@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -41,13 +42,19 @@ class ThemeBackground extends StatelessWidget {
               // `Theme.of(context).brightness`（源自 ThemeModeStore）不同步，
               // 会出现"UI 是浅色、背景层已按深色画"这种同屏自相矛盾。
               isDark: !AppBrightness.isLight.value,
+              opacity: cfg.opacity,
+              blur: cfg.blur,
             ),
           );
         }
-        return ThemeBackgroundAnimation(
+        final anim = ThemeBackgroundAnimation(
           topInset: topInset,
           bottomInset: bottomInset,
         );
+        // 动画背景只支持整体淡出（模糊对逐帧画面代价过高，见 ThemeBackground.blur）
+        return cfg.opacity >= 0.999
+            ? anim
+            : Opacity(opacity: cfg.opacity.clamp(0.2, 1.0), child: anim);
       },
     );
   }
@@ -58,10 +65,21 @@ class ThemeBackground extends StatelessWidget {
 /// 按物理像素宽度 `cacheWidth` 下采样解码，限制内存占用（背景无需超清）。
 /// 路径文件被手动删除等情况由 [Image.errorBuilder] 降级为空，透出 Scaffold 纯色。
 class _ThemeImageBackground extends StatelessWidget {
-  const _ThemeImageBackground({required this.path, required this.isDark});
+  const _ThemeImageBackground({
+    required this.path,
+    required this.isDark,
+    this.opacity = 1.0,
+    this.blur = 0.0,
+  });
 
   final String path;
   final bool isDark;
+
+  /// 不透明度（1.0 = 原样）
+  final double opacity;
+
+  /// 模糊 sigma（0 = 不模糊）
+  final double blur;
 
   @override
   Widget build(BuildContext context) {
@@ -71,18 +89,37 @@ class _ThemeImageBackground extends StatelessWidget {
     final scrim = isDark
         ? Colors.black.withValues(alpha: 0.45)
         : Colors.black.withValues(alpha: 0.22);
+    Widget img = Image.file(
+      File(path),
+      fit: BoxFit.cover,
+      width: double.infinity,
+      height: double.infinity,
+      cacheWidth: widthPx,
+      gaplessPlayback: true,
+      errorBuilder: (_, _, _) => const SizedBox.shrink(),
+    );
+    final sigma = blur.clamp(0.0, 40.0);
+    if (sigma > 0.01) {
+      // 轻微放大抵消高斯模糊在四边产生的透明羽化（decal 边缘）
+      img = Transform.scale(
+        scale: 1 + sigma / 60,
+        child: ImageFiltered(
+          imageFilter: ui.ImageFilter.blur(
+            sigmaX: sigma,
+            sigmaY: sigma,
+            tileMode: TileMode.decal,
+          ),
+          child: img,
+        ),
+      );
+    }
+    if (opacity < 0.999) {
+      img = Opacity(opacity: opacity.clamp(0.2, 1.0), child: img);
+    }
     return Stack(
       fit: StackFit.expand,
       children: [
-        Image.file(
-          File(path),
-          fit: BoxFit.cover,
-          width: double.infinity,
-          height: double.infinity,
-          cacheWidth: widthPx,
-          gaplessPlayback: true,
-          errorBuilder: (_, _, _) => const SizedBox.shrink(),
-        ),
+        img,
         IgnorePointer(child: ColoredBox(color: scrim)),
       ],
     );

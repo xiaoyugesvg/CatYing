@@ -24,7 +24,7 @@
  *   · @p.N 段落下标、## 正则替换（部分规则会退化）
  */
 
-import { evalRule, evalList, makeInput, jsonPath } from './book_rule.js';
+import { evalRule, evalList, makeInput, jsonPath, looksLikeJsRule } from './book_rule.js';
 
 import axios from 'axios';
 
@@ -102,7 +102,9 @@ function splitUrlOptions(raw) {
 
 /** 补全相对地址 */
 function absolute(url, base) {
-  const u = String(url || '').trim();
+  // 有些源的封面/图片是从 style="url('…')" 里正则抠出来的，
+  // 会把包裹的引号一起带出来 ⇒ 这里统一去掉首尾引号。
+  const u = String(url || '').trim().replace(/^["']|["']$/g, '').trim();
   if (!u) return '';
   if (/^https?:\/\//i.test(u)) return u;
   try {
@@ -145,6 +147,156 @@ function normalizeHeaders(h, jsLib) {
     }
   }
   return h;
+}
+
+/**
+ * 提取规则/网址尾部的 `@Header:{...}`（Legado 教材语法，常见于漫画源）。
+ *
+ * 例（本文件适配的「看漫画」源）：
+ *   `@js:…mhgDecode(String(result))@Header:{"Referer":"https://m.manhuagui.com/"}` 
+ *
+ * 该尾巴**不是规则的一部分** —— 留在 `@js:` 里会直接语法错（整章空白），
+ * 必须切掉单独解析。请求头回给客户端（漫画图床靠 Referer/UA 过防盗链）。
+ */
+function splitRuleHeader(rule) {
+  const s = String(rule || '');
+  const idx = s.lastIndexOf('@Header:');
+  if (idx < 0) return { rule: s, header: {} };
+  const obj = parseLooseObject(s.substring(idx + 8));
+  if (!obj) return { rule: s, header: {} }; // 解析失败就不当标记，保持原文
+  return { rule: s.substring(0, idx).trim(), header: obj };
+}
+
+/**
+ * 宽松解析 `{key:value, ...}`：
+ *   · key 可带/不带引号（`"Referer"` / `Referer`）
+ *   · value 可为裸字面量（`host` / `thisPage` / 无引号 URL）
+ *   · 值里的 `:` `,` `()`（UA 串）不能被误切
+ */
+function parseLooseObject(raw) {
+  const s = String(raw || '').trim();
+  if (!s.startsWith('{')) return null;
+  let depth = 0;
+  let end = -1;
+  let q = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (q) {
+      if (c === q && s[i - 1] !== '\\') q = null;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      q = c;
+      continue;
+    }
+    if (c === '{') depth++;
+    else if (c === '}') {
+      depth--;
+      if (depth === 0) {
+        end = i;
+        break;
+      }
+    }
+  }
+  if (end < 0) return null;
+
+  const inner = s.slice(1, end);
+  const segs = [];
+  let buf = '';
+  let d = 0;
+  let qq = null;
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i];
+    if (qq) {
+      buf += c;
+      if (c === qq && inner[i - 1] !== '\\') qq = null;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      qq = c;
+      buf += c;
+      continue;
+    }
+    if (c === '{' || c === '[' || c === '(') d++;
+    else if (c === '}' || c === ']' || c === ')') d--;
+    if (c === ',' && d === 0) {
+      segs.push(buf);
+      buf = '';
+      continue;
+    }
+    buf += c;
+  }
+  if (buf.trim()) segs.push(buf);
+
+  const out = {};
+  for (const seg of segs) {
+    const i = seg.indexOf(':');
+    if (i <= 0) continue;
+    const k = seg.slice(0, i).trim().replace(/^["']|["']$/g, '');
+    if (!k) continue;
+    let v = seg.slice(i + 1).trim();
+    if ((v.startsWith('"') && v.endsWith('"')) ||
+        (v.startsWith("'") && v.endsWith("'"))) {
+      v = v.slice(1, -1);
+    }
+    out[k] = v;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/**
+ * 解析 @Header 里的 Legado 内置取值：
+ *   host     → 当前页面的协议+域名（`https://m.manhuagui.com`）
+ *   thisPage → 当前页完整地址（章节页）
+ *   prePage  → 上一步页面；content 阶段拿不到，退回站点根
+ * 其余按字面量。
+ */
+function resolveRuleHeaders(header, pageUrl, base) {
+  const out = {};
+  if (!header || typeof header !== 'object') return out;
+  let origin = '';
+  try {
+    origin = new URL(pageUrl || base || '').origin;
+  } catch (_) {
+    origin = base || '';
+  }
+  for (const [k, v] of Object.entries(header)) {
+    const s = String(v == null ? '' : v).trim();
+    if (!s) continue;
+    if (/^host$/i.test(s)) out[k] = origin;
+    else if (/^thisPage$/i.test(s)) out[k] = pageUrl || '';
+    else if (/^prePage$/i.test(s)) out[k] = base || origin;
+    else out[k] = s;
+  }
+  return out;
+}
+
+/**
+ * 老式扁平书源的网址占位符：`searchKey` / `searchPage`（无花括号）。
+ * 例：`https://m.manhuagui.com/s/searchKey.html`、`.../?page=searchPage`。
+ * `searchPage-1` 这类偏移写法一并支持（老源页码从 0 开始）。
+ */
+function applySearchTokens(url, keyword, page) {
+  let s = String(url || '');
+  if (keyword != null && keyword !== '') {
+    // 用函数替换：关键词里出现 `$&` 之类时不会被当成替换模式
+    s = s.replace(/searchKey/g, () => encodeURIComponent(keyword));
+  }
+  if (page != null) {
+    s = s.replace(/searchPage([+-]\d+)?/g, (all, off) => {
+      const n = Number(page) + (off ? parseInt(off, 10) : 0);
+      return String(n);
+    });
+  }
+  return s;
+}
+
+/** bookSourceType 可能是数字 2，也可能是「漫画」这类中文（老源写法） */
+function isMangaSourceType(v) {
+  if (v == null) return false;
+  if (typeof v === 'number') return v === 2;
+  const s = String(v).trim().toLowerCase();
+  return s === '2' || s === '漫画' || s === 'manga' || s === 'comic';
 }
 
 /** 单源代理：source.proxy = "host:port"，空则直连。 */
@@ -367,6 +519,9 @@ async function evalSearchUrlScript(rawUrl, { state, source, base }) {
     baseUrl: base,
     key: state.key || '',
     page: state.page || 1,
+    // 老式源脚本里的同义变量
+    searchKey: state.key || '',
+    searchPage: state.page || 1,
     book: state.book || {},
     src: source.bookSourceUrl || '',
     java: {
@@ -416,6 +571,9 @@ async function search({ source, keyword, page = 1 }) {
   const state = stateOf(base);
   state.key = keyword;
   state.page = page;
+  // 老式扁平源的 `{{searchKey}}` / `{{searchPage}}` 变量（buildVars 的默认值）
+  state.searchKey = keyword;
+  state.searchPage = page;
 
   // ✅ **兼容 Legado 规范字段名**（重构 ✓）—— 原来只认 `searchUrl` ✗：
   //   而 Legado 书源（含 yckceo / 631 源包 / gedoor/legado 生态）用的都是
@@ -442,9 +600,13 @@ async function search({ source, keyword, page = 1 }) {
     .replace(/\{\{\s*page\s*\}\}/g, String(page))
     .replace(/\{key\}/g, encodeURIComponent(keyword))
     .replace(/\{page\}/g, String(page));
-
   // 整段 @js:/<js> 脚本型 searchUrl：执行脚本取 result 作为最终地址
   rawUrl = await evalSearchUrlScript(rawUrl, { state, source, base });
+
+  // 老式扁平写法：`https://site/s/searchKey.html`、`...?page=searchPage`
+  // ⚠️ 放在脚本执行**之后**：脚本里 `searchKey` 可能是变量名，
+  //    先替换会把代码改坏；脚本产出物里的占位符仍会在这里替换。
+  rawUrl = applySearchTokens(rawUrl, keyword, page);
 
   const opt = splitUrlOptions(rawUrl);
   if (opt.webView) {
@@ -645,12 +807,23 @@ async function content({ source, chapterUrl }) {
   const rule = source.ruleContent || {};
   if (!rule.content) return { ok: false, error: '该源没有配置 ruleContent.content' };
 
+  // `@Header:{...}` 尾巴（Legado 教材语法）：从规则里切掉单独解析。
+  // 看漫画这类源写作 `@js:…@Header:{"Referer":"…"}` —— 留在 JS 里就是语法错。
+  const split = splitRuleHeader(rule.content);
+  const contentRule = split.rule;
+
   const opt = splitUrlOptions(chapterUrl);
   const url = absolute(opt.url, base);
+  const ruleHeaders = resolveRuleHeaders(split.header, url, base);
 
   let text = '';
   try {
-    const resp = await httpGet(url, applyHeaderVars(Object.assign({}, normalizeHeaders(source.header, source.jsLib), opt.headers || {}), state));
+    const resp = await httpGet(url, applyHeaderVars(Object.assign({},
+      normalizeHeaders(source.header, source.jsLib),
+      opt.headers || {},
+      // 规则自带的 @Header 优先（源作者就是靠它过站点校验）
+      ruleHeaders,
+    ), state));
     text = resp.text;
   } catch (e) {
     return { ok: false, error: '正文请求失败：' + (e.message || e) };
@@ -671,16 +844,28 @@ async function content({ source, chapterUrl }) {
 
   let raw = '';
   try {
-    const v = evalRule({ rule: rule.content, input, vars, ctx });
-    // 规则可能直接返回数组（漫画）
+    // ⚠️ 必须按**列表**求值：漫画正文规则普遍是
+    //   `.comiclist img@data-original` 这种「选择器@属性」——
+    //   isList:false 只会取**第一张**图，整章就只剩一页。
+    const v = evalRule({ rule: contentRule, input, vars, ctx, isList: true });
     if (Array.isArray(v)) {
-      return {
-        ok: true,
-        type: 'images',
-        images: v.map((u) => absolute(str(u), base)).filter((u) => u),
-      };
+      const arr = v.map((x) => str(x)).filter((x) => x !== '');
+      const imgs = arr.map((u) => absolute(u, base)).filter(Boolean);
+      // 每个值都像图片地址（http/绝对路径/带图片后缀）
+      const allUrlish = arr.length > 0 && arr.every((u) =>
+        /^(https?:\/\/|\/|\.\/)/i.test(u) ||
+        /\.(jpe?g|png|webp|gif|bmp|avif)(\?|#|$)/i.test(u));
+      // ① @js: 返回数组 = 图片列表（Legado 漫画源约定）
+      // ② 漫画源 + 全是地址 = 图片列表（有的图床地址不带后缀）
+      if (looksLikeJsRule(contentRule) ||
+          (isMangaSourceType(source.bookSourceType) && allUrlish)) {
+        return { ok: true, type: 'images', images: imgs, headers: ruleHeaders };
+      }
+      // 普通文本列表（段落/多节点正文）→ 拼成文本，交给后面的图片/文本判定
+      raw = arr.join('\n');
+    } else {
+      raw = str(v);
     }
-    raw = str(v);
   } catch (e) {
     return { ok: false, error: 'content 规则失败：' + e.message };
   }
@@ -690,7 +875,7 @@ async function content({ source, chapterUrl }) {
   //   · 或整体全是图片 URL
   const maybeImages = detectImages(raw, base);
   if (maybeImages.length > 0) {
-    return { ok: true, type: 'images', images: maybeImages };
+    return { ok: true, type: 'images', images: maybeImages, headers: ruleHeaders };
   }
 
   // 文本正文：清掉常见噪声
@@ -818,6 +1003,25 @@ function parseExploreCategories(raw, state, base, jsLib) {
     }
   }
   if (/^https?:\/\//i.test(s)) return [{ title: '全部', url: s }];
+
+  // 老式扁平写法（ruleFindUrl）：
+  //   分类名::https://site/list/1/?page=searchPage
+  //   分类名2::https://site/list/2/?page=searchPage
+  // 多个分类用换行或 `&&` 分隔。
+  if (s.includes('::')) {
+    const out = [];
+    for (const line of s.split(/&&|\r?\n/)) {
+      const t = line.trim();
+      if (!t) continue;
+      const i = t.indexOf('::');
+      if (i <= 0) continue;
+      const title = t.slice(0, i).trim();
+      const url = t.slice(i + 2).trim();
+      if (!title || !url) continue;
+      out.push({ title, url: absolute(url, base) });
+    }
+    if (out.length > 0) return out;
+  }
   return [];
 }
 
@@ -883,6 +1087,8 @@ async function explore({ source, categoryUrl }) {
       source.exploreUrl ||
       source.ruleExploreUrl ||
       (source.ruleExplore && source.ruleExplore.url) ||
+      // 老式扁平源的发现分类（`分类::地址` 多行）
+      source.ruleFindUrl ||
       '';
     if (!raw) {
       // ⚠️ 无 exploreUrl 的源：自动抓站点首页导航，把真实分类链接探测成
@@ -913,6 +1119,9 @@ async function explore({ source, categoryUrl }) {
     rawUrl = applyLegadoVars(categoryUrl, state)
       .replace(/\{\{\s*page\s*\}\}/g, String(state.page || 1))
       .replace(/\{page\}/g, String(state.page || 1))
+      // 老式扁平写法 `?page=searchPage`
+      .replace(/searchPage([+-]\d+)?/g, (all, off) =>
+        String(Number(state.page || 1) + (off ? parseInt(off, 10) : 0)))
       // 未识别变量（cookie.getKey / java 等）会留下畸形花括号 → 源站 500，直接清理
       .replace(/\{\{[^}]*\}\}/g, '');
   } catch (e) {
@@ -1129,9 +1338,33 @@ function normalizeLegadoSource(src) {
   }
   s.ruleExplore = re;
 
+  // 更老的「发现」扁平字段：ruleFindList / ruleFindName / …
+  // （这类源没有 ruleExplore*，只有 ruleFindUrl + ruleFind*；缺失才补）
+  const reFindMap = {
+    bookList: 'ruleFindList',
+    name: 'ruleFindName',
+    author: 'ruleFindAuthor',
+    kind: 'ruleFindKind',
+    lastChapter: 'ruleFindLastChapter',
+    introduce: 'ruleFindIntroduce',
+    coverUrl: 'ruleFindCoverUrl',
+    noteUrl: 'ruleFindNoteUrl',
+    bookUrl: 'ruleFindNoteUrl',
+  };
+  for (const [k, flat] of Object.entries(reFindMap)) {
+    if (re[k] == null && s[flat] != null) re[k] = s[flat];
+  }
+
   // 顶层 URL 名也一并补 ✓（与上面 `search`/`explore` 内的兜底**双保险** ✓）
   if (!s.searchUrl && s.ruleSearchUrl) s.searchUrl = s.ruleSearchUrl;
   if (!s.exploreUrl && s.ruleExploreUrl) s.exploreUrl = s.ruleExploreUrl;
+  if (!s.exploreUrl && s.ruleFindUrl) s.exploreUrl = s.ruleFindUrl;
+
+  // Legado 的 httpUserAgent 是独立字段（不在 header 里）。移动站/漫画站
+  // 常按 UA 分流，没有 header 时把它当默认 User-Agent。
+  if (s.httpUserAgent && s.header == null) {
+    s.header = { 'User-Agent': String(s.httpUserAgent) };
+  }
 
   // ✅ **旧版"全扁平"方言 → 3.x 嵌套**（本轮补齐 ✓ 关键 ✓）
   //
@@ -1153,6 +1386,8 @@ function normalizeLegadoSource(src) {
     intro: 'ruleIntroduce',
     kind: 'ruleBookKind',
     lastChapter: 'ruleBookLastChapter',
+    // 老式扁平源的目录地址（很多漫画/小说源把它留空 = 用详情页当目录页）
+    tocUrl: 'ruleChapterUrl',
   };
   for (const [k, flat] of Object.entries(biMap)) {
     if (bi[k] == null && s[flat] != null) bi[k] = s[flat];

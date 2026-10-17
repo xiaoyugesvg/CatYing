@@ -55,6 +55,7 @@ class SyncNeeds {
     required this.url,
     required this.headers,
     required this.body,
+    this.binary = false,
   });
 
   /// 缓存键（JS 侧构造，Dart 原样使用，保证两边一致）
@@ -63,6 +64,10 @@ class SyncNeeds {
   final String url;
   final Map<String, String> headers;
   final String? body;
+
+  /// true = 需要**原始字节**（`java.getByteArray`）：代理回 base64，
+  /// 而不是按 charset 解码后的文本。
+  final bool binary;
 
   @override
   String toString() => 'SyncNeeds($method $url)';
@@ -116,6 +121,7 @@ class SyncHttpBridge {
         url: url,
         headers: _asStringMap(m['h']),
         body: m['b']?.toString(),
+        binary: '${m['x'] ?? ''}' == 'b64',
       );
     } catch (_) {
       return null;
@@ -165,6 +171,7 @@ class SyncHttpBridge {
       // 协议头：目标 URL 与方法（放头里，避免 URL 编码问题）
       req.headers.set('x-legado-url', need.url);
       req.headers.set('x-legado-method', need.method);
+      if (need.binary) req.headers.set('x-legado-binary', '1');
       need.headers.forEach((k, v) {
         if (k.trim().isNotEmpty) req.headers.set(k, v);
       });

@@ -140,8 +140,12 @@ class LegadoHttpProxy {
       );
 
       final raw = resp.data ?? const <int>[];
+      // 二进制通道（java.getByteArray）：原样以 base64 回传，绝不按 charset 解码
+      // —— 图片/加密数据按 UTF-8 解会丢字节，后续解密必然失败。
+      final wantBinary =
+          (req.headers.value('x-legado-binary') ?? '') == '1';
       final charset = _charsetOf(resp.headers.value('content-type'));
-      final text = _decodeText(raw, charset);
+      final text = wantBinary ? base64.encode(raw) : _decodeText(raw, charset);
 
       res.statusCode = resp.statusCode ?? 502;
       // ⚠️ sync_http 的源码里明确写着 `persistence connections are unsupported`：

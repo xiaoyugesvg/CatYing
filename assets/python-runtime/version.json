@@ -8,7 +8,11 @@
   "libs": [
     "requests",
     "httpx",
-    "beautifulsoup4"
+    "beautifulsoup4",
+    "flask",
+    "lxml(纯 Python 垫片)",
+    "pycryptodome(纯 Python 垫片 Crypto)",
+    "pyquery(纯 Python 垫片)"
   ],
-  "note": "一期锁纯 Python 三件套，无 C 扩展（lxml/pycryptodome/flask 属二期）；精确 patch 版本以运行时 sys.version 为准。"
+  "note": "requests/httpx/beautifulsoup4/flask 由 CI pip --target 安装（纯 Python，跨平台）；lxml/pycryptodome/pyquery 的真库依赖 C 扩展、iOS 无法交叉编译，由 assets/python-project/pylib/ 提供同名 API 的纯 Python 实现；精确 patch 版本以运行时 sys.version 为准。"
 }

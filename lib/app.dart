@@ -37,6 +37,7 @@ import 'services/main_tab_controller.dart';
 import 'pages/content_view.dart';
 // ✅ **隐藏 WebView 的挂载点**（本轮 ✓）—— 见下方根 builder 里的说明 ✓
 import 'reading/source/webview_image_fetcher.dart';
+import 'reading/pet/reading_pet_overlay.dart';
 
 /// 上一次打过的外观签名 —— 用**顶层变量**而不是实例字段：
 /// 日志去重本身是"进程级"的（同一时刻只会有一个 App 实例在跑）。
@@ -313,6 +314,10 @@ class _TVBoxAppState extends State<TVBoxApp> with WidgetsBindingObserver {
                           overlayAlpha: 0.3,
                         ),
                         out,
+                        // ── 全局悬浮桌宠 ───────────────────────────────
+                        // 与音乐悬浮球同一层挂载：一处覆盖所有路由；
+                        // 关闭开关或未加载时自身渲染为空，不影响其它交互。
+                        const ReadingPetOverlay(),
                         // ── 悬浮播放球（方案 C）──────────────────────────
                         // 可拖动、点击进播放页；没有在播的歌时它自己隐藏。
                         // 挂在这一层 → **一处挂载覆盖所有路由**（含 push 出去的

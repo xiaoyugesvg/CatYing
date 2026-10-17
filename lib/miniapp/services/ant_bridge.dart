@@ -50,6 +50,23 @@ class AntBridge {
   /// manifest permissions 权限门禁
   static Set<String> permissions = <String>{};
 
+  /// 小程序自带 Node 后端的地址表：`appId → http://127.0.0.1:<port>`
+  ///
+  /// 由 [MiniAppWebPage] 在启动 `manifest.node` 之后登记，页面关闭时清掉。
+  /// `ant.resolveService('miniapp://appId')` 查的就是这张表。
+  static final Map<String, String> _services = <String, String>{};
+
+  /// 登记 / 清除某个小程序的后端地址（[baseUrl] 为空 = 清除）。
+  static void registerService(String appId, String? baseUrl) {
+    final k = appId.isEmpty ? 'app' : appId;
+    final url = (baseUrl ?? '').trim();
+    if (url.isEmpty) {
+      _services.remove(k);
+    } else {
+      _services[k] = url;
+    }
+  }
+
   /// 由小程序页面在加载时调用（读 manifest.json 后配置）。
   static void configure({
     required String appId,
@@ -197,6 +214,12 @@ class AntBridge {
     // ── 反向服务（宿主暂不提供 loopback，注册 handler 备用）──
     serve: function (handler) { window.__antServe = handler; return Promise.resolve(); },
 
+    // ── 小程序自带 Node 后端（manifest.json 的 node）──
+    //   页面拿到的是 `http://127.0.0.1:<port>`，直接 fetch 即可（服务端带 CORS）
+    resolveService: function (name) {
+      return antCall('miniapp.resolveService', { name: name });
+    },
+
     // ── 事件与生命周期 ──
     on: function (name, fn) { return on(name, fn); },
     once: function (name, fn) { return once(name, fn); },
@@ -342,9 +365,26 @@ class AntBridge {
         return _sourceRecent(args);
       case 'exitMiniApp':
         return _exitMiniApp();
+      case 'miniapp.resolveService':
+        return _resolveService(args);
       default:
         throw AntError('UNKNOWN_API', '未知方法 $method');
     }
+  }
+
+  /// `ant.resolveService('miniapp://appId')` → 小程序 Node 后端的 base URL。
+  ///
+  /// 传空 / 只传 `miniapp://` 时用当前页面自己的 appId。
+  static String _resolveService(Map<String, dynamic> args) {
+    final raw = (args['name'] ?? '').toString().trim();
+    final id = raw.replaceFirst(RegExp(r'^miniapp://'), '').trim();
+    final key = id.isEmpty ? appId : id;
+    final url = _services[key];
+    if (url == null || url.isEmpty) {
+      throw AntError('SERVICE_NOT_FOUND',
+          '这个小程序没有 Node 后端（manifest.json 的 node 字段未配置或启动失败）');
+    }
+    return url;
   }
 
   // ────────────────────────── env ──────────────────────────

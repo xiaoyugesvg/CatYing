@@ -247,6 +247,8 @@ class RssWebViewPage extends StatefulWidget {
 class _RssWebViewPageState extends State<RssWebViewPage> {
   late final WebViewController _c;
   int _progress = 0;
+  bool _canGoBack = false;
+  bool _canGoForward = false;
 
   @override
   void initState() {
@@ -260,11 +262,21 @@ class _RssWebViewPageState extends State<RssWebViewPage> {
         },
         // 去广告：网页源（站点型 RSS / 原文链接）里的广告层
         onPageStarted: (url) => AdBlockService.instance.injectInto(_c, url),
-        onPageFinished: (url) => AdBlockService.instance.injectInto(_c, url),
+        onPageFinished: (url) {
+          AdBlockService.instance.injectInto(_c, url);
+          _refreshNavState();
+        },
       ));
     AdBlockService.attach(_c);
     AdBlockService.instance.ensureLoaded();
     _c.loadRequest(Uri.parse(widget.url));
+  }
+
+  /// 刷新前进/后退按钮可用状态（页面跳转后调用）。
+  Future<void> _refreshNavState() async {
+    final b = await _c.canGoBack();
+    final f = await _c.canGoForward();
+    if (mounted) setState(() { _canGoBack = b; _canGoForward = f; });
   }
 
   @override
@@ -311,6 +323,70 @@ class _RssWebViewPageState extends State<RssWebViewPage> {
             ),
           ),
         ],
+      ),
+      // 底栏：返回上一页 / 刷新当前页 / 下一页（对齐浏览器常用导航）
+      bottomNavigationBar: BottomAppBar(
+        color: AppTheme.backgroundSecondary,
+        elevation: 0,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _navBtn(
+              icon: Icons.arrow_back_ios_new_rounded,
+              label: '返回',
+              enabled: _canGoBack,
+              onTap: () async {
+                if (await _c.canGoBack()) {
+                  await _c.goBack();
+                }
+              },
+            ),
+            _navBtn(
+              icon: Icons.refresh_rounded,
+              label: '刷新',
+              enabled: true,
+              onTap: () => _c.reload(),
+            ),
+            _navBtn(
+              icon: Icons.arrow_forward_ios_rounded,
+              label: '前进',
+              enabled: _canGoForward,
+              onTap: () async {
+                if (await _c.canGoForward()) {
+                  await _c.goForward();
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 底栏按钮：图标在上、文字在下，禁用时置灰。
+  Widget _navBtn({
+    required IconData icon,
+    required String label,
+    required bool enabled,
+    required VoidCallback onTap,
+  }) {
+    final color = enabled
+        ? AppTheme.textPrimary
+        : AppTheme.textTertiary.withValues(alpha: 0.4);
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 20, color: color),
+            const SizedBox(height: 3),
+            Text(label,
+                style: TextStyle(fontSize: 11, color: color)),
+          ],
+        ),
       ),
     );
   }

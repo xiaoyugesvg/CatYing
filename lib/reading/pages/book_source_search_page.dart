@@ -21,6 +21,7 @@ import 'favorites_page.dart';
 import 'webview_page.dart';
 import '../../common/theme.dart';
 import '../utils/source_fail_text.dart';
+import '../utils/text_match.dart';
 // ✅ **外壳内嵌子页**（本轮重构 ✓）：本页由 `home_page.dart` 的外壳渲染 ✓
 //   ⇒ 底部胶囊导航栏（"悬浮菜单栏"）**照常显示** ✓✓；返回用 `closeEmbeddedPage()` ✓
 import 'shell_embedded_page.dart';
@@ -89,7 +90,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
   bool _searching = false;
   String _keyword = '';
 
-  /// 已聚合的结果（按 identityKey 去重，保留每个源各自的条目）
+  /// 已聚合的结果（按**归一化书名**分组，每组内保留各源条目）
   final Map<String, List<BookSourceResult>> _grouped = {};
   final List<SourceSearchState> _states = [];
   int _doneCount = 0;
@@ -591,8 +592,14 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
   void rebuildGroups() {
     _grouped.clear();
     _perSource.forEach((_, list) {
+      // 同一源返回重复条目（分卷/重复抓取）先按「源 + 地址 + 作者」去重
+      final seen = <String>{};
       for (final r in list) {
-        _grouped.putIfAbsent(r.identityKey, () => []).add(r);
+        final key = normalizeForMatch(r.name);
+        if (key.isEmpty) continue;
+        final dedupe = '${r.source.id}|${r.bookUrl}|${r.author}';
+        if (!seen.add(dedupe)) continue;
+        _grouped.putIfAbsent(key, () => []).add(r);
       }
     });
   }
@@ -613,8 +620,19 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
         (g) => !g.items.any((r) => _selectedSourceIds.contains(r.source.id)),
       );
     }
-    // 来源多的排前面（更可能有完整章节），其次书名
+    // 三级排序（对齐 MiDu 的思路，自己实现）：
+    //   0 书名与关键词归一化后完全相同（多源同书合并）
+    //   1 互相包含（「斗罗大陆」/「斗罗大陆（精校版）」）
+    //   2 模糊相似（Dice ≥ 0.55）
+    //   3 其余
+    // 同级再按「相似度 → 来源数 → 书名」排，避免结果看起来随机。
     out.sort((a, b) {
+      final ra = matchRank(a.items.first.name, _keyword);
+      final rb = matchRank(b.items.first.name, _keyword);
+      if (ra != rb) return ra.compareTo(rb);
+      final sa = nameSimilarity(a.items.first.name, _keyword);
+      final sb = nameSimilarity(b.items.first.name, _keyword);
+      if ((sa - sb).abs() > 0.01) return sb.compareTo(sa);
       final c = b.items.length.compareTo(a.items.length);
       return c != 0 ? c : a.items.first.name.compareTo(b.items.first.name);
     });
@@ -1997,11 +2015,17 @@ JellyIconDeck(
                                 style:
                                     TextStyle(fontSize: AppTheme.fontBody, color: _titleColor)),
                             subtitle: Text(
-                              r.lastChapter.isNotEmpty
-                                  ? r.lastChapter
-                                  : (r.wordCount.isNotEmpty
-                                      ? r.wordCount
-                                      : r.bookUrl),
+                              // 同名不同作者的书会合并到一张卡里，
+                              // 选择面板必须显示作者才能区分
+                              [
+                                if (r.author.isNotEmpty) r.author,
+                                if (r.lastChapter.isNotEmpty)
+                                  r.lastChapter
+                                else if (r.wordCount.isNotEmpty)
+                                  r.wordCount
+                                else
+                                  r.bookUrl,
+                              ].join(' · '),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(

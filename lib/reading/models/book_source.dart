@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:tvbox/reading/models/builtin_book_sources.dart';
+
 /// 小说书源模型与存储。
 ///
 /// 支持两种书源形态：
@@ -80,10 +82,41 @@ class BookSource {
   /// Python 源模块 key（对应 Documents 下 python-project/src/spider/book/<key>.py）
   String get pythonKey => (raw['pythonKey'] ?? '').toString().trim();
 
-  /// 书源类型（Legado 有小说/漫画/音源等；config 源一律 0=小说）
+  /// 书源类型：`0`=小说 `1`=有声 `2`=漫画 `3`=文件（Legado 规范）。
+  ///
+  /// ⚠️ 不少流传的源把 `bookSourceType` 写成中文（`"漫画"`），而阅读器
+  /// 判的是 **`'2'`**（`book_source_reader_page.dart` 的 `type == '2'`）
+  /// ⇒ 中文类型会被当成文字源：整章拿到图片列表却按文字渲染 = 一片空白。
+  /// 这里统一归一化成数字字符串。
   String get type {
     if (isConfig) return '0';
-    return (raw['bookSourceType'] ?? raw['type'] ?? '').toString();
+    final rawType = (raw['bookSourceType'] ?? raw['type'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    switch (rawType) {
+      case '2':
+      case '漫画':
+      case 'manga':
+      case 'comic':
+        return '2';
+      case '1':
+      case '有声':
+      case '音频':
+      case 'audio':
+        return '1';
+      case '3':
+      case '文件':
+      case 'file':
+        return '3';
+      case '0':
+      case '小说':
+      case 'text':
+      case 'novel':
+        return '0';
+      default:
+        return rawType;
+    }
   }
 
   /// 是否只用于搜索（Legado 的 enabledExplore 之类）
@@ -228,6 +261,9 @@ class BookSourceStore {
   //（那个键仍留在 prefs 里，只是没人再用它了 ✓）
   static const _key = 'book_sources_v1';
 
+  /// 内置书源只播种一次：用户删掉后不再自动加回来。
+  static const _kBuiltinSeedKey = 'book_sources_builtin_seed_v1';
+
   final List<BookSource> _items = [];
   List<BookSource> get all => List.unmodifiable(_items);
   List<BookSource> get enabled => _items.where((s) => s.enabled).toList();
@@ -237,9 +273,8 @@ class BookSourceStore {
   final revision = ValueNotifier<int>(0);
 
   Future<void> init() async {
-    // 内置书源已移除（用户 2026-10-13）：只加载用户自己导入/仓库导入的源。
-    // 首装/清缓存后书源仓库为空是**预期行为**，由用户在「书源仓库 → 网络导入」
-    // 或「云端仓库地址」自行导入。
+    // 只加载用户自己导入/仓库导入的源；出厂只播种一次内置漫画源
+    // （用户 2026-10-17 要求把「看漫画」内置，见 [_seedBuiltin]）。
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_key);
@@ -248,10 +283,29 @@ class BookSourceStore {
           ..clear()
           ..addAll(_decode(raw));
       }
+      await _seedBuiltin(prefs);
     } catch (e) {
       debugPrint('[BookSource] 加载失败: $e');
     }
     revision.value++;
+  }
+
+  /// 首次启动播种出厂内置书源（只做一次，用户删除后不复活）。
+  Future<void> _seedBuiltin(SharedPreferences prefs) async {
+    if (prefs.getBool(_kBuiltinSeedKey) == true) return;
+    final added = <BookSource>[];
+    for (final j in decodeBuiltinBookSources()) {
+      final s = BookSource.fromJson(j);
+      if (s == null) continue;
+      // 用户已经手动导入过同一条（id 相同）→ 不重复添加
+      if (_items.any((x) => x.id == s.id)) continue;
+      added.add(s);
+    }
+    if (added.isNotEmpty) {
+      _items.addAll(added);
+      await _persist();
+    }
+    await prefs.setBool(_kBuiltinSeedKey, true);
   }
 
   /// 兼容三种落盘形态：数组 / 单个对象 / {"sources":[...]}

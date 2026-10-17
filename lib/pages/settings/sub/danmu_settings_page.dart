@@ -63,6 +63,9 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
   int _fontWeight = 500;
   double _delaySeconds = 0.0;
 
+  /// 同屏活跃弹幕上限（10~200）：调低更流畅，调高更热闹。
+  int _maxActive = 60;
+
   @override
   void initState() {
     super.initState();
@@ -97,6 +100,7 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
       _speed = (p.getDouble('danmu_speed') ?? 150).clamp(60.0, 300.0);
       _strokeWidth = (p.getDouble('danmu_stroke_width') ?? 1.5).clamp(0.0, 3.0);
       _fontWeight = p.getInt('danmu_font_weight') ?? 500;
+      _maxActive = (p.getInt('danmu_max_active') ?? 60).clamp(10, 200);
       _delaySeconds = (p.getDouble('danmu_delay_seconds') ?? 0.0).clamp(
         -5.0,
         5.0,
@@ -470,6 +474,18 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
                 },
               ),
               _sliderRow(
+                label: '同屏上限',
+                value: _maxActive.toDouble(),
+                min: 10,
+                max: 200,
+                divisions: 19,
+                text: '$_maxActive',
+                onChanged: (v) async {
+                  setState(() => _maxActive = v.round());
+                  await _saveInt('danmu_max_active', v.round());
+                },
+              ),
+              _sliderRow(
                 label: '滚动速度',
                 value: _speed,
                 min: 60,
@@ -800,7 +816,7 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
     }
     setState(() {
       _colorMode = v;
-      if (pickedColor != null) _customColor = pickedColor!;
+      if (pickedColor != null) _customColor = pickedColor;
     });
   }
 

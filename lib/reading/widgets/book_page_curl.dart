@@ -31,6 +31,15 @@ class BookPageCurl extends StatefulWidget {
   final VoidCallback onTurnPrev;
   final VoidCallback onTapCenter;
 
+  /// 阴影强度 0~1（0 = 无阴影）
+  final double shadowStrength;
+
+  /// 性能档位：0 流畅 / 1 标准 / 2 精细（网格列数）
+  final int quality;
+
+  /// 纸背是否绘制纸张纹理
+  final bool paperTexture;
+
   const BookPageCurl({
     super.key,
     required this.page,
@@ -42,6 +51,9 @@ class BookPageCurl extends StatefulWidget {
     required this.onTurnNext,
     required this.onTurnPrev,
     required this.onTapCenter,
+    this.shadowStrength = 1.0,
+    this.quality = 1,
+    this.paperTexture = true,
   });
 
   @override
@@ -263,6 +275,9 @@ class _BookPageCurlState extends State<BookPageCurl>
               width: w,
               height: h,
               isDark: isDark,
+              shadowStrength: widget.shadowStrength,
+              quality: widget.quality,
+              paperTexture: widget.paperTexture,
             ),
           ),
         ),
@@ -346,6 +361,9 @@ class _CurlPainter extends CustomPainter {
   final double width;
   final double height;
   final bool isDark;
+  final double shadowStrength;
+  final int quality;
+  final bool paperTexture;
 
   _CurlPainter({
     required this.image,
@@ -354,6 +372,9 @@ class _CurlPainter extends CustomPainter {
     required this.width,
     required this.height,
     required this.isDark,
+    this.shadowStrength = 1.0,
+    this.quality = 1,
+    this.paperTexture = true,
   });
 
   @override
@@ -373,8 +394,18 @@ class _CurlPainter extends CustomPainter {
     final flatFar = sign > 0 ? 0.0 : w; // 未卷段远端
     final phiFront = math.min(theta, mid);
     final hasBack = theta > mid;
-    const flatCols = 6;
-    const curlCols = 20;
+    // 性能档位：列数越少越省 CPU
+    final flatCols = switch (quality) {
+      0 => 4,
+      2 => 8,
+      _ => 6,
+    };
+    final curlCols = switch (quality) {
+      0 => 12,
+      2 => 28,
+      _ => 20,
+    };
+    final shadow = shadowStrength.clamp(0.0, 1.0);
     final frontCols = hasBack
         ? (curlCols * phiFront / theta).round().clamp(1, curlCols - 1)
         : curlCols;
@@ -390,8 +421,8 @@ class _CurlPainter extends CustomPainter {
     Offset bot(double x3d, double z) => Offset(px(x3d, z), py(h, z));
 
     // ---- 落影：投在目标页露出侧（sign 方向，轴外侧）----
-    if (p > 0) {
-      final castA = 0.26 * math.sin(p * math.pi);
+    if (p > 0 && shadow > 0) {
+      final castA = 0.26 * math.sin(p * math.pi) * shadow;
       if (castA > 0) {
         final sw = 30 + 60 * p;
         final left = sign > 0 ? axisX : axisX - sw;
@@ -448,15 +479,16 @@ class _CurlPainter extends CustomPainter {
       );
     }
     // 自阴影（叠在文字上）：平面段近轴暗、卷曲段近轴暗
-    if (p > 0) {
-      final flatA = 0.20 * math.sin(p * math.pi);
+    if (p > 0 && shadow > 0) {
+      final flatA = 0.20 * math.sin(p * math.pi) * shadow;
+      final curlA = 0.34 * shadow;
       for (int i = 0; i < cols.length - 1; i++) {
         final c0 = cols[i], c1 = cols[i + 1];
         final double a;
         if (c1.seg == _Seg.flat) {
           a = flatA * c1.t; // c1.t=frac，近轴(=1)最暗
         } else {
-          a = 0.34 * (1 - c0.t.clamp(0.0, 1.0)); // 卷曲段 c0.t=phi/mid，近轴(=0)最暗
+          a = curlA * (1 - c0.t.clamp(0.0, 1.0)); // 卷曲段 c0.t=phi/mid，近轴(=0)最暗
         }
         if (a < 0.01) continue;
         final path = Path()
@@ -494,6 +526,7 @@ class _CurlPainter extends CustomPainter {
             path,
             Paint()..color = Color.lerp(backBase, backDark, t)!,
           );
+          _speckle(canvas, pTop, tTop, tBot, pBot, k);
         }
         pTop = tTop;
         pBot = tBot;
@@ -525,10 +558,31 @@ class _CurlPainter extends CustomPainter {
             path,
             Paint()..color = Color.lerp(backBase, backDark, t)!,
           );
+          _speckle(canvas, pTop, tTop, tBot, pBot, k + 100);
         }
         pTop = tTop;
         pBot = tBot;
       }
+    }
+  }
+
+  /// 纸背的细微纤维点点（只用几个圆，开销可忽略；关闭纹理时直接返回）
+  void _speckle(
+    Canvas c,
+    Offset p0,
+    Offset p1,
+    Offset p2,
+    Offset p3,
+    int seed,
+  ) {
+    if (!paperTexture) return;
+    final paint = Paint()..color = Colors.black.withValues(alpha: 0.035);
+    for (var i = 0; i < 3; i++) {
+      final fx = ((seed * 37 + i * 53) % 100) / 100.0;
+      final fy = ((seed * 17 + i * 29) % 100) / 100.0;
+      final x = p0.dx + (p1.dx - p0.dx) * fx;
+      final y = p0.dy + (p3.dy - p0.dy) * fy;
+      c.drawCircle(Offset(x, y), 1.1, paint);
     }
   }
 
@@ -538,5 +592,8 @@ class _CurlPainter extends CustomPainter {
       old.direction != direction ||
       old.image != image ||
       old.width != width ||
-      old.height != height;
+      old.height != height ||
+      old.shadowStrength != shadowStrength ||
+      old.quality != quality ||
+      old.paperTexture != paperTexture;
 }

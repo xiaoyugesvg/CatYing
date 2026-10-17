@@ -571,7 +571,7 @@ class MusicPlayerManager extends ChangeNotifier {
     if (direct) {
       if (song.source == SongSource.ting15) {
         directResolved = await MusicApi.instance.ting15Resolve(song.directUrl);
-        if (directResolved!.ok && directResolved.url.isNotEmpty) {
+        if (directResolved.ok && directResolved.url.isNotEmpty) {
           sourceHeaders = directResolved.headers;
         }
       } else {

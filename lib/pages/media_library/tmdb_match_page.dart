@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 
 import '../../common/theme.dart';
 import '../../services/tmdb_service.dart';
-import '../../widgets/app_toast.dart';
 
 /// 「匹配 TMDB」搜索页（媒体库详情页右上角 🔍 进入）
 ///
@@ -28,7 +27,6 @@ class _TmdbMatchPageState extends State<TmdbMatchPage> {
       const <(String, Map<String, dynamic>)>[];
   bool _loading = false;
   String? _error;
-  String _kw = '';
   String _tab = '综合';
 
   static const _tabs = ['综合', '电影', '电视剧'];
@@ -152,7 +150,6 @@ class _TmdbMatchPageState extends State<TmdbMatchPage> {
                       behavior: HitTestBehavior.opaque,
                       onTap: () {
                         _input.clear();
-                        setState(() => _kw = '');
                         _search('');
                       },
                       child: Padding(

@@ -23,7 +23,13 @@ class BookInfo {
 
     if (bookInfoRule.init != null && bookInfoRule.init!.isNotEmpty) {
       try {
-        final initContent = analyzeRule.getElement(bookInfoRule.init!);
+        var initContent = analyzeRule.getElement(bookInfoRule.init!);
+        // JS 返回对象时 QuickJS 只给 `[object Object]`：用 JSON.stringify
+        // 再求值一次，拿到 `{a:…}` 供后续字段按 key 取值（官方 init 约定）。
+        if ('$initContent' == '[object Object]') {
+          final json = analyzeRule.evalJsObjectJson(bookInfoRule.init!);
+          if (json.isNotEmpty) initContent = json;
+        }
         if (initContent != null) {
           analyzeRule.setContent(initContent);
           AppLog.instance
@@ -36,7 +42,13 @@ class BookInfo {
       }
     }
 
-    final canReNameFlag = canReName && (bookInfoRule.canReName?.isEmpty ?? true);
+    // Legado 官方逻辑（BookInfo.kt）：
+    //   mCanReName = canReName && !infoRule.canReName.isNullOrBlank()
+    // 即「canReName 字段**非空**」才允许用详情页书名/作者覆盖；为空则保留
+    // 搜索页拿到的书名/作者。此前条件写反了（非空反而不覆盖），导致
+    // 声明了 canReName 的源永远更新不了书名/作者。
+    final canReNameFlag =
+        canReName && (bookInfoRule.canReName?.trim().isNotEmpty ?? false);
 
     if (bookInfoRule.name != null && bookInfoRule.name!.isNotEmpty) {
       try {

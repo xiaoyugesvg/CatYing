@@ -24,7 +24,10 @@ import '../widgets/jelly_mode_picker.dart';
 import '../widgets/pomodoro_button.dart';
 import '../../common/theme.dart';
 import '../../common/system_ui.dart';
+import '../../services/ocr_service.dart';
+import '../../services/translate_service.dart';
 import '../../widgets/app_image_cache.dart';
+import 'comic_translate_page.dart';
 
 /// 漫画阅读页面
 class ReaderPage extends StatefulWidget {
@@ -2126,6 +2129,40 @@ class _ReaderPageState extends State<ReaderPage> {
     );
   }
 
+  /// 「翻译本页」：跳到翻译阅读页（OCR → 翻译 → 译文盖回原位置）。
+  ///
+  /// 单独一页而不是直接叠在本页，是因为本阅读器有翻页/双页/拼页/溶解/缩放
+  /// 五套渲染路径，各自算一遍"图片显示矩形"既易错又影响原阅读手感。
+  Future<void> _openTranslate() async {
+    if (_images.isEmpty) {
+      _showTip('这一话还没加载出图片');
+      return;
+    }
+    if (!OcrService.isAvailable) {
+      _showTip('当前平台不支持本机 OCR');
+      return;
+    }
+    final missing = await TranslateSettings.missingReason();
+    if (missing.isNotEmpty) {
+      _showTip(missing);
+      return;
+    }
+    final idx =
+        _isContinuousMode ? _continuousPageNotifier.value : _currentIndex;
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ComicTranslatePage(
+          images: List<String>.from(_images),
+          initialIndex: idx.clamp(0, _images.length - 1),
+          headers: _imageHeaders,
+          useLocal: _useLocal,
+          title: widget.comic.title,
+        ),
+      ),
+    );
+  }
+
   /// 切换控制栏显示
   void _toggleControls() {
     setState(() {
@@ -2157,10 +2194,8 @@ class _ReaderPageState extends State<ReaderPage> {
     final zones = SettingsService().mangaTapZones;
     final list = zones.length == 9 ? zones : _defaultMangaZones;
     // 按三列归纳：左列/中列/右列最常见的动作
-    final left = list[0];
-    final mid = list[4];
-    final right = list[8];
-    return '点击设置 3×3 各区域动作（左$names[left]·中$names[mid]·右$names[right]）';
+    return '点击设置 3×3 各区域动作'
+        '（左${names[list[0]]}·中${names[list[4]]}·右${names[list[8]]}）';
   }
 
   /// C8：九宫格点击区域编辑弹窗。每格点击循环切换动作，
@@ -3452,6 +3487,13 @@ class _ReaderPageState extends State<ReaderPage> {
                               icon: Icons.timer_outlined,
                               onTap: () => setState(
                                   () => _showPomodoro = !_showPomodoro),
+                            ),
+                          ),
+                          Tooltip(
+                            message: '翻译本页',
+                            child: _dockCircleButton(
+                              icon: Icons.translate_rounded,
+                              onTap: _openTranslate,
                             ),
                           ),
                           Tooltip(

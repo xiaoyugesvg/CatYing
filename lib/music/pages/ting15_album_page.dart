@@ -53,7 +53,7 @@ class _Ting15AlbumPageState extends State<Ting15AlbumPage> {
           ? r.albumName
           : (widget.albumName ?? '专辑');
       _coverUrl = r.coverUrl;
-      _intro = r.songs.isEmpty ? '' : (r.songs.first.artists ?? '');
+      _intro = r.songs.isEmpty ? '' : r.songs.first.artists;
       if (!r.ok) _error = r.message;
     });
   }

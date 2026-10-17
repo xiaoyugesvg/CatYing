@@ -358,26 +358,57 @@ class ThemeBackground {
     this.type = ThemeBackgroundType.none,
     this.animationId,
     this.imagePath,
+    this.opacity = 1.0,
+    this.blur = 0.0,
   });
 
   const ThemeBackground.none()
     : type = ThemeBackgroundType.none,
       animationId = null,
-      imagePath = null;
+      imagePath = null,
+      opacity = 1.0,
+      blur = 0.0;
 
-  const ThemeBackground.animation(String id)
+  const ThemeBackground.animation(String id, {this.opacity = 1.0, this.blur = 0.0})
     : type = ThemeBackgroundType.animation,
       animationId = id,
       imagePath = null;
 
-  const ThemeBackground.image(String path)
-    : type = ThemeBackgroundType.image,
-      animationId = null,
-      imagePath = path;
+  const ThemeBackground.image(
+    String path, {
+    this.opacity = 1.0,
+    this.blur = 0.0,
+  }) : type = ThemeBackgroundType.image,
+       animationId = null,
+       imagePath = path;
 
   final ThemeBackgroundType type;
   final String? animationId;
   final String? imagePath;
+
+  /// 背景不透明度 0.2~1.0（默认 1.0）。调低可让底下 Scaffold 底色透出来，
+  /// 图片/动画背景更"轻"，正文对比度更高。
+  final double opacity;
+
+  /// 背景模糊半径（0 = 不模糊，单位即 ImageFilter sigma，建议 0~24）。
+  /// 仅图片背景生效——对逐帧变化的动画施加 ImageFilter 代价过高。
+  final double blur;
+
+  ThemeBackground copyWith({
+    ThemeBackgroundType? type,
+    String? animationId,
+    String? imagePath,
+    double? opacity,
+    double? blur,
+  }) {
+    return ThemeBackground(
+      type: type ?? this.type,
+      animationId: animationId ?? this.animationId,
+      imagePath: imagePath ?? this.imagePath,
+      opacity: opacity ?? this.opacity,
+      blur: blur ?? this.blur,
+    );
+  }
 
   /// 序列化；缺省字段省略。旧自定义主题无 `background` 节点时由
   /// [fromMap] 回退 [ThemeBackground.none]（向后兼容）。
@@ -385,6 +416,9 @@ class ThemeBackground {
     final m = <String, dynamic>{'type': type.name};
     if (animationId != null) m['animationId'] = animationId;
     if (imagePath != null) m['imagePath'] = imagePath;
+    // 只在非默认值时写，保持旧格式体积/可读性
+    if (opacity != 1.0) m['opacity'] = opacity;
+    if (blur > 0) m['blur'] = blur;
     return m;
   }
 
@@ -401,21 +435,37 @@ class ThemeBackground {
         }
       }
     }
+    final opacity = _numOr(raw['opacity'], 1.0).clamp(0.2, 1.0).toDouble();
+    final blur = _numOr(raw['blur'], 0.0).clamp(0.0, 40.0).toDouble();
     switch (type) {
       case ThemeBackgroundType.animation:
         final id = raw['animationId'];
-        return id is String
-            ? ThemeBackground.animation(id)
-            : const ThemeBackground.none();
+        if (id is! String) return const ThemeBackground.none();
+        return ThemeBackground(
+          type: ThemeBackgroundType.animation,
+          animationId: id,
+          opacity: opacity,
+          blur: blur,
+        );
       case ThemeBackgroundType.image:
         final p = raw['imagePath'];
-        return p is String
-            ? ThemeBackground.image(p)
-            : const ThemeBackground.none();
+        if (p is! String) return const ThemeBackground.none();
+        return ThemeBackground(
+          type: ThemeBackgroundType.image,
+          imagePath: p,
+          opacity: opacity,
+          blur: blur,
+        );
       default:
-        return const ThemeBackground.none();
+        return const ThemeBackground.none().copyWith(
+          opacity: opacity,
+          blur: blur,
+        );
     }
   }
+
+  static double _numOr(Object? v, double fallback) =>
+      v is num && v.isFinite ? v.toDouble() : fallback;
 
   @override
   bool operator ==(Object other) =>
@@ -423,10 +473,12 @@ class ThemeBackground {
       (other is ThemeBackground &&
           other.type == type &&
           other.animationId == animationId &&
-          other.imagePath == imagePath);
+          other.imagePath == imagePath &&
+          other.opacity == opacity &&
+          other.blur == blur);
 
   @override
-  int get hashCode => Object.hash(type, animationId, imagePath);
+  int get hashCode => Object.hash(type, animationId, imagePath, opacity, blur);
 }
 
 /// 主题预设元信息（UI 展示用：id + 名称 + 调色板取色块）

@@ -1627,7 +1627,7 @@ class _DiscoverPageState extends State<DiscoverPage>
               onTap: () => Navigator.of(context).push<void>(
                 MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
                   builder: (_) => Ting15AlbumPage(
-                    detailUrl: s.directUrl ?? '',
+                    detailUrl: s.directUrl,
                     albumName: s.name,
                   ),
                 ),
@@ -1677,7 +1677,7 @@ class _DiscoverPageState extends State<DiscoverPage>
                         MaterialPageRoute(
                           settings: const RouteSettings(name: 'music:page'),
                           builder: (_) => Ting15AlbumPage(
-                            detailUrl: song.directUrl ?? '',
+                            detailUrl: song.directUrl,
                             albumName: song.name,
                           ),
                         ),

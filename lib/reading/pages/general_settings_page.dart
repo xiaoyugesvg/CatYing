@@ -17,6 +17,7 @@ import '../utils/file_browser.dart';
 import '../../../services/app_log.dart';
 import '../../../services/cache_manager_service.dart';
 import '../../common/theme.dart';
+import 'translate_settings_page.dart';
 
 /// 通用设置页：分组对齐参考图 IMG_8465。
 class GeneralSettingsPage extends StatefulWidget {
@@ -46,6 +47,18 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
               // ── 通用 ────────────────────────────────────────
               _sectionTitle('通用'),
               const SizedBox(height: 8),
+              _buildNavCard(
+                isDark: _isDark,
+                icon: Icons.translate_rounded,
+                title: '翻译设置',
+                subtitle: '漫画 OCR 翻译 · AI / 百度两种引擎 · 语言与密钥',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const TranslateSettingsPage()),
+                ),
+              ),
+              const SizedBox(height: 12),
 
               // ── 运行维护 ────────────────────────────────────
               _sectionTitle('运行维护'),

@@ -1036,6 +1036,7 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  // ignore: unused_element
   void _openConfigCenterUrl(Video video) {
     String? openUrl;
     if (video.pic.startsWith('http')) {

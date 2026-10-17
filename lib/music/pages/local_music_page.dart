@@ -4,6 +4,7 @@ import '../services/download_service.dart';
 import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
 import '../../common/theme.dart';
+import '../../services/file_export_service.dart';
 import '../../widgets/app_toast.dart';
 
 /// 本地音乐 —— 已下载的歌（App 沙盒 `Documents/music/`）。
@@ -124,6 +125,20 @@ class _LocalMusicPageState extends State<LocalMusicPage> {
                       fontSize: AppTheme.fontFootnote),
                 ),
               ),
+              // 文件位置提示：下载都在 App 沙盒 Documents/music，
+              // Info.plist 已开 UIFileSharingEnabled → 「文件」App 里能直接看到
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '文件位置：我的 iPhone → 猫影 → music（可在「文件」App 查看/导出）',
+                    style: TextStyle(
+                        color: MusicTheme.secondary.withValues(alpha: 0.75),
+                        fontSize: AppTheme.fontCaption),
+                  ),
+                ),
+              ),
               Expanded(
                 child: ListView.separated(
                   padding: const EdgeInsets.symmetric(vertical: 6),
@@ -170,15 +185,27 @@ class _LocalMusicPageState extends State<LocalMusicPage> {
                       onTap: isDone && doneIndex >= 0
                           ? () => _player.playQueue(done, index: doneIndex)
                           : null,
-                      trailing: IconButton(
-                        tooltip: '删除',
-                        icon: Icon(Icons.delete_outline,
-                            size: 20, color: MusicTheme.secondary),
-                        onPressed: () async {
-                          await _svc.remove(s);
-                          if (!mounted) return;
-                          AppToast.show('已删除「${s.name}」', '');
-                        },
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (isDone)
+                            IconButton(
+                              tooltip: '导出',
+                              icon: Icon(Icons.ios_share_rounded,
+                                  size: 19, color: MusicTheme.secondary),
+                              onPressed: () => _exportFile(d),
+                            ),
+                          IconButton(
+                            tooltip: '删除',
+                            icon: Icon(Icons.delete_outline,
+                                size: 20, color: MusicTheme.secondary),
+                            onPressed: () async {
+                              await _svc.remove(s);
+                              if (!mounted) return;
+                              AppToast.show('已删除「${s.name}」', '');
+                            },
+                          ),
+                        ],
                       ),
                     );
                   },
@@ -187,6 +214,28 @@ class _LocalMusicPageState extends State<LocalMusicPage> {
             ],
           );
         },
+      ),
+    );
+  }
+
+  /// 导出单首已下载歌曲：交给系统分享面板（存到「文件」/ AirDrop 等）。
+  Future<void> _exportFile(MusicDownload d) async {
+    final ok = await FileExportService.shareFiles([d.path]);
+    if (!mounted || ok) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('导出失败'),
+        content: Text(
+          '找不到本地文件：\n${d.path}\n\n'
+          '也可以直接在「文件」App → 我的 iPhone → 猫影 → music 中查看。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('知道了'),
+          ),
+        ],
       ),
     );
   }

@@ -224,7 +224,7 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.showTabs ? '浏览记录' : '足迹'),
+        title: Text(widget.showTabs ? '浏览记录' : '阅读历程'),
       ),
       body: ListenableBuilder(
         listenable: Listenable.merge([

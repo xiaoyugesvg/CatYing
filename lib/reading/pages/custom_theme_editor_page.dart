@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -430,6 +431,10 @@ class _CustomThemeEditorPageState extends State<CustomThemeEditorPage> {
               ),
               if (_workingBg.type == ThemeBackgroundType.image)
                 _buildImagePicker(isDark),
+              if (_workingBg.type != ThemeBackgroundType.none) ...[
+                _sectionDivider(isDark),
+                _buildBgTuning(isDark),
+              ],
             ],
           ),
         ),
@@ -448,12 +453,11 @@ class _CustomThemeEditorPageState extends State<CustomThemeEditorPage> {
     final selected = _workingBg.type == type;
     return ListTile(
       onTap: () => setState(() {
-        _workingBg = ThemeBackground(
+        _workingBg = _workingBg.copyWith(
           type: type,
           animationId: type == ThemeBackgroundType.animation
               ? (_workingBg.animationId ?? 'green')
               : _workingBg.animationId,
-          imagePath: _workingBg.imagePath,
         );
       }),
       dense: true,
@@ -495,10 +499,9 @@ class _CustomThemeEditorPageState extends State<CustomThemeEditorPage> {
             final selected = p.id == _workingBg.animationId;
             return GestureDetector(
               onTap: () => setState(() {
-                _workingBg = ThemeBackground(
+                _workingBg = _workingBg.copyWith(
                   type: ThemeBackgroundType.animation,
                   animationId: p.id,
-                  imagePath: _workingBg.imagePath,
                 );
               }),
               child: Column(
@@ -591,6 +594,8 @@ class _CustomThemeEditorPageState extends State<CustomThemeEditorPage> {
                             type: ThemeBackgroundType.image,
                             animationId: _workingBg.animationId,
                             imagePath: null,
+                            opacity: _workingBg.opacity,
+                            blur: _workingBg.blur,
                           );
                         }),
                       ),
@@ -634,8 +639,102 @@ class _CustomThemeEditorPageState extends State<CustomThemeEditorPage> {
         type: ThemeBackgroundType.image,
         animationId: _workingBg.animationId,
         imagePath: path,
+        opacity: _workingBg.opacity,
+        blur: _workingBg.blur,
       );
     });
+  }
+
+  /// 背景不透明度 / 模糊调节（仅图片/动画背景显示）。
+  ///
+  /// 不透明度作用于整层（含动画背景）；模糊只对图片开放——动画是逐帧重绘，
+  /// 套 ImageFilter 会在每帧做一次全屏高斯，代价过高。
+  Widget _buildBgTuning(bool isDark) {
+    final labelColor = isDark
+        ? _working.textPrimaryDark
+        : _working.textPrimaryLight;
+    return Padding(
+      padding: const EdgeInsets.only(left: 50, right: 16, top: 4, bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              SizedBox(
+                width: 62,
+                child: Text(
+                  '不透明度',
+                  style: TextStyle(
+                    fontSize: AppTheme.fontFootnote,
+                    color: labelColor,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Slider(
+                  value: _workingBg.opacity.clamp(0.2, 1.0),
+                  min: 0.2,
+                  max: 1.0,
+                  divisions: 16,
+                  activeColor: _working.primary,
+                  onChanged: (v) => setState(
+                    () => _workingBg = _workingBg.copyWith(opacity: v),
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 38,
+                child: Text(
+                  '${(_workingBg.opacity * 100).round()}%',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontSize: AppTheme.fontFootnote,
+                    color: _working.textSecondary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (_workingBg.type == ThemeBackgroundType.image)
+            Row(
+              children: [
+                SizedBox(
+                  width: 62,
+                  child: Text(
+                    '模糊',
+                    style: TextStyle(
+                      fontSize: AppTheme.fontFootnote,
+                      color: labelColor,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: Slider(
+                    value: _workingBg.blur.clamp(0.0, 24.0),
+                    max: 24,
+                    divisions: 24,
+                    activeColor: _working.primary,
+                    onChanged: (v) => setState(
+                      () => _workingBg = _workingBg.copyWith(blur: v),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 38,
+                  child: Text(
+                    '${_workingBg.blur.round()}',
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      fontSize: AppTheme.fontFootnote,
+                      color: _working.textSecondary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
   }
 
   Widget _sectionDivider(bool isDark) => Divider(
@@ -701,17 +800,38 @@ class _BackgroundPreviewState extends State<_BackgroundPreview>
       case ThemeBackgroundType.image:
         final p = widget.background.imagePath;
         if (p == null) return const SizedBox.shrink();
+        Widget img = Image.file(
+          File(p),
+          fit: BoxFit.cover,
+          width: double.infinity,
+          height: double.infinity,
+          gaplessPlayback: true,
+          errorBuilder: (_, _, _) => const SizedBox.shrink(),
+        );
+        final sigma = widget.background.blur.clamp(0.0, 40.0);
+        if (sigma > 0.01) {
+          img = Transform.scale(
+            scale: 1 + sigma / 60,
+            child: ImageFiltered(
+              imageFilter: ui.ImageFilter.blur(
+                sigmaX: sigma,
+                sigmaY: sigma,
+                tileMode: TileMode.decal,
+              ),
+              child: img,
+            ),
+          );
+        }
+        if (widget.background.opacity < 0.999) {
+          img = Opacity(
+            opacity: widget.background.opacity.clamp(0.2, 1.0),
+            child: img,
+          );
+        }
         return Stack(
           fit: StackFit.expand,
           children: [
-            Image.file(
-              File(p),
-              fit: BoxFit.cover,
-              width: double.infinity,
-              height: double.infinity,
-              gaplessPlayback: true,
-              errorBuilder: (_, _, _) => const SizedBox.shrink(),
-            ),
+            img,
             ColoredBox(
               color: widget.isDark
                   ? Colors.black.withValues(alpha: 0.45)
@@ -729,9 +849,15 @@ class _BackgroundPreviewState extends State<_BackgroundPreview>
           widget.palette,
         );
         if (painter == null) return const SizedBox.shrink();
-        return RepaintBoundary(
+        final painted = RepaintBoundary(
           child: CustomPaint(painter: painter, child: const SizedBox.expand()),
         );
+        return widget.background.opacity >= 0.999
+            ? painted
+            : Opacity(
+                opacity: widget.background.opacity.clamp(0.2, 1.0),
+                child: painted,
+              );
       case ThemeBackgroundType.none:
         return const SizedBox.shrink();
     }

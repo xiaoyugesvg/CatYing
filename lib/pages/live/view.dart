@@ -80,7 +80,6 @@ class _LivePageState extends State<LivePage> {
   /// 抖音模式：纯竖屏全屏（与短剧互斥；全屏布局同短剧）
   bool _douyinMode = false;
   bool _audioMode = false;
-  int _activeGroupIndex = 0;
   String? _playError;
 
   /// 正在切台/加载流（显示播放器中间转圈）
@@ -668,7 +667,6 @@ class _LivePageState extends State<LivePage> {
           final current = c.currentChannel;
           final currentSourceName = c.currentSourceName;
           final currentGroupName = c.currentGroupName;
-          final sources = c.sources;
           // 视频层常驻 Stack 首位：全屏/普通切换只改高度，Video 永不重建
           // （修复直播全屏/横屏后"有声音没画面"——同一 VideoController
           //   被反复 attach/detach 时 media_kit 渲染层会黑屏）
@@ -2068,7 +2066,6 @@ class _LivePageState extends State<LivePage> {
                         onTap: () {
                           Navigator.pop(ctx);
                           c.selectGroup(i);
-                          setState(() => _activeGroupIndex = i);
                           _autoplayCurrent();
                         },
                       );
@@ -2084,6 +2081,7 @@ class _LivePageState extends State<LivePage> {
     );
   }
 
+  // ignore: unused_element
   void _showAnnouncements(BuildContext context) {
     final list = LiveService.instance.announcements;
     showModalBottomSheet(
@@ -2386,8 +2384,7 @@ class _LivePageState extends State<LivePage> {
 }
 
 class _LiveDot extends StatefulWidget {
-  final double size;
-  const _LiveDot({this.size = 8});
+  const _LiveDot();
   @override
   State<_LiveDot> createState() => _LiveDotState();
 }
@@ -2410,36 +2407,11 @@ class _LiveDotState extends State<_LiveDot>
     return FadeTransition(
       opacity: Tween(begin: 0.35, end: 1.0).animate(_c),
       child: Container(
-        width: widget.size,
-        height: widget.size,
+        width: 8,
+        height: 8,
         decoration: const BoxDecoration(
           color: Colors.redAccent,
           shape: BoxShape.circle,
-        ),
-      ),
-    );
-  }
-}
-
-class _TopIcon extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-  const _TopIcon({required this.icon, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 10),
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            color: AppTheme.backgroundTertiary,
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, color: AppTheme.textSecondary, size: 18),
         ),
       ),
     );
@@ -2451,12 +2423,10 @@ class _VideoTopIcon extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
   final String? tooltip;
-  final double size;
   const _VideoTopIcon({
     required this.icon,
     required this.onTap,
     this.tooltip,
-    this.size = 20,
   });
 
   @override
@@ -2481,7 +2451,7 @@ class _VideoTopIcon extends StatelessWidget {
             shape: BoxShape.circle,
             border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
           ),
-          child: Icon(icon, color: Colors.white, size: size),
+          child: Icon(icon, color: Colors.white, size: 20),
         ),
       ),
     );

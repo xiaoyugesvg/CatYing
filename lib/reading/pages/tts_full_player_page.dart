@@ -94,6 +94,45 @@ class TtsFullPlayerPage extends StatelessWidget {
                             style: TextStyle(
                                 color: Colors.white.withValues(alpha: 0.6),
                                 fontSize: AppTheme.fontFootnote)),
+                      const SizedBox(width: 8),
+                      // 定时关闭：15/30/60/90 分钟，到点自动暂停
+                      Obx(() {
+                        final secs = TtsService.instance.sleepRemaining.value;
+                        final label = secs <= 0 ? '' : '${(secs / 60).ceil()}分';
+                        return GestureDetector(
+                          onTap: () => _showSleepSheet(context),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  secs > 0
+                                      ? Icons.bedtime_rounded
+                                      : Icons.bedtime_outlined,
+                                  size: 15,
+                                  color: Colors.white70,
+                                ),
+                                if (label.isNotEmpty) ...[
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    label,
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        );
+                      }),
                     ],
                   ),
                 ),
@@ -284,6 +323,73 @@ class TtsFullPlayerPage extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 定时关闭选项
+  void _showSleepSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF1E1E26),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Row(
+                  children: [
+                    Icon(Icons.bedtime_rounded, color: Colors.white70, size: 18),
+                    SizedBox(width: 8),
+                    Text(
+                      '定时关闭',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: AppTheme.fontTitle3,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              for (final m in const [15, 30, 60, 90])
+                ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.timer_outlined,
+                      color: Colors.white70, size: 20),
+                  title: Text(
+                    '$m 分钟后暂停朗读',
+                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                  ),
+                  onTap: () {
+                    TtsService.instance.startSleep(Duration(minutes: m));
+                    Navigator.pop(ctx);
+                  },
+                ),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.timer_off_outlined,
+                    color: Colors.white54, size: 20),
+                title: const Text(
+                  '关闭定时',
+                  style: TextStyle(color: Colors.white54, fontSize: 14),
+                ),
+                onTap: () {
+                  TtsService.instance.cancelSleep();
+                  Navigator.pop(ctx);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
       ),
     );
   }

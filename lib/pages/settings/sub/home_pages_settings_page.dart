@@ -23,6 +23,7 @@ class HomePagesSettingsPage extends StatelessWidget {
     // 与其它项不一致（NavFeature 自己带 icon getter，这里只是复刻一份）
     NavFeature.rss: Icons.rss_feed_outlined,
     NavFeature.hiker: Icons.rocket_launch_outlined,
+    NavFeature.emby: Icons.video_settings_outlined,
     NavFeature.shelf: Icons.video_library_outlined,
     NavFeature.settings: Icons.settings_outlined,
     NavFeature.search: Icons.search,

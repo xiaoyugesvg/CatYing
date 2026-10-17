@@ -19,10 +19,38 @@
 """
 import re
 
-from bs4 import BeautifulSoup as _BS
-from bs4 import Tag as _Tag
+# ⚠️ 这里**不能**在模块顶层 `from bs4 import BeautifulSoup`：
+#   bs4 的 lxml builder 在 import 时会反过来 `from lxml import etree`，
+#   此时本模块还没执行完 ⇒ `etree.XMLParser` 不存在 ⇒ AttributeError，
+#   最终 `from lxml import etree` 直接失败（实测 bs4 4.14 / 4.12 都会）。
+#   所以：先给出 bs4 导入期要引用的占位类，bs4 延迟到真正解析页面时再 import。
+class XMLParser(object):
+    """占位：只为满足 bs4 lxml builder 的导入期引用（本垫片走 html.parser）。"""
 
-__all__ = ['HTML', 'fromstring', 'tostring', 'Element', '_Element']
+    def __init__(self, *a, **kw):
+        pass
+
+
+class HTMLParser(XMLParser):
+    pass
+
+
+__all__ = ['HTML', 'fromstring', 'tostring', 'fromstringlist', 'Element',
+           '_Element', 'XMLParser', 'HTMLParser']
+
+_bs_cls = None
+_tag_cls = None
+
+
+def _bs4():
+    """延迟导入 bs4（避免与 bs4.builder._lxml 形成循环导入）。"""
+    global _bs_cls, _tag_cls
+    if _bs_cls is None:
+        from bs4 import BeautifulSoup as _B
+        from bs4 import Tag as _T
+        _bs_cls, _tag_cls = _B, _T
+    return _bs_cls, _tag_cls
+
 
 _ATTR_EQ = re.compile(r"^@([\w:-]+)\s*=\s*'([^']*)'$")
 _ATTR_EQ2 = re.compile(r'^@([\w:-]+)\s*=\s*"([^"]*)"$')
@@ -75,8 +103,9 @@ class _Element(object):
         return r[0] if r else None
 
     def __iter__(self):
+        _, tag_cls = _bs4()
         for c in self._t.children:
-            if isinstance(c, _Tag):
+            if isinstance(c, tag_cls):
                 yield _Element(c)
 
     def __repr__(self):
@@ -187,7 +216,8 @@ def _xpath(root, path):
 
 
 def HTML(text, parser=None, **_kw):  # noqa: N802（对齐 lxml 命名）
-    return _Element(_BS('' if text is None else str(text), 'html.parser'))
+    bs, _ = _bs4()
+    return _Element(bs('' if text is None else str(text), 'html.parser'))
 
 
 def fromstring(text, parser=None, **kw):

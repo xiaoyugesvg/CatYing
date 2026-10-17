@@ -43,16 +43,15 @@ const Duration kHealthPerSourceTimeout = Duration(seconds: 40);
 /// 明确**未实现的宿主 API**：用了它们的源必然失败 ✓，先标出来便于分类
 /// （与参考实现同一套 regexp ✓）。
 final List<RegExp> kHealthHostApiBlockers = <RegExp>[
+  // 2026-10-17：getByteArray / aesEncodeToString / refreshCookie 已实现
+  // （二进制重放通道 / AES 加密 / WebView cookie 刷新），不再判死。
   RegExp(r'java\.webView'),
   RegExp(r'java\.startBrowser'),
-  RegExp(r'java\.getByteArray'),
-  RegExp(r'java\.aesEncodeToString'),
-  RegExp(r'java\.refreshCookie'),
 ];
 
 /// 命中 [kHealthHostApiBlockers] 时的统一错因（写进结果 JSON 的 `error`）。
 const String kBlockedReason =
-    '用了未实现的宿主 API（webView/startBrowser/getByteArray/aesEncode/refreshCookie）';
+    '用了需要人工交互的宿主 API（webView/startBrowser）';
 
 // ============================================================
 // 结果模型
@@ -209,8 +208,14 @@ class HealthSearchCallbacks {
       Function(src.BookSource source, String tocUrl) toc;
 
   /// 同 `BookSourceService.content` 的签名。
-  final Future<({bool ok, String? error, String content, List<String> images})>
-      Function(src.BookSource source, String chapterUrl) content;
+  final Future<
+      ({
+        bool ok,
+        String? error,
+        String content,
+        List<String> images,
+        Map<String, String> headers,
+      })> Function(src.BookSource source, String chapterUrl) content;
 }
 
 // ============================================================

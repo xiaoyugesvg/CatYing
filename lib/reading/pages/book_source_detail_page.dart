@@ -4,11 +4,13 @@ import 'dart:io';
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/book_source.dart';
 import '../models/bookshelf.dart';
 import '../utils/html_text.dart';
 import '../services/book_source_service.dart';
+import '../services/chapter_alignment.dart';
 import '../services/book_source_download_service.dart';
 import '../services/browse_history_service.dart';
 // 收藏服务：本文件原来导入的是**从未被使用**的 bookshelf_service ✗
@@ -1114,12 +1116,61 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
     );
 
     if (picked == null || !mounted) return;
+
+    // 换源前先记住旧目录与旧进度：换到新源后按「章节标题 + 序号比例」对齐，
+    // 否则读者换源后会被打回第 1 章。
+    final oldSourceId = _result.source.id;
+    final oldTitles = _chapters.map((e) => e.name).toList(growable: false);
+    final oldProgress = await _readSavedChapter(oldSourceId, name);
+
     setState(() {
       _current = picked;
       _info = const {};
       _chapters = const [];
     });
     await _load();
+    if (!mounted) return;
+
+    // 对齐并写进「新源」的进度键：阅读器 initialIndex=0 时会自动恢复到该章。
+    if (oldProgress != null &&
+        oldProgress > 0 &&
+        oldProgress < oldTitles.length &&
+        _chapters.isNotEmpty) {
+      final a = ChapterAlignment.align(
+        oldTitles: oldTitles,
+        oldIndex: oldProgress,
+        newTitles: _chapters.map((e) => e.name).toList(growable: false),
+      );
+      if (a != null && a.index > 0 && a.index < _chapters.length) {
+        try {
+          final p = await SharedPreferences.getInstance();
+          await p.setInt(
+            ChapterAlignment.progressKey(picked.source.id, _name),
+            a.index,
+          );
+        } catch (_) {/* 写进度失败不影响换源本身 */}
+        _toast(a.matchedByTitle
+            ? '已换源并对齐到第 ${a.index + 1} 章'
+            : '已换源，按原进度定位到第 ${a.index + 1} 章');
+      }
+    }
+  }
+
+  /// 读旧源保存的章节下标。
+  ///
+  /// 书名可能因源站差异略有不同（带「（精校版）」等后缀），所以把
+  /// 搜索结果名 / 当前详情名都试一遍，命中即用。
+  Future<int?> _readSavedChapter(String sourceId, String bookName) async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final names = <String>{bookName, _result.name, _name};
+      for (final n in names) {
+        if (n.isEmpty) continue;
+        final v = p.getInt(ChapterAlignment.progressKey(sourceId, n));
+        if (v != null) return v;
+      }
+    } catch (_) {/* ignore */}
+    return null;
   }
 }
 

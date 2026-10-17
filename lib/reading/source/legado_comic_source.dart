@@ -1,0 +1,472 @@
+/// Legado（开源阅读）/ 异次元 规则的漫画源适配器。
+///
+/// 复用阅读模块已有的书源规则引擎（`AnalyzeRule` / `AnalyzeUrl` / `WebBook`）：
+///   · `class./id./tag.` 选择器、链式选择、XPath、JSONPath
+///   · `@js:` 内嵌脚本（QuickJS）
+///   · `@Header:{...}` 单规则请求头
+///   · `##正则##替换`
+///   · Base64 / gzip / zlib 响应（由 AnalyzeUrl 的浏览器指纹适配器处理）
+///
+/// 与 `ConfigMangaSource` 的区别：后者只有 CSS/DOM 配置，本类直接吃 Legado
+/// 的 `ruleSearch / ruleBookInfo / ruleToc / ruleContent` 四段规则。
+library;
+
+import 'dart:convert';
+
+import 'package:html/parser.dart' as html_parser;
+
+import 'models.dart';
+import '../novel_source/analyze/analyze_rule.dart';
+import '../novel_source/analyze/analyze_url.dart';
+import '../novel_source/analyze/cookie_store.dart';
+import '../novel_source/analyze/js_engine.dart';
+import '../novel_source/model/book_source.dart';
+import '../novel_source/model/search_book.dart';
+import '../novel_source/model/xiaoshuo_book.dart';
+import '../novel_source/model/xiaoshuo_book_chapter.dart';
+import '../novel_source/web_book/web_book.dart';
+import 'manga_source.dart';
+
+class LegadoComicMangaSource extends MangaSource {
+  LegadoComicMangaSource(this.source);
+
+  final XiaoshuoBookSource source;
+  final WebBook _web = WebBook();
+
+  Map<String, String> _imageHeaders = const {};
+  String? _imageReferer;
+
+  @override
+  String get id => 'legado:${source.bookSourceUrl}';
+
+  @override
+  String get name =>
+      source.bookSourceName.trim().isEmpty ? 'Legado 漫画' : source.bookSourceName;
+
+  @override
+  String get lang => 'zh';
+
+  @override
+  bool get supportsLatest => (source.exploreUrl ?? '').trim().isNotEmpty;
+
+  @override
+  bool get supportsCategories => (source.exploreUrl ?? '').trim().isNotEmpty;
+
+  @override
+  Map<String, String> get imageHeaders => {
+        ..._sourceHeaders(),
+        ..._imageHeaders,
+      };
+
+  @override
+  String? get referer => _imageReferer ?? source.bookSourceUrl;
+
+  @override
+  String? refererForChapter(CChapter chapter) =>
+      _imageReferer ?? chapter.url ?? source.bookSourceUrl;
+
+  /// 源级 header（Legado 的 `header` 字段，JSON 字符串）
+  Map<String, String> _sourceHeaders() {
+    final raw = source.header?.trim();
+    if (raw == null || raw.isEmpty) return const {};
+    try {
+      final m = jsonDecode(raw);
+      if (m is Map) {
+        return m.map((k, v) => MapEntry('$k', '$v'));
+      }
+    } catch (_) {}
+    return const {};
+  }
+
+  void _bindJs() {
+    try {
+      SourceCookieStore.instance.enabled = source.enabledCookieJar;
+      JsEngine.shared.setActiveSource(
+        source.bookSourceUrl.isNotEmpty
+            ? source.bookSourceUrl
+            : source.bookSourceName,
+        source.jsLib,
+      );
+    } catch (_) {}
+  }
+
+  // ── 列表 ────────────────────────────────────────────────
+
+  @override
+  Future<MangasPage> search(
+    String query, {
+    int page = 0,
+    FilterList filters = const FilterList(),
+  }) async {
+    final books = await _web.searchBook(
+      source: source,
+      key: query,
+      page: page + 1,
+    );
+    return MangasPage(
+      items: books.map(_toCManga).toList(),
+      hasNextPage: books.isNotEmpty,
+    );
+  }
+
+  @override
+  Future<MangasPage> getPopular({int page = 0}) =>
+      _explore(null, page);
+
+  @override
+  Future<MangasPage> getLatestUpdates({int page = 0}) =>
+      _explore(null, page);
+
+  Future<MangasPage> _explore(String? categoryUrl, int page) async {
+    final cats = _web.getExploreCategories(source);
+    if (cats.isEmpty) {
+      return const MangasPage(items: [], hasNextPage: false);
+    }
+    final target = (categoryUrl == null || categoryUrl.isEmpty)
+        ? cats.first.url
+        : categoryUrl;
+    final books = await _web.exploreCategory(
+      source: source,
+      categoryUrl: target,
+      page: page + 1,
+    );
+    return MangasPage(
+      items: books.map(_toCMangaFromBook).toList(),
+      hasNextPage: books.isNotEmpty,
+    );
+  }
+
+  @override
+  Future<List<FilterGroup>> fetchCategories() async {
+    final cats = _web.getExploreCategories(source);
+    if (cats.isEmpty) return const [];
+    return [
+      FilterGroup(
+        key: 'explore',
+        title: '分类',
+        options: [
+          for (var i = 0; i < cats.length; i++)
+            FilterOption(
+              value: cats[i].url,
+              name: cats[i].name.isEmpty ? '分类 ${i + 1}' : cats[i].name,
+            ),
+        ],
+        selected: FilterOption(
+          value: cats.first.url,
+          name: cats.first.name.isEmpty ? '分类 1' : cats.first.name,
+        ),
+      ),
+    ];
+  }
+
+  @override
+  Future<MangasPage> getCategoryList(
+    List<FilterGroup> groups, {
+    int page = 0,
+  }) {
+    String? url;
+    for (final g in groups) {
+      if (g.key != 'explore') continue;
+      url = g.selected?.value;
+    }
+    return _explore(url, page);
+  }
+
+  CManga _toCManga(SearchBook b) {
+    return CManga(
+      id: b.bookUrl,
+      sourceId: id,
+      title: b.name,
+      cover: b.coverUrl ?? '',
+      author: b.author,
+      description: b.kind,
+      tags: _splitTags(b.kind),
+      url: b.bookUrl,
+    );
+  }
+
+  CManga _toCMangaFromBook(XiaoshuoBook b) {
+    return CManga(
+      id: b.bookUrl,
+      sourceId: id,
+      title: b.name,
+      cover: b.coverUrl ?? '',
+      author: b.author,
+      description: b.intro,
+      tags: _splitTags(b.kind),
+      url: b.bookUrl,
+    );
+  }
+
+  List<String>? _splitTags(String? raw) {
+    final s = raw?.trim() ?? '';
+    if (s.isEmpty) return null;
+    final list = s
+        .split(RegExp(r'[,，/|]'))
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    return list.isEmpty ? null : list;
+  }
+
+  // ── 详情 / 章节 ──────────────────────────────────────────
+
+  @override
+  Future<({CManga manga, List<CChapter> chapters})>
+      getMangaDetailsAndChapters(CManga manga) async {
+    _bindJs();
+    final detailUrl = manga.id.isNotEmpty ? manga.id : (manga.url ?? '');
+    final book = await _web.getBookInfo(source: source, bookUrl: detailUrl);
+    final chapters = await _web.getChapterList(source: source, book: book);
+
+    final list = <CChapter>[];
+    for (var i = 0; i < chapters.length; i++) {
+      final c = chapters[i];
+      final url = c.getAbsoluteURL(redirectUrl: detailUrl);
+      if (url.isEmpty) continue;
+      list.add(CChapter(
+        id: url,
+        sourceId: id,
+        mangaId: manga.id,
+        name: c.title.trim().isEmpty ? '第${i + 1}话' : c.title.trim(),
+        url: url,
+        order: i,
+      ));
+    }
+
+    return (
+      manga: manga.copyWith(
+        id: manga.id,
+        sourceId: id,
+        title: book.name.trim().isEmpty ? manga.title : book.name.trim(),
+        cover: (book.coverUrl ?? '').trim().isEmpty
+            ? manga.cover
+            : book.coverUrl!.trim(),
+        author: book.author.trim().isEmpty ? manga.author : book.author.trim(),
+        description:
+            (book.intro ?? '').trim().isEmpty ? manga.description : book.intro,
+        status: (book.bookStatus ?? '').trim().isEmpty
+            ? manga.status
+            : book.bookStatus,
+        tags: _splitTags(book.kind) ?? manga.tags,
+        url: detailUrl,
+        totalChapters: list.length,
+        initialized: true,
+      ),
+      chapters: list,
+    );
+  }
+
+  @override
+  Future<CManga> getMangaDetails(CManga manga) async =>
+      (await getMangaDetailsAndChapters(manga)).manga;
+
+  @override
+  Future<List<CChapter>> getChapterList(CManga manga) async =>
+      (await getMangaDetailsAndChapters(manga)).chapters;
+
+  // ── 取图 ────────────────────────────────────────────────
+
+  @override
+  Future<List<String>> getChapterImages(CManga manga, CChapter chapter) async {
+    _bindJs();
+    final chapterUrl = chapter.url ?? chapter.id;
+    final contentRule = source.getContentRule();
+    final rawRule = contentRule.content ?? '';
+    final (ruleStr, ruleHeaders) = _splitRuleHeader(rawRule);
+
+    final book = XiaoshuoBook(
+      bookUrl: manga.id,
+      name: manga.title,
+      author: manga.author ?? '',
+      tocUrl: manga.id,
+    );
+    final ch = XiaoshuoBookChapter(
+      bookUrl: manga.id,
+      url: chapterUrl,
+      title: chapter.name,
+    );
+
+    final analyzeUrl = AnalyzeUrl(
+      url: chapterUrl,
+      baseUrl: source.bookSourceUrl,
+      source: source,
+      chapter: ch,
+    );
+    final body = await analyzeUrl.getStrResponse(
+      headers: ruleHeaders.isEmpty ? null : ruleHeaders,
+    );
+    if (body.isEmpty) return const [];
+
+    final rule = AnalyzeRule(book: book, chapter: ch)
+      ..setContent(body, chapterUrl)
+      ..setBaseUrl(chapterUrl)
+      ..setRedirectUrl(chapterUrl);
+
+    // 规则结果既可能是图片 URL 列表，也可能是 <img> HTML / JSON。
+    // 声明了 subContent 时：先按 content 取容器，再在每个容器里跑 subContent。
+    List<String> values;
+    final subRule = contentRule.subContent?.trim() ?? '';
+    if (subRule.isNotEmpty && ruleStr.isNotEmpty) {
+      values = <String>[];
+      final containers = rule.getElements(ruleStr);
+      for (final el in containers) {
+        final sub = AnalyzeRule(book: book, chapter: ch)
+          ..setContent(el, chapterUrl)
+          ..setBaseUrl(chapterUrl)
+          ..setRedirectUrl(chapterUrl);
+        values.addAll(sub.getStringList(subRule));
+      }
+      if (values.isEmpty) values = rule.getStringList(ruleStr);
+    } else {
+      values = rule.getStringList(ruleStr);
+    }
+    var urls = _extractImageUrls(values, chapterUrl);
+
+    // imageDecode：对每个图片 URL 执行源声明的解码 JS（legado 同名能力）
+    final decode = contentRule.imageDecode?.trim() ?? '';
+    if (decode.isNotEmpty) {
+      urls = urls.map((u) {
+        final d = JsEngine.shared.eval(decode, bindings: {'result': u});
+        return d.trim().isEmpty ? u : d.trim();
+      }).toList();
+    }
+
+    // 章节级请求头（@Header）用于图片防盗链
+    if (ruleHeaders.isNotEmpty) {
+      _imageHeaders = Map<String, String>.from(ruleHeaders);
+      final ref = ruleHeaders.entries
+          .where((e) => e.key.toLowerCase() == 'referer')
+          .map((e) => e.value)
+          .firstOrNull;
+      if (ref != null && ref.isNotEmpty) {
+        _imageReferer = ref;
+        _imageHeaders.removeWhere((k, _) => k.toLowerCase() == 'referer');
+      }
+    }
+
+    return urls;
+  }
+
+  /// 从规则结果里提取图片 URL：支持纯 URL / 多行 / JSON / `<img>` HTML。
+  List<String> _extractImageUrls(List<String> values, String baseUrl) {
+    final out = <String>[];
+    final seen = <String>{};
+
+    void add(String raw) {
+      var u = raw.trim();
+      if (u.isEmpty) return;
+      if ((u.startsWith('"') && u.endsWith('"')) ||
+          (u.startsWith("'") && u.endsWith("'"))) {
+        u = u.substring(1, u.length - 1).trim();
+      }
+      if (u.isEmpty) return;
+      if (u.startsWith('//')) u = 'https:$u';
+      if (!u.startsWith('http://') && !u.startsWith('https://')) {
+        final resolved = Uri.tryParse(baseUrl)?.resolve(u).toString();
+        if (resolved == null) return;
+        u = resolved;
+      }
+      if (!u.startsWith('http')) return;
+      if (seen.add(u)) out.add(u);
+    }
+
+    for (final value in values) {
+      final t = value.trim();
+      if (t.isEmpty) continue;
+
+      // JSON 数组 / 对象
+      if (t.startsWith('[') || t.startsWith('{')) {
+        try {
+          final obj = jsonDecode(t);
+          final list = obj is List ? obj : [obj];
+          for (final e in list) {
+            if (e is String) {
+              add(e);
+            } else if (e is Map) {
+              final u = e['url'] ?? e['src'] ?? e['image'] ?? e['data-src'];
+              if (u != null) add('$u');
+            }
+          }
+          continue;
+        } catch (_) {
+          // 不是 JSON，继续按 HTML / 文本处理
+        }
+      }
+
+      // HTML 片段
+      if (t.contains('<img')) {
+        try {
+          final doc = html_parser.parse(t);
+          for (final img in doc.querySelectorAll('img')) {
+            final u = img.attributes['data-src'] ??
+                img.attributes['data-original'] ??
+                img.attributes['data-lazy-src'] ??
+                img.attributes['data-url'] ??
+                img.attributes['src'];
+            if (u != null) add(u);
+          }
+          continue;
+        } catch (_) {}
+      }
+
+      // 多行文本
+      if (t.contains('\n')) {
+        for (final line in t.split('\n')) {
+          final s = line.trim();
+          if (s.startsWith('http') ||
+              s.startsWith('//') ||
+              s.startsWith('/')) {
+            add(s);
+          }
+        }
+        continue;
+      }
+
+      add(t);
+    }
+    return out;
+  }
+
+  /// 剥离规则里的 `@Header:{...}`，返回剩余规则与请求头。
+  (String, Map<String, String>) _splitRuleHeader(String raw) {
+    final m = RegExp(r'@Header:\s*\{', caseSensitive: false).firstMatch(raw);
+    if (m == null) return (raw, const {});
+    final start = raw.indexOf('{', m.start);
+    if (start < 0) return (raw, const {});
+
+    var depth = 0;
+    String? quote;
+    var end = -1;
+    for (var i = start; i < raw.length; i++) {
+      final c = raw[i];
+      if (quote != null) {
+        if (c == quote) quote = null;
+        continue;
+      }
+      if (c == "'" || c == '"') {
+        quote = c;
+        continue;
+      }
+      if (c == '{') depth++;
+      if (c == '}') {
+        depth--;
+        if (depth == 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end <= start) return (raw, const {});
+
+    final inner = raw.substring(start + 1, end);
+    final headers = <String, String>{};
+    for (final mm
+        in RegExp(r'([A-Za-z0-9_\-]+)\s*:\s*([^,}]+)').allMatches(inner)) {
+      headers[mm.group(1)!] =
+          mm.group(2)!.trim().replaceAll(RegExp(r'''^['"]|['"]$'''), '');
+    }
+    final cleaned = (raw.substring(0, m.start) + raw.substring(end + 1)).trim();
+    return (cleaned, headers);
+  }
+}

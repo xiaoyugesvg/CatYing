@@ -121,6 +121,25 @@ abstract class NodeJSPlatform {
   /// Node.js 通过 `--native-port $port` 拿到这个端口，回调通知 Dart
   void setNativeServerPort(int port);
 
+  // ============================================================
+  // 小程序 Node 后端（manifest.json 的 `node` 字段）
+  // ============================================================
+
+  /// 启动某个小程序自带的 Node 服务，返回它的 base URL（`http://127.0.0.1:<port>`）。
+  ///
+  /// 默认实现返回 null（该平台不支持 / 还没有实现）。iOS 走 management 端口
+  /// 的 `/miniapp/start`，让 Node 侧 require 小程序的 `server/index.js` 并 listen。
+  Future<String?> startMiniAppService({
+    required String appId,
+    required String dir,
+    String entry = 'server/index.js',
+    String config = 'server/index.config.js',
+  }) async =>
+      null;
+
+  /// 停止某个小程序的 Node 服务（不存在时静默返回）。
+  Future<void> stopMiniAppService(String appId) async {}
+
   /// HTTP server 收到 `/onCatPawOpenPort?port=&type=` 时调用
   void onPortReceived(int port, String type);
 

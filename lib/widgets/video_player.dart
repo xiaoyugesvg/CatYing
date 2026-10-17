@@ -180,7 +180,6 @@ class VideoPlayerWidget extends StatefulWidget {
 class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     with WidgetsBindingObserver {
   late final AppPlayer _player;
-  late final AppPlayer _controller; // 与 _player 同一实例
   bool _ownsPlayer = false; // 是否自己创建并需要释放
 
   /// 跨 widget rebuild 持久化的状态缓存（按 widget.key 区分）。
@@ -301,6 +300,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   double _danmuOpacity = 1;
   double _danmuSpeed = 150;
   int _danmuTracks = 4;
+
+  /// 同屏活跃弹幕上限（10~200）。高密度源调低可明显减少绘制压力。
+  int _danmuMaxActive = 60;
   List<String> _danmuBlockWords = [];
 
   // ---- 按类型屏蔽（滚动 / 顶部 / 底部）----
@@ -588,7 +590,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       _player = AppPlayer(config: const AppConfig(title: 'TVBox'));
       _ownsPlayer = true;
     }
-    _controller = _player;
 
     // 同步读取 player 真实状态，避免全屏/普通模式切换时新实例显示"转圈"假象
     _isPlaying = _player.state.playing;
@@ -1154,6 +1155,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       _danmuOpacity = (prefs.getDouble('danmu_opacity') ?? 1).clamp(0.2, 1.0);
       _danmuSpeed = (prefs.getDouble('danmu_speed') ?? 150).clamp(80.0, 240.0);
       _danmuTracks = (prefs.getInt('danmu_tracks') ?? 4).clamp(2, 8);
+      _danmuMaxActive = (prefs.getInt('danmu_max_active') ?? 60).clamp(10, 200);
       _danmuBlockWords = prefs.getStringList('danmu_block_words') ?? const [];
       // 按类型屏蔽 / 显示区域 / 同步视频速度
       _danmuBlockScroll = prefs.getBool('danmu_block_scroll') ?? false;
@@ -1777,7 +1779,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   void _updateResolutionFromTrack() {
     final w = _player.state.width;
     final h = _player.state.height;
-    if (w != null && h != null && w > 0 && h > 0) {
+    if (w > 0 && h > 0) {
       _resolutionText = '${w.toInt()}×${h.toInt()}';
     } else {
       _resolutionText = '';
@@ -2802,6 +2804,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       strokeWidth: _danmuStrokeWidth,
       fontWeight: _danmuFontWeight,
       delaySeconds: _danmuDelaySeconds,
+      maxActive: _danmuMaxActive,
       topPadding: _danmuTopPadding,
       bottomPadding: _danmuBottomPadding,
       // 弹幕颜色：builtin=null(自带), white=白, custom=自定义
@@ -3808,6 +3811,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   // 时间显示（已移至进度条两端, 此方法保留未再被调用）
   // ============================================================
 
+  // ignore: unused_element
   Widget _buildTimeView() {
     return ListenableBuilder(
       listenable: Listenable.merge([_positionVN, _durationVN]),
@@ -3851,6 +3855,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   // 倍速菜单（已收进设置弹窗, 保留兼容）
   // ============================================================
 
+  // ignore: unused_element
   Widget _buildSpeedMenu() {
     final displaySpeed = _isLongPressSpeedLocked
         ? _playbackSpeed * 2
@@ -3915,6 +3920,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   // 画面比例菜单（已收进设置弹窗, 保留兼容）
   // ============================================================
 
+  // ignore: unused_element
   Widget _buildVideoFitMenu() {
     return PopupMenuButton<VideoFitType>(
       tooltip: '画面比例',

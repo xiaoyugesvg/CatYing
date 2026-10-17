@@ -45,7 +45,7 @@ class MeAccountQuickEntries extends StatelessWidget {
   /// 「我的笔记」→ 笔记与阅读经历页
   final VoidCallback onNotes;
 
-  /// 「阅读经历」→ 浏览历史页（无 Tab 形态）
+  /// 「阅读历程」→ 浏览历史页（无 Tab 形态）
   final VoidCallback onJourney;
 
   /// 「阅读计划」→ 阅读计划页
@@ -58,7 +58,7 @@ class MeAccountQuickEntries extends StatelessWidget {
   ///   · `event_available` —— 日历打勾＝计划
   static const List<({IconData icon, String tooltip})> entries = [
     (icon: Icons.edit_note_rounded, tooltip: '我的笔记'),
-    (icon: Icons.route_rounded, tooltip: '阅读经历'),
+    (icon: Icons.route_rounded, tooltip: '阅读历程'),
     (icon: Icons.event_available_rounded, tooltip: '阅读计划'),
   ];
 

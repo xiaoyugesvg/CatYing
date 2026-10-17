@@ -40,8 +40,6 @@ class SettingsController extends GetxController {
   final playTimeStep = 10.obs;
   final cacheSizeString = '0 KB'.obs;
 
-  bool _nodeJSStarted = false;
-
   final playTimeStepOptions = [5, 10, 15, 30, 60];
   List<PlayerEngine> get playerEngineOptions => PlayerEngine.availableEngines;
   List<VideoDecodeMode> get decodeModeOptions => VideoDecodeMode.values;
@@ -136,8 +134,6 @@ class SettingsController extends GetxController {
   Future<void> selectPendingMultiRepoOption(MultiRepoOption option) async {
     final pending = pendingMultiRepoSelection.value;
     if (pending == null) return;
-
-    final normalizedSource = ApiConfig.normalizeConfigUrl(pending.sourceUrl);
 
     switch (pending.target) {
       case PendingMultiRepoTarget.vod:

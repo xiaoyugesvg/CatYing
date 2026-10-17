@@ -18,6 +18,7 @@ import '../models/reading_settings.dart';
 import '../novel_source/novel_chinese_converter.dart';
 import '../services/book_paginator.dart';
 import '../services/book_source_service.dart';
+import '../services/chapter_alignment.dart';
 import '../services/reader_notes_service.dart';
 import '../services/tts_service.dart';
 import '../services/ai_service.dart';
@@ -29,6 +30,7 @@ import '../widgets/jelly_filter_sheet.dart';
 import '../widgets/jelly_mode_picker.dart';
 import '../widgets/color_picker_dialog.dart';
 import '../widgets/pomodoro_button.dart';
+import '../widgets/wavy_underline.dart';
 import 'tts_engine_page.dart';
 import 'book_source_editor_page.dart';
 import 'tts_full_player_page.dart';
@@ -223,6 +225,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   // 理由：手机窄屏下单张漫画图通常比屏幕高，一图一页要额外缩放，
   // 而纵向滚动是主流漫画 App 的做法，也省掉分页度量。
   List<String> _images = const [];
+
+  /// 本章图片的请求头（引擎从正文规则尾部 `@Header:{...}` 解析出来）。
+  /// 漫画图床（如 i.hamreus.com）按 Referer/UA 判防盗链，缺失就是 403 空图。
+  Map<String, String> _mangaImgHeaders = const {};
 
   /// **文字章附带的插图**（引擎随 `content` 一起回的 `images`）。
   /// 纯图章不存在这里（那种章走 [_images] → 图片阅读模式）✓；
@@ -591,7 +597,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   }
 
   String get _progressKey =>
-      'bsr.progress.${widget.source.id}.${widget.bookName}';
+      ChapterAlignment.progressKey(widget.source.id, widget.bookName);
 
   /// 书签的存储键（**按章**存 ✓）：同一本书不同章各存各的，
   /// 避免"整本只存一份、重进时把上次那章的书签装到当前章"的串章。
@@ -928,6 +934,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           //    确认后再补 ✓
           _images = const [];
           _chapterImages = const [];
+          _mangaImgHeaders = const {};
           _paragraphs = _applyConvert(_cache[i]!);
           _invalidateTtsSegs();
           _loading = false;
@@ -987,10 +994,15 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       final isPureImage = r.images.isNotEmpty &&
           (isMangaSource || r.content.trim().isEmpty);
       if (isPureImage) {
-        _cache[i] = const []; // 文本缓存置空，避免上一本的文字残留
+        // ⚠️ 不能写 `_cache[i] = const []`：`_cache.containsKey(i)` 是"正文
+        // 已加载"的判据 ⇒ 再次进入该章会命中文本缓存、把图片章渲染成空白。
+        // 直接移除键（同时清掉上一本/上一章残留的文本）。
+        _cache.remove(i);
         if (!prefetchOnly) {
           setState(() {
             _images = r.images;
+            // 规则 `@Header:{...}` 给的图片头（Referer/UA）——缺它图床 403
+            _mangaImgHeaders = r.headers;
             _chapterImages = const [];
             _paragraphs = const [];
             _invalidateTtsSegs();
@@ -1000,7 +1012,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           });
           await _saveProgress();
         }
-        _prefetch(i + 1);
+        // 漫画章不缓存图片列表 ⇒ 预取结果会被丢弃（纯白耗流量/请求数），
+        // 所以图片源不预取；文字源照旧预取下一章正文。
+        if (!isMangaSource) _prefetch(i + 1);
         return;
       }
       // C9 正文净化：净化 → 繁简 → 气泡（装载链路固定顺序）
@@ -1012,6 +1026,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           _paragraphs = _applyConvert(paras);
           _invalidateTtsSegs();
           _images = const []; // 切回文字章节要把漫画图清掉
+          _mangaImgHeaders = const {};
           // 文字章附带的插图（上游按 content-is-empty 已排除纯图章）
           _chapterImages = r.images;
           _loading = false;
@@ -1767,13 +1782,29 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     if (site.isNotEmpty && !h.keys.any((k) => k.toLowerCase() == 'referer')) {
       h['Referer'] = site;
     }
-    // 再兜一层 UA：源没配 header 时很多站直接拒
+    // 再兜一层 UA：源没配 header 时很多站直接拒。
+    // 优先用源自己的 `httpUserAgent`（Legado 独立字段，移动站按 UA 分流）。
     if (!h.keys.any((k) => k.toLowerCase() == 'user-agent')) {
-      h['User-Agent'] =
-          'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) '
-          'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 '
-          'Mobile/15E148 Safari/604.1';
+      final ua = (widget.source.raw['httpUserAgent'] ?? '').toString().trim();
+      h['User-Agent'] = ua.isNotEmpty
+          ? ua
+          : 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) '
+              'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 '
+              'Mobile/15E148 Safari/604.1';
     }
+    // 最后覆盖本章 `@Header:{...}`（源的显式声明优先级最高：漫画源就是靠
+    // 它把 Referer 指向 m.manhuagui.com 才能从 i.hamreus.com 取到图）。
+    _mangaImgHeaders.forEach((k, v) {
+      if (v.isEmpty) return;
+      // 大小写不同的同名头只保留一个（Referer vs referer 会重复发送）
+      final old = h.keys
+          .where((x) => x.toLowerCase() == k.toLowerCase() && x != k)
+          .toList();
+      for (final x in old) {
+        h.remove(x);
+      }
+      h[k] = v;
+    });
     return h;
   }
 
@@ -1909,6 +1940,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       padding: EdgeInsets.only(bottom: _fontSize * _paraSpacing),
       child: GestureDetector(
         onLongPress: () => _onParagraphLongPress(pi),
+        // 有笔记/划线的段落：点一下弹「笔记气泡」，可直接改批注或删除
+        onTap: note == null ? null : () => _showNoteBubble(note),
         child: Container(
           decoration: BoxDecoration(
             color: noteBg,
@@ -1922,16 +1955,161 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           ),
           padding: EdgeInsets.only(
               left: (_bookmarks.containsKey(pi) || hasNote) ? 8 : 0),
-          child: _wrapWithHighlight(
-            pi,
-            Text(
-              _indent > 0 ? '\u3000' * _indent.round() + text : text,
-              style: _bodyStyle(fg),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _wrapWithHighlight(
+                pi,
+                Text(
+                  _indent > 0 ? '\u3000' * _indent.round() + text : text,
+                  style: _bodyStyle(fg),
+                ),
+              ),
+              if (note != null)
+                WavyUnderline(
+                  color: Color(note.color),
+                  height: 5,
+                  amplitude: 1.1,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 笔记气泡：展示摘录 + 批注，并可直接编辑/删除。
+  Future<void> _showNoteBubble(ReaderNote note) async {
+    final excerpt = note.text.trim();
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: BoxDecoration(
+          color: _bgTop,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.format_quote_rounded,
+                        size: 18, color: Color(note.color)),
+                    const SizedBox(width: 6),
+                    Text(
+                      '笔记',
+                      style: TextStyle(
+                        fontSize: AppTheme.fontSubhead,
+                        fontWeight: FontWeight.w700,
+                        color: _fg,
+                      ),
+                    ),
+                    const Spacer(),
+                    if (note.chapterName.isNotEmpty)
+                      Text(
+                        note.chapterName,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: _fgMuted,
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                if (excerpt.isNotEmpty)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                    decoration: BoxDecoration(
+                      color: Color(note.color).withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border(
+                        left: BorderSide(color: Color(note.color), width: 3),
+                      ),
+                    ),
+                    child: Text(
+                      excerpt,
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: AppTheme.fontFootnote,
+                        height: 1.5,
+                        color: _fg,
+                      ),
+                    ),
+                  ),
+                if (note.note.trim().isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    note.note,
+                    style: TextStyle(
+                      fontSize: AppTheme.fontSubhead,
+                      height: 1.5,
+                      color: _fg,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => Navigator.pop(ctx, 'edit'),
+                        icon: const Icon(Icons.edit_outlined, size: 18),
+                        label: const Text('编辑批注'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => Navigator.pop(ctx, 'delete'),
+                        icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                        label: const Text('删除'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.redAccent,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
         ),
       ),
     );
+    if (!mounted || action == null) return;
+    if (action == 'delete') {
+      await ReaderNotesService.instance.remove(note.id);
+      if (!mounted) return;
+      setState(() {});
+      _toast('已删除笔记');
+      return;
+    }
+    if (action == 'edit') {
+      final text = await _showNoteInput(excerpt);
+      if (text == null || !mounted) return;
+      await ReaderNotesService.instance.addNote(
+        sourceId: widget.source.id,
+        sourceName: widget.source.name,
+        bookName: widget.bookName,
+        chapterIndex: note.chapterIndex,
+        chapterName: note.chapterName,
+        paragraphIndex: note.paragraphIndex,
+        text: excerpt.isEmpty ? note.text : excerpt,
+        note: text,
+        color: note.color,
+      );
+      if (!mounted) return;
+      setState(() {});
+      _toast('批注已更新');
+    }
   }
 
   /// 当前正在朗读的「全局段落下标」。
@@ -2280,7 +2458,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             : Stack(
                 fit: StackFit.expand,
                 children: [
-                  Image.asset(asset!, fit: BoxFit.cover),
+                  Image.asset(asset, fit: BoxFit.cover),
                   if (selected)
                     Container(
                       color: JellyTheme.primary.withValues(alpha: 0.10),
@@ -5386,6 +5564,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     };
     // TtsService 自己切段（splitSegments 会按标点再切过长段）
     // A4 双音色：逐段音色覆盖（对话段 → 对话音色，其余 → 旁白音色）✓
+    _tts.setNowPlayingMeta(widget.bookName, widget.chapters[_index].name);
     await _tts.speak(text, segmentVoices: _buildSegmentVoices());
     if (mounted) setState(() {});
   }
@@ -6594,6 +6773,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                             borderRadius: BorderRadius.circular(10),
                             child: Image.network(
                               urls[i],
+                              headers: _mangaHeaders,
                               fit: BoxFit.cover,
                               errorBuilder: (_, __, ___) => Container(
                                 color: _fg.withValues(alpha: 0.07),
@@ -6631,7 +6811,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               child: InteractiveViewer(
                 minScale: 0.8,
                 maxScale: 4,
-                child: Image.network(url, fit: BoxFit.contain),
+                child: Image.network(url,
+                    headers: _mangaHeaders, fit: BoxFit.contain),
               ),
             ),
             Positioned(
@@ -6670,7 +6851,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     try {
       // 用引擎的 dio（带书源 header），否则很多图床会 403
       final bytes = await BookSourceService.instance.fetchBytes(
-          widget.source, url);
+          widget.source, url, headers: _mangaHeaders);
       if (bytes == null || bytes.isEmpty) {
         _toast('下载失败：图片为空');
         return false;

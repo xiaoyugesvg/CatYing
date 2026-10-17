@@ -287,6 +287,62 @@ String _hikerPayloadOf(String url) {
   return body;
 }
 
+/// 剥掉海阔条目地址上的 **`@Referer=…`** 尾巴。
+///
+/// 海阔里给条目拼 `'…/1.jpg' + '@Referer='` 是「加载这张图时带上来源页 Referer」的
+/// 约定（空值 = 用所在页面地址）。直接拿去下载会把 `@Referer=` 当成 URL 的一部分，
+/// 表现为**整章图片全部加载失败**。返回 (纯地址, 显式 Referer)。
+({String url, String referer}) splitHikerReferer(String raw) {
+  final s = raw.trim();
+  const mark = '@Referer=';
+  final i = s.lastIndexOf(mark);
+  if (i < 0) return (url: s, referer: '');
+  return (url: s.substring(0, i).trim(), referer: s.substring(i + mark.length).trim());
+}
+
+/// 条目地址里的**内联规则**：`真实地址#flags#@rule=js:<code>` / `@lazyRule=.js:<code>`。
+///
+/// 这是海阔「二级页面」的另一种主要写法（漫画/短剧源最常用）：页面不是独立模块，
+/// 而是把 JS 直接挂在条目地址尾巴上。实测「漫小肆」：
+///   漫画条目 → `https://site/manga/123#immersiveTheme##autoCache#@rule=js:$.require("er")`
+///   章节条目 → `https://site/chapter/1 + $('').lazyRule(fn)`（这个仍走 lazy 链路）
+class HikerInlineRule {
+  /// 去掉 flag 与 `@rule=` 尾巴后的**真实地址**（规则里的 `MY_URL` / `input`）
+  final String base;
+
+  /// JS 正文（可能还带 `.js:` 前缀，引擎侧会再剥一次）
+  final String code;
+
+  /// `@lazyRule=`（点开才执行）还是 `@rule=`（打开即执行）——
+  /// 对详情页入口来说两者都是"点进来了就执行"，仅用于文案区分。
+  final bool lazy;
+
+  const HikerInlineRule(this.base, this.code, {this.lazy = false});
+}
+
+/// 从条目地址里拆出内联规则；没有则 null。
+HikerInlineRule? splitHikerInlineRule(String url) {
+  final lazyIdx = url.indexOf('@lazyRule=');
+  final ruleIdx = url.indexOf('@rule=');
+  var idx = -1;
+  var lazy = false;
+  if (lazyIdx >= 0 && (ruleIdx < 0 || lazyIdx <= ruleIdx)) {
+    idx = lazyIdx;
+    lazy = true;
+  } else if (ruleIdx >= 0) {
+    idx = ruleIdx;
+  }
+  if (idx < 0) return null;
+  final code =
+      url.substring(idx + (lazy ? '@lazyRule='.length : '@rule='.length)).trim();
+  if (code.isEmpty) return null;
+  // 去掉海阔的 flag 尾巴（`#immersiveTheme##autoCache#` / `#noHistory#`）——
+  // 它们是**指令**，不是 URL 的一部分，留着会让 MY_URL / 缓存键全带脏尾巴
+  var base = url.substring(0, idx).trim();
+  base = base.replaceFirst(RegExp(r'(?:#[A-Za-z][A-Za-z0-9_]*#)+$'), '').trim();
+  return HikerInlineRule(base, code, lazy: lazy);
+}
+
 /// 把地址翻成**人话 + 它到底是什么内容**（详情页「地址」行与候选卡片都用它）。
 ///
 /// 用户 2026-10-16：「上面的地址就有问题……点击取地址获取也不是我真正想要的，
@@ -311,6 +367,10 @@ String _hikerPayloadOf(String url) {
   }
   if (s.startsWith('hiker://lazy#')) {
     return (kind: '延迟规则', detail: '源把 JS 放在地址里，点一次才算得出真地址');
+  }
+  // 条目地址自带内联规则（`… #flags#@rule=js:…`）：别把整段 JS 印到界面上
+  if (s.contains('@rule=') || s.contains('@lazyRule=')) {
+    return (kind: '内联规则', detail: '点一下执行源里的 JS（排序 / 切换线路等）');
   }
   switch (hikerLinkKind(s)) {
     case HikerLinkKind.pics:

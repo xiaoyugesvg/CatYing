@@ -40,7 +40,7 @@ class AdBlockBubble extends StatefulWidget {
 }
 
 class _AdBlockBubbleState extends State<AdBlockBubble> {
-  Offset? _pos; // 左上角坐标；null = 默认右下角
+  Offset? _pos; // 左上角坐标；null = 默认屏幕右侧中间
   bool _picking = false;
   double _size = 44;
 
@@ -377,17 +377,32 @@ class _AdBlockBubbleState extends State<AdBlockBubble> {
   @override
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
+    // 用户 2026-10-17：默认位置改为**屏幕右侧中间**（原来在右下角，
+    // 经常压住网页底部的翻页/播放控件），仍可自由拖动。
     final pos = _pos ??
         Offset(
           mq.size.width - widget.margin.right - _size,
-          mq.size.height - widget.margin.bottom - _size - mq.padding.bottom,
+          mq.padding.top +
+              (mq.size.height - mq.padding.top - mq.padding.bottom - _size) / 2,
         );
+    final maxX = (mq.size.width - _size).clamp(0.0, double.infinity);
+    final minY = mq.padding.top;
+    final maxY = (mq.size.height - mq.padding.bottom - _size)
+        .clamp(minY, double.infinity);
     return Positioned(
-      left: pos.dx.clamp(0.0, (mq.size.width - _size).clamp(0.0, double.infinity)),
-      top: pos.dy.clamp(0.0, (mq.size.height - _size).clamp(0.0, double.infinity)),
+      left: pos.dx.clamp(0.0, maxX),
+      top: pos.dy.clamp(minY, maxY),
       child: GestureDetector(
         onTap: _togglePick,
-        onPanUpdate: (d) => setState(() => _pos = pos + d.delta),
+        // 拖动后把坐标**钳在屏幕内**：原来只钳渲染位置、不钳 _pos，
+        // 于是拖出屏幕后要反向拖回来很远才“重新出现”。
+        onPanUpdate: (d) {
+          final next = pos + d.delta;
+          setState(() => _pos = Offset(
+                next.dx.clamp(0.0, maxX),
+                next.dy.clamp(minY, maxY),
+              ));
+        },
         child: Tooltip(
           message: _picking ? '取消选元素' : '点选广告并隐藏',
           child: Container(

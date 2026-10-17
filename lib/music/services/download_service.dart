@@ -59,9 +59,10 @@ class MusicDownload {
 /// 音乐下载（App 沙盒内的「本地音乐」）。
 ///
 /// ── 设计取舍 ──────────────────────────────────────────────────
-/// · **放在 App 沙盒**（`Documents/music/`），不暴露到系统「文件」App ——
-///   那需要改 `Info.plist`（`UIFileSharingEnabled`/`LSSupportsOpeningDocumentsInPlace`），
-///   属于产品决定，先不做。以后要暴露只需加那两个键。
+/// · **放在 App 沙盒**（`Documents/music/`）：Info.plist 已开
+///   `UIFileSharingEnabled` / `LSSupportsOpeningDocumentsInPlace`，
+///   所以能在「文件」App → 我的 iPhone → 猫影 → music 里直接看到并拷出。
+///   页面里另有「导出」按钮走系统分享面板。
 /// · **串行下载**（同一时刻只跑一个）而不并发：移动端并发下载更容易被限速/失败，
 ///   而且串行的进度语义对用户最直观。
 /// · **按 `identityKey` 去重**：同一个文件不重复下。

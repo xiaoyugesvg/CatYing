@@ -168,6 +168,7 @@ class ReadingPlanService extends ChangeNotifier {
     required String title,
     String itemId = '',
     int totalChapters = 0,
+    String pathWord = '',
     required DateTime deadline,
     int dailyMinutes = 30,
   }) async {
@@ -179,6 +180,7 @@ class ReadingPlanService extends ChangeNotifier {
       title: title,
       itemId: itemId,
       totalChapters: totalChapters,
+      pathWord: pathWord,
       createdAt: now,
       deadline: deadline,
       dailyMinutes: dailyMinutes,

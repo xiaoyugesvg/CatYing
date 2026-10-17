@@ -81,7 +81,12 @@ class AnalyzeRule {
   AnalyzeRule setContent(dynamic newContent, [String? newBaseUrl]) {
     content = newContent;
     if (newContent is! Node) {
-      isJson = _isJsonString(newContent?.toString() ?? '');
+      // Map/List 直接来自 `ruleBookInfo.init` 的 JS 返回值（文档：
+      // init 返回 `{a:'书名', b:'作者'…}`，之后各字段填 a/b/…）。
+      // 只认字符串会让这类源退化成 CSS 模式 ⇒ 详情页所有字段都取不到。
+      isJson = newContent is Map ||
+          newContent is List ||
+          _isJsonString(newContent?.toString() ?? '');
     } else {
       isJson = false;
     }
@@ -184,6 +189,21 @@ class AnalyzeRule {
 
   List<SourceRule> _splitSourceRuleCache(String ruleStr) {
     return _stringRuleCache.putIfAbsent(ruleStr, () => splitSourceRule(ruleStr));
+  }
+
+  /// `ruleBookInfo.init` 专用：JS 返回 **对象** 时取 JSON 文本。
+  ///
+  /// 官方约定 init 返回 `{a:'书名', b:'作者', …}`，后续字段填 a/b/…。
+  /// QuickJS 的 `stringResult` 对对象只给 `[object Object]`，拿不到字段，
+  /// 所以这里用 `JSON.stringify` 把同一段规则再包一层求值一次。
+  /// （只在 `getElement` 确实返回 `[object Object]` 时调用，字符串规则不会多跑。）
+  String evalJsObjectJson(String ruleStr) {
+    var js = ruleStr.trim();
+    js = js.replaceFirst(RegExp(r'^@js:\s*', caseSensitive: false), '');
+    if (js.isEmpty) return '';
+    final out = _evalJs('JSON.stringify((function(){ $js })())', content);
+    if (out.isEmpty || out == 'undefined' || out == 'null') return '';
+    return out;
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -393,6 +413,22 @@ class AnalyzeRule {
     }
   }
 
+  /// java.aesEncodeToString(data, key, mode, iv)
+  ///
+  /// legado 语义：明文 → AES 加密 → Base64 字符串。
+  /// mode 如 `AES/CBC/PKCS7Padding`；key 可为 base64 或明文；iv 为空时补零。
+  String aesEncodeToString(String data, String key,
+      [String? mode, String? iv]) {
+    try {
+      final spec = _buildSpec(mode ?? 'AES/CBC/PKCS7Padding', key);
+      final out = _encryptSpec(
+          spec, Uint8List.fromList(utf8.encode(data)), iv);
+      return base64.encode(out);
+    } catch (_) {
+      return '';
+    }
+  }
+
   /// java.desBase64DecodeToString(data, key, mode, iv)
   String desBase64DecodeToString(String data, String key,
       [String? mode, String? iv]) {
@@ -476,6 +512,41 @@ class AnalyzeRule {
         .decryptBytes(dkenc.Encrypted(bytes), iv: ivObj);
   }
 
+  /// 加密（与 [_decryptSpec] 对称）：AES 走 encrypt 库，DES 走 pointycastle。
+  List<int> _encryptSpec(_CryptoSpec spec, Uint8List bytes, String? iv) {
+    if (spec.isDes) {
+      final desKey = spec.keyBytes.length == 8
+          ? Uint8List.fromList(
+              [...spec.keyBytes, ...spec.keyBytes, ...spec.keyBytes])
+          : spec.keyBytes;
+      final engine = DESedeEngine();
+      final cipher = spec.cbc
+          ? PaddedBlockCipherImpl(PKCS7Padding(), CBCBlockCipher(engine))
+          : PaddedBlockCipherImpl(PKCS7Padding(), ECBBlockCipher(engine));
+      if (spec.cbc) {
+        final ivBytes = _padIv(_resolveIv(spec, iv), 8);
+        final withIv = ParametersWithIV<KeyParameter>(KeyParameter(desKey), ivBytes);
+        cipher.init(
+            true,
+            PaddedBlockCipherParameters<ParametersWithIV<KeyParameter>,
+                ParametersWithIV<KeyParameter>>(withIv, withIv));
+      } else {
+        cipher.init(
+            true,
+            PaddedBlockCipherParameters<KeyParameter, Null>(
+                KeyParameter(desKey), null));
+      }
+      return _runBlockCipher(cipher, bytes);
+    }
+    final ivObj = spec.mode != dkenc.AESMode.ecb
+        ? dkenc.IV(_padIv(_resolveIv(spec, iv), 16))
+        : null;
+    return dkenc.Encrypter(
+            dkenc.AES(spec.key!, mode: spec.mode, padding: spec.padding))
+        .encryptBytes(bytes, iv: ivObj)
+        .bytes;
+  }
+
   static List<int> _runBlockCipher(PaddedBlockCipherImpl cipher, Uint8List input) {
     // pointycastle 3.9 的 PaddedBlockCipherImpl.process 一步完成
     // 尾块 + padding 处理（内部 doFinal），解密直接返回明文字节。
@@ -506,12 +577,21 @@ class AnalyzeRule {
     return out;
   }
 
-  /// 密钥解码：base64 优先（Legado 常用 base64 密钥），失败按 UTF-8。
+  /// 密钥解码：**长度优先**（16/24/32 字符按明文），否则按 base64。
+  ///
+  /// 与 Legado 对齐：它先看 `key.getBytes().length` 是否为 AES 合法长度，
+  /// 是就按明文；否则才 `Base64.decode`。以前这里**总是先试 base64**，
+  /// 于是 16 位明文密钥（如 `1234567890abcdef`，恰好是合法 base64）被误解成
+  /// 12 字节再补零 —— 加密/解密自己内部能对上，但与源站/Java 端不一致。
   static Uint8List _decodeKeyBytes(String s) {
+    final t = s.trim();
+    if (t.length == 16 || t.length == 24 || t.length == 32) {
+      return Uint8List.fromList(utf8.encode(t));
+    }
     try {
-      return base64.decode(s.trim());
+      return base64.decode(t);
     } catch (_) {
-      return Uint8List.fromList(utf8.encode(s));
+      return Uint8List.fromList(utf8.encode(t));
     }
   }
 
@@ -706,7 +786,13 @@ class AnalyzeRule {
     switch (sourceRule.mode) {
       case Mode.js:
         final jsResult = _evalJs(rule, result);
+        // single（getElement / bookInfoInit）：JS 可以返回任意类型，
+        // 官方就是把返回值直接 setContent —— 例如 init 的 `{a:'书名'}`。
+        // 以前一律返回 [] ⇒ init 的 JS 结果被丢弃，详情页字段全空。
+        if (single) return jsResult;
         if (jsResult is List) return jsResult;
+        // 列表规则里 JS 返回单个对象：包一层，别静默丢数据
+        if (jsResult is Map) return [jsResult];
         return [];
       case Mode.regex:
         if (result is String) {
@@ -899,6 +985,13 @@ class AnalyzeRule {
           args.length > 2 && args[2] != null ? '${args[2]}' : null,
           args.length > 3 && args[3] != null ? '${args[3]}' : null,
         );
+      case 'aesEncodeToString':
+        return aesEncodeToString(
+          a0,
+          args.length > 1 ? '${args[1]}' : '',
+          args.length > 2 && args[2] != null ? '${args[2]}' : null,
+          args.length > 3 && args[3] != null ? '${args[3]}' : null,
+        );
       case 'desBase64DecodeToString':
         return desBase64DecodeToString(
           a0,
@@ -1030,14 +1123,33 @@ class AnalyzeRule {
     return buf.toString();
   }
 
-  /// legado `java.bytesToStr`：十六进制串 / 含分隔符的字节串 → UTF-8 文本。
+  /// legado `java.bytesToStr`：十六进制串 / 字节数组 → UTF-8 文本。
+  ///
+  /// `java.getByteArray(url)` 返回的是 JS 字节数组，经宿主协议变成
+  /// `"12,34,56"` 这种逗号串 —— 这里一并识别，避免按 hex 解出乱码。
   String _bytesToStr(String s) {
-    final hex = s.replaceAll(RegExp(r'[^0-9A-Fa-f]'), '');
     final bytes = <int>[];
+    final csv = s.trim();
+    if (csv.contains(',')) {
+      for (final p in csv.split(',')) {
+        final v = int.tryParse(p.trim());
+        if (v == null) {
+          bytes.clear();
+          break;
+        }
+        bytes.add(v & 255);
+      }
+      if (bytes.isNotEmpty) return _decodeUtf8Bytes(bytes);
+    }
+    final hex = s.replaceAll(RegExp(r'[^0-9A-Fa-f]'), '');
     for (var i = 0; i + 1 < hex.length; i += 2) {
       bytes.add(int.parse(hex.substring(i, i + 2), radix: 16));
     }
     if (bytes.isEmpty) return '';
+    return _decodeUtf8Bytes(bytes);
+  }
+
+  static String _decodeUtf8Bytes(List<int> bytes) {
     try {
       return utf8.decode(bytes);
     } catch (_) {

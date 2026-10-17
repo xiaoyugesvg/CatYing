@@ -42,7 +42,11 @@ class HikerDetailPage extends StatefulWidget {
   final List<String> lazyChain;
 
   /// 延迟规则执行入口：宿主（列表页）拿**整条链**去重跑它那次查询，把结果返回。
-  final Future<HikerResult> Function(List<String> lazyIds)? replayLazy;
+  ///
+  /// [lazyInput] 对应海阔的「条目地址 + lazyRule」写法（如 kinostream 的
+  /// `pd(…,'a&&href') + lazy`）：规则 fn 里的 `input` 就是前面那截真实地址。
+  final Future<HikerResult> Function(List<String> lazyIds,
+      {String lazyInput})? replayLazy;
 
   /// 「打开一个新页面」——`nextPage` 不是 lazy 时用它：宿主用**同一个源**按那个地址
   /// 跑一次 `find_rule`，等价于海阔里点「下一页」。（见 `_loadNextChapterImages`）
@@ -64,6 +68,17 @@ class HikerDetailPage extends StatefulWidget {
 /// 延迟规则地址前缀（与 hiker_engine.js 的 `lazyRuleImpl` 一致）
 const String kHikerLazyPrefix = 'hiker://lazy#';
 
+/// 把「条目地址 + lazyRule」拆成 (前面那截真实地址, lazy id)。
+///
+/// 海阔最常见的写法是 `'https://site/play/123' + $('').lazyRule(fn)` ——
+/// 拼出来的字符串里 `hiker://lazy#` **不在开头**。之前只认 `startsWith`，
+/// 这类条目会被当成普通网页直接丢进 WebView（实测 kinostream / Xvideos）。
+({String input, String id})? splitHikerLazyUrl(String url) {
+  final i = url.indexOf(kHikerLazyPrefix);
+  if (i < 0) return null;
+  return (input: url.substring(0, i), id: url.substring(i + kHikerLazyPrefix.length));
+}
+
 /// 一条候选播放地址
 class _Candidate {
   final String url;
@@ -78,12 +93,16 @@ class _Candidate {
   /// 播放请求头（来自海阔播放 JSON 的 headers，防盗链要用）
   final Map<String, String> headers;
 
+  /// lazy 条目前面那截真实地址（规则 fn 里的 `input`）
+  final String input;
+
   const _Candidate(
     this.url,
     this.note, {
     this.lazy = false,
     this.chain = const [],
     this.headers = const {},
+    this.input = '',
   });
 
   bool get isDirect => !lazy && SniffFilter.isDirectMedia(url);
@@ -119,10 +138,28 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
   /// 产出当前候选的那条 lazy 链（`_nextPage` 还是 lazy 时要用它接续）
   List<String> _lastChain = const [];
 
+  /// 本页条目地址里的**内联规则**（`@rule=` / `@lazyRule=`）。
+  ///
+  /// 非空时：目录由它产出；章节里的 `hiker://lazy#id` 也必须用**同一段 code**
+  /// 再跑一趟才能解开（lazy 定义在那次执行的作用域里，宿主的 home/category
+  /// 重放看不到它）。实测「漫小肆」的目录 → 看图链路。
+  HikerInlineRule? _inline;
+
+  /// 最近一次 lazy 解出来的**真实页面地址**（章节页），图片的 `@Referer=`
+  /// 空值时用它补 Referer。
+  String _lastInput = '';
+
   @override
   void initState() {
     super.initState();
     _prefs.addListener(_onChanged);
+    // 进页面就自动取地址（用户 2026-10-17：「要自动获取，除非是确实没有，
+    // 再点击获取地址」）。原来必须点「播放 / 取地址」才跑规则，
+    // 于是每个源看起来都"点下去没反应"。
+    // 首帧之后再跑：initState 里直接 setState 会撞 build。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _resolve(auto: true);
+    });
   }
 
   @override
@@ -154,7 +191,10 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
   }
 
   /// 解析候选地址（详情规则优先，取不到就回落条目 url）
-  Future<void> _resolve() async {
+  ///
+  /// [auto] = 进页面时的自动解析：**只把播放列表取回来，不自动开播**
+  /// （用户 2026-10-17：自动获取的是"列表"，播放仍由用户点）。
+  Future<void> _resolve({bool auto = false}) async {
     if (_busy) return;
     setState(() {
       _busy = true;
@@ -163,11 +203,15 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
     try {
       final src = widget.source;
       final out = <_Candidate>[];
-      final isLazy = widget.item.url.startsWith(kHikerLazyPrefix);
+      // ⚠️ 不能只用 startsWith：海阔大量源写成 `真实地址 + $('').lazyRule(fn)`
+      //（如 kinostream 的 `pd(…,'a&&href') + lazy`），lazy 标记在**中间**。
+      final lazySplit = splitHikerLazyUrl(widget.item.url);
 
-      if (isLazy) {
+      if (lazySplit != null) {
         // 延迟规则（分类/详情/选集/立即播放几乎都是它）：解一层，拿到候选
-        final next = await _resolveLazy(widget.item.url, widget.item.title, widget.lazyChain);
+        final next = await _resolveLazy(
+            '${kHikerLazyPrefix}${lazySplit.id}', widget.item.title,
+            widget.lazyChain, input: lazySplit.input);
         if (!mounted) return;
         setState(() {
           _candidates = next;
@@ -176,8 +220,59 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
         });
         _resolvedNote = '延迟规则第二趟：${next.length} 个候选';
         // 只解出**一个可直接打开**的候选时直接打开，省一次点击
-        //（不限于直链：`pics://` 漫画、`novel://` 正文也算）
-        if (next.length == 1 && next.first.isOpenable) {
+        //（不限于直链：`pics://` 漫画、`novel://` 正文也算）。
+        // ⚠️ 自动解析时不开播：用户要的是"自动取列表"，不是"进页面就跳播放器"。
+        if (!auto && next.length == 1 && next.first.isOpenable) {
+          await _play(next.first);
+        }
+        return;
+      }
+
+      // ── 条目地址自带**内联规则**（`#flags#@rule=js:…`）────────────────
+      // 漫画源的「目录页」就是这么来的（实测漫小肆：
+      // `详情页 + '#immersiveTheme##autoCache#@rule=js:$.require("er")'`）。
+      // 以前整串被当成网页丢进 WebView ⇒ 只能看到漫画详情，永远出不来章节。
+      final inline = splitHikerInlineRule(widget.item.url);
+      if (inline != null) {
+        final vars = HikerStore.instance.varsOf(src.id);
+        final r = await HikerEngine.instance.inline(
+          src,
+          url: inline.base,
+          code: inline.code,
+          vars: vars,
+        );
+        await HikerStore.instance.saveVarsIfChanged(src.id, vars, r.vars);
+        _lastVars = r.vars;
+        _inline = inline;
+        _nextPage = r.nextPage;
+        _lastChain = widget.lazyChain;
+        final closeCodes = r.listeners['onClose'];
+        if (closeCodes != null) {
+          for (final c in closeCodes) {
+            if (_onClose.length >= 16) break;
+            if (!_onClose.contains(c)) _onClose.add(c);
+          }
+        }
+        if (!r.ok) {
+          if (!mounted) return;
+          setState(() => _error = r.error ?? '内联规则执行失败');
+          return;
+        }
+        final next = _candidatesOf(r, '目录')
+            // 源常把"当前这一页"也塞进结果（`MY_URL + '#noHistory#'`）——
+            // 点它只会再开一遍网页，过滤掉
+            .where((c) => _stripUrlFlags(c.url) != inline.base)
+            .toList();
+        if (!mounted) return;
+        setState(() {
+          _candidates = next;
+          _busy = false;
+          _resolvedNote =
+              '内联规则 · 抓取 ${r.requests} 次 · ${(r.elapsedMs / 1000).toStringAsFixed(1)}s';
+          if (next.isEmpty) _error = '这条内联规则没有给出内容';
+        });
+        // 只解出一条且可直接打开时才自动打开（自动解析时仍然只取列表）
+        if (!auto && next.length == 1 && next.first.isOpenable) {
           await _play(next.first);
         }
         return;
@@ -209,7 +304,18 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
         }
         for (final it in r.list) {
           if (it.url.isEmpty) continue;
-          out.add(_Candidate(it.url, it.title.isEmpty ? '详情规则' : it.title));
+          // ⚠️ 详情规则**也会产出 lazyRule**（例如 XO 的「点击获取」兜底条目）。
+          // 不标记 lazy 的话它会被当成 `hiker://` 内部页 → 点了只弹"不支持"，
+          // 而且永远解不出第二层地址（2026-10-17 修）。
+          final sp = splitHikerLazyUrl(it.url);
+          final lazy = sp != null;
+          out.add(_Candidate(
+            it.url,
+            it.title.isEmpty ? (lazy ? '延迟规则' : '详情规则') : it.title,
+            lazy: lazy,
+            chain: widget.lazyChain,
+            input: sp?.input ?? '',
+          ));
         }
         _resolvedNote = '抓取 ${r.requests} 次 · ${(r.elapsedMs / 1000).toStringAsFixed(1)}s';
       }
@@ -232,18 +338,73 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
     }
   }
 
+  /// 把一次规则结果（详情 / 内联 / 延迟）转成候选列表。
+  ///
+  /// 条目地址里带 `hiker://lazy#id` 的标记成 lazy（点它时再解一层）；
+  /// 其余原样展示。`note` 是产出来源（目录 / 详情规则 / 选集 …）。
+  List<_Candidate> _candidatesOf(HikerResult r, String note,
+      {List<String> chain = const []}) {
+    final out = <_Candidate>[];
+    if (r.playUrl.isNotEmpty) {
+      out.add(_Candidate(r.playUrl, note, headers: r.playHeaders));
+    }
+    for (final u in r.playUrlExtra) {
+      out.add(_Candidate(u, '备用清晰度', headers: r.playHeaders));
+    }
+    for (final it in r.list) {
+      if (it.url.isEmpty) continue;
+      final sp = splitHikerLazyUrl(it.url);
+      final lazy = sp != null;
+      out.add(_Candidate(
+        it.url,
+        it.title.isEmpty ? (lazy ? '选集' : note) : it.title,
+        lazy: lazy,
+        chain: chain,
+        input: sp?.input ?? '',
+      ));
+    }
+    return out;
+  }
+
   /// 解一层延迟规则（`hiker://lazy#<id>`）：
   /// 把 **父链 + 自己** 交给宿主去重跑（见 hiker_engine.js 的 lazyRuleImpl），
   /// 产出的候选里可能还有 lazy（海阔的"详情→选集→立即播放"就是链条）。
   Future<List<_Candidate>> _resolveLazy(
-      String lazyUrl, String label, List<String> chain) async {
-    final replay = widget.replayLazy;
-    if (replay == null) {
-      throw Exception('这个条目是延迟规则（lazyRule），当前入口无法执行');
-    }
-    final id = lazyUrl.substring(kHikerLazyPrefix.length);
+      String lazyUrl, String label, List<String> chain,
+      {String input = ''}) async {
+    // `lazyUrl` 可能是 `真实地址 + hiker://lazy#id`：拆出 id 与 input
+    final sp = splitHikerLazyUrl(lazyUrl);
+    final id = sp != null ? sp.id : lazyUrl;
+    final realInput =
+        (sp != null && sp.input.isNotEmpty) ? sp.input : input;
     final full = [...chain, id];
-    final r = await replay(full);
+    _lastInput = realInput;
+
+    final HikerResult r;
+    final inline = _inline;
+    if (inline != null) {
+      // ⚠️ 内联规则的 lazy 定义在**那一次执行的作用域**里，宿主的
+      //    home/category 重放根本没有这段 JS ⇒ 必须带同样的 code 再跑一趟。
+      //    实测漫小肆：目录→章节→`pics://` 全靠这条。
+      final vars =
+          _lastVars.isEmpty ? HikerStore.instance.varsOf(widget.source.id) : _lastVars;
+      r = await HikerEngine.instance.inline(
+        widget.source,
+        url: inline.base,
+        code: inline.code,
+        vars: vars,
+        lazyIds: full,
+        lazyInput: realInput,
+      );
+      await HikerStore.instance
+          .saveVarsIfChanged(widget.source.id, vars, r.vars);
+    } else {
+      final replay = widget.replayLazy;
+      if (replay == null) {
+        throw Exception('这个条目是延迟规则（lazyRule），当前入口无法执行');
+      }
+      r = await replay(full, lazyInput: realInput);
+    }
     if (!r.ok) throw Exception(r.error ?? '规则执行失败');
     // 变量/事件回调照旧（onClose 清理靠它）
     _lastVars = r.vars;
@@ -268,18 +429,27 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
     }
     for (final it in r.list) {
       if (it.url.isEmpty) continue;
-      final lazy = it.url.startsWith(kHikerLazyPrefix);
+      final sp = splitHikerLazyUrl(it.url);
+      final lazy = sp != null;
       out.add(_Candidate(
         it.url,
         it.title.isEmpty ? (lazy ? '选集' : '地址') : it.title,
         lazy: lazy,
         chain: full,
+        input: sp?.input ?? '',
       ));
     }
     return out;
   }
 
   Future<void> _play(_Candidate c) async {
+    // 候选地址自带内联规则（`#flags#@lazyRule=.js:…`）：源里的**排序 / 线路切换**
+    // 按钮就是这种（实测漫小肆的「⇧」与线路 tab）。执行它 → 变量变了 → 重跑本页。
+    final inline = splitHikerInlineRule(c.url);
+    if (inline != null && !c.lazy) {
+      await _runInlineAction(inline);
+      return;
+    }
     if (c.lazy) {
       // 又一层延迟规则（"立即播放"/选集）：再解一层，能出直链就直接播
       setState(() {
@@ -287,7 +457,7 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
         _error = null;
       });
       try {
-        final next = await _resolveLazy(c.url, c.note, c.chain);
+        final next = await _resolveLazy(c.url, c.note, c.chain, input: c.input);
         if (!mounted) return;
         setState(() {
           _busy = false;
@@ -430,6 +600,39 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
     }
   }
 
+  /// 执行一条**点击型内联规则**（排序 / 切换线路这类），随后重跑本页规则刷新目录。
+  Future<void> _runInlineAction(HikerInlineRule inline) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final vars =
+          _lastVars.isEmpty ? HikerStore.instance.varsOf(widget.source.id) : _lastVars;
+      final r = await HikerEngine.instance.inline(
+        widget.source,
+        url: inline.base,
+        code: inline.code,
+        vars: vars,
+      );
+      await HikerStore.instance
+          .saveVarsIfChanged(widget.source.id, vars, r.vars);
+      _lastVars = r.vars;
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = '$e';
+        });
+      }
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    // 这类规则一般只改变量 + refreshPage()，内容要带上新变量重跑一次
+    await _resolve();
+  }
+
   /// 进原生播放器
   Future<void> _pushPlayer(String url, Map<String, String> headers) {
     return Navigator.of(context).push(
@@ -457,13 +660,35 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
   /// 源给了「下一页」（官方 `setNextPage`）就带上 [SimpleImageReaderPage.onLoadNextChapter]
   /// —— 用户一路往下滑会自动续章（对齐官方 `pics://` 的"下拉自动下一章"）。
   void _openImageReader(List<String> images, Map<String, String> headers) {
-    AppLog.instance.log('[Hiker] 图片列表 → 看图阅读器（${images.length} 张）'
+    // 海阔给条目/图片拼的 `@Referer=` 尾巴不是 URL 的一部分：
+    // 空值表示"用来源页当 Referer"，有值则用它。不剥掉会整章图全加载失败。
+    final clean = <String>[];
+    var explicitReferer = '';
+    var needPageReferer = false;
+    for (final raw in images) {
+      final sp = splitHikerReferer(raw);
+      if (raw.contains('@Referer=')) {
+        if (sp.referer.isEmpty) {
+          needPageReferer = true;
+        } else if (explicitReferer.isEmpty) {
+          explicitReferer = sp.referer;
+        }
+      }
+      if (sp.url.isNotEmpty) clean.add(sp.url);
+    }
+    final h = Map<String, String>.from(headers);
+    final referer = explicitReferer.isNotEmpty
+        ? explicitReferer
+        : (needPageReferer ? _lastInput : '');
+    if (referer.isNotEmpty) h.putIfAbsent('Referer', () => referer);
+    AppLog.instance.log('[Hiker] 图片列表 → 看图阅读器（${clean.length} 张）'
+        '${referer.isEmpty ? '' : ' · Referer=$referer'}'
         '${_nextPage.isEmpty ? '' : ' · 有下一页，支持自动续章'}');
     SimpleImageReaderPage.open(
       title: widget.item.title,
-      images: images,
+      images: clean,
       chapterName: widget.source.title,
-      headers: headers,
+      headers: h,
       onLoadNextChapter:
           _nextPage.isEmpty ? null : _loadNextChapterImages,
     );
@@ -476,10 +701,11 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
     if (np.isEmpty) return (images: const <String>[], nextPage: '');
     HikerResult r;
     try {
-      if (np.startsWith(kHikerLazyPrefix)) {
+      final sp = splitHikerLazyUrl(np);
+      if (sp != null) {
         final replay = widget.replayLazy;
         if (replay == null) return (images: const <String>[], nextPage: '');
-        r = await replay([..._lastChain, np.substring(kHikerLazyPrefix.length)]);
+        r = await replay([..._lastChain, sp.id], lazyInput: sp.input);
       } else {
         final run = widget.runPage;
         if (run == null) return (images: const <String>[], nextPage: '');
@@ -506,17 +732,21 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
       ...r.playUrlExtra,
     ]) {
       final pics = hikerPicList(u);
-      if (pics != null && pics.isNotEmpty) out.addAll(pics);
+      if (pics != null && pics.isNotEmpty) {
+        out.addAll(pics.map((p) => splitHikerReferer(p).url));
+      }
     }
     for (final it in r.list) {
       final u = it.url;
       if (u.isEmpty || u.startsWith(kHikerLazyPrefix)) continue;
       final pics = hikerPicList(u);
       if (pics != null && pics.isNotEmpty) {
-        out.addAll(pics);
+        out.addAll(pics.map((p) => splitHikerReferer(p).url));
         continue;
       }
-      if (hikerLinkKind(u) == HikerLinkKind.image) out.add(u);
+      if (hikerLinkKind(u) == HikerLinkKind.image) {
+        out.add(splitHikerReferer(u).url);
+      }
     }
     final seen = <String>{};
     out.retainWhere(seen.add);
@@ -913,6 +1143,9 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
   /// 卡片底部的动作文案 + 图标（lazy 候选点了会再解一层，所以是"打开"）
   static (String, IconData) _actionOf(_Candidate c) {
     if (c.lazy) return ('打开', Icons.touch_app_rounded);
+    if (splitHikerInlineRule(c.url) != null) {
+      return ('切换', Icons.tune_rounded);
+    }
     return switch (hikerLinkKind(c.url)) {
       HikerLinkKind.media ||
       HikerLinkKind.playJson ||
@@ -955,6 +1188,10 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
       ),
     );
   }
+
+  /// 去掉地址末尾的海阔 flag（`#noHistory#` / `#autoCache#` …），用于比"是不是同一页"
+  static String _stripUrlFlags(String url) =>
+      url.replaceFirst(RegExp(r'#+$'), '').trim();
 
   static String _short(String url) =>
       url.length <= 70 ? url : '${url.substring(0, 34)}…${url.substring(url.length - 30)}';

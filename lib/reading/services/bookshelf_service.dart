@@ -33,6 +33,7 @@ class BookshelfService extends ChangeNotifier {
   static const presetFinished = 'preset_finished'; // 已读完
   static const presetDownloaded = 'preset_downloaded'; // 已下载的书
   static const presetLocal = 'preset_local'; // 本地图书（导入的本地文件，仅图书 tab 可见）
+  static const presetLocalComic = 'preset_local_comic'; // 本地漫画（仅漫画 tab 可见）
 
   /// 初始化：从本地加载，首次启动创建预置书架
   Future<void> init() async {
@@ -67,6 +68,11 @@ class BookshelfService extends ChangeNotifier {
       if (_bookshelves.isEmpty) {
         _createPresetBookshelves();
         await _persistShelves();
+      }
+
+      // 老版本升级：补上「本地漫画」预置书架（不做迁移、不影响已有书架）
+      if (!_bookshelves.any((s) => s.id == presetLocalComic)) {
+        await ensureLocalComicShelf();
       }
 
       _log('已加载 ${_bookshelves.length} 个书架，${_items.length} 条记录');
@@ -159,6 +165,29 @@ class BookshelfService extends ChangeNotifier {
     await _persistShelves();
     notifyListeners();
     _log('新建本地图书书架');
+    return shelf;
+  }
+
+  /// 查找或创建"本地漫画"书架（仅漫画 tab 可见）。
+  Future<Bookshelf> ensureLocalComicShelf() async {
+    final idx = _bookshelves.indexWhere((s) => s.id == presetLocalComic);
+    if (idx >= 0) return _bookshelves[idx];
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final maxOrder = _bookshelves.isEmpty
+        ? -1
+        : _bookshelves.map((s) => s.sortOrder).reduce((a, b) => a > b ? a : b);
+    final shelf = Bookshelf(
+      id: presetLocalComic,
+      name: '本地漫画',
+      sortOrder: maxOrder + 1,
+      isPreset: true,
+      createdAt: now,
+    );
+    _bookshelves.add(shelf);
+    _sortShelves();
+    await _persistShelves();
+    notifyListeners();
+    _log('新建本地漫画书架');
     return shelf;
   }
 

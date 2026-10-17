@@ -12,6 +12,7 @@ import 'package:dio/io.dart';
 import 'package:fast_gbk/fast_gbk.dart';
 import '../../../services/app_log.dart';
 import 'analyze_rule.dart';
+import 'source_rate_limiter.dart';
 import 'sync_http_bridge.dart';
 import 'browser_faithful_adapter.dart';
 import 'verification_exception.dart';
@@ -641,8 +642,14 @@ class AnalyzeUrl {
 
     String body;
     try {
+      // 源级限流（Legado `concurrentRate`）：`N` = 最小间隔 N 毫秒，
+      // `N/M` = 任意 M 毫秒内最多 N 次。配置缺省/非法时不做任何等待。
+      await SourceRateLimiter.instance.acquire(
+        (source?.bookSourceUrl ?? baseUrl ?? '').trim(),
+        source?.concurrentRate,
+      );
       // 书源链路用独立 Dio，背靠背连发可能触发 Cloudflare 临时挑战；
-      // 请求间做一次短节流（与源级限流 concurrentRate 互补）。
+      // 请求间再做一次短节流（与源级限流互补）。
       await Future<void>.delayed(const Duration(milliseconds: 120));
       AppLog.instance.d('[书源HTTP] ${method?.toUpperCase() ?? 'GET'} $url');
 

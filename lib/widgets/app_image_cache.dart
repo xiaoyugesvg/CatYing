@@ -1,5 +1,3 @@
-import 'package:cached_network_image_ce/cached_network_image.dart'
-    show CacheManager;
 // ⚠️ 必须直接 import **实现文件**而不是走
 // `default_cache_manager_factory.dart`：
 // 那个工厂是条件导出，在非 io 平台会换成 `default_cache_manager_stub.dart`，

@@ -586,14 +586,6 @@ class CacheStore {
     return items;
   }
 
-  Future<void> _saveCacheItems(List<CacheItem> items) async {
-    final box = _cacheItemsBox!;
-    await box.clear();
-    for (int i = 0; i < items.length; i++) {
-      await box.put(i, items[i].toJson());
-    }
-  }
-
   static String? _encodePlaybackState(VodPlaybackState? state) {
     if (state == null) return null;
     return jsonEncode(state.toJson());

@@ -82,6 +82,10 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
               _sectionTitle('图书 · 书源', isDark),
               const SizedBox(height: 8),
               _buildBookReadingModeCard(isDark, s),
+              if (s.bookReadingMode == BookReadingMode.simulation) ...[
+                const SizedBox(height: 12),
+                _buildPageCurlCard(isDark, s),
+              ],
               const SizedBox(height: 12),
               _buildReverseTapCard(isDark, s),
               const SizedBox(height: 12),
@@ -325,6 +329,128 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                   onTap: () => s.setReadingMode(m),
                 ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 仿真翻页细节：阴影强度 / 性能档位 / 纸张纹理
+  Widget _buildPageCurlCard(bool isDark, SettingsService s) {
+    const qualityLabels = ['流畅', '标准', '精细'];
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+      decoration: BoxDecoration(
+        color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '仿真翻页细节',
+            style: TextStyle(
+              fontSize: AppTheme.fontHeadline,
+              fontWeight: FontWeight.bold,
+              color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '阴影越重越有纸张立体感；性能档位越低越省电（低端机选“流畅”）。',
+            style: TextStyle(
+              fontSize: AppTheme.fontFootnote,
+              color: JellyTheme.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Text(
+                '阴影强度',
+                style: TextStyle(
+                  fontSize: AppTheme.fontSubhead,
+                  color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '${(s.pageCurlShadow * 100).round()}%',
+                style: TextStyle(
+                  fontSize: AppTheme.fontFootnote,
+                  color: JellyTheme.textSecondary,
+                ),
+              ),
+            ],
+          ),
+          Slider(
+            value: s.pageCurlShadow,
+            min: 0,
+            max: 1,
+            divisions: 10,
+            label: '${(s.pageCurlShadow * 100).round()}%',
+            onChanged: (v) => s.setPageCurlShadow(v),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Text(
+                '性能档位',
+                style: TextStyle(
+                  fontSize: AppTheme.fontSubhead,
+                  color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+                ),
+              ),
+              const Spacer(),
+              for (var i = 0; i < qualityLabels.length; i++) ...[
+                if (i > 0) const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: () => s.setPageCurlQuality(i),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: s.pageCurlQuality == i
+                          ? JellyTheme.primary
+                          : JellyTheme.primary.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      qualityLabels[i],
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: s.pageCurlQuality == i
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                        color: s.pageCurlQuality == i
+                            ? Colors.white
+                            : JellyTheme.primary,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 6),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(
+              '纸张纹理',
+              style: TextStyle(
+                fontSize: AppTheme.fontSubhead,
+                color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+              ),
+            ),
+            subtitle: Text(
+              '纸背绘制细微纤维点点（关闭可再省一点性能）',
+              style: TextStyle(
+                fontSize: AppTheme.fontFootnote,
+                color: JellyTheme.textSecondary,
+              ),
+            ),
+            value: s.pageCurlTexture,
+            onChanged: s.setPageCurlTexture,
           ),
         ],
       ),

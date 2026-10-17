@@ -114,6 +114,9 @@ class _HikerHomePageState extends State<HikerHomePage> {
     // 释放随包的**App 自带资源**（assets/hiker/files/* → Documents/hiker/builtin）
     // 规则里的 `hiker://assets/xxx` 靠它才能读到内容；幂等，只补缺失的
     await HikerBuiltin.installAssets();
+    // 预置远程 require 缓存（assets/hiker/libs/* → Documents/hiker/files/libs）
+    // 大量源 `$.require('https://…/f')` 靠它首次运行/断网也能跑
+    await HikerBuiltin.installRequireLibs();
     if (!mounted) return;
     _load(page: 1);
   }
@@ -308,19 +311,23 @@ class _HikerHomePageState extends State<HikerHomePage> {
   ///
   /// [vars] 用来**续用上一轮的变量**（源切页 = 改 mode 变量 + `refreshPage()`，
   /// 真正的内容要带上刚改过的变量再跑一轮，见 [_runToolEntry]）。
-  Future<HikerResult> Function(List<String>) _replayLazyFor(
+  Future<HikerResult> Function(List<String>, {String lazyInput}) _replayLazyFor(
     HikerSource src, {
     bool persistVars = true,
     Map<String, dynamic>? vars,
   }) {
     final cate = _cate;
     final cateName = _cateName;
-    return (ids) async {
+    return (ids, {String lazyInput = ''}) async {
       final v = vars ?? _store.varsOf(src.id);
       final r = cate.isEmpty
-          ? await HikerEngine.instance.home(src, vars: v, lazyIds: ids)
+          ? await HikerEngine.instance.home(src,
+              vars: v, lazyIds: ids, lazyInput: lazyInput)
           : await HikerEngine.instance.category(src, cate,
-              cateName: cateName, vars: v, lazyIds: ids);
+              cateName: cateName,
+              vars: v,
+              lazyIds: ids,
+              lazyInput: lazyInput);
       if (persistVars) {
         await _store.saveVarsIfChanged(src.id, v, r.vars);
       }
@@ -358,12 +365,14 @@ class _HikerHomePageState extends State<HikerHomePage> {
     if (src == null) return;
     final u = it.url;
     if (u.isEmpty || u == 'hiker://empty') return;
-    if (!u.startsWith('hiker://lazy#')) {
+    // 海阔老写法：`真实地址 + $('').lazyRule(fn)`（lazy 标记在中间），不能只判开头
+    final lazySplit = splitHikerLazyUrl(u);
+    if (lazySplit == null) {
       // 老式写法：直接给一个分类地址（http 或 `hiker://empty##xxx##fypage` 规则串）
       _pickCate(u, hikerPlainText(it.title));
       return;
     }
-    final chain = [..._lazyChain, u.substring('hiker://lazy#'.length)];
+    final chain = [..._lazyChain, lazySplit.id];
 
     // **工具入口**（`text_2/3/4` 多列文本按钮，典型是「收藏 / 历史 / 设置」）：
     // 官方语义是把整页换成它产出的内容，而源多半靠一个**粘性**的 mode 变量切页
@@ -380,7 +389,14 @@ class _HikerHomePageState extends State<HikerHomePage> {
     });
     HikerResult r;
     try {
-      r = await _replayLazyFor(src)(chain);
+      r = await _replayLazyFor(src)(chain, lazyInput: lazySplit.input);
+      // 源切分类的典型写法：`putMyVar('分类', id); refreshPage(false); return 'hiker://empty'`
+      // —— 第一轮**只改状态**，真正的分类内容要带上新变量再跑一轮
+      //（实测「探色视频」的首页 tab：不补这一轮，点哪个 tab 都还是原来的列表）。
+      if (r.needRefresh) {
+        final r2 = await _replayLazyFor(src)(const []);
+        if (r2.list.isNotEmpty || r2.playUrl.isNotEmpty) r = r2;
+      }
     } catch (e) {
       if (mounted) {
         setState(() => _loading = false);

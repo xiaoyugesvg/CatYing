@@ -41,7 +41,6 @@ class _BookSourceQrScanPageState extends State<BookSourceQrScanPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(

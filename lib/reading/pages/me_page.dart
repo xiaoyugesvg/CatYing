@@ -1,6 +1,7 @@
 
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -23,11 +24,16 @@ import 'display_settings_page.dart';
 import 'download_page.dart';
 import 'download_settings_page.dart';
 import 'favorites_page.dart';
-import 'notes_and_journey_page.dart';
+import 'book_notes_page.dart';
 import 'reading_plan_page.dart';
+import 'reading_stats_page.dart';
+import '../pet/pet_center_page.dart';
+import '../pet/pet_models.dart';
+import '../pet/pet_view.dart';
 import 'reading_settings_page.dart';
 import 'search_page.dart';
 import 'book_source_repo_page.dart';
+import 'source_warehouse_page.dart';
 import 'source_repo_page.dart';
 import 'tts_engine_page.dart';
 import 'zlibrary_auth_page.dart';
@@ -297,6 +303,49 @@ class _MePageState extends State<MePage> {
                         ),
                       ),
                     ),
+                    // 6.1 书源仓 / 漫画仓（用户 2026-10-17）：
+                    // 订阅链接记录 + 已导入源分组；订阅一个加载一个、多个全部加载。
+                    StaggeredEntrance(
+                      key: ValueKey('${_session}_novel_warehouse'),
+                      index: 7,
+                      child: SizedBox(
+                        width: itemWidth,
+                        child: _buildMenuItem(
+                          isDark,
+                          icon: Icons.rss_feed_rounded,
+                          iconBg: JellyTheme.primary,
+                          title: '书源仓',
+                          subtitle: '小说订阅 · 分组管理 · 更新',
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const SourceWarehousePage(),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    StaggeredEntrance(
+                      key: ValueKey('${_session}_comic_warehouse'),
+                      index: 8,
+                      child: SizedBox(
+                        width: itemWidth,
+                        child: _buildMenuItem(
+                          isDark,
+                          icon: Icons.collections_bookmark_rounded,
+                          iconBg: JellyTheme.primary,
+                          title: '漫画仓',
+                          subtitle: '漫画订阅 · 分组管理 · 更新',
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  const SourceWarehousePage(startComic: true),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                     // 7. 下载设置
                     StaggeredEntrance(
                       key: ValueKey('${_session}_2'),
@@ -342,7 +391,7 @@ class _MePageState extends State<MePage> {
                         ),
                       ),
                     ),
-                    // 9. 足迹（原「浏览记录」入口，跳转不变）
+                    // 9. 阅读历程（原「浏览记录/足迹」入口，跳转不变）
                     StaggeredEntrance(
                       key: ValueKey('${_session}_browse_history'),
                       index: 9,
@@ -352,12 +401,54 @@ class _MePageState extends State<MePage> {
                           isDark,
                           icon: Icons.history_rounded,
                           iconBg: JellyTheme.primary,
-                          title: '足迹',
-                          subtitle: '漫画 & 图书浏览历史',
+                          title: '阅读历程',
+                          subtitle: '漫画 & 图书阅读历史',
                           onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(
                               builder: (_) => const BrowseHistoryPage(),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    // 10. 阅读统计（时长 / 连续天数 / 7 天图 / 读完本数 / 书源可用率）
+                    StaggeredEntrance(
+                      key: ValueKey('${_session}_reading_stats'),
+                      index: 10,
+                      child: SizedBox(
+                        width: itemWidth,
+                        child: _buildMenuItem(
+                          isDark,
+                          icon: Icons.bar_chart_rounded,
+                          iconBg: JellyTheme.primary,
+                          title: '阅读统计',
+                          subtitle: '时长 · 连续天数 · 7 天趋势',
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const ReadingStatsPage(),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    // 桌宠：养成 / 图鉴 / 换装（全局悬浮，可在宠物中心关闭）
+                    StaggeredEntrance(
+                      key: ValueKey('${_session}_pet'),
+                      index: 10,
+                      child: SizedBox(
+                        width: itemWidth,
+                        child: _buildMenuItem(
+                          isDark,
+                          icon: Icons.pets_rounded,
+                          iconBg: JellyTheme.primary,
+                          title: '桌宠',
+                          subtitle: '养成 · 图鉴 · 换装',
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const PetCenterPage(),
                             ),
                           ),
                         ),
@@ -434,61 +525,61 @@ class _MePageState extends State<MePage> {
   // 下载本地内置进去」）
   // ============================================================
 
-  /// 内置头像张数（assets/avatars/a01.png … a40.png）
+  /// 内置头像数量 = 有插画素材的物种数（用户提供的 10 张生肖图）。
   ///
-  /// 素材：DiceBear `fun-emoji`（CC BY 4.0，原作者 Davis Uche / DiceBear）。
-  /// 生成命令（40 个不同 seed，192px PNG）：
-  ///   https://api.dicebear.com/9.x/fun-emoji/png?seed=<seed>&size=192&backgroundType=gradientLinear
-  static const int _kAvatarCount = 40;
+  /// 没有插画的物种（猫/麒麟/凤凰/朱雀/白虎/玄武等）暂不进入头像面板，
+  /// 桌宠里仍可用矢量团子形态出现。
+  static int get _kAvatarCount =>
+      PetSpecies.all.where((e) => e.imageAsset != null).length;
 
-  /// 没选头像时用的那款内置头像 id（`assets/avatars/aNN.png`）。
-  ///
-  /// 用户 2026-10-16：「之前让你下载内置的头像呢」—— 默认位本来就该摆
-  /// 内置素材里的一张，而不是 App 的猫标。
-  static const String _kDefaultAvatarId = 'a01';
+  /// 没选头像时用的那款内置头像 id（`img://<speciesId>`）。
+  static const String _kDefaultAvatarId = 'img://rat';
 
-  /// 头像图（按 id）：'' = 默认图标；'aNN' = 内置素材；'custom' = 相册上传
+  /// 有插画素材的物种（头像面板用）
+  static List<PetSpeciesInfo> get _avatarSpecies =>
+      PetSpecies.all.where((e) => e.imageAsset != null).toList();
+
+  /// 头像图（按 id）：
+  ///   · '' = 默认头像；'img://<species>' = 内置生肖插画；
+  ///   · 'ink://<species>' = 矢量团子（兼容旧选择）；
+  ///   · 'custom' = 相册上传；
+  ///   · 'aNN' = 旧版 DiceBear 素材 → 映射到同序号的内置插画。
   Widget _avatarImageFor(String id, double size, {bool logged = true}) {
     if (id == 'custom') {
       final p = SettingsService().readerAvatarPath;
       if (p.isNotEmpty) {
         final f = File(p);
         if (f.existsSync()) {
-          return Image.file(f, width: size, height: size, fit: BoxFit.cover);
+          return ClipOval(
+            child: Image.file(
+              f,
+              width: size,
+              height: size,
+              fit: BoxFit.cover,
+            ),
+          );
         }
       }
+    } else if (id.startsWith('img://')) {
+      return InkPetAvatar(speciesId: id.substring(6), size: size);
+    } else if (id.startsWith('ink://')) {
+      return InkPetAvatar(speciesId: id.substring(7), size: size);
     } else if (id.startsWith('a')) {
-      return Image.asset(
-        'assets/avatars/$id.png',
-        width: size,
-        height: size,
-        fit: BoxFit.cover,
-        errorBuilder: (_, _, _) => _defaultAvatarIcon(size, logged),
-      );
+      final n = int.tryParse(id.substring(1)) ?? 1;
+      final list = _avatarSpecies;
+      final sp = list[(n - 1) % list.length];
+      return InkPetAvatar(speciesId: sp.id, size: size);
     }
-    return _defaultAvatarIcon(size, logged);
+    return _defaultAvatarIcon(size);
   }
 
   /// 当前用户选择的头像
   Widget _avatarImage(double size, {bool logged = true}) =>
       _avatarImageFor(SettingsService().readerAvatar, size, logged: logged);
 
-  Widget _defaultAvatarIcon(double size, bool logged) => logged
-      ? Image.asset(
-          // ⚠️ 默认头像用**随包内置素材**（`assets/avatars/`，40 款，见
-          // [_kAvatarCount]），不再用 App 的猫标 —— 用户 2026-10-16：
-          // 「阅读模块头像要是圆形，**并且之前让你下载内置的头像呢**」。
-          // 猫标是"应用图标"不是"用户头像"，而且它是**圆角方图**，
-          // 摆在圆形头像位里会露出方角（旧版这里就是那个粉猫方图）。
-          'assets/avatars/$_kDefaultAvatarId.png',
-          width: size,
-          height: size,
-          fit: BoxFit.cover,
-          errorBuilder: (_, _, _) =>
-              Icon(Icons.person_rounded, color: Colors.white, size: size * 0.44),
-        )
-      : Icon(Icons.person_rounded,
-          color: JellyTheme.textSecondary, size: size * 0.5);
+  /// 默认头像：内置生肖插画（鼠），外层始终圆形裁剪。
+  Widget _defaultAvatarIcon(double size) =>
+      InkPetAvatar(speciesId: 'rat', size: size);
 
   /// 选择头像面板：拖拽条 → 「选择头像」+ 说明 → **4 列圆形网格**
   /// （首格 = 上传自定义头像，与用户给的目标样式一致）。
@@ -533,7 +624,7 @@ class _MePageState extends State<MePage> {
                             fontWeight: FontWeight.w600,
                             color: fg)),
                     const SizedBox(height: 4),
-                    Text('共 $_kAvatarCount 款内置，可点首张上传自定义头像',
+                    Text('共 $_kAvatarCount 款内置生肖插画，可点首张上传自定义头像',
                         style: TextStyle(
                             fontSize: AppTheme.fontCaption, color: sub)),
                   ],
@@ -567,7 +658,7 @@ class _MePageState extends State<MePage> {
                             selected: false,
                           );
                         }
-                        final id = 'a${i.toString().padLeft(2, '0')}';
+                        final id = 'img://${_avatarSpecies[i - 1].id}';
                         return _avatarCell(
                           ctx: ctx,
                           isDark: isDark,
@@ -954,11 +1045,11 @@ class _MePageState extends State<MePage> {
                     // 测试用的稳定锚点（`find.byKey`）
                     key: const ValueKey('me_account_quick_entries'),
                     isDark: isDark,
-                    onNotes: () => _push(const NotesAndJourneyPage()),
+                    // 用户 2026-10-17：三个入口**各自独立**，不再共用同一页
+                    onNotes: () => _push(const BookNotesPage()),
                     onJourney: () => _push(
                       const BrowseHistoryPage(showTabs: false),
                     ),
-                    // ⚠️ 「阅读计划」接线保持指向 `ReadingPlanPage`（跳转目标未变）
                     onPlan: () => _push(const ReadingPlanPage()),
                   ),
                 ),
@@ -1533,6 +1624,28 @@ class _MePageState extends State<MePage> {
                                   ],
                                   const SizedBox(height: 10),
                                   _buildCreateThemeButton(isDark),
+                                  const SizedBox(height: 10),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: _buildThemeTransferButton(
+                                          isDark,
+                                          Icons.file_download_outlined,
+                                          '导入主题',
+                                          _importThemes,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: _buildThemeTransferButton(
+                                          isDark,
+                                          Icons.ios_share_rounded,
+                                          '导出主题',
+                                          _exportThemes,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ],
                               ),
                             ),
@@ -1818,6 +1931,158 @@ class _MePageState extends State<MePage> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  /// 「导入 / 导出主题」次级按钮：无描边、仅浅底，视觉上弱于「新建自定义主题」。
+  Widget _buildThemeTransferButton(
+    bool isDark,
+    IconData icon,
+    String label,
+    VoidCallback onTap,
+  ) {
+    final fg = isDark ? Colors.white70 : JellyTheme.textPrimaryLight;
+    return Material(
+      color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.05),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 11),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: fg, size: 17),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: fg,
+                  fontSize: AppTheme.fontFootnote,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 导出自定义主题：写一份 JSON 到 Documents + 复制到剪贴板，弹窗说明。
+  Future<void> _exportThemes() async {
+    final svc = SettingsService();
+    if (svc.customThemes.isEmpty) {
+      await _showThemeInfo('没有可导出的主题', '先在「新建自定义主题」里创建一套配色，或在编辑器里保存后重试。');
+      return;
+    }
+    final json = svc.exportCustomThemes();
+    String? savedPath;
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final f = File(
+        '${dir.path}/newtv_themes_${DateTime.now().millisecondsSinceEpoch}.json',
+      );
+      await f.writeAsString(json);
+      savedPath = f.path;
+    } catch (_) {
+      // 写文件失败不阻断：剪贴板仍可用
+    }
+    try {
+      await Clipboard.setData(ClipboardData(text: json));
+    } catch (_) {}
+    if (!mounted) return;
+    await _showThemeInfo(
+      '已导出 ${svc.customThemes.length} 套主题',
+      savedPath == null
+          ? 'JSON 已复制到剪贴板，可直接粘贴分享。'
+          : 'JSON 已复制到剪贴板，并另存为：\n$savedPath',
+    );
+  }
+
+  /// 导入自定义主题：优先从文件读 JSON，也可直接粘贴剪贴板内容。
+  Future<void> _importThemes() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Theme.of(context).brightness == Brightness.dark
+          ? JellyTheme.cardDark
+          : JellyTheme.cardLight,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.folder_open_rounded),
+              title: const Text('从文件导入'),
+              subtitle: const Text('选择 .json 主题文件'),
+              onTap: () => Navigator.pop(ctx, 'file'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.content_paste_rounded),
+              title: const Text('粘贴 JSON'),
+              subtitle: const Text('使用剪贴板中的主题 JSON'),
+              onTap: () => Navigator.pop(ctx, 'clipboard'),
+            ),
+            const SizedBox(height: 6),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+
+    String? text;
+    if (choice == 'file') {
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['json', 'txt'],
+      );
+      if (result.isEmpty) return;
+      final path = result.first.path;
+      if (path == null) return;
+      try {
+        text = await File(path).readAsString();
+      } catch (e) {
+        if (mounted) await _showThemeInfo('读取文件失败', '$e');
+        return;
+      }
+    } else {
+      try {
+        final data = await Clipboard.getData(Clipboard.kTextPlain);
+        text = data?.text;
+      } catch (_) {}
+      if (text == null || text.trim().isEmpty) {
+        if (mounted) await _showThemeInfo('剪贴板为空', '请先复制主题 JSON 再试。');
+        return;
+      }
+    }
+
+    if (text.trim().isEmpty) return;
+    final count = await SettingsService().importCustomThemes(text);
+    if (!mounted) return;
+    if (count == 0) {
+      await _showThemeInfo('没有可导入的主题', '内容不是有效的主题 JSON，或缺少配色字段。');
+    } else {
+      await _showThemeInfo('已导入 $count 套主题', '可在上方「我的自定义」列表里查看并应用。');
+    }
+  }
+
+  Future<void> _showThemeInfo(String title, String message) {
+    return showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('知道了'),
+          ),
+        ],
       ),
     );
   }

@@ -39,6 +39,12 @@ class WebSniffService {
   /// iframe 递归层数（0 = 只看首页，1 = 首页 + 其 iframe）
   static const int _maxDepth = 2;
 
+  /// 没有影视后缀的候选，最多探测多少个（并发；防止对复杂站点发几十个请求）
+  static const int _maxMimeProbes = 6;
+
+  /// 单次 MIME 探测的超时（只取响应头，不能拖慢整个嗅探）
+  static const Duration _mimeTimeout = Duration(seconds: 4);
+
   Dio? _dio;
   Dio get _client => _dio ??= _createDio();
 
@@ -69,6 +75,9 @@ class WebSniffService {
     var frontier = <String>[start];
     var depth = 0;
     var fetched = 0;
+    // 没有影视后缀的候选（`/play?id=…`、`/stream/abc` 这类）。
+    // 等所有页面扫完仍无后缀命中时，再用服务端 Content-Type 兜底验证。
+    final probeCandidates = <String>[];
 
     while (frontier.isNotEmpty && depth <= _maxDepth && fetched < _maxPages) {
       final next = <String>[];
@@ -87,13 +96,88 @@ class WebSniffService {
             return u;
           }
         }
-        // ② 抠 iframe / frame 的 src —— 跨域也在 HTML 里，照样读得到
+        // ② 没有后缀、但形似媒体的地址先记下来（MIME 兜底用）
+        for (final u in _findProbeCandidates(html, base: url)) {
+          if (!probeCandidates.contains(u)) probeCandidates.add(u);
+        }
+        // ③ 抠 iframe / frame 的 src —— 跨域也在 HTML 里，照样读得到
         next.addAll(_findFrameUrls(html, base: url));
       }
       frontier = next;
       depth++;
     }
+
+    // ④ MIME 兜底：扩展名被藏起来的直链，用**响应头**而不是后缀判断
+    //（思路对齐 res-sniffer 的默认嗅探插件：按 Content-Type 识别媒体）
+    final hit = await _probeByMime(probeCandidates, referer: referer);
+    if (hit != null) {
+      AppLog.instance.log('[WebSniff] MIME 命中: $hit');
+      return hit;
+    }
     return null;
+  }
+
+  /// 并发探测前 [max] 个候选，按**原顺序**取第一个 Content-Type 是媒体的。
+  Future<String?> _probeByMime(List<String> candidates, {String? referer}) async {
+    if (candidates.isEmpty) return null;
+    final batch = candidates.take(_maxMimeProbes).toList();
+    final checks = await Future.wait(
+      batch.map((u) => looksLikeMediaByMime(u, referer: referer)),
+    );
+    for (var i = 0; i < checks.length; i++) {
+      if (!checks[i]) continue;
+      final u = batch[i];
+      if (SniffFilter.acceptSniffUrl(u, mediaVerified: true)) return u;
+    }
+    return null;
+  }
+
+  /// 用 `Content-Type` 判断这个地址是不是媒体（不下载内容，只取响应头）。
+  ///
+  /// 只发一个带 `Range: bytes=0-0` 的 GET：响应头一到就取消响应体，
+  /// 对 m3u8 也只读几十字节，不会把整段视频拉下来。
+  ///
+  /// 判定口径（对齐 res-sniffer 的默认插件 + 常见 CDN）：
+  ///   `video/*` / `audio/*` / `*mpegurl` / `dash+xml` / `ms-sstr`。
+  Future<bool> looksLikeMediaByMime(String url, {String? referer}) async {
+    if (!_isHttp(url)) return false;
+    ResponseBody? body;
+    try {
+      final resp = await _client.get<ResponseBody>(
+        url,
+        options: Options(
+          responseType: ResponseType.stream,
+          receiveTimeout: _mimeTimeout,
+          sendTimeout: _mimeTimeout,
+          headers: {
+            'Range': 'bytes=0-0',
+            if (referer != null && referer.isNotEmpty) 'Referer': referer,
+          },
+          // 403/404/5xx 也要拿到响应头而不是抛异常
+          validateStatus: (_) => true,
+        ),
+      );
+      body = resp.data;
+      return _isMediaMime(resp.headers.value('content-type') ?? '');
+    } catch (e) {
+      AppLog.instance.log('[WebSniff] MIME 探测失败 $url: $e');
+      return false;
+    } finally {
+      // 立刻断开，避免把响应体（可能是整段视频）读完
+      try {
+        await body?.stream.listen(null).cancel();
+      } catch (_) {}
+    }
+  }
+
+  /// Content-Type → 是否媒体
+  static bool _isMediaMime(String contentType) {
+    final ct = contentType.toLowerCase();
+    if (ct.isEmpty) return false;
+    if (ct.startsWith('video/') || ct.startsWith('audio/')) return true;
+    return ct.contains('mpegurl') ||
+        ct.contains('dash+xml') ||
+        ct.contains('ms-sstr');
   }
 
   // ============================================================
@@ -137,6 +221,56 @@ class WebSniffService {
     caseSensitive: false,
   );
 
+  /// 「可能藏着媒体」的属性（video/source/audio 的 src、各种 data-*）
+  static final RegExp _probeAttrRe = RegExp(
+    r'''(?:src|data-src|data-url|data-video|data-play|data-file|data-original)'''
+    r'''\s*=\s*["']([^"']+)["']''',
+    caseSensitive: false,
+  );
+
+  /// 内联 JS / JSON 里常见的播放地址键（`{url:'/play?id=1'}`）
+  static final RegExp _probeJsonRe = RegExp(
+    r'''["'](?:url|src|file|playUrl|play_url|videoUrl|video_url|video|m3u8|mp4)'''
+    r'''["']\s*:\s*["']([^"']+)["']''',
+    caseSensitive: false,
+  );
+
+  /// 明显不是媒体的后缀 —— 这些不进 MIME 探测队列
+  static const List<String> _nonMediaExts = [
+    '.js', '.css', '.json', '.html', '.htm', '.xml', '.txt',
+    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico', '.bmp',
+    '.woff', '.woff2', '.ttf', '.eot', '.map',
+  ];
+
+  /// 从页面里挑出**没有影视后缀、但可能是媒体直链**的候选。
+  ///
+  /// 只认明确的语义位置（video/source/audio 的 src、data-*、JS 里
+  /// playUrl/videoUrl 之类的键），不做"全页面 http 链接"的泛匹配 ——
+  /// 否则每页都会挑出几十个 API/CSS，再逐个探测会把站点打爆。
+  static List<String> _findProbeCandidates(String html, {required String base}) {
+    final out = <String>[];
+    final seen = <String>{};
+    void take(String raw) {
+      final abs = _absolute(raw.trim(), base);
+      if (abs == null) return;
+      // 有影视后缀的走原路径（_findMediaUrls），这里只收"藏起来"的
+      if (SniffFilter.isDirectMedia(abs)) return;
+      final path = Uri.tryParse(abs)?.path.toLowerCase() ?? '';
+      if (path.isEmpty || path.endsWith('/')) return;
+      if (_nonMediaExts.any(path.endsWith)) return;
+      if (!seen.add(abs)) return;
+      out.add(abs);
+    }
+
+    for (final m in _probeAttrRe.allMatches(html)) {
+      take(m.group(1) ?? '');
+    }
+    for (final m in _probeJsonRe.allMatches(html)) {
+      take(m.group(1) ?? '');
+    }
+    return out;
+  }
+
   static List<String> _findFrameUrls(String html, {required String base}) {
     final out = <String>[];
     for (final m in _frameRe.allMatches(html)) {
@@ -178,4 +312,14 @@ class WebSniffService {
   @visibleForTesting
   static List<String> debugFindFrameUrls(String html, String base) =>
       _findFrameUrls(html, base: base);
+
+  /// 仅供单测：挑出"没有后缀、待 MIME 验证"的候选
+  @visibleForTesting
+  static List<String> debugFindProbeCandidates(String html, String base) =>
+      _findProbeCandidates(html, base: base);
+
+  /// 仅供单测：Content-Type 判定
+  @visibleForTesting
+  static bool debugIsMediaMime(String contentType) =>
+      _isMediaMime(contentType);
 }

@@ -47,7 +47,7 @@ import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 
 /** 单次脚本执行的 CPU 上限（死循环保护） */
-const SCRIPT_TIMEOUT_MS = 8000;
+const SCRIPT_TIMEOUT_MS = 12000;
 /** 单条规则最多重放几次（见文件头「重放桥」） */
 const MAX_REPLAY = 40;
 /** 单次网络请求超时 */
@@ -159,6 +159,14 @@ function cacheKeyOf(url, opts) {
     o.postType || '',
     o.body ? String(o.body) : '',
     JSON.stringify(o.headers || {}),
+    // 以下几个开关会改变**返回值形状**（JSON/hex/只取头）⇒ 必须参与缓存键，
+    // 否则 `fetch(u)` 与 `fetch(u,{withHeaders:true})` 会互相拿到对方的缓存。
+    o.withHeaders ? 'h' : '',
+    o.withStatusCode ? 's' : '',
+    o.onlyHeaders ? 'o' : '',
+    o.toHex ? 'x' : '',
+    o.redirect === false ? 'r' : '',
+    o.ua === UA_PC ? 'pc' : '',
   ].join('\u0001');
 }
 
@@ -264,19 +272,48 @@ function absorbSetCookie(rt, url, headers) {
 async function doHttp(rt, url, opts, asBuffer = false) {
   const o = opts || {};
   const method = String(o.method || 'get').toLowerCase();
-  const headers = { ...(o.headers || {}) };
+  // ⚠️ TVBox/海阔老写法是 `{ header: {...} }`（单数，无 s），新版才是 `headers`。
+  //    只认复数会让请求头被**静默丢掉**（实测「✨91Porn✨」的 `request(input,
+  //    {header:{'User-Agent':'91appnew'}})` 直接 403）。两种都吃。
+  const headers = { ...(o.headers || o.header || {}) };
   const ua = o.ua || rt.ctx.ua;
   if (ua && !headers['User-Agent']) headers['User-Agent'] = ua;
   const ck = cookieHeaderFor(rt, url);
   if (ck && !headers['Cookie']) headers['Cookie'] = ck;
 
+  // ── 请求体 / Content-Type（照官方 HttpHelper 的口径）──────────────
+  //   · body 是**字符串**且形如 `{…}` / `[…]` → 自动 `application/json`
+  //   · body 是对象 → JSON 字符串 + `application/json`
+  //   · 其它字符串 → 表单（`a=1&b=2`）
+  // 少了这一步，服务端（Spring）会当空 body 处理，返回 `data:null`
+  //（实测「探色视频」的 config 接口）。
+  const isBodyMethod = method === 'post' || method === 'put' || method === 'patch';
+  let reqData = o.body != null ? o.body : undefined;
+  const hasContentType = Object.keys(headers).some((k) => k.toLowerCase() === 'content-type');
+  if (isBodyMethod && reqData != null) {
+    if (typeof reqData !== 'string') {
+      try { reqData = JSON.stringify(reqData); } catch (_) { reqData = String(reqData); }
+      if (!hasContentType) headers['Content-Type'] = 'application/json;charset=utf-8';
+    } else {
+      const t = reqData.trim();
+      const looksJson = (t.startsWith('{') && t.endsWith('}'))
+        || (t.startsWith('[') && t.endsWith(']'));
+      if (!hasContentType) {
+        headers['Content-Type'] = looksJson
+          ? 'application/json;charset=utf-8'
+          : 'application/x-www-form-urlencoded;charset=utf-8';
+      }
+    }
+  }
+
   const req = axios.request({
     url,
     method,
     headers,
-    data: o.body != null ? o.body : undefined,
-    timeout: HTTP_TIMEOUT_MS,
-    maxRedirects: 5,
+    data: reqData,
+    // 文档：`{timeout:5000}`（毫秒，默认 10 秒）；这里再夹一层上下限防呆
+    timeout: Math.max(1000, Math.min(Number(o.timeout) || HTTP_TIMEOUT_MS, 60000)),
+    maxRedirects: o.redirect === false ? 0 : 5,
     responseType: 'arraybuffer',
     // 响应体上限：规则抓到超大内容（被当网页的文件/视频）时别整块驻留内存
     maxContentLength: MAX_RESPONSE_BYTES,
@@ -288,18 +325,32 @@ async function doHttp(rt, url, opts, asBuffer = false) {
   // ⚠️ **必须再包一层硬超时**：axios 的 `timeout` 只管 socket 建立之后的
   //   静默期，**DNS 解析阶段不受它约束** —— 遇到过域名不合法（如模板里的
   //   `https://{host}/...`）导致整个请求永久挂住，比报错更糟（前端只看到转圈）。
+  const reqTimeout = Math.max(1000, Math.min(Number(o.timeout) || HTTP_TIMEOUT_MS, 60000));
   const resp = await Promise.race([
     req,
     new Promise((_, rej) => {
-      setTimeout(() => rej(new Error(`请求超时（${HTTP_TIMEOUT_MS}ms）：${String(url).slice(0, 80)}`)),
-        HTTP_TIMEOUT_MS + 2000);
+      setTimeout(() => rej(new Error(`请求超时（${reqTimeout}ms）：${String(url).slice(0, 80)}`)),
+        reqTimeout + 2000);
     }),
   ]);
   absorbSetCookie(rt, url, resp.headers);
   const buf = Buffer.from(resp.data);
   if (asBuffer) return buf; // 二进制通道（图片）：不做字符集解码
   const charset = String(o.charset || '').trim() || sniffCharset(resp.headers, buf) || 'utf-8';
-  return decodeBuffer(buf, charset);
+  // ── 文档里的返回形状开关 ──────────────────────────────
+  //   onlyHeaders：只要响应头；toHex：byte[] → 16 进制串；
+  //   withHeaders / withStatusCode：返回 `{body,headers,statusCode}` 的 **JSON 字符串**
+  const body = o.onlyHeaders === true
+    ? ''
+    : (o.toHex === true ? buf.toString('hex') : decodeBuffer(buf, charset));
+  if (o.withHeaders === true || o.withStatusCode === true) {
+    return JSON.stringify({
+      body,
+      headers: resp.headers || {},
+      statusCode: resp.status,
+    });
+  }
+  return body;
 }
 
 function sniffCharset(headers, buf) {
@@ -384,7 +435,15 @@ function warnOnce(msg) {
  * `writeFile('a.txt')` 这类老写法照样能用，但跳不出去。
  */
 function safePath(rt, raw) {
-  const s = String(raw == null ? '' : raw);
+  let s = String(raw == null ? '' : raw);
+  // 安卓绝对路径（`file:///storage/emulated/0/Android/data/<pkg>/files/Documents/newPlan.html`
+  // 这类）在 iOS 上不存在：统一映射到 filesDir 下的**同名文件**。
+  // 「我的主页」模板（assets/home.js）的 htmlUrl 就是这种写法，不映射会直接写失败。
+  if (/^file:\/\//i.test(s) || /^[A-Za-z]:[\\/]/.test(s)
+      || /^\/(?:storage|sdcard|data)\//i.test(s)) {
+    const baseName = s.split(/[\\/]/).filter(Boolean).pop() || 'file';
+    s = `hiker://files/${baseName}`;
+  }
   const isAssets = /^hiker:\/\/assets\//i.test(s);
   const isFiles = /^hiker:\/\/files\//i.test(s);
   const rel = s.replace(/^hiker:\/\/(?:assets|files|page)\//i, '');
@@ -431,6 +490,13 @@ function writeTextFile(rt, p, content) {
  */
 function hikerFetch(rt, url) {
   const s = String(url || '');
+  // 宿主内置伪页（`hiker://collection` / `hiker://history` …）：
+  // 「我的主页」模板（assets/home.js）会 fetch 它们来显示"收藏/历史"卡片。
+  // 我们没有这些数据源 ⇒ 返回空数组/空串，让模板正常渲染其余部分，
+  // 而不是整页报「hiker://assets/hiker://collection 不存在」。
+  const pseudo = s.replace(/^hiker:\/\//i, '').split(/[?#]/)[0].toLowerCase();
+  if (['collection', 'history', 'download', 'bookmark'].includes(pseudo)) return '[]';
+  if (['home', 'tools', 'explore', 'search', 'localmedia'].includes(pseudo)) return '';
   const isPage = /^hiker:\/\/page\//i.test(s);
   const key = normalizeModuleName(s);
   const mod = rt.modules && rt.modules.get(key);
@@ -438,7 +504,13 @@ function hikerFetch(rt, url) {
     return JSON.stringify({
       name: key,
       path: String(mod.path || key),
-      rule: String(mod.rule || ''),
+      // ⚠️ 源里最常见的写法是
+      //     `eval(JSON.parse(request('hiker://page/aes')).rule)`
+      //   然后在**同一函数**里直接用模块里的 `let image = …` / `const x = …`。
+      //   ES 的 eval 里 `let/const` 只活在 eval 自己那段代码里（函数外看不到），
+      //   而 Rhino 的 `let` 是函数作用域 ⇒ 官方能跑、我们会 `image is not defined`。
+      //   服务出去之前统一改成 `var`，让直接 eval 把它提升到调用方函数作用域。
+      rule: evalFriendlyModule(String(mod.rule || '')),
       col_type: String(mod.col_type || ''),
     });
   }
@@ -454,12 +526,75 @@ function hikerFetch(rt, url) {
   );
 }
 
+/**
+ * 把页面模块里的 `let` / `const` 改成 `var`（只在 `hiker://page/*` 服务出去时用）。
+ *
+ * 原因：海阔（Rhino）里 `let` 是**函数作用域**，所以
+ *   `eval(request('hiker://page/aes').rule)` 之后同一函数里能直接用模块的 `image`；
+ * 而 ES 的 eval 里 `let/const` 只在 eval 代码内部可见 ⇒ 会报 `image is not defined`。
+ * 改成 `var` 后，直接 eval 会把它提升到调用方函数作用域，与官方一致。
+ */
+function evalFriendlyModule(code) {
+  return String(code || '')
+    // 只处理"语句开头"的声明，避免误伤字符串里的单词
+    .replace(/(^|[;{}\n])([ \t]*)(let|const)(\s+)/g, '$1$2var$4');
+}
+
+/**
+ * `fileExist(path)` / `fileExists` / `existsFile` 的共用实现。
+ *
+ * 两种路径都认：
+ *   · `hiker://page/x` → 查源自己的 pages 模块（不算文件）
+ *   · 其余（`hiker://files/...` / 相对路径）→ 查文件区里是否真的有这个文件
+ *
+ * 永远不会抛错（源把它当布尔判断用，抛错会让整条规则中断）。
+ */
+function sandboxFileExist(rt, p) {
+  const s = String(p == null ? '' : p);
+  try {
+    if (/^hiker:\/\/page\//i.test(s)) {
+      const key = normalizeModuleName(s);
+      const base = key.split('/').pop() || '';
+      return !!(rt.modules
+        && (rt.modules.has(key) || (base && rt.modules.has(base))));
+    }
+    return fs.existsSync(safePath(rt, s));
+  } catch (_) {
+    return false;
+  }
+}
+
 /** 同步取网页（重放桥的发起端） */
 function httpSync(rt, url, opts) {
-  const u = String(url == null ? '' : url);
+  let u = String(url == null ? '' : url);
   // `hiker://...` 是**宿主资源/文件**，不联网（见 hikerFetch）
   if (/^hiker:\/\//i.test(u)) {
-    return hikerFetch(rt, u);
+    const raw = hikerFetch(rt, u);
+    // 官方语义：`request/fetch('hiker://page/X')` 返回的是
+    //   `{"rule":"<模块源码>"}` 这样的 **JSON 字符串**（源里普遍写
+    //   `JSON.parse(request('hiker://page/home')).rule` 再 eval）；
+    // 而 `$.require('hiker://page/X')` 走的是模块求值，另一个入口。
+    // 以前这里直接返回裸源码 ⇒ JSON.parse 必然炸 / .rule 拿不到东西
+    // （115 个源里这种写法共 175 处）。
+    if (/^hiker:\/\/page\//i.test(u)) {
+      try {
+        JSON.parse(raw);
+        return raw; // 本来就是 JSON（配置页），原样返回
+      } catch (_) {/* 不是 JSON ⇒ 包一层 */}
+      const code = raw.replace(/^\s*js:\s*/i, '');
+      return JSON.stringify({ rule: code });
+    }
+    return raw;
+  }
+  // 相对路径（`/api/x`、`config.json`）按当前页面地址补全：
+  // 模块里常见 `request('/xxx/config')`，官方会自动拼上源域名。
+  if (!/^https?:\/\//i.test(u) && u && !/^[a-z][\w+.-]*:/i.test(u)) {
+    const base = String((rt.ctx && (rt.ctx.url || rt.ctx.homeUrl)) || '');
+    if (/^https?:\/\//i.test(base)) {
+      try {
+        u = new URL(u, base).toString();
+      } catch (_) { /* 保持原样，走下面的明确报错 */ }
+    }
   }
   if (!/^https?:\/\//i.test(u)) {
     // 给出**能看懂**的错误，而不是 axios 的 "Unsupported protocol"
@@ -587,6 +722,36 @@ function lazyRuleImpl(rt, ctx, fn, args) {
 // ============================================================
 
 /**
+ * 把 jsoup 的 `:matches(正则)` / `:matchesOwn(正则)` 从选择器里拆出来。
+ *
+ * 返回 `{ sel, filters }`：
+ *   · `sel`     —— 去掉这些伪类后、cheerio 能执行的选择器
+ *   · `filters` —— `[{ re, negate }]`，选完元素后按**文本**过滤
+ *
+ * 支持 `:not(:matches(...))` 的取反写法（海阔源里最常见的用法）。
+ */
+function splitMatchesPseudo(selRaw) {
+  const filters = [];
+  let s = String(selRaw || '');
+  const mk = (rx) => {
+    try {
+      return new RegExp(String(rx));
+    } catch (_) {
+      return /$^/; // 坏正则 ⇒ 永不命中（比抛错让整条规则崩掉好）
+    }
+  };
+  s = s.replace(/:not\(\s*:matches(?:Own)?\(((?:[^()\\]|\\.)*)\)\s*\)/g, (_, rx) => {
+    filters.push({ re: mk(rx), negate: true });
+    return '';
+  });
+  s = s.replace(/:matches(?:Own)?\(((?:[^()\\]|\\.)*)\)/g, (_, rx) => {
+    filters.push({ re: mk(rx), negate: false });
+    return '';
+  });
+  return { sel: s.trim(), filters };
+}
+
+/**
  * 纯选择器链：逐级 find；无匹配返回 null。
  *
  * ⚠️ 第一段必须用 `$(seg)` 从**文档根**查，不能 `$root.find(seg)` ——
@@ -597,14 +762,31 @@ function selectByPath($, pathSegs) {
   let cur = null;
   for (const seg of pathSegs) {
     if (seg === '*') continue;
+    // jsoup 专有伪类（`:matches(正则)` / `:matchesOwn`）cheerio 不认识：
+    //   正着写会**静默返回 0 条**，写在 `:not(...)` 里则完全不生效。
+    //   这里拆出来，选完再按元素文本做正则过滤（实测「午夜影院」的
+    //   `li:not(:has(a[target])):not(:matches(黑鬼|媚黑|…))` 就靠它）。
+    const { sel, filters } = splitMatchesPseudo(seg);
+    const useSel = sel.length > 0 ? sel : '*';
     try {
-      // 第一段从**文档根**查（`$(sel)`）—— `cheerio.load()` 返回的是**函数** `$`，
-      // 它自己没有 `.find`/`.eq`（曾实测 `$root.eq is not a function`）
-      cur = cur === null ? $(seg) : cur.find(seg);
+      cur = cur === null ? $(useSel) : cur.find(useSel);
     } catch (_) {
-      return null; // 无效选择器
+      // 还有别的 jsoup 伪类（`:containsOwn` 等）不被认识 → 退化到前半段选择器
+      try {
+        const rough = useSel.split(':')[0].trim() || '*';
+        cur = cur === null ? $(rough) : cur.find(rough);
+      } catch (_) {
+        return null; // 无效选择器
+      }
     }
     if (!cur || cur.length === 0) return null;
+    if (filters.length) {
+      cur = cur.filter((_, el) => filters.every((f) => {
+        const hit = f.re.test($(el).text());
+        return f.negate ? !hit : hit;
+      }));
+      if (!cur || cur.length === 0) return null;
+    }
   }
   if (cur === null) cur = $('body');
   return cur;
@@ -752,7 +934,19 @@ function runSecondaryRule(html, rule, fallbackColType, maxItems) {
 function normItem(it, fallbackColType) {
   if (!it || typeof it !== 'object') return null;
   const title = String(it.title ?? it.name ?? '').trim();
-  let url = String(it.url ?? it.link ?? it.href ?? '').trim();
+  const rawUrl = it.url ?? it.link ?? it.href ?? '';
+  // 官方允许条目 url 直接放**播放地址对象**（`url: {urls:['…m3u8']}`，实测探色视频）；
+  // 直接 String() 会变成 "[object Object]"，播放页就永远打不开。
+  let url;
+  if (rawUrl && typeof rawUrl === 'object') {
+    try {
+      url = JSON.stringify(rawUrl).trim();
+    } catch (_) {
+      url = String(rawUrl).trim();
+    }
+  } else {
+    url = String(rawUrl).trim();
+  }
   if (url.startsWith('x5://')) url = url.slice(5);
   const pic = String(it.pic_url ?? it.pic ?? it.img ?? it.cover ?? '').trim();
   const desc = String(it.desc ?? it.description ?? it.remarks ?? '').trim();
@@ -1757,11 +1951,16 @@ function normalizeModuleValue(v, name) {
 }
 
 function runInModuleScope(sandbox, code, wantName) {
-  const body = stripJsPrefix(code);
+  // 先做 Rhino 语法兼容，再把"语句开头的 let/const"降成 var：
+  // Rhino 允许同作用域重复声明（`let key` 出现两次），V8 会报
+  // "Identifier 'key' has already been declared"（公共库 `f` 就是这样）。
+  const body = evalFriendlyModule(fixRhinoLexical(stripJsPrefix(code)));
   const names = new Set();
   const re = /(?:^|\n)\s*(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/g;
   let m;
-  while ((m = re.exec(body)) !== null && names.size < 40) names.add(m[1]);
+  // ⚠️ 上限不能太小：公共库 `f` 有两百多个顶层函数，`imgDec` 在第 4852 行，
+  //    原来卡 40 个 ⇒ 它不会被复制进沙箱，源调用时就是 "imgDec is not defined"。
+  while ((m = re.exec(body)) !== null && names.size < 600) names.add(m[1]);
   const capture = [...names]
     .map((n) => `${n}:(typeof ${n}==="undefined"?undefined:${n})`)
     .join(',');
@@ -1774,7 +1973,10 @@ function runInModuleScope(sandbox, code, wantName) {
   const dollar = sandbox.$;
   const hadExports = dollar && Object.prototype.hasOwnProperty.call(dollar, 'exports');
   const prevExports = hadExports ? dollar.exports : undefined;
-  if (dollar) dollar.exports = undefined;
+  // ⚠️ 默认必须是**对象**：大量模块写 `$.exports.xxx = ...`（而不是整体赋值），
+  //    原来默认 undefined 会报 "Cannot set properties of undefined"，
+  //    整条源在加载模块时直接失败（实测 探色视频 / 摸鱼日报）。
+  if (dollar) dollar.exports = {};
   let out;
   let moduleExports;
   try {
@@ -1784,10 +1986,15 @@ function runInModuleScope(sandbox, code, wantName) {
   } finally {
     if (dollar) {
       if (hadExports) dollar.exports = prevExports;
-      else delete dollar.exports;
+      else dollar.exports = {};
     }
   }
-  if (moduleExports !== undefined) return moduleExports;
+  // 只有模块**真的往里塞了东西**才算导出；否则继续走"按名字取绑定"的老路
+  if (moduleExports !== undefined && moduleExports !== null) {
+    const empty = typeof moduleExports === 'object'
+      && Object.keys(moduleExports).length === 0;
+    if (!empty) return moduleExports;
+  }
   if (!out || typeof out !== 'object' || out.__hikerCapture !== true) {
     // 模块自己 `return` 了值 ⇒ 那就是 require 的结果
     return out;
@@ -1802,10 +2009,14 @@ function runInModuleScope(sandbox, code, wantName) {
   if (vals.length) return vals[vals.length - 1];
   // 最后才回落到沙箱里的同名绑定（"另一个模块已经定义过"的情况）
   try {
-    return sandbox[wantName];
-  } catch (_) {
-    return undefined;
-  }
+    if (sandbox[wantName] !== undefined) return sandbox[wantName];
+  } catch (_) { /* 忽略 */ }
+  // 模块确实存在、也正常跑完了，但没有任何导出 —— 典型是"只做副作用"的模块
+  //（实测「探色视频」的 homelei：把 host 写进 item 后 refreshPage，源码里
+  //  `$.require("homelei")` 只当语句用）。官方这里就是 undefined；我们返回
+  // 空对象，避免 normalizeModuleValue 抛"没取到值"把整条规则打断。
+  warnOnce(`模块「${wantName || '?'}」没有导出值（按空对象处理）`);
+  return {};
 }
 
 // ============================================================
@@ -1907,7 +2118,308 @@ function buildCryptoGlobals() {
   // ⚠️ `CryptoJS` 必须一起给：官方是把整份 `assets/aes.js`（CryptoJS 副本 + AES/Data
   //    封装）**全局注入**的，源里除了 `AES.encrypt(...)` 还会直接写
   //    `CryptoJS.MD5(...)` / `CryptoJS.enc.Base64` —— 少了它照样 "CryptoJS is not defined"。
-  return { AES, Data, CryptoJS };
+  //    DES / TripleDES 同族，一起暴露（社区源常用 `$.des` / `DES.encrypt`）。
+  const _desDecrypt = CryptoJS.DES.decrypt.bind(CryptoJS.DES);
+  const _desEncrypt = CryptoJS.DES.encrypt.bind(CryptoJS.DES);
+  const DES = {
+    ...CryptoJS.DES,
+    encrypt: (msg, key, c) => _desEncrypt(msg, key, cfg(c)),
+    decrypt: (cipher, key, c) => _desDecrypt(cipher, key, cfg(c)),
+  };
+  const _tdesDecrypt = CryptoJS.TripleDES.decrypt.bind(CryptoJS.TripleDES);
+  const _tdesEncrypt = CryptoJS.TripleDES.encrypt.bind(CryptoJS.TripleDES);
+  const TripleDES = {
+    ...CryptoJS.TripleDES,
+    encrypt: (msg, key, c) => _tdesEncrypt(msg, key, cfg(c)),
+    decrypt: (cipher, key, c) => _tdesDecrypt(cipher, key, cfg(c)),
+  };
+  return { AES, Data, CryptoJS, DES, TripleDES };
+}
+
+/**
+ * `rsa` 兼容层（社区源里 `$.rsa.encrypt(明文, 公钥)` / `rsa.decrypt(密文, 私钥)`）。
+ *
+ * CryptoJS **没有** RSA ⇒ 用 Node 自带 `crypto` 实现。默认 PKCS#1 v1.5
+ * （最常用的"公钥加密、Base64 输出"），可传 `{padding:'oaep'}` 切 OAEP。
+ */
+function buildRsa() {
+  const padOf = (o) => {
+    const p = String((o && o.padding) || 'pkcs1').toLowerCase();
+    return p.includes('oaep')
+      ? crypto.constants.RSA_PKCS1_OAEP_PADDING
+      : crypto.constants.RSA_PKCS1_PADDING;
+  };
+  const out = (buf, o) =>
+    String((o && o.output) || 'base64').toLowerCase() === 'hex'
+      ? buf.toString('hex')
+      : buf.toString('base64');
+  return {
+    encrypt: (msg, key, o) => out(
+      crypto.publicEncrypt(
+        { key: String(key == null ? '' : key), padding: padOf(o) },
+        Buffer.from(String(msg == null ? '' : msg), 'utf8'),
+      ),
+      o,
+    ),
+    // 私钥解密：`data` 默认按 Base64 解（与 encrypt 的默认输出对称）
+    decrypt: (data, key, o) => {
+      const s = String(data == null ? '' : data);
+      const buf = String((o && o.input) || 'base64').toLowerCase() === 'hex'
+        ? Buffer.from(s, 'hex')
+        : Buffer.from(s, 'base64');
+      return crypto.privateDecrypt(
+        { key: String(key == null ? '' : key), padding: padOf(o) },
+        buf,
+      ).toString('utf8');
+    },
+  };
+}
+
+/**
+ * 官方 `aesEncode/aesDecode`（`utils/encrypt/AesUtil.java`）：
+ *   · AES / ECB / PKCS5Padding，Base64 输出（NO_WRAP）
+ *   · 密钥按**字符数**补 `'0'` 到 32 位（不足才补，超了不截断）
+ *
+ * ⚠️ 与 `$.aes.encrypt(明文, key)` 不是一回事：那个是社区版参数顺序
+ *    （数据在前），这里是官方的 `(key, data)`。
+ */
+function aesKey32(key) {
+  const s = String(key == null ? '' : key);
+  return s.length < 32 ? s + '0'.repeat(32 - s.length) : s;
+}
+
+function aesEncodeDoc(key, data) {
+  try {
+    const k = CryptoJS.enc.Utf8.parse(aesKey32(key));
+    return CryptoJS.AES.encrypt(String(data == null ? '' : data), k, {
+      mode: CryptoJS.mode.ECB,
+      padding: CryptoJS.pad.Pkcs7,
+    }).toString();
+  } catch (_) {
+    return '';
+  }
+}
+
+function aesDecodeDoc(key, base64Data) {
+  try {
+    const k = CryptoJS.enc.Utf8.parse(aesKey32(key));
+    const dec = CryptoJS.AES.decrypt(String(base64Data == null ? '' : base64Data), k, {
+      mode: CryptoJS.mode.ECB,
+      padding: CryptoJS.pad.Pkcs7,
+    });
+    return dec.toString(CryptoJS.enc.Utf8);
+  } catch (_) {
+    return '';
+  }
+}
+
+/**
+ * 官方 `decodeStr/encodeStr`（`HttpParser.decodeUrl/encodeUrl`）：
+ *   本质是 **URL 百分号编解码 + 指定字符集**（GBK/GB2312 站点常用），
+ *   而不是"乱码二次解码"。
+ *
+ * 官方对 `UTF-8` / `*` / 空字符集**直接原样返回**（见 HttpParser.encodeUrl）。
+ */
+function decodeStrDoc(str, charset) {
+  const s = String(str == null ? '' : str);
+  const cs = String(charset == null ? '' : charset).trim();
+  if (!cs || cs === '*' || /^utf-?8$/i.test(cs)) return s;
+  const fixed = s.replace(/%(?![0-9a-fA-F]{2})/g, '%25').replace(/\+/g, '%2B');
+  const bytes = [];
+  for (let i = 0; i < fixed.length; i++) {
+    if (fixed[i] === '%' && /^[0-9a-fA-F]{2}$/.test(fixed.slice(i + 1, i + 3))) {
+      bytes.push(parseInt(fixed.slice(i + 1, i + 3), 16));
+      i += 2;
+    } else {
+      for (const b of iconv.encode(fixed[i], cs)) bytes.push(b);
+    }
+  }
+  try {
+    return iconv.decode(Buffer.from(bytes), cs);
+  } catch (_) {
+    return s;
+  }
+}
+
+function encodeStrDoc(str, charset) {
+  const s = String(str == null ? '' : str);
+  const cs = String(charset == null ? '' : charset).trim();
+  if (!cs || cs === '*' || /^utf-?8$/i.test(cs)) return s;
+  let bytes;
+  try {
+    bytes = iconv.encode(s, cs);
+  } catch (_) {
+    return s;
+  }
+  let out = '';
+  for (const b of bytes) {
+    const c = String.fromCharCode(b);
+    if (/[A-Za-z0-9._*-]/.test(c)) out += c;
+    else if (c === ' ') out += '+';
+    else out += `%${b.toString(16).toUpperCase().padStart(2, '0')}`;
+  }
+  return out;
+}
+
+/**
+ * 官方 `rsaEncrypt/rsaDecrypt(data, key, options)`。
+ *
+ * options（都可省）：`{config:"RSA/ECB/PKCS1Padding", type:1, long:1, block:true}`
+ *   · type 1 = 公钥加密 / 私钥解密（默认）；2 = 私钥加密 / 公钥解密
+ *   · long 1 = 普通；2 = 分段（按密钥长度切块）
+ *   · block false = 加密固定 117 字节；true = 自动
+ */
+function rsaDocOptions(options) {
+  const o = options && typeof options === 'object' ? options : {};
+  const config = String(o.config || 'RSA/ECB/PKCS1Padding');
+  const padding = /OAEP/i.test(config)
+    ? crypto.constants.RSA_PKCS1_OAEP_PADDING
+    : crypto.constants.RSA_PKCS1_PADDING;
+  return {
+    padding,
+    type: Number(o.type) === 2 ? 2 : 1,
+    long: Number(o.long) === 2 ? 2 : 1,
+    block: o.block !== false,
+  };
+}
+
+function rsaKeyBytes(key, isPrivate) {
+  try {
+    const k = isPrivate ? crypto.createPrivateKey(String(key)) : crypto.createPublicKey(String(key));
+    const bits = (k.asymmetricKeyDetails && k.asymmetricKeyDetails.modulusLength) || 2048;
+    return Math.floor(bits / 8);
+  } catch (_) {
+    return 256;
+  }
+}
+
+function rsaEncryptDoc(data, key, options) {
+  const s = String(data == null ? '' : data);
+  const k = String(key == null ? '' : key);
+  const opt = rsaDocOptions(options);
+  const buf = Buffer.from(s, 'utf8');
+  const isPrivate = opt.type === 2;
+  const keyBytes = rsaKeyBytes(k, isPrivate);
+  const chunk = opt.block
+    ? Math.max(1, keyBytes - (opt.padding === crypto.constants.RSA_PKCS1_OAEP_PADDING ? 42 : 11))
+    : 117;
+  try {
+    if (opt.long !== 2) {
+      return (isPrivate
+        ? crypto.privateEncrypt({ key: k, padding: opt.padding }, buf)
+        : crypto.publicEncrypt({ key: k, padding: opt.padding }, buf)).toString('base64');
+    }
+    const parts = [];
+    for (let i = 0; i < buf.length; i += chunk) {
+      const one = buf.subarray(i, i + chunk);
+      parts.push(isPrivate
+        ? crypto.privateEncrypt({ key: k, padding: opt.padding }, one)
+        : crypto.publicEncrypt({ key: k, padding: opt.padding }, one));
+    }
+    return Buffer.concat(parts).toString('base64');
+  } catch (_) {
+    return '';
+  }
+}
+
+function rsaDecryptDoc(base64Data, key, options) {
+  const s = String(base64Data == null ? '' : base64Data).trim();
+  if (!s) return '';
+  const k = String(key == null ? '' : key);
+  const opt = rsaDocOptions(options);
+  const buf = Buffer.from(s, 'base64');
+  const isPublic = opt.type === 2; // type 2 = 私钥加密 ⇒ 公钥解密
+  const keyBytes = rsaKeyBytes(k, !isPublic);
+  const chunks = opt.long === 2 && buf.length > keyBytes
+    ? (() => {
+        const out = [];
+        for (let i = 0; i < buf.length; i += keyBytes) out.push(buf.subarray(i, i + keyBytes));
+        return out;
+      })()
+    : [buf];
+  try {
+    const out = chunks.map((one) => (isPublic
+      ? crypto.publicDecrypt({ key: k, padding: opt.padding }, one)
+      : crypto.privateDecrypt({ key: k, padding: opt.padding }, one)));
+    return Buffer.concat(out).toString('utf8');
+  } catch (_) {
+    return '';
+  }
+}
+
+/** `post(url, obj)`：官方会把普通对象自动转成 `a=xx&b=1` */
+function formEncode(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
+  return Object.keys(obj)
+    .filter((k) => obj[k] !== undefined && obj[k] !== null)
+    .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(String(obj[k]))}`)
+    .join('&');
+}
+
+/**
+ * 官方文档里的 `http.fetch(url).success(...).error(...).start()` 链式 AJAX 封装。
+ *
+ * 我们的 fetch 是**同步**的（重放桥），所以 `.start()` 当场执行并回调，
+ * 链式调用的写法与官方一致（不需要真的异步）。
+ */
+function makeHttpChain(g, postFn) {
+  const make = (method, url, initial) => {
+    let u = String(url || '');
+    let opts = { ...(initial || {}), method };
+    let onOk = null;
+    let onErr = null;
+    const c = {
+      headers(h) {
+        if (h && typeof h === 'object') opts.headers = { ...(opts.headers || {}), ...h };
+        return c;
+      },
+      success(fn) { onOk = typeof fn === 'function' ? fn : null; return c; },
+      error(fn) { onErr = typeof fn === 'function' ? fn : null; return c; },
+      start() {
+        try {
+          let data = method === 'post' ? postFn(u, opts) : g(u, opts);
+          // 文档：返回 JSON 会自动 JSON.parse 成对象
+          try {
+            const t = String(data).trim();
+            if (t.startsWith('{') || t.startsWith('[')) data = JSON.parse(t);
+          } catch (_) {}
+          if (onOk) onOk(data);
+        } catch (e) {
+          if (onErr) onErr(e && e.message ? e.message : String(e));
+        }
+        return c;
+      },
+      fetch(u2, o2) { u = String(u2 || ''); opts = { ...(o2 || {}), method: 'get' }; onOk = null; onErr = null; return c; },
+      get(u2, o2) { return c.fetch(u2, o2); },
+      post(u2, o2) { u = String(u2 || ''); opts = { ...(o2 || {}), method: 'post' }; onOk = null; onErr = null; return c; },
+      request(u2, o2) { return c.fetch(u2, o2); },
+      response() { return c; },
+    };
+    return c;
+  };
+  return {
+    fetch: (url, o) => make('get', url, o),
+    get: (url, o) => make('get', url, o),
+    request: (url, o) => make('get', url, o),
+    post: (url, o) => make('post', url, o),
+  };
+}
+
+/** JS 的**遗留** `escape` / `unescape`（Node 的 vm 沙箱里默认没有）。 */
+function jsUnescape(s) {
+  return String(s == null ? '' : s).replace(
+    /%u([0-9a-fA-F]{4})|%([0-9a-fA-F]{2})/g,
+    (_, u, h) => String.fromCharCode(parseInt(u || h, 16)),
+  );
+}
+
+function jsEscape(s) {
+  return String(s == null ? '' : s).replace(/[^@*_+\-.\/0-9A-Za-z]/g, (c) => {
+    const code = c.charCodeAt(0);
+    return code < 256
+      ? `%${code.toString(16).toUpperCase().padStart(2, '0')}`
+      : `%u${code.toString(16).toUpperCase().padStart(4, '0')}`;
+  });
 }
 
 /// 官方文档里的**裸加密函数**（hiker `assets/help_js.json`「md5」节）：
@@ -1949,8 +2461,82 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
   const ctx = rt.ctx;
 
   const g = (url, opts) => httpSync(rt, url, opts);
-  const post = (url, body, opts) => httpSync(rt, url, { ...(opts || {}), method: 'post', body });
+  /// 官方 `post(url, 数据, options)`：
+  ///   · `post(url, 'a=1&b=2')`            → 原样当表单
+  ///   · `post(url, {a:'1', b:'2'})`        → 自动转成 `a=1&b=2`
+  ///   · `post(url, {body:{…}, headers:{…}})` → 第二参数其实是整个 options
+  const post = (url, body, opts) => {
+    if (body && typeof body === 'object' && !Array.isArray(body) &&
+        ('body' in body || 'headers' in body || 'header' in body ||
+         'method' in body || 'charset' in body)) {
+      const merged = { ...(opts || {}), ...body, method: 'post' };
+      if (merged.body && typeof merged.body === 'object' && !Array.isArray(merged.body)) {
+        merged.body = formEncode(merged.body);
+      }
+      return g(url, merged);
+    }
+    return g(url, {
+      ...(opts || {}),
+      method: 'post',
+      body: formEncode(body),
+    });
+  };
   const cryptoGlobals = buildCryptoGlobals();
+  const rsaGlobals = buildRsa();
+
+  /**
+   * 写变量的统一入口（官方 JSEngine 的 `putVar/putMyVar` 语义）：
+   *   · 非字符串值用 **JSON.stringify** 存（`putMyVar('a', {x:1})` → `'{"x":1}'`；
+   *     「探色视频」把域名数组存进 vodhost，后面用 `getMyVar('vodhost').split('"')[1]`
+   *     取 URL —— 存成数组对象就会 `split is not a function`）
+   *   · 兼容 `putVar({key:'x', value:'1'})` 的对象写法（漫小肆的排序按钮就长这样）
+   *   · `storage0.*` 例外：官方明确它用来存 JSON 对象，见下方 storage0
+   */
+  const kvStr = (v) => (typeof v === 'string' ? v : JSON.stringify(v));
+  const kvPut = (k, v) => {
+    if (k && typeof k === 'object' && !Array.isArray(k)) {
+      const key = k.key ?? k.name;
+      const val = k.value ?? k.val;
+      if (key == null || val === undefined) return;
+      rt.kv[String(key)] = kvStr(val);
+      rt.touchedVars = true;
+      return;
+    }
+    if (v === undefined) return;
+    rt.kv[String(k)] = kvStr(v);
+    rt.touchedVars = true;
+  };
+
+  /**
+   * `bf(list)` —— 社区源里的"批量抓取"惯例：传 `[{url}]` 或字符串数组，
+   * 按**同序**返回每条的响应体（失败给空串）。
+   *
+   * ⚠️ 每次 fetch 都要引擎重跑整条规则一轮（重放桥），上限 40 轮 ⇒ 这里**封顶 16 条**，
+   *    多出来的直接给空串（宁缺不炸，避免整页只出个错误）。
+   */
+  function batchFetch(list) {
+    const arr = Array.isArray(list) ? list : [list];
+    const out = [];
+    for (let i = 0; i < arr.length; i++) {
+      // 文档：数组超过 16 项自动分批；同步实现里超出部分返回空串
+      if (i >= 16) {
+        out.push('');
+        continue;
+      }
+      const it = arr[i];
+      const u = typeof it === 'string' ? it : String((it && (it.url || it.link)) || '');
+      // 文档格式：`{url, options:{headers,body,method}}`；也兼容直接把选项摊平
+      const oo = (it && typeof it === 'object')
+        ? (it.options && typeof it.options === 'object' ? it.options : it)
+        : {};
+      try {
+        out.push(g(u, oo));
+      } catch (_) {
+        out.push('');
+      }
+    }
+    return out;
+  }
 
   /**
    * `$(url, headers).image(fn, …)` —— **只登记任务**，这里不抓任何东西
@@ -2020,6 +2606,14 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
     // `android.*`（Android 专属 API，见 [buildAndroidNs]）
     android: buildAndroidNs(),
     Packages: lazyJavaNs({ java: javaNs }),
+    // Rhino 的 importPackage / importClass（公共库 `f` 用 `javaImport.importPackage(...)`）
+    // 只是"导入后可以用短类名"，我们的 java shim 已按全限定名支持 ⇒ 空实现即可
+    javaImport: {
+      importPackage: () => {},
+      importClass: () => {},
+    },
+    importPackage: () => {},
+    importClass: () => {},
     // ── 环境 ─────────────────────────────────────────────
     console,
     JSON,
@@ -2057,6 +2651,29 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
     sha1: (s) => bareHashHex('sha1', s, rt),
     sha256: (s) => bareHashHex('sha256', s, rt),
     sha512: (s) => bareHashHex('sha512', s, rt),
+    // ── 解码兼容层（社区源常用，缺了就是 ReferenceError 整条规则中断）──
+    //   `escape/unescape`：JS 遗留函数，vm 沙箱默认没有；
+    //     实测「✨91Porn✨」直接 `eval(unescape(…))` 解播放页里的编码串。
+    escape: jsEscape,
+    unescape: jsUnescape,
+    //   `strencode2/strdecode2`：TVBox 血统的 URL 编码对（与 encodeURIComponent 同义）
+    strencode2: (s) => encodeURIComponent(String(s == null ? '' : s)),
+    strdecode2: (s) => decodeURIComponent(String(s == null ? '' : s)),
+    // ── 官方文档「JS里面编解码」的四个裸函数 ─────────────────────
+    //   decodeStr/encodeStr 是 **URL 百分号编解码 + 指定字符集**（GBK 站点常用）
+    decodeStr: (s, cs) => decodeStrDoc(s, cs),
+    encodeStr: (s, cs) => encodeStrDoc(s, cs),
+    //   aesEncode/aesDecode：AES/ECB/PKCS5，Base64，密钥补 '0' 到 32 位
+    aesEncode: (key, data) => aesEncodeDoc(key, data),
+    aesDecode: (key, data) => aesDecodeDoc(key, data),
+    //   rsaEncrypt/rsaDecrypt：官方 (data, key, options) 参数顺序
+    rsaEncrypt: (data, key, o) => rsaEncryptDoc(data, key, o),
+    rsaDecrypt: (data, key, o) => rsaDecryptDoc(data, key, o),
+    //   批量抓取（见 [batchFetch]）
+    bf: (list) => batchFetch(list),
+    // ── RSA（社区源 `$.rsa` / 裸 `rsa` 两种写法都认）──
+    rsa: rsaGlobals,
+    RSA: rsaGlobals,
     /// 官方文档：16 进制串 → Uint8Array（常搭配 `fetch(url,{toHex:true})`）
     hexToBytes: (h) => {
       const s = String(h == null ? '' : h);
@@ -2121,6 +2738,23 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
     request: (url, opts) => g(url, opts),
     post: (url, body, opts) => post(url, body, opts),
     get: (url, opts) => g(url, opts),
+    /// 文档：`fetchPC` / `postPC` = 用**电脑端 UA** 的 fetch / post
+    fetchPC: (url, opts) => g(url, { ...(opts || {}), ua: UA_PC }),
+    postPC: (url, body, opts) => post(url, body, { ...(opts || {}), ua: UA_PC }),
+    /// 文档：`fetchCookie(url, options)` → 返回 Set-Cookie 数组的 **JSON 字符串**
+    fetchCookie: (url, opts) => {
+      try {
+        const raw = g(url, { ...(opts || {}), withHeaders: true });
+        const j = JSON.parse(raw);
+        const h = j.headers || {};
+        const ck = h['set-cookie'] || h['Set-Cookie'] || [];
+        return JSON.stringify(Array.isArray(ck) ? ck : [ck]);
+      } catch (_) {
+        return '[]';
+      }
+    },
+    /// 文档：`http.fetch(url).success(fn).error(fn).start()` 链式 AJAX
+    http: makeHttpChain(g, post),
     // WebView 抓页（Phase 2）：信号式同步 —— Node 里没有 WebView，
     // 抛 NeedWebView 交给宿主（Dart）去抓，再重放（见 webViewSync）
     fetchCodeByWebView: (input, opts) => webViewSync(rt, input, opts),
@@ -2155,12 +2789,25 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
     getKeyword: () => String((ctx.params && ctx.params.keyword) || ''),
     getUa: () => ctx.ua || '',
     getVar: (k, def) => (rt.kv[k] != null ? rt.kv[k] : (def != null ? def : '')),
-    setVar: (k, v) => { rt.kv[k] = v; rt.touchedVars = true; },
-    putVar: (k, v) => { rt.kv[k] = v; rt.touchedVars = true; },
+    setVar: (k, v) => kvPut(k, v),
+    putVar: (k, v) => kvPut(k, v),
+    /// `putVar2/getVar2`：官方「我的主页」模板（assets/home.js）与大量社区源在用，
+    /// 语义与 putVar/getVar 相同（海阔里 2 只是"能存 JSON 字符串"的变体）。
+    putVar2: (k, v) => kvPut(k, v),
+    getVar2: (k, def) => (rt.kv[k] != null ? rt.kv[k] : (def != null ? def : '')),
+    /// `initConfig({host: ...})`：prerule 里写"源配置默认值"的唯一入口。
+    /// 用户手填过的键优先（不动用户在「源配置」里改过的值）。
+    initConfig: (obj) => {
+      if (!obj || typeof obj !== 'object') return;
+      if (!ctx.config || typeof ctx.config !== 'object') ctx.config = {};
+      for (const k of Object.keys(obj)) {
+        if (ctx.config[k] == null || ctx.config[k] === '') ctx.config[k] = obj[k];
+      }
+    },
     clearVar: (k) => { delete rt.kv[k]; rt.touchedVars = true; },
     /// `setItem/getItem/clearItem`：文档说是"规则内持久存储"（值为字符串）。
     /// 我们这套 kv 本来就是"按规则隔离 + 落盘"，语义一致 ⇒ 同一份实现。
-    setItem: (k, v) => { rt.kv[k] = v; rt.touchedVars = true; },
+    setItem: (k, v) => kvPut(k, v),
     clearItem: (k) => { delete rt.kv[k]; rt.touchedVars = true; },
     /// `storage0`：文档原话是"支持存储 JSON 对象"的同族接口
     ///（putMyVar/getMyVar/putVar/getVar/setItem/getItem/setPublicItem/getPublicItem）。
@@ -2180,6 +2827,23 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
     joinUrl: (base, rel) => {
       try { return new URL(String(rel), String(base)).toString(); } catch (_) { return rel || ''; }
     },
+    /// `buildUrl(base, {a:1,b:2})` → 拼查询参数（社区源常用）
+    buildUrl: (base, params) => {
+      const u = String(base == null ? '' : base);
+      if (!params || typeof params !== 'object') return u;
+      const qs = Object.keys(params)
+        .filter((k) => params[k] !== undefined && params[k] !== null)
+        .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(String(params[k]))}`)
+        .join('&');
+      if (!qs) return u;
+      return u + (u.includes('?') ? '&' : '?') + qs;
+    },
+    /// Android Base64 标志位（crypto-java 垫片会读 `_base64.NO_WRAP`）
+    _base64: { NO_WRAP: 2, NO_PADDING: 1, CRLF: 4, URL_SAFE: 8, DEFAULT: 0 },
+    /// `updateItem(key, patch)`：官方用于**原地更新已渲染的条目**。
+    /// 我们是一次性求值，没有可更新的列表实例 ⇒ 安全占位（返回 true），
+    /// 至少不让 `updateItem is not defined` 把整条源打死。
+    updateItem: () => true,
     urlJoin: (base, rel) => {
       try { return new URL(String(rel), String(base)).toString(); } catch (_) { return rel || ''; }
     },
@@ -2198,6 +2862,8 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
     // ── 结果 ─────────────────────────────────────────────
     setResult: (r) => { state.result = r; if (rt.inLazyFn) rt.lazyCollected = r; },
     setHomeResult: (r) => { state.homeResult = r; if (rt.inLazyFn) rt.lazyCollected = r; },
+    /// 文档：`setSearchResult` 与 setResult 等价（软件自动识别回调类型）
+    setSearchResult: (r) => { state.result = r; if (rt.inLazyFn) rt.lazyCollected = r; },
     setNextPage: (r) => { state.nextPage = r == null ? '' : String(r); },
     setPageTitle: (r) => { state.pageTitle = r == null ? '' : String(r); },
     setError: (r) => { state.error = r == null ? '' : String(r); },
@@ -2206,6 +2872,85 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
     hideLoading: () => {},
     longToast: () => {},
     toast: () => {},
+    /// 文档：`alert(文本)` — 弹提示（我们没有原生对话框，落到日志）
+    alert: (...a) => console.log('[hiker]', ...a),
+
+    // ── 页面列表的**原地操作**（官方 RuleBean / JSEngine 那批）──────────
+    //
+    // 我们的规则是**一次性求值**，没有常驻的列表实例，所以这些接口只能做
+    // "安全占位" —— 但**必须有**：实测 115 个源里 `deleteItemByCls` 用了 50 次、
+    // `deleteItem` 74 次、`addItemBefore` 51 次，几乎都在规则末尾清 loading 占位。
+    // 少了它们 → `xxx is not defined` → 整条规则中断（列表出不来）。
+    deleteItem: () => true,
+    deleteItemByCls: () => true,
+    addItem: () => true,
+    addItemBefore: () => true,
+    addItemAfter: () => true,
+    // 读已渲染条目：没有实例 ⇒ 返回空（调用方通常只做兜底/判断）
+    findItem: () => null,
+    findItemsByCls: () => [],
+
+    // ── 剪贴板 / 云剪贴板（社区源做"分享导入"用）────────────────
+    copy: () => true,
+    /// `getPastes()` 官方返回 JSON 数组（可同步的云剪贴板列表）⇒ 无实现给空数组
+    getPastes: () => [],
+    /// `parsePaste(口令)` → 解析后的规则文本；没有云剪贴板 ⇔ 返回空串
+    parsePaste: () => '',
+    /// `sharePaste(内容, 剪贴板)` → 分享后的地址；没有云剪贴板 ⇔ 返回空串
+    sharePaste: () => '',
+
+    // ── 页面元信息 / 导航（文档「JS里面常用方法」）────────────────
+    getPageTitle: () => state.pageTitle || '',
+    setPagePicUrl: () => true,
+    setPageParams: (p) => { state.pageParams = p; return true; },
+    /// 二级页动态设置"最新章节"规则：只记录，收藏页由宿主另走
+    setLastChapterRule: (r) => { state.lastChapterRule = r == null ? '' : String(r); return true; },
+    /// 关闭当前页（文档：二级页面才有效）—— 宿主没有回传通道 ⇒ 返回 false
+    back: () => false,
+    closeMe: () => true,
+    /// 选择器弹窗（官方弹原生选择框）：无 UI ⇒ 占位成功
+    showSelectOptions: () => true,
+    /// 打开外部 App（迅雷等）：本模块不调起第三方 App
+    openAppIntent: () => false,
+
+    // ── 规则/版本信息（文档）────────────────────────────────
+    getAppVersion: () => 1800,
+    getRuleCount: () => '1',
+    getColTypes: () => [],
+    getLastRules: () => [],
+    getHomeSub: () => [],
+    hasHomeSub: () => false,
+
+    // ── 缓存 / 文件 / 网络杂项（社区源高频）──────────────────────
+    /// `cacheM3u8(url)` 官方会下到本地再返回本地地址；我们无法在同步规则里下载，
+    /// 直接返回原地址（播放链路仍然可用，只是没有本地缓存）
+    cacheM3u8: (url) => String(url == null ? '' : url),
+    clearM3u8Ad: () => true,
+    deleteCache: () => true,
+    fetchCache: () => '',
+    downloadFile: () => false,
+    /// `deleteFile(path)` → 真删（收敛在 hiker 目录内）
+    deleteFile: (p) => {
+      try {
+        const f = safePath(rt, String(p == null ? '' : p));
+        if (fs.existsSync(f)) fs.unlinkSync(f);
+        return true;
+      } catch (_) {
+        return false;
+      }
+    },
+    /// `saveImage(url, path)` 依赖异步下载 ⇒ 占位失败（不中断规则）
+    saveImage: () => false,
+    /// 全局代理读取（部分源用它拼提示；本模块代理由宿主统一应用）
+    getProxy: () => '',
+    requireDownload: () => false,
+    /// DNS 相关：Node 走系统 DNS，注册/探测做成无副作用的安全实现
+    registerDNS: () => true,
+    ipping: () => true,
+    findReachableIP: (ips) => (Array.isArray(ips) && ips.length ? String(ips[0]) : ''),
+    unRegisterTask: () => true,
+    /// 规则里常见的 `sleep(ms)`；同步求值里不能真睡（会卡死 Node 事件循环的最后机会）
+    sleep: () => {},
 
     // ── 事件 / 交互 ──────────────────────────────────────────────
     //   `confirm(...)` / `setInterval(...)` 建立在"页面有事件循环"之上，
@@ -2249,8 +2994,29 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
       // `hiker://page/x` 是**源内模块**而不是文件，仍走 hikerFetch
       if (/^hiker:\/\/page\//i.test(s)) return hikerFetch(rt, s);
       const t = readTextChecked(safePath(rt, s));
-      if (t == null) throw new Error(`readFile('${s}') 读不到文件`);
+      // ⚠️ 文件**不存在**不是错误（首次运行、可选配置、缓存文件都这样）。
+      //    原来在这里抛异常，导致「阅漫君 / 阅动漫」这种在规则顶部直接
+      //    `readFile('newWindow')` 的源一打开就整条崩（2026-10-17 实测）。
+      //    目录 / 过大 / 权限问题仍由 readTextChecked 抛出，不掩盖真错误。
+      if (t == null) return '';
       return t;
+    },
+    /// `fileExist(path)`：文件 / 源内页面模块是否存在（社区源常用作首次运行判断）
+    fileExist: (p) => sandboxFileExist(rt, p),
+    fileExists: (p) => sandboxFileExist(rt, p),
+    existsFile: (p) => sandboxFileExist(rt, p),
+    /// `getPath('hiker://files/x')` → **真实文件系统路径**（官方带 `file://` 前缀）
+    ///
+    /// 源里的常见写法是 `getPath(...).replace(/^file:\/\//, '')` 或 `.slice(7)`，
+    /// 再交给 `java.io.File(...)` / `require(...)` 用 —— 所以这里必须返回
+    /// `file://` + 绝对路径（少这个函数会让「聚图库 / 星集Media / 某聚合 /
+    /// MyField」这类源在第一步就 `getPath is not defined`）。
+    getPath: (p) => {
+      try {
+        return `file://${safePath(rt, String(p == null ? '' : p))}`;
+      } catch (_) {
+        return '';
+      }
     },
     writeFile: (p, c) => writeTextFile(rt, p, c),
     saveFile: (p, c) => writeTextFile(rt, p, c),
@@ -2292,13 +3058,18 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
     },
 
     // ── 变量 / 参数 ──────────────────────────────────────
-    getParam: (k) => {
+    getParam: (k, def) => {
       const p = ctx.params || {};
-      return p[k] != null ? String(p[k]) : '';
+      if (p[k] != null) return String(p[k]);
+      try {
+        const u = new URL(String(ctx.url || ''));
+        if (u.searchParams.has(String(k))) return String(u.searchParams.get(k));
+      } catch (_) {}
+      return def != null ? def : '';
     },
     getMyVar: (k, def) => (rt.kv[k] != null ? rt.kv[k] : (def != null ? def : '')),
-    putMyVar: (k, v) => { rt.kv[k] = v; rt.touchedVars = true; },
-    setMyVar: (k, v) => { rt.kv[k] = v; rt.touchedVars = true; },
+    putMyVar: (k, v) => kvPut(k, v),
+    setMyVar: (k, v) => kvPut(k, v),
     delMyVar: (k) => { delete rt.kv[k]; rt.touchedVars = true; },
     listMyVarKeys: () => Object.keys(rt.kv),
     clearMyVar: (k) => {
@@ -2338,6 +3109,20 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
       html: (h) => jq(cheerio.load(String(h || ''))),
       md5: (s) => CryptoJS.MD5(String(s)).toString(),
       sha1: (s) => CryptoJS.SHA1(String(s)).toString(),
+      sha256: (s) => CryptoJS.SHA256(String(s)).toString(),
+      // ── 加解密别名（社区源三种写法都有：`$.aes` / `$.AES` / 裸 `AES`）──
+      //   语义与官方 aes.js 注入的全局完全一致（含 `"AES/CBC/PKCS7Padding"` 字符串配置）
+      aes: cryptoGlobals.AES,
+      AES: cryptoGlobals.AES,
+      des: cryptoGlobals.DES,
+      DES: cryptoGlobals.DES,
+      tripledes: cryptoGlobals.TripleDES,
+      TripleDES: cryptoGlobals.TripleDES,
+      rsa: rsaGlobals,
+      RSA: rsaGlobals,
+      CryptoJS: cryptoGlobals.CryptoJS,
+      escape: jsEscape,
+      unescape: jsUnescape,
       base64: (s) => Buffer.from(String(s), 'utf8').toString('base64'),
       atob: (s) => Buffer.from(String(s), 'base64').toString('binary'),
       btoa: (s) => Buffer.from(String(s)).toString('base64'),
@@ -2355,10 +3140,13 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
       base64Encode: (s) => Buffer.from(String(s == null ? '' : s), 'utf8').toString('base64'),
       base64Decode: (s) => Buffer.from(String(s == null ? '' : s), 'base64').toString('utf8'),
       require: (name) => normalizeModuleValue(requireModule(name), name),
-      /// 模块导出约定：`$.exports = xxx;`（CommonJS 风格）
+      /// 模块导出约定：`$.exports = xxx;` 或 `$.exports.xxx = ...`
       /// —— 海阔的源页面模块就是这么把值交出去的（`main` / `xiu` 等模块名
       ///    与内部变量名常常不一致，只能靠 exports 取），见 [runInModuleScope]
-      exports: undefined,
+      ///
+      /// ⚠️ 默认必须是对象：大量模块写 `$.exports.fn = ...`，默认 undefined
+      ///    会直接报 "Cannot set properties of undefined"（探色视频 / 摸鱼日报）。
+      exports: {},
       // `rc(url, hours)` / `requireCache(...)`：**远端 JS 依赖**（官方别名 rc）
       //   文档：`requireCache('http://xxx/t.js', 24)` → 缓存 24 小时，超过重新下载。
       //   实现：本地缓存 `<filesDir>/libs/<md5(url)>.js`；缓存未过期直接 eval，
@@ -2389,6 +3177,28 @@ function stripJsPrefix(rule) {
 }
 
 /**
+ * Rhino 语法兼容：单语句上下文里的 `let/const`。
+ *
+ * Rhino 的 `let` 是**函数作用域**，所以 `if (x) let y = …;` 合法；
+ * V8 会直接报 "Lexical declaration cannot appear in a single-statement context"。
+ * 实测 mistywater/hiker 的公共库 `f`（`libs/bf286…js`）里就有这种写法，
+ * 不修的话 `rc()` 一加载就 SyntaxError，整个源报废。
+ *
+ * 只把 `) let/const` 与 `else let/const` 换成 `var`（语义按 Rhino 的函数作用域，
+ * 反而更接近）；正常的 `for (let i…)` / `{ let x }` 不会被命中。
+ */
+function fixRhinoLexical(code) {
+  let s = String(code == null ? '' : code);
+  // 论坛复制来的规则常夹带**零宽字符**（U+200B..200F / 202A..202E / 2060..206F / FEFF），
+  // Rhino 容忍、V8 直接 "Invalid or unexpected token"。实测公共库 `f` 的
+  // `Math.ceil` 中间就夹了 U+200C。
+  s = s.replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g, '');
+  s = s.replace(/([)\]]\s*)(let|const)\s+/g, '$1var ');
+  s = s.replace(/(\belse\s+)(let|const)\s+/g, '$1var ');
+  return s;
+}
+
+/**
  * 跑一条规则；返回 `{list, playUrl, nextPage, pageTitle, vars}`。
  *
  * @param {object} source  源（含 `pages` 内联模块）
@@ -2413,7 +3223,14 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
   // ⚠️ 必须在**二级规则之前**建好：二级规则路径也会走 httpSync，
   //   而 `hiker://page|assets/...` 现在由 httpSync 直接当宿 host 资源返回。
   const modules = new Map();
-  for (const p of (source && Array.isArray(source.pages)) ? source.pages : []) {
+  // ⚠️ 海阔导出的 `pages` 是**JSON 字符串**（而不是数组）—— Dart 侧已解开，
+  //    但引擎也要能吃字符串，否则 `$.require('er')` / `hiker://page/lunbo`
+  //    全部查不到（实测漫小肆的目录页就是这种情况）。
+  let pageList = source && source.pages;
+  if (typeof pageList === 'string') {
+    try { pageList = JSON.parse(pageList); } catch (_) { pageList = []; }
+  }
+  for (const p of Array.isArray(pageList) ? pageList : []) {
     if (!p || typeof p !== 'object') continue;
     for (const rawKey of [p.name, p.path]) {
       if (!rawKey) continue;
@@ -2525,6 +3342,9 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
 
       let mod = null;
       let key = '';
+      /// 是否走了"名字对不上、用唯一模块兜底"这条路
+      /// （兜底时按名字取绑定必然取不到 ⇒ 要返回**整个导出对象**）
+      let nameFallback = false;
       for (const c of cands) {
         const m = modules.get(c);
         if (m) {
@@ -2551,10 +3371,39 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
             Utf8: CryptoJS.enc.Utf8,
           };
         }
-        throw moduleError(
-          `$.require('${String(name || '')}') 找不到对应的 pages 模块`
-          + '（该源依赖海阔内置页面模块 / 宿主文件，暂不支持）',
-        );
+        // `$.require('hiker://assets/xxx.js')` / `hiker://files/...`：
+        // 官方允许直接 require 一个 JS 文件（例如 `crypto-java.js`）。
+        // 之前只查源内 pages ⇒ 这类源在第一步就失败。
+        // ⚠️ 必须用**原始** name（moduleCandidates 会把 hiker://assets/ 前缀剥掉）
+        const rawName = String(name || '').trim();
+        if (/^hiker:\/\/(?:assets|files)\//i.test(rawName)) {
+          try {
+            const code = hikerFetch(rt, rawName);
+            return normalizeModuleValue(
+              runInModuleScope(sandbox, code, ''), rawName);
+          } catch (e) {
+            throw moduleError(
+              `$.require('${rawName}') 加载失败：${describeError(e)}`);
+          }
+        }
+        // 兼容：社区源偶尔把模块名写错（「声阅APP」`$.require('hanshu')`，
+        // 但它的 pages 里只有一个叫「函数」的模块，模块本身导出的对象里
+        // 确实有规则要调的 `tuijian1`）。只有一个模块时直接用它 ——
+        // 总比一句"找不到模块"让整条源报废合理。
+        if (modules.size === 1) {
+          const only = modules.entries().next().value;
+          if (only) {
+            mod = only[1];
+            key = only[0];
+            nameFallback = true;
+          }
+        }
+        if (!mod) {
+          throw moduleError(
+            `$.require('${String(name || '')}') 找不到对应的 pages 模块`
+            + '（该源依赖海阔内置页面模块 / 宿主文件，暂不支持）',
+          );
+        }
       }
       let value;
       let modErr = null;
@@ -2568,7 +3417,9 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
       try {
         // 模块语义见 [runInModuleScope]：独立函数作用域 + 顶层名字回填沙箱
         //  ⚠️ 整个执行（含调用）都在 runInContext 里，SCRIPT_TIMEOUT_MS 才管得住死循环
-        value = runInModuleScope(sandbox, mod.rule, key);
+        //  ⚠️ 名字兜底时 wantName 传空：按错误的名字取绑定必然取不到，
+        //     传空才会返回**整个导出对象**（`require('x').fn()` 才能拿到 fn）。
+        value = runInModuleScope(sandbox, mod.rule, nameFallback ? '' : key);
       } catch (e) {
         // 🔴 `NeedFetch` / `NeedWebView` 是**重放桥的信号**，绝不能在这里被吞掉 ——
         //   模块顶层很常见就要抓网页（如 `host: getHome(config.host)`），
@@ -2580,6 +3431,24 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
       // 加载结束（成功或失败）都放开"加载中"标记；重放桥的信号直接抛出时
       // 整趟会重来，moduleLoading 也会随之重建，不需要额外清理。
       moduleLoading.delete(cacheKey);
+      // ⚠️ 模块自己把抓页异常 try/catch 吞了（源头常见的
+      //   `try { var html = getResCode() } catch(e) { … return; }`）⇒ 模块返回 undefined。
+      //   这时**不能直接报"没取到值"**：那一页本来就还没抓，引擎的 wantFetch 闸门
+      //   会在本轮结束后补抓并重放。先给个空对象让规则跑完这一轮（实测漫小肆的
+      //   目录模块 `er` 正是这种写法）。
+      if (value === undefined && rt.wantFetch) {
+        moduleCache.set(cacheKey, {});
+        return {};
+      }
+      // 同理：延迟规则**已经拿到结果**时，外层模块后续的报错不该把结果作废
+      //（典型场景：第二趟解章节图时，目录模块又去抓详情页，网络抖一下 →
+      //  本来已经拿到的 `pics://` 被一句"没取到值"顶掉）
+      if (value === undefined && rt.lazyOutcome
+          && rt.lazyOutcome.returned !== undefined
+          && rt.lazyOutcome.returned !== null) {
+        moduleCache.set(cacheKey, {});
+        return {};
+      }
       if (value === undefined && modErr) {
         // 已经是"模块级错误"就**原样抛出**：否则每套一层 require 就再包一层，
         // 实测会滚成"加载源内模块「hxc」失败：加载源内模块「hxc」失败：…"的递归长串。
@@ -2607,7 +3476,8 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
         if (e instanceof NeedFetch || e instanceof NeedWebView) throw e;
         const pj = source && (source.private_js || source.privateJs);
         if (typeof pj === 'string' && pj.trim()) {
-          return vm.runInContext(stripJsPrefix(pj), sandbox, { timeout: SCRIPT_TIMEOUT_MS });
+          return vm.runInContext(fixRhinoLexical(stripJsPrefix(pj)), sandbox,
+            { timeout: SCRIPT_TIMEOUT_MS });
         }
         throw e;
       }
@@ -2617,7 +3487,7 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
 
     try {
       // 不包 IIFE：保持海阔「顶层 var/const/function 即全局」的语义
-      new vm.Script(rule, { filename: 'hiker_rule.js' })
+      new vm.Script(fixRhinoLexical(rule), { filename: 'hiker_rule.js' })
         .runInContext(sandbox, { timeout: SCRIPT_TIMEOUT_MS });
     } catch (e) {
       if (e instanceof NeedFetch) {
@@ -2718,6 +3588,13 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
     let playUrl = '';
     let playHeaders = null;
     let playUrlExtra = [];
+    // 官方允许 lazyRule/详情规则**直接 return 一个对象**（实测「探色视频」：
+    //   `return {urls:[…]}`）。对象进不了下面的字符串分支 ⇒ 播放地址被丢掉，
+    //   现象是"点进去什么都没发生"。有 urls/url 就先转成 JSON 串统一处理。
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      const ou = Array.isArray(raw.urls) ? raw.urls : (raw.url ? [raw.url] : []);
+      if (ou.length) raw = JSON.stringify(raw);
+    }
     if (typeof raw === 'string') {
       const s = raw.trim();
       if (isPlayableAddr(s)) {
@@ -2842,6 +3719,41 @@ export async function runHikerDetail(source, ctx, kv) {
   return { playUrl: r.playUrl || '', list: r.list, vars: r.vars };
 }
 
+/**
+ * 执行条目地址里的**内联规则**：`url#flags#@rule=js:<code>` / `@lazyRule=.js:<code>`。
+ *
+ * 海阔的「二级页面」很多不是独立页面，而是把 JS 挂在条目地址上：
+ *   漫画条目 → `章节页 + '@rule=js:$.require("er")'`
+ *   章节条目 → `图片页 + 'hiker://lazy#id'`（id 来自同一次执行里的 `解析` 模块）
+ *
+ * 我们把它当成一次普通规则执行：
+ *   · `input` / `MY_URL` = 去掉 `@rule=` 尾巴的原始地址
+ *   · 预加载 `lazy` 模块（很多二级页直接引用 `lazy` 变量却不 require 它）
+ *   · 支持 `lazyIds` 第二趟（解析章节里的图片列表）
+ */
+export async function runHikerInline(source, ctx, kv, opts = {}) {
+  const code = String(ctx.code || '')
+    .replace(/^\s*(?:\.js|js):\s*/i, '')
+    .trim();
+  if (!code) {
+    return { list: [], playUrl: '', nextPage: '', pageTitle: '', vars: kv || {} };
+  }
+  const base = String(ctx.url || '');
+  // ⚠️ 第二趟的 `input` 是**章节页**（lazy fn 里 fetch(input) 要抓的那一页），
+  //    不是条目自身地址 —— 两者混用会让漫画的 lazy 规则去抓详情页、抓不出图。
+  const swapInput = String(ctx.lazyInput || '');
+  const prelude = "try { $.require('lazy'); } catch (__e) {}\n";
+  return await runHikerRule(source, {
+    ...ctx,
+    url: base,
+    input: base,
+    rule: `js:${prelude}${code}`,
+    action: 'detail',
+    lazyInput: swapInput,
+    lazyIds: Array.isArray(ctx.lazyIds) ? ctx.lazyIds : [],
+  }, kv, opts);
+}
+
 // ============================================================
 // 规则 URL 解析（`**`=关键词 / `fypage`=页码 / `;get;UTF-8;{UA@..}`）
 // ============================================================
@@ -2937,12 +3849,19 @@ function parseRuleUrl(raw, opt) {
     }
   }
 
+  // fy* 占位符（海阔/TVBox 风格的筛选位）：`fyclass` 用当前选中分类，
+  // 没选就是空；`fyarea/fyyear/fysort` 同理。之前一律原样留着，
+  // 地址里就会出现字面量 "fyclass"，站点必然 404（实测多个源因此首页为空）。
+  const cate = o.cate != null ? String(o.cate) : '';
   const subs = (x) => String(x)
     .replace(/\*\*/g, encodeURIComponent(keyword))
-    .replace(/fypage/g, String(page));
+    .replace(/fypage/g, String(page))
+    .replace(/fyclass/g, cate)
+    .replace(/fyarea|fyyear|fysort/g, '');
 
   const params = {};
   let url = subs(urlPart);
+  let rawOut = '';
   if (url.startsWith('hiker://')) {
     const q = url.indexOf('?');
     if (q >= 0) {
@@ -2955,6 +3874,10 @@ function parseRuleUrl(raw, opt) {
     }
     const hashSegs = url.split('##').slice(1);
     if (hashSegs.length) params.hiker_hash = hashSegs.map(subs).join('##');
+    // `MY_URL` 要保留**规则原文**（含 `hiker://empty##`）：
+    //   大量源写 `MY_URL.replace('hiker://empty##', host)` 拼真地址，
+    //   剥掉伪协议后规则拿到空串 ⇒ fetch('') 直接失败（实测 20+ 个源）。
+    rawOut = url;
     url = '';
   } else if (url) {
     // ① URL 字段可能带 `.js:` 规则（动态域名）→ 先求值出真地址
@@ -2962,8 +3885,9 @@ function parseRuleUrl(raw, opt) {
     // ② 相对路径 → 用源的 url 补成绝对地址
     //    （实测 9 个源的 search_url 写的是 `/search?q=**&page=fypage`）
     url = absolutize(url, o.base);
+    rawOut = url;
   }
-  return { url, method, charset, headers, params };
+  return { url, raw: rawOut, method, charset, headers, params };
 }
 
 function normalizePages(source) {
@@ -3089,6 +4013,48 @@ export async function handleHikerApi(data) {
     let ctxUrl = '';
     let envParams = { ...params };
     let ua = resolveUa(source.ua);
+
+    // ── 前置规则 `prerule`（海阔打开源时先执行，然后才跑 find_rule）────────
+    //   典型写法：抓发布页找最新域名 → `setItem('link', …)` 记住 →
+    //   `initConfig({host: …})` 写进配置。主规则里的 `config.host`、
+    //   以及 `getVar('18AV')` 这类动态域名全靠它。
+    //   ⚠️ 必须在 `evalUrlRule(homeBase)` **之前**跑：动态域名源的 URL 规则
+    //      依赖 prerule 写下的变量（否则算出 `https:///zh/…` 直接判死）。
+    //   失败不阻断主规则（海阔里它只是"准备域名/配置"）。
+    const preRule = String(source.preRule || source.pre_rule || source.prerule || '').trim();
+    if (preRule && action !== 'event' && action !== 'inline') {
+      try {
+        const preRun = await runHikerRule(source, {
+          url: String(source.url || ''),
+          name: source.title || source.name || '',
+          page: 1,
+          cateUrl: '',
+          cateName: '',
+          keyword: '',
+          lazyInput: '',
+          action: 'home',
+          params: {},
+          ua,
+          config: cfg,
+          homeUrl: String(source.url || ''),
+          rule: /^\s*js:/i.test(preRule) ? preRule : (`js:${preRule}`),
+          filesDir: opts.filesDir,
+          assetsDir: opts.assetsDir,
+        }, kv, {
+          ...opts,
+          timeoutMs: Math.min(opts.timeoutMs, 20000),
+          maxItems: 1,
+          fetchWebView: fetchViaHostWebView,
+        });
+        // runHikerRule 内部是 kv 的**副本**，要把 prerule 写的变量并回调用方的 kv
+        if (preRun && preRun.vars && typeof preRun.vars === 'object') {
+          Object.assign(kv, preRun.vars);
+        }
+      } catch (e) {
+        console.log('[hiker] prerule 跳过：' + describeError(e));
+      }
+    }
+
     // 源的首页地址：既可能是普通 URL，也可能带 `.js:` 规则（动态域名）。
     // 相对路径的 `search_url` 要用它做 base 来补全。
     let homeBase = String(source.url || '');
@@ -3125,6 +4091,42 @@ export async function handleHikerApi(data) {
       };
     }
 
+    if (action === 'inline') {
+      // 条目地址里的内联规则：`@rule=js:<code>` / `@lazyRule=.js:<code>`
+      //   body: { action:'inline', source, params:{ url, code, lazyIds?, lazyInput? }, vars }
+      const r = await runHikerInline(
+        source,
+        {
+          url: String(params.url || ''),
+          lazyInput: String(params.lazyInput || ''),
+          code: String(params.code || ''),
+          name: source.title || source.name || '',
+          page: params.page || 1,
+          ua,
+          config: cfg,
+          homeUrl: homeBase,
+          filesDir: opts.filesDir,
+          assetsDir: opts.assetsDir,
+          lazyIds: Array.isArray(params.lazyIds) ? params.lazyIds.map(String) : [],
+        },
+        kv,
+        { timeoutMs: opts.timeoutMs, maxItems: opts.maxItems },
+      );
+      return {
+        ok: true,
+        list: r.list || [],
+        playUrl: r.playUrl || '',
+        playHeaders: r.playHeaders || null,
+        playUrlExtra: r.playUrlExtra || [],
+        nextPage: r.nextPage || '',
+        pageTitle: r.pageTitle || '',
+        vars: r.vars || kv,
+        requests: r.requests || 0,
+        lazyIds: r.lazyIds || [],
+        elapsedMs: Date.now() - t0,
+      };
+    }
+
     if (action === 'search') {
       const r = parseRuleUrl(source.search_url || source.searchUrl || '', {
         keyword: params.keyword,
@@ -3133,7 +4135,8 @@ export async function handleHikerApi(data) {
         base: homeBase,
       });
       rule = String(source.searchFind || source.search_find || '');
-      ctxUrl = r.url;
+      // 搜索地址也可能是 `hiker://empty##search/**/fypage/`（MY_URL 由规则拼）
+      ctxUrl = r.raw || r.url;
       envParams = { ...r.params, ...envParams };
       if (r.headers && r.headers['User-Agent']) ua = r.headers['User-Agent'];
     } else if (action === 'detail') {
@@ -3141,14 +4144,24 @@ export async function handleHikerApi(data) {
       ctxUrl = String(params.url || '');
     } else {
       // home / category：`source.url` 是首页地址；分类走传入的 class_url
-      const r = parseRuleUrl(params.url || source.url || '', {
+      // ⚠️ `MY_URL` 必须保留**规则原文**（含 `hiker://empty##` 前缀）——
+      //    大量源靠 `MY_URL.replace('hiker://empty##', config.host)` 拼地址。
+      //    分类地址是相对片段时（`page` / `category/xx`）也按同样格式拼回去。
+      const cateRaw = params.url ? String(params.url) : '';
+      const r = parseRuleUrl(cateRaw || source.url || '', {
         page: params.page || 1,
         kv,
         base: homeBase,
+        cate: cateRaw,
       });
       rule = String(source.find_rule || source.findRule || '');
-      ctxUrl = params.url ? ctxUrl : (r.url || '');
-      if (!ctxUrl) ctxUrl = r.url || '';
+      if (cateRaw) {
+        ctxUrl = /^(?:https?|hiker):\/\//i.test(cateRaw)
+          ? cateRaw
+          : `hiker://empty##${cateRaw}`;
+      } else {
+        ctxUrl = r.raw || r.url || '';
+      }
       envParams = { ...r.params, ...envParams };
     }
 

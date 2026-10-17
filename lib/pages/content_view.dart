@@ -20,6 +20,7 @@ import '../reading/pages/home_page.dart' as reading_app;
 import '../music/pages/root_view.dart';
 import '../miniapp/pages/mini_app_list_page.dart';
 import '../hiker/pages/hiker_home_page.dart';
+import '../emby/emby_home_page.dart';
 import '../rss/pages/rss_page.dart';
 import 'settings/view.dart';
 import 'search/view.dart';
@@ -700,6 +701,9 @@ class _ContentViewState extends State<ContentView>
         // 独立于「程序」里的 TVBox 小程序体系；默认不进底栏，
         // 用户在「设置 → 主页页面」里自行开启。
         const HikerHomePage(),
+        // Emby（索引 10）—— 自建媒体库（电影 / 剧集）。
+        // 默认不进底栏，用户在「设置 → 菜单设置」里自行开启。
+        const EmbyHomePage(),
       ];
     }
     return _tabPagesCache!;

@@ -27,6 +27,9 @@ enum NavFeature {
   // 「海阔」模块（海阔视界 hiker/hipy 小程序规则；**独立于** TVBox 小程序体系，
   //  见 lib/hiker/）。同样默认不进底栏，用户在「设置 → 主页页面」里自行开启。
   hiker('hiker', '海阔', false, tabIndex: 9),
+  // 「Emby」媒体库分类（自建 Emby 服务器：电影 / 剧集）。
+  // 默认不进底栏，用户在「设置 → 菜单设置」里自行开启。
+  emby('emby', 'Emby', false, tabIndex: 10),
   shelf('shelf', '史藏', false, tabIndex: 1),
   settings('settings', '设置', true, tabIndex: 3),
   search('search', '搜索', false, tabIndex: 0);
@@ -55,6 +58,7 @@ enum NavFeature {
         NavFeature.apps => Icons.widgets_outlined,
         NavFeature.rss => Icons.rss_feed_outlined,
         NavFeature.hiker => Icons.rocket_launch_outlined,
+        NavFeature.emby => Icons.video_settings_outlined,
         NavFeature.shelf => Icons.schedule_outlined,
         NavFeature.settings => Icons.settings_outlined,
         NavFeature.search => Icons.search,
@@ -69,6 +73,7 @@ enum NavFeature {
         NavFeature.apps => Icons.widgets,
         NavFeature.rss => Icons.rss_feed,
         NavFeature.hiker => Icons.rocket_launch,
+        NavFeature.emby => Icons.video_settings,
         NavFeature.shelf => Icons.schedule,
         NavFeature.settings => Icons.settings,
         NavFeature.search => Icons.search,
@@ -101,6 +106,7 @@ class NavFeatureService extends GetxService {
   static const List<NavFeature> kDefaultOffFeatures = [
     NavFeature.rss,
     NavFeature.hiker,
+    NavFeature.emby,
   ];
 
   /// 启用中的功能（**顺序即底栏顺序**，不含 search —— 搜索是按钮不是 tab）

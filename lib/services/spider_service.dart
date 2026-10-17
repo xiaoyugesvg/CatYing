@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'app_log.dart';
 import 'dio_factory.dart';
+import 'drpy_service.dart';
 import 'nodejs_manager.dart';
 import 'python_manager.dart';
 import 'python_script_sources.dart';
@@ -245,6 +246,22 @@ class SpiderService {
   String _loadedScriptUrl = '';
   String _loadedScriptKey = '';
 
+  /// drpy 标准源：已载入的站点脚本地址（`ext`）。
+  String _loadedDrpyExt = '';
+
+  /// drpy 主源的运行时地址（`api`）——`isScriptLoaded` 用它判断"还是同一个源"。
+  String _mainDrpyApi = '';
+
+  /// drpy 主源的站点规则地址（`ext`）——被顶替后重新载入时要用。
+  String _mainDrpyExt = '';
+
+  /// 同一份 ext 的载入只跑一次（并发请求复用一个 Future）。
+  final Map<String, Future<String?>> _drpyLoadInFlight = {};
+
+  /// 是否是 drpy 标准源（`api=drpy2.min.js` + `ext=站点.js`）。
+  static bool isDrpySource(String api, String ext) =>
+      DrpyService.isDrpySource(api, ext);
+
   /// 本次载入的脚本对应的**候选 key 列表**（按可信度排序，见
   /// [_queryEngineScriptCandidates]）。
   ///
@@ -282,7 +299,17 @@ class SpiderService {
   /// 整表替换后线路全错（表现为"切了源但内容不对"）。
   bool isScriptLoaded(String url) {
     final u = url.trim();
-    return u.isNotEmpty && _loadedScriptUrl == u;
+    if (u.isEmpty) return false;
+    if (_loadedScriptUrl == u) return true;
+    // drpy：槽位里驻留的是"运行时 + 站点规则"，主源登记的是运行时地址。
+    // 还要确认它没被 CatVod 整包源顶替（_loadedScriptUrl 会变）。
+    if (_mainDrpyApi.isNotEmpty &&
+        u == _mainDrpyApi &&
+        _loadedDrpyExt.isNotEmpty &&
+        _loadedScriptUrl == 'drpy::$_loadedDrpyExt') {
+      return true;
+    }
+    return false;
   }
 
   /// 由 `AppState._loadSpiderSource` 在**主源脚本已载入 Node 槽位**之后调用：
@@ -314,9 +341,15 @@ class SpiderService {
   /// 走这条分支只会做两件**便宜**的事：`_ensureNodeScript` 命中"同 url"时
   /// **不会重新 loadSource**，只补问一次 `/config` 拿 key ⇒ 不再有
   /// "切完订阅第一次点击白等一次完整脚本载入"的开销。
-  bool get _needMainScriptRefresh =>
-      mainScriptUrl.isNotEmpty &&
-      (_loadedScriptUrl != mainScriptUrl || _loadedScriptKey.isEmpty);
+  bool get _needMainScriptRefresh {
+    if (mainScriptUrl.isEmpty) return false;
+    // drpy 主源：槽位标记是 `drpy::<ext>`，不是 api 本身
+    if (_mainDrpyApi.isNotEmpty && _mainDrpyApi == mainScriptUrl) {
+      return _loadedScriptUrl != 'drpy::$_loadedDrpyExt' ||
+          _loadedScriptKey.isEmpty;
+    }
+    return _loadedScriptUrl != mainScriptUrl || _loadedScriptKey.isEmpty;
+  }
 
   /// script → Python 模块 key（去 .py 后缀 + py_ 前缀）
   String _pythonModuleKey(String script) {
@@ -567,6 +600,113 @@ class SpiderService {
   ///   源加载失败（与 `AppState._nodeLoadInFlight` 同一类竞态）。
   final Map<String, Future<String?>> _scriptLoadInFlight = {};
 
+  /// 主源加载入口（供 `AppState._loadSpiderSource` 调用）。
+  ///
+  /// drpy 标准源（`api=drpy2.min.js` + `ext=站点.js`）不能直接 loadSource(api)，
+  /// 必须交给 drpy 宿主（运行时会话 + /config + /spider 路由）。
+  Future<(bool, String?)> loadSourceSmart(String api, String ext) async {
+    if (isDrpySource(api, ext)) {
+      _mainDrpyApi = api.trim();
+      _mainDrpyExt = ext;
+      final k = await _ensureDrpyScript(api, ext, fallback: 'drpy');
+      return k == null
+          ? (false, lastError ?? 'drpy 源加载失败')
+          : (true, null);
+    }
+    _mainDrpyApi = '';
+    _mainDrpyExt = '';
+    return NodeJSManager.instance.loadSource(api);
+  }
+
+  /// 确保 drpy 源已载入宿主，返回站点 key。
+  Future<String?> _ensureDrpyScript(
+    String api,
+    String ext, {
+    String fallback = 'drpy',
+    int? type,
+  }) {
+    final extUrl = DrpyService.resolveExt(api, ext);
+    if (extUrl.isEmpty) {
+      lastError = 'drpy 源缺少 ext 站点规则';
+      return Future.value(null);
+    }
+    // 同一份规则仍驻留在 Node 槽位里才复用：
+    // 中途可能被 CatVod 整包源顶替（spiderPort 已指向别的服务）
+    if (_loadedDrpyExt == extUrl &&
+        _loadedScriptUrl == 'drpy::$extUrl' &&
+        _loadedScriptKey.isNotEmpty) {
+      _loadedScriptCandidates = [_loadedScriptKey];
+      return Future.value(_loadedScriptKey);
+    }
+    final playing = _drpyLoadInFlight[extUrl];
+    if (playing != null) {
+      AppLog.instance.log('[SpiderService] drpy 正在载入，复用同一次流程: $extUrl');
+      return playing;
+    }
+    final fut = _ensureDrpyScriptInner(api, extUrl,
+        fallback: fallback, type: type);
+    _drpyLoadInFlight[extUrl] = fut;
+    fut.whenComplete(() {
+      if (identical(_drpyLoadInFlight[extUrl], fut)) {
+        _drpyLoadInFlight.remove(extUrl);
+      }
+    });
+    return fut;
+  }
+
+  Future<String?> _ensureDrpyScriptInner(
+    String api,
+    String extUrl, {
+    String fallback = 'drpy',
+    int? type,
+  }) async {
+    try {
+      if (NodeJSManager.instance.managementPort <= 0) {
+        final ok = await NodeJSManager.instance.startNodeJS();
+        if (!ok) {
+          lastError = 'Node 启动失败，drpy 源无法加载';
+          return null;
+        }
+      }
+      // 管理端口是 Node 异步通知回来的，最多等 10 秒
+      for (var i = 0;
+          i < 50 && NodeJSManager.instance.managementPort <= 0;
+          i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      }
+      if (NodeJSManager.instance.managementPort <= 0) {
+        lastError = 'Node 管理端口未就绪，drpy 源无法加载';
+        return null;
+      }
+      final r = await DrpyService.instance.load(
+        api: api,
+        ext: extUrl,
+        key: fallback,
+      );
+      if (!r.ok) {
+        lastError = r.error ?? 'drpy 源加载失败';
+        AppLog.instance.w('[SpiderService] drpy 载入失败 $extUrl: $lastError');
+        return null;
+      }
+      _loadedDrpyExt = extUrl;
+      _loadedScriptUrl = 'drpy::$extUrl';
+      _loadedScriptKey = r.key;
+      _loadedScriptCandidates = [r.key];
+      // 等 catServerFactory 把 spiderPort 切到**新服务**（旧端口可能还活着）
+      for (var i = 0;
+          i < 50 && r.port > 0 && NodeJSManager.instance.spiderPort != r.port;
+          i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      await NodeJSManager.instance.waitForSpiderPort();
+      AppLog.instance.log('[SpiderService] drpy 已载入 $extUrl（key=${r.key}）');
+      return r.key;
+    } catch (e) {
+      lastError = 'drpy 源加载异常：$e';
+      return null;
+    }
+  }
+
   /// 确保 [script] 已载入 Node 引擎，返回引擎里的**真实站点 key**（去重入口）。
   ///
   /// [type] 只用于"挑候选 key"（站点声明的 type 与本次请求的 type 一致者优先），
@@ -722,6 +862,24 @@ class SpiderService {
       return r;
     }
 
+    // ── drpy 标准源（api=drpy2.min.js + ext=站点.js）────────────
+    // 由 drpy_host.js 提供 /config 与 /spider 路由，这里只负责确保它已载入。
+    if (isDrpySource(api, ext)) {
+      final k = await _ensureDrpyScript(api, ext, fallback: key, type: type);
+      if (k == null) {
+        lastError ??= 'drpy 源加载失败：$ext';
+        return null;
+      }
+      return _postSpiderWithKeyFallback(
+        candidates: [k],
+        primaryKey: k,
+        type: type,
+        api: api,
+        action: action,
+        body: nodeArgs,
+      );
+    }
+
     // ── Node 引擎（JS / 无脚本地址）──────────────────────────
     var engineKey = key;
     // 🔴 2026-10-14 修（猫源 CatVod 切换不顺）：
@@ -772,8 +930,12 @@ class SpiderService {
     } else if (_needMainScriptRefresh) {
       // 主源（单 js spider 配置）：api 由 /config 下发、通常为空或 csp_ 占位。
       // 若期间被程序脚本源顶替过，这里把主源脚本重新载入。
-      final k =
-          await _ensureNodeScript(mainScriptUrl, fallback: key, type: type);
+      // ⚠️ drpy 主源要重新跑 drpy 宿主（api 是运行时，不能当整包脚本载入）。
+      final k = _mainDrpyApi.isNotEmpty
+          ? await _ensureDrpyScript(_mainDrpyApi, _mainDrpyExt,
+              fallback: key, type: type)
+          : await _ensureNodeScript(mainScriptUrl,
+              fallback: key, type: type);
       if (k != null) engineKey = k;
       candidates = List<String>.of(_loadedScriptCandidates);
     }
@@ -871,6 +1033,20 @@ class SpiderService {
     final script = _scriptUrl(api, ext);
     if (script.isNotEmpty && _isPythonScript(script)) return null;
 
+    // drpy 标准源：api 是运行时、ext 是站点规则 ⇒ 交给 drpy 宿主
+    if (isDrpySource(api, ext)) {
+      final k = await _ensureDrpyScript(api, ext, fallback: key, type: type);
+      if (k == null) return null;
+      return _postSpiderWithKeyFallback(
+        candidates: [k],
+        primaryKey: k,
+        type: type,
+        api: api,
+        action: 'init',
+        body: <String, dynamic>{},
+      );
+    }
+
     // key 的解析必须与 [_dispatchScript] **完全一致** —— 聚合配置里的脚本源
     // 配置 key 和引擎自报 key 不是一回事，这里用配置 key 会 init 404、
     // 而后五个接口却能通（init 失败会被调用方 catch 掉，问题很隐蔽）。
@@ -887,8 +1063,11 @@ class SpiderService {
       candidates = List<String>.of(_loadedScriptCandidates);
     } else if (_needMainScriptRefresh) {
       // 与 [_dispatchScript] 同一套判断（见 `_needMainScriptRefresh` 说明）
-      final k =
-          await _ensureNodeScript(mainScriptUrl, fallback: key, type: type);
+      final k = _mainDrpyApi.isNotEmpty
+          ? await _ensureDrpyScript(_mainDrpyApi, _mainDrpyExt,
+              fallback: key, type: type)
+          : await _ensureNodeScript(mainScriptUrl,
+              fallback: key, type: type);
       if (k != null) engineKey = k;
       candidates = List<String>.of(_loadedScriptCandidates);
     }

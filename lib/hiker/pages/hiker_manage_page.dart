@@ -7,8 +7,11 @@ import 'package:flutter/material.dart';
 
 import '../../common/theme.dart';
 import '../../reading/source/global_proxy.dart';
+import '../../services/app_log.dart';
 import '../../widgets/app_toast.dart';
 import '../models/hiker_source.dart';
+import '../services/hiker_builtin.dart';
+import '../services/hiker_files.dart';
 import '../services/hiker_prefs.dart';
 import '../services/hiker_store.dart';
 
@@ -30,6 +33,13 @@ class _HikerManagePageState extends State<HikerManagePage> {
   String _group = ''; // 空 = 全部分组
   bool _usableOnly = false;
 
+  /// 源诊断的输入：随包资源名 + 用户文件区里的文件（相对路径）
+  Set<String> _bundledAssets = const {};
+  Set<String> _importedFiles = const {};
+
+  /// 诊断结果缓存（key = 源 id）——列表重建时不重复扫规则文本
+  final Map<String, List<HikerSourceDiagnosis>> _diagCache = {};
+
   @override
   void initState() {
     super.initState();
@@ -39,6 +49,25 @@ class _HikerManagePageState extends State<HikerManagePage> {
       _store.load().then((_) {
         if (mounted) setState(() {});
       });
+    }
+    _loadDiagnosisInputs();
+  }
+
+  /// 诊断要用的两份清单（随包资源 / 文件区）。
+  /// 读失败就保持空集合：宁可少标，也不误报「缺文件」。
+  Future<void> _loadDiagnosisInputs() async {
+    try {
+      final assets = await HikerBuiltin.assetNames();
+      final files = await HikerFiles.list();
+      if (!mounted) return;
+      setState(() {
+        _bundledAssets = assets.toSet();
+        _importedFiles =
+            files.map((e) => e.path.replaceAll('\\', '/')).toSet();
+        _diagCache.clear();
+      });
+    } catch (e) {
+      AppLog.instance.log('[Hiker] 载入诊断清单失败: $e');
     }
   }
 
@@ -50,6 +79,8 @@ class _HikerManagePageState extends State<HikerManagePage> {
   }
 
   void _onChanged() {
+    // 源 / 配置变了 ⇒ 诊断结果作废（"需填配置"要跟着消失）
+    _diagCache.clear();
     if (mounted) setState(() {});
   }
 
@@ -499,10 +530,20 @@ class _HikerManagePageState extends State<HikerManagePage> {
     );
   }
 
+  /// 这个源的诊断结果（带缓存；配置/文件清单变化时由 [_onChanged] 清掉）
+  List<HikerSourceDiagnosis> _diagOf(HikerSource s) => _diagCache.putIfAbsent(
+        s.id,
+        () => s.diagnose(
+          bundledAssets: _bundledAssets,
+          importedFiles: _importedFiles,
+          config: _store.configOf(s.id),
+        ),
+      );
+
   Widget _sourceCard(HikerSource s) {
     final isCurrent = _store.currentId == s.id;
-    final usable = s.usable;
     final hasCfg = _store.configOf(s.id).isNotEmpty;
+    final issues = _diagOf(s);
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
@@ -543,9 +584,6 @@ class _HikerManagePageState extends State<HikerManagePage> {
                       if (hasCfg) ...[
                         const SizedBox(width: 4),
                         _tag('已配置', AppTheme.backgroundTertiary, AppTheme.textSecondary),
-                      ] else if (s.needsConfig) ...[
-                        const SizedBox(width: 4),
-                        _tag('需配置', AppTheme.backgroundTertiary, Colors.orange.shade400),
                       ],
                     ],
                   ),
@@ -559,13 +597,7 @@ class _HikerManagePageState extends State<HikerManagePage> {
                     style: TextStyle(
                         color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption),
                   ),
-                  if (!usable) ...[
-                    const SizedBox(height: 4),
-                    Text(s.unusableReason,
-                        style: TextStyle(
-                            color: Colors.orange.shade400,
-                            fontSize: AppTheme.fontCaption)),
-                  ],
+                  _diagTags(s, issues),
                 ],
               ),
             ),
@@ -584,6 +616,98 @@ class _HikerManagePageState extends State<HikerManagePage> {
             tooltip: '删除',
             onPressed: () => _store.remove(s.id),
             icon: Icon(Icons.close_rounded, size: 18, color: AppTheme.textTertiary),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 诊断标签行：直接标出「缺 Apollo / 缺 lazy / 缺文件 / 需填配置」…
+  /// 点标签看具体说明与补法（不再等点进源才看到一句报错）。
+  Widget _diagTags(HikerSource s, List<HikerSourceDiagnosis> issues) {
+    if (issues.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 7),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 5,
+        children: [
+          for (final d in issues)
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _showDiagnosis(s, d),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: d.blocking
+                      ? Colors.orange.withValues(alpha: 0.14)
+                      : AppTheme.backgroundTertiary,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      d.blocking
+                          ? Icons.error_outline_rounded
+                          : Icons.info_outline_rounded,
+                      size: 11,
+                      color: d.blocking
+                          ? Colors.orange.shade400
+                          : AppTheme.textSecondary,
+                    ),
+                    const SizedBox(width: 3),
+                    Text(d.label,
+                        style: TextStyle(
+                            color: d.blocking
+                                ? Colors.orange.shade400
+                                : AppTheme.textSecondary,
+                            fontSize: AppTheme.fontCaption)),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 诊断详情：说明缺什么、去哪儿补
+  void _showDiagnosis(HikerSource s, HikerSourceDiagnosis d) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundCard,
+        title: Row(
+          children: [
+            Icon(
+              d.blocking ? Icons.error_outline_rounded : Icons.info_outline_rounded,
+              size: 18,
+              color: d.blocking ? Colors.orange.shade400 : AppTheme.textSecondary,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('${d.label} · ${s.title}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: AppTheme.fontHeadline)),
+            ),
+          ],
+        ),
+        content: Text(
+          d.detail,
+          style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: AppTheme.fontSubhead,
+              height: 1.6),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text('知道了',
+                style: TextStyle(color: AppTheme.accentOnSurface)),
           ),
         ],
       ),

@@ -148,6 +148,21 @@ class DownloadTask {
   };
 }
 
+/// 本地漫画导入时传入的章节（图片已按 DownloadService 的目录结构落盘）。
+class LocalComicChapterInput {
+  const LocalComicChapterInput({
+    required this.id,
+    required this.name,
+    required this.order,
+    required this.imageCount,
+  });
+
+  final String id;
+  final String name;
+  final int order;
+  final int imageCount;
+}
+
 /// 下载服务（队列 + 两级并发 + 本地持久化）
 /// 单例 + ChangeNotifier，UI 用 ListenableBuilder 监听变化。
 /// 下载批次（运行时，不持久化）：追踪一次 downloadChapters 调用所选章节的完成情况。
@@ -411,6 +426,100 @@ class DownloadService extends ChangeNotifier {
       await dir.create(recursive: true);
     }
     return dir;
+  }
+
+  /// 本地漫画导入用：拿到与离线阅读完全一致的章节目录（自动创建）。
+  ///
+  /// 导入器把图片写进这里后，[getLocalImages] / 书架离线阅读 / 下载记录页
+  /// 都会把这本漫画当成"已下载"，无需改动 ReaderPage。
+  Future<Directory> prepareLocalComicChapterDir(
+    String pathWord,
+    String title,
+    String chapterId,
+  ) =>
+      _chapterDir(pathWord, title, chapterId);
+
+  /// 整本漫画的下载目录（不存在返回 null）。导出（ZIP）用。
+  Future<Directory?> comicDownloadDir(String pathWord, String title) async {
+    try {
+      final base = await SettingsService.downloadBaseDir();
+      for (final folder in {_comicDirName(pathWord, title), pathWord}) {
+        final dir = Directory('${base.path}/Comics/$folder');
+        if (await dir.exists()) return dir;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// 单章下载目录（不存在返回 null）。导出单话（ZIP）用。
+  Future<Directory?> chapterDownloadDir(
+    String pathWord,
+    String title,
+    String chapterId,
+  ) async {
+    try {
+      final base = await SettingsService.downloadBaseDir();
+      for (final folder in {_comicDirName(pathWord, title), pathWord}) {
+        final dir = Directory(
+          '${base.path}/Comics/$folder/${_sanitizeChapterId(chapterId)}',
+        );
+        if (await dir.exists()) return dir;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// 注册一本本地导入漫画：写入完成态任务 + 加入「本地漫画」书架。
+  ///
+  /// 任务里 `sourceId = 'local'`，不会参与网络下载调度；`status = completed`
+  /// 让现有离线阅读链路（isChapterDownloaded / downloadedChapters）直接可用。
+  Future<void> registerLocalComic({
+    required String pathWord,
+    required String title,
+    required String cover,
+    required List<LocalComicChapterInput> chapters,
+  }) async {
+    if (chapters.isEmpty) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    for (final c in chapters) {
+      final key = 'local/$pathWord/${c.id}';
+      _tasks[key] = DownloadTask(
+        key: key,
+        sourceId: 'local',
+        comicPathWord: pathWord,
+        comicTitle: title,
+        comicCover: cover,
+        totalChapters: chapters.length,
+        chapterId: c.id,
+        chapterTitle: c.name,
+        chapterOrder: c.order,
+        status: DownloadStatus.completed,
+        progress: 1,
+        totalImages: c.imageCount,
+        downloadedImages: c.imageCount,
+        downloadedAt: now,
+      );
+      _downloaded.putIfAbsent(pathWord, () => <String>{}).add(c.id);
+    }
+    await _persist();
+    notifyListeners();
+
+    final comic = Comic(
+      id: pathWord,
+      title: title,
+      cover: cover,
+      pathWord: pathWord,
+      sourceId: 'local',
+      totalChapters: chapters.length,
+    );
+    await BookshelfService().ensureLocalComicShelf();
+    await BookshelfService().addToBookshelf(
+      BookshelfService.presetLocalComic,
+      pathWord,
+      BookshelfItemType.comic,
+      meta: jsonEncode(comic.toJson()),
+    );
+    _log('本地漫画已入库: $title（${chapters.length} 章）');
   }
 
   /// 读取本地图片路径列表（阅读页离线读）；未下载或无文件返回空。

@@ -231,3 +231,244 @@ import UIKit
         }
     }
 }
+
+// =============================================================================
+// TtsNowPlaying —— 听书（TTS）的锁屏 / 控制中心控制
+// -----------------------------------------------------------------------------
+// 与上面的 MusicNowPlaying 同款做法（系统公开 API，不新增三方依赖）：
+//   ① MPNowPlayingInfoCenter —— 锁屏显示书名、章节、播放/暂停
+//   ② MPRemoteCommandCenter  —— 播放 / 暂停 / 上一句 / 下一句 / 停止
+//
+// ⚠️ 为什么**写在同一个文件里**而不是新建 Swift 文件：
+//   本项目是 TrollStore 侧载，新增 Swift 源文件必须改 Xcode 工程（pbxproj）
+//   才会被编译；写进已编译的文件里可以零工程改动上线。
+//
+// ⚠️ 与音乐共用系统级 MPRemoteCommandCenter：
+//   本类只在 activate() 注册自己的 target，deactivate() 只移除**自己**的
+//   target（保存 addTarget 返回的 token，不用 removeTarget(nil)，避免误删
+//   音乐的 handler）。若音乐与听书同时活跃，系统按键会同时送达两边 —— 已知边界。
+// =============================================================================
+
+@objc class TtsNowPlaying: NSObject {
+
+    @objc static let shared = TtsNowPlaying()
+
+    private static let channelName = "tvbox/tts_now_playing"
+
+    private var channel: FlutterMethodChannel?
+    private var active = false
+
+    /// addTarget 返回的 token；deactivate 时只移除这些
+    private var targets: [(MPRemoteCommand, Any)] = []
+
+    @objc func register(messenger: FlutterBinaryMessenger) {
+        let ch = FlutterMethodChannel(name: Self.channelName, binaryMessenger: messenger)
+        ch.setMethodCallHandler { [weak self] call, result in
+            self?.handle(call, result: result)
+        }
+        channel = ch
+        NSLog("[TtsNowPlaying] registered (channel=\(Self.channelName))")
+    }
+
+    private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        let args = call.arguments as? [String: Any] ?? [:]
+        switch call.method {
+        case "activate":
+            activate()
+            result(nil)
+        case "deactivate":
+            deactivate()
+            result(nil)
+        case "update":
+            update(args)
+            result(nil)
+        case "setPlaying":
+            setPlaying(args["playing"] as? Bool ?? false)
+            result(nil)
+        case "clear":
+            clear()
+            result(nil)
+        default:
+            result(FlutterMethodNotImplemented)
+        }
+    }
+
+    // MARK: - 元数据
+
+    private func update(_ args: [String: Any]) {
+        var info: [String: Any] = [:]
+        if let title = args["title"] as? String, !title.isEmpty {
+            info[MPMediaItemPropertyTitle] = title
+        }
+        if let subtitle = args["subtitle"] as? String, !subtitle.isEmpty {
+            info[MPMediaItemPropertyArtist] = subtitle
+        }
+        if let duration = args["duration"] as? Int, duration > 0 {
+            info[MPMediaItemPropertyPlaybackDuration] = Double(duration)
+        }
+        if let position = args["position"] as? Int, position >= 0 {
+            info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = Double(position)
+        }
+        let playing = args["playing"] as? Bool ?? false
+        info[MPNowPlayingInfoPropertyPlaybackRate] = playing ? 1.0 : 0.0
+        info[MPMediaItemPropertyMediaType] = MPMediaType.audioBook.rawValue
+
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        setPlaying(playing)
+    }
+
+    private func setPlaying(_ playing: Bool) {
+        let center = MPNowPlayingInfoCenter.default()
+        if var info = center.nowPlayingInfo {
+            info[MPNowPlayingInfoPropertyPlaybackRate] = playing ? 1.0 : 0.0
+            center.nowPlayingInfo = info
+        }
+        if #available(iOS 13.0, *) {
+            center.playbackState = playing ? .playing : .paused
+        }
+    }
+
+    private func clear() {
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        if #available(iOS 13.0, *) {
+            MPNowPlayingInfoCenter.default().playbackState = .stopped
+        }
+    }
+
+    // MARK: - 远程命令
+
+    private func activate() {
+        guard !active else { return }
+        active = true
+        registerCommands()
+    }
+
+    private func deactivate() {
+        guard active else { return }
+        active = false
+        for (cmd, token) in targets {
+            cmd.removeTarget(token)
+        }
+        targets.removeAll()
+        clear()
+        NSLog("[TtsNowPlaying] deactivated")
+    }
+
+    private func registerCommands() {
+        let c = MPRemoteCommandCenter.shared()
+
+        c.playCommand.isEnabled = true
+        append(c.playCommand, c.playCommand.addTarget { [weak self] _ in
+            self?.send("play")
+            return .success
+        })
+
+        c.pauseCommand.isEnabled = true
+        append(c.pauseCommand, c.pauseCommand.addTarget { [weak self] _ in
+            self?.send("pause")
+            return .success
+        })
+
+        c.togglePlayPauseCommand.isEnabled = true
+        append(c.togglePlayPauseCommand, c.togglePlayPauseCommand.addTarget { [weak self] _ in
+            self?.send("toggle")
+            return .success
+        })
+
+        c.nextTrackCommand.isEnabled = true
+        append(c.nextTrackCommand, c.nextTrackCommand.addTarget { [weak self] _ in
+            self?.send("next")
+            return .success
+        })
+
+        c.previousTrackCommand.isEnabled = true
+        append(c.previousTrackCommand, c.previousTrackCommand.addTarget { [weak self] _ in
+            self?.send("previous")
+            return .success
+        })
+
+        c.stopCommand.isEnabled = true
+        append(c.stopCommand, c.stopCommand.addTarget { [weak self] _ in
+            self?.send("stop")
+            return .success
+        })
+
+        NSLog("[TtsNowPlaying] remote commands registered")
+    }
+
+    private func append(_ cmd: MPRemoteCommand, _ token: Any) {
+        targets.append((cmd, token))
+    }
+
+    private func send(_ action: String) {
+        NSLog("[TtsNowPlaying] remote → \(action)")
+        DispatchQueue.main.async { [weak self] in
+            self?.channel?.invokeMethod("remote", arguments: ["action": action])
+        }
+    }
+}
+
+// MARK: - 文件导出（系统分享面板）
+
+/// 把已下载到沙盒的文件交给 iOS 系统分享面板（存到「文件」/ AirDrop / 其他 App）。
+///
+/// ⚠️ 故意写进**已编译**的 `MusicNowPlaying.swift`，而不是新建 Swift 文件：
+///    TrollStore 侧载工程不跑 `pod install`，新增 Swift 文件必须改 `project.pbxproj`
+///    才会参与编译；写进既有文件可零工程改动生效（与 `TtsNowPlaying` 同款原因）。
+@objc class FileExport: NSObject {
+    @objc static let shared = FileExport()
+
+    private static let channelName = "tvbox/file_export"
+    private var channel: FlutterMethodChannel?
+
+    @objc func register(messenger: FlutterBinaryMessenger) {
+        let ch = FlutterMethodChannel(name: Self.channelName, binaryMessenger: messenger)
+        ch.setMethodCallHandler { [weak self] call, result in
+            guard call.method == "share" else {
+                result(FlutterMethodNotImplemented)
+                return
+            }
+            let args = call.arguments as? [String: Any] ?? [:]
+            let paths = (args["paths"] as? [String]) ?? []
+            self?.share(paths: paths, result: result)
+        }
+        channel = ch
+        NSLog("[FileExport] registered (channel=\(Self.channelName))")
+    }
+
+    private func share(paths: [String], result: @escaping FlutterResult) {
+        let urls = paths
+            .filter { FileManager.default.fileExists(atPath: $0) }
+            .map { URL(fileURLWithPath: $0) }
+        guard !urls.isEmpty else {
+            result(false)
+            return
+        }
+        DispatchQueue.main.async {
+            guard let root = UIApplication.shared.windows.first(where: { $0.isKeyWindow })?.rootViewController else {
+                result(false)
+                return
+            }
+            // 找到栈顶控制器（可能正开着 Flutter 弹窗）
+            var top = root
+            while let presented = top.presentedViewController {
+                top = presented
+            }
+            let vc = UIActivityViewController(activityItems: urls, applicationActivities: nil)
+            // iPad 必须给 popover 锚点，否则直接崩
+            if let pop = vc.popoverPresentationController {
+                pop.sourceView = top.view
+                pop.sourceRect = CGRect(
+                    x: top.view.bounds.midX,
+                    y: top.view.bounds.midY,
+                    width: 0,
+                    height: 0
+                )
+                pop.permittedArrowDirections = []
+            }
+            top.present(vc, animated: true) {
+                result(true)
+            }
+        }
+    }
+}

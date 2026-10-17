@@ -2,16 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../../../common/theme.dart';
+import '../../../models/source_bean.dart';
 import '../../../models/subscription.dart';
 import '../../../services/api_config.dart';
 import '../../../services/source_kind.dart';
 import '../../../rss/services/rss_store.dart';
 import '../../../rss/pages/rss_manage_page.dart';
 import '../../subscription/view.dart';
+import '../../subscription/moontv_converter_page.dart';
 import '../../../widgets/common_widgets.dart';
 import '../../../widgets/source_kind_badge.dart';
 import '../controller.dart';
 import 'engine_settings_page.dart';
+import 'local_python_sources_page.dart';
 import 'parse_settings_page.dart';
 import 'settings_shared.dart';
 
@@ -53,6 +56,13 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
                 onTap: () => Get.to(() => const SubscriptionPage()),
               );
             }),
+            // 影视仓转换器：MoonTV / LunaTV 的 video.json → TVBox 站点
+            SettingsRow(
+              icon: Icons.swap_horiz_rounded,
+              title: '影视仓转换器',
+              value: 'MoonTV video.json',
+              onTap: () => Get.to(() => const MoonTvConverterPage()),
+            ),
           ],
         ),
         // 分组之间留出一整段空白：SettingsGroup 自身只在**有 title 时**加 10+6px 内边距，
@@ -81,6 +91,19 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
                 title: '主页数据源',
                 value: ApiConfig.instance.homeSourceBean.value?.name ?? '未选择',
                 onTap: _showSourcePicker,
+              ),
+            ),
+            // 本地 Python 源（用户 2026-10-17）：单独导入 .py、单独成组、可删可改；
+            // 不写进订阅 sites，切订阅也不丢。
+            Obx(
+              () => SettingsRow(
+                icon: Icons.terminal_rounded,
+                title: '本地 Python 源',
+                value: '${ApiConfig.instance.localVideoSources.length} 个',
+                onTap: () async {
+                  await Get.to(() => const LocalPythonSourcesPage());
+                  if (mounted) setState(() {});
+                },
               ),
             ),
             // 解析线路管理（用户 2026-10-14）：从订阅拉到的解析线路会**落盘**，
@@ -402,7 +425,11 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
   // ============================================================
 
   void _showSourcePicker() {
-    final sources = ApiConfig.instance.sourceBeanList;
+    // 本地 Python 源单独成组，但这里也一并列出（置顶），方便直接切主页源
+    final sources = <SourceBean>[
+      ...ApiConfig.instance.localVideoSources,
+      ...ApiConfig.instance.sourceBeanList,
+    ];
     if (sources.isEmpty) {
       _showApiEditDialog();
       return;

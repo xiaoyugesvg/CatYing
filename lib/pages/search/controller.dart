@@ -209,7 +209,7 @@ class TvSearchController extends GetxController {
     String? best;
     var bestCount = 0;
     for (final e in resultCount.entries) {
-      final n = e.value ?? 0;
+      final n = e.value;
       if (n > bestCount) {
         bestCount = n;
         best = e.key;

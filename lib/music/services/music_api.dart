@@ -1,8 +1,6 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:dio/dio.dart';
-import 'package:dio/io.dart' show IOHttpClientAdapter;
 import 'package:flutter/foundation.dart';
 
 import '../../services/nodejs_manager.dart';
@@ -709,7 +707,6 @@ class MusicApi {
     // 单集列表（每页 200，自动翻页聚合）
     final songs = <Song>[];
     var page = 1;
-    var total = 0;
     while (page <= 20) {
       final unitsUrl = _bkUrl(_bkApiHost, '/voice/album/units', {
         'album_id': albumId,
@@ -733,7 +730,7 @@ class MusicApi {
         if (albumName.isEmpty) {
           albumName = (m['album_title'] ?? '').toString().trim();
         }
-        if (coverUrl == null || coverUrl!.isEmpty) {
+        if (coverUrl == null || coverUrl.isEmpty) {
           final c = (m['cover'] ?? '').toString().trim();
           if (c.isNotEmpty) coverUrl = c;
         }
@@ -748,8 +745,6 @@ class MusicApi {
           directHeaders: const {'User-Agent': _bkUa},
         ));
       }
-      final rawTotal = data is Map ? data['total'] : null;
-      total = int.tryParse('$rawTotal') ?? 0;
       if (list.length < 200) break;
       page++;
     }
@@ -867,7 +862,7 @@ class MusicApi {
       ));
 
   static String _t15Abs(String value) {
-    final u = (value ?? '').toString().trim();
+    final u = value.trim();
     if (u.isEmpty) return '';
     try {
       return RegExp(r'^https?://', caseSensitive: false).hasMatch(u)
@@ -879,7 +874,7 @@ class MusicApi {
   }
 
   static String _t15Clean(String value) {
-    final s = (value ?? '').toString()
+    final s = value
         .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
         .replaceAll(RegExp(r'<[^>]+>'), '');
     return s
@@ -920,7 +915,7 @@ class MusicApi {
     final out = <Song>[];
     final seen = <String>{};
     final reLi = RegExp(r'<li[\s\S]*?</li>', caseSensitive: false);
-    for (final li in reLi.allMatches(html ?? '')) {
+    for (final li in reLi.allMatches(html)) {
       final block = li.group(0)!;
       final aM = RegExp(
               r'''<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)</a>''',

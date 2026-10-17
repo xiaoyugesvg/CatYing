@@ -20,7 +20,13 @@ import 'hiker_store.dart';
 /// 回归记录：45/45 有首页内容。
 ///
 /// 2026-10-16 分三批下架了 31 个（成人导航 / 论坛 / 工具 / 实测「分类内容·搜索·详情·地址」
-/// 拿不出东西的）⇒ 现在 **14 个**；已经装过老版本的用户由 [kRetiredIds] 清掉，见 [removeRetired]。
+/// 拿不出东西的）⇒ 当时 **14 个**；已经装过老版本的用户由 [kRetiredIds] 清掉，见 [removeRetired]。
+///
+/// 2026-10-17 再次用同一份 114 源的导出逐个实跑 `home`：引擎补齐 `prerule` /
+/// `initConfig` / `MY_URL` 原文 / `putVar2` 等能力后，能出首页内容的从 50 涨到 **67**。
+/// 其中 27 个此前已在清单里，另外 23 个新增 ⇒ 现在 **57 个**。
+/// ⚠️ 这批新增的只过了「首页有内容」这一关，没做上面的五项能力审核。
+/// （曾一度把 [kRetiredIds] 里那 17 个也恢复进来，用户明确不要「潮流私密屋」这类源，已撤回。）
 ///
 /// 口径说明：**「首页能出内容」不算数**。按「首页 / 分类内容 / 搜索 / 详情页 / 地址」
 /// 逐项真跑审核（`assets/nodejs-project/scratch/_audit_caps.mjs`），保留 ≥3 分的；
@@ -55,34 +61,21 @@ class HikerBuiltin {
     '吾爱破解\u{1D525}\u0001Hood',
     // 2026-10-16 第二批：用户实测点进去拿不到内容
     '破解APP\u0001小棉袄🌞&永远の明日',
-    '某聚合\u0001none',
     '模板·Q\u0001发粪涂墙',
-    'JavDB v5\u0001天空 / ChatGPT',
-    'JavDB v3\u0001天空 / ChatGPT',
     '仙帝美图乐\u0001仙仙帝',
     '发哥专属\u0001发哥',
     '星集Media\u0001不知道叫啥好',
     '比价.拒绝套路\u0001小棉袄🌞',
     '色情导航\u0001Xiaohuihui',
-    '一个APP\u0001zhao',
     '集芳阁云搜\u0001',
     '聚涩吧\u0001',
     // 2026-10-16 第三批（宽松口径：实测「首页/分类内容/搜索/详情/地址」≤2 分的）
-    '𝟕𝐌𝐌𝐓𝐕\u0001R',
-    'AnySex\u0001KFC',
     '黄色仓库123\u0001FenMei',
-    '𝐗𝐎𝐉𝐚𝐯\u0001R',
-    '良家视频\u0001zz',
     '大哥视频\u0001JiaYQAQ',
     '绿帽社\u0001KFC',
     '✨魔曰✨\u0001Aries',
-    'AVbebe\u0001Minis',
     '漫小肆\u0001Sky&Guang',
-    '萝莉聚合AV\u0001西米露',
-    '91成人短剧\u0001KFC',
-    'XiuRen秀人网\u0001xiao&ai',
     '新吾爱吃瓜网\u0001集&Aries',
-    '𝐉𝐌𝐂𝐨𝐦𝐢𝐜𝟐本地\u0001流苏',
   ];
 
   /// 清掉 [kRetiredIds] 里列出的源（幂等；不在仓库里的直接跳过）
@@ -111,11 +104,29 @@ class HikerBuiltin {
   /// assets** 里，我们这边落地成真实文件（见 [installAssets]）。
   static const String kFilesAsset = 'assets/hiker/files/';
 
+  /// 随包的**远程 require 预置缓存**（文件名 = 源 URL 的 md5，与引擎
+  /// `requireRemoteJs` 的缓存命名完全一致）。
+  ///
+  /// 来源：海阔真实数据目录的 `libs/`（用户 2026-10-17 提供）。
+  /// 这三份是 mistywater/hiker 与 TTImika/hikerF 的公共脚本库 `f`
+  /// 以及一个 ghproxy 地址模块；大量源 `$.require('https://…/f')` 依赖它们，
+  /// 预置后首次运行/断网也能跑，不必先联网下载。
+  static const String kLibsAsset = 'assets/hiker/libs/';
+
+  static const List<String> kLibsFallback = [
+    'bf28604c9bb18ed13508828e47c86074.js',
+    '64c0dd017f760e1de685e19c79ce6b2b.js',
+    '518cf6e05a14ae6e483012118e3910be.js',
+  ];
+
   /// [kFilesAsset] 的兜底清单（枚举 asset 失败时用；正常走 `AssetManifest`）
   static const List<String> kFilesFallback = [
     'home.js',
     'home.json',
     'homeSubView.json',
+    // 「我的主页」模板（assets/home.js）依赖的本地配置；源自用户导出的
+    // 海阔数据目录 `rules/js/NewPlanConfigFile.js`（内容就是 JSON）。
+    'NewPlanConfigFile.json',
     'inject.js',
     'Hikerurl.js',
     'empty.js',
@@ -190,10 +201,17 @@ class HikerBuiltin {
     }
   }
 
-  /// 内置清单指纹：条数 + 全部 id（标题+作者）的有序 hash。
+  /// 内置清单指纹：条数 + 每个源的 **id + 规则内容** 的有序 hash。
+  ///
+  /// ⚠️ 必须把规则正文也算进去（2026-10-17）：只算 id 的话，改了内置源的规则
+  /// （例如 XO 改成自动取流）指纹不变 ⇒ [installIfNeeded] 直接早退，
+  /// 老用户的仓库里永远还是旧规则，等于白改。
   /// 用确定性折叠而不是 `String.hashCode`（后者不保证跨进程稳定）。
   static String _fingerprint(List<HikerSource> list) {
-    final ids = list.map((s) => s.id).toList()..sort();
+    final ids = list
+        .map((s) => '${s.id}\u0002${s.findRule}\u0002${s.detailFindRule}')
+        .toList()
+      ..sort();
     var h = 17;
     for (final c in ids.join('\u0001').codeUnits) {
       h = (h * 31 + c) & 0x7fffffff;
@@ -228,7 +246,7 @@ class HikerBuiltin {
       if (root == null) return 0;
       final dir = Directory('${root.path}/builtin');
       if (!await dir.exists()) await dir.create(recursive: true);
-      for (final name in await _assetNames()) {
+      for (final name in await assetNames()) {
         try {
           final data = await rootBundle.load('$kFilesAsset$name');
           final bytes = data.buffer
@@ -250,6 +268,69 @@ class HikerBuiltin {
     return n;
   }
 
+  /// 把随包的远程 require 预置缓存铺到 `<Documents>/hiker/files/libs/`。
+  ///
+  /// 引擎的 `rc()/requireCache()` 缓存键就是「URL 的 md5 + .js」，
+  /// 与这里的文件名完全一致；TTL 按 **mtime** 算（默认 24h），
+  /// 所以每次进模块都刷新一下 mtime，避免隔天断网时缓存被判过期。
+  ///
+  /// 幂等：内容大小一致就只 touch；升级换包后大小变了会覆盖。
+  static Future<int> installRequireLibs({bool force = false}) async {
+    var n = 0;
+    try {
+      final root = await filesDir();
+      if (root.isEmpty) return 0;
+      final dir = Directory('$root/libs');
+      if (!await dir.exists()) await dir.create(recursive: true);
+      for (final name in await libAssetNames()) {
+        // 只接受 md5.js，防目录里混进别的东西被当成缓存
+        if (!RegExp(r'^[0-9a-f]{32}\.js$').hasMatch(name)) continue;
+        try {
+          final data = await rootBundle.load('$kLibsAsset$name');
+          final bytes = data.buffer
+              .asUint8List(data.offsetInBytes, data.lengthInBytes);
+          final f = File('${dir.path}/$name');
+          final same = !force &&
+              await f.exists() &&
+              await f.length() == bytes.length;
+          if (!same) {
+            await f.writeAsBytes(bytes, flush: true);
+            n++;
+          }
+          // 刷新 TTL（rc() 看 mtime）
+          try {
+            await f.setLastModified(DateTime.now());
+          } catch (_) {/* 个别文件系统不支持，忽略 */}
+        } catch (e) {
+          AppLog.instance.log('[Hiker] 释放预置 require 缓存 $name 失败: $e');
+        }
+      }
+      if (n > 0) {
+        AppLog.instance.log('[Hiker] 已释放预置 require 缓存 $n 个 → ${dir.path}');
+      }
+    } catch (e) {
+      AppLog.instance.log('[Hiker] 释放预置 require 缓存失败: $e');
+    }
+    return n;
+  }
+
+  /// 枚举 [kLibsAsset] 下的文件名（AssetManifest 不可用时退回内置清单）
+  static Future<List<String>> libAssetNames() async {
+    try {
+      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      final names = manifest
+          .listAssets()
+          .where((k) => k.startsWith(kLibsAsset))
+          .map((k) => k.substring(kLibsAsset.length))
+          .where((n) => n.isNotEmpty && !n.contains('/'))
+          .toList();
+      if (names.isNotEmpty) return names;
+    } catch (e) {
+      AppLog.instance.log('[Hiker] 枚举预置 require 缓存失败，退回内置清单: $e');
+    }
+    return kLibsFallback;
+  }
+
   /// `hiker://assets/*` 的**落地目录**（Node 侧 `assetsDir`）
   static Future<String> assetsDir() async {
     final root = await HikerStore.rootDir();
@@ -265,7 +346,9 @@ class HikerBuiltin {
   /// 枚举 [kFilesAsset] 下的文件名。
   /// 走 [AssetManifest] 自动列举（以后往目录里加文件不用改代码），
   /// 该 API 不可用/被裁剪时退回 [kFilesFallback]。
-  static Future<List<String>> _assetNames() async {
+  ///
+  /// 公开给「源诊断」用：规则里 `hiker://assets/x.js` 能命中的就不算缺。
+  static Future<List<String>> assetNames() async {
     try {
       final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
       final names = manifest

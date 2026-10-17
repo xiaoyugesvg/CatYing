@@ -500,8 +500,18 @@ class RssReader {
     };
     final raw = source.header.trim();
     if (raw.isEmpty) return h;
+    // Legado 同款：`header` 可以是 JSON 字符串，也可以是 `@js:` 动态求值
+    // （返回 JSON 字符串）。yckceo / 影视聚合这类源的 header 全是 `@js:`，
+    // 不执行就只剩默认 UA ⇒ 源站缺签名/UA 直接拒（表现 DioException unknown）。
+    var jsonStr = raw;
+    if (raw.startsWith('@js:')) {
+      try {
+        final evaluated = _ruleFor(source, '', source.url).getString(raw).trim();
+        if (evaluated.isNotEmpty) jsonStr = evaluated;
+      } catch (_) {/* 求值失败就用原值（大概率也解不出 JSON，等于没 header）*/}
+    }
     try {
-      final d = jsonDecode(raw);
+      final d = jsonDecode(jsonStr);
       if (d is Map) {
         d.forEach((k, v) => h['$k'] = '$v');
       }

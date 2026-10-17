@@ -61,7 +61,12 @@ class SniffFilter {
   ///   2. 必须带**当前生效清单**里的影视后缀（用户可自定义，见 [mediaExtensions]）；
   ///   3. 黑名单关键词（小写子串）命中 → 丢弃（切片广告多为 /ads/、/ad/ 等）；
   ///   4. 白名单非空时，必须命中白名单关键词之一。
-  static bool acceptSniffUrl(String raw) {
+  ///
+  /// [mediaVerified]：地址**没有**影视后缀、但已经由服务端 `Content-Type`
+  /// 确认是视频/音频/播放列表（见 `WebSniffService.looksLikeMediaByMime`）。
+  /// 这类扩展名被藏起来的直链（`/play?id=…`、`/stream/abc`）很常见，
+  /// 只靠后缀会全部漏掉；已验证过就跳过第 2 步，但**黑/白名单照旧生效**。
+  static bool acceptSniffUrl(String raw, {bool mediaVerified = false}) {
     final url = raw.trim();
     if (url.isEmpty) return false;
     final lower = url.toLowerCase();
@@ -69,7 +74,7 @@ class SniffFilter {
       return false;
     }
     // 只要影视直链（用户明确要求；后缀清单用户可自定义）
-    if (!isDirectMedia(url)) return false;
+    if (!mediaVerified && !isDirectMedia(url)) return false;
 
     final prefs = PlayerPrefs.instance;
     for (final kw in prefs.sniffBlacklist) {

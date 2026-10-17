@@ -9,6 +9,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../../common/theme.dart';
 import '../../services/ad_block_service.dart';
 import '../../services/app_log.dart';
+import '../../services/nodejs_manager.dart';
 import '../../services/webview_page_color.dart';
 import '../../widgets/ad_block_bubble.dart';
 import '../services/ant_bridge.dart';
@@ -43,6 +44,19 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
   late final WebViewController _controller;
   int _loadingProgress = 0;
   String _entry = 'index.html';
+
+  /// manifest.json 的 `node` 字段（`server/index.js` 型小程序的后端）
+  String _nodeEntry = '';
+  String _nodeConfig = 'server/index.config.js';
+
+  /// manifest 是否声明了 `node` 权限（没声明就不拉起后端，避免越权）
+  bool _nodeAllowed = false;
+
+  /// 本次打开是否真的把这个小程序的后端拉起来了（dispose 时据此停止）
+  bool _nodeStarted = false;
+
+  /// 本页自己的 appId（`AntBridge.appId` 是全局的，别的页面会覆盖它）
+  String _ownerAppId = '';
 
   /// 当前网页的**主色**（meta theme-color → body/html 背景色）。
   /// 用来把**状态栏那一条**刷成和网页一样的颜色（用户 2026-10-14 要求：
@@ -104,7 +118,40 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
 
   Future<void> _loadManifestThenEntry() async {
     await _initManifest();
+    // 先拉起小程序自带的 Node 后端，再加载页面 —— 页面脚本一进来就会
+    // `ant.resolveService(...)`（LX音乐等），晚一步就会拿到 SERVICE_NOT_FOUND。
+    await _startNodeService();
     await _loadEntry();
+  }
+
+  /// manifest 声明了 `node` 就把它拉起来，并登记到 ant 桥的地址表。
+  ///
+  /// 只有**本地安装**（zip 解包）的小程序才有后端目录；在线站点型没有。
+  Future<void> _startNodeService() async {
+    final local = widget.localRoot?.trim() ?? '';
+    if (local.isEmpty || _nodeEntry.isEmpty) return;
+    if (!_nodeAllowed) {
+      AppLog.instance.log('[MiniAppWeb] manifest 未声明 node 权限，跳过 Node 后端');
+      return;
+    }
+    try {
+      final url = await NodeJSManager.instance.startMiniAppService(
+        appId: _ownerAppId.isEmpty ? AntBridge.appId : _ownerAppId,
+        dir: local,
+        entry: _nodeEntry,
+        config: _nodeConfig,
+      );
+      if (url != null && url.isNotEmpty) {
+        _nodeStarted = true;
+        final owner = _ownerAppId.isEmpty ? AntBridge.appId : _ownerAppId;
+        AntBridge.registerService(owner, url);
+        AppLog.instance.log('[MiniAppWeb] node 后端已就绪: $owner → $url');
+      } else {
+        AppLog.instance.log('[MiniAppWeb] node 后端启动失败（页面会提示 SERVICE_NOT_FOUND）');
+      }
+    } catch (e) {
+      AppLog.instance.log('[MiniAppWeb] node 后端异常: $e');
+    }
   }
 
   /// 按来源加载入口页：远端 URL > 本地目录（zip 安装）
@@ -156,6 +203,15 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
               .toList() ??
           const <String>[];
       AntBridge.configure(appId: appId, permissions: perms);
+      _ownerAppId = appId.isEmpty ? 'app' : appId;
+      // manifest.node = { entry: 'server/index.js', config: 'server/index.config.js' }
+      final node = map['node'];
+      if (node is Map) {
+        _nodeEntry = (node['entry'] ?? '').toString().trim();
+        final cfg = (node['config'] ?? '').toString().trim();
+        if (cfg.isNotEmpty) _nodeConfig = cfg;
+      }
+      _nodeAllowed = perms.contains('node');
       if (entry.isNotEmpty) {
         // 入口页统一交给 _loadEntry 加载（assets / 本地 / 远端同一套）
         _entry = entry;
@@ -163,6 +219,19 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
     } catch (e) {
       AppLog.instance.log('[MiniAppWeb] manifest 解析失败: $e');
     }
+  }
+
+  @override
+  void dispose() {
+    // 页面关了就把后端也停掉：否则端口一直占着，下次打开拿到的是旧进程
+    // （代码改了也不生效），退出 App 前还会白占内存。
+    final owner = _ownerAppId.isEmpty ? AntBridge.appId : _ownerAppId;
+    AntBridge.registerService(owner, null);
+    if (_nodeStarted) {
+      unawaited(NodeJSManager.instance.stopMiniAppService(owner));
+      _nodeStarted = false;
+    }
+    super.dispose();
   }
 
   Future<void> _onBridgeMessage(JavaScriptMessage message) async {

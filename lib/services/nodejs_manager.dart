@@ -21,11 +21,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data' show BytesBuilder;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter/services.dart' show rootBundle;
-import 'package:path_provider/path_provider.dart';
 
 import 'app_log.dart';
 import 'nodejs_platform.dart';
@@ -188,6 +188,38 @@ class NodeJSManager {
   Future<bool> deleteSource() => _platform.deleteSource();
 
   Future<String> getDocumentsSourcePath() => _platform.getDocumentsSourcePath();
+
+  /// 启动某个小程序自带的 Node 后端（manifest.json 的 `node` 字段）。
+  ///
+  /// 会先确保 Node 进程 + management 端口就绪（音乐模块/海阔/源引擎共用同一个
+  /// Node 进程，通常已经起来了）。返回 `http://127.0.0.1:<port>`，失败返回 null。
+  Future<String?> startMiniAppService({
+    required String appId,
+    required String dir,
+    String entry = 'server/index.js',
+    String config = 'server/index.config.js',
+  }) async {
+    if (!isRunning || managementPort <= 0) {
+      final ok = await startNodeJS();
+      if (!ok) return null;
+      await waitForNodeReady();
+    }
+    // management 端口是 Node 异步通知回来的 ⇒ 再等一小会儿（最多 8 秒）
+    for (var i = 0; i < 40 && managementPort <= 0; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+    if (managementPort <= 0) return null;
+    return _platform.startMiniAppService(
+      appId: appId,
+      dir: dir,
+      entry: entry,
+      config: config,
+    );
+  }
+
+  /// 停止某个小程序的 Node 后端（页面关闭时调用）
+  Future<void> stopMiniAppService(String appId) =>
+      _platform.stopMiniAppService(appId);
 
   /// 当前平台的 NodeDownloadConfig（iOS 无需下载运行时）
   NodeDownloadConfig? get nodeDownloadConfig => null;

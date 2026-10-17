@@ -318,6 +318,11 @@ class DanmuLayer extends StatefulWidget {
   /// （对应设置页「弹幕颜色」的「统一白色」「自定义」）。
   final Color? forceColor;
 
+  /// 同时活跃弹幕上限（可调；高密度源调低更流畅，调高更热闹）。
+  /// 高密度弹幕源（一集上千条）每帧可能 spawn 十几条，
+  /// 不设上限的话活跃列表越来越多 → 渲染越来越卡。
+  final int maxActive;
+
   const DanmuLayer({
     super.key,
     required this.danmus,
@@ -337,6 +342,7 @@ class DanmuLayer extends StatefulWidget {
     this.fontWeight = FontWeight.w500,
     this.delaySeconds = 0.0,
     this.forceColor,
+    this.maxActive = 60,
   });
 
   @override
@@ -371,9 +377,8 @@ class _DanmuLayerState extends State<DanmuLayer>
   static const double _trackGap = 24.0;
 
   /// 同时活跃弹幕上限：超过后从最旧的开始丢。
-  /// 高密度弹幕源（一集上千条）每帧可能 spawn 十几条，
-  /// 不设上限的话 Stack 里 Positioned 越来越多 → 渲染越来越卡。
-  static const int _maxActive = 60;
+  /// 默认 60，可在「设置 → 弹幕管理 → 同屏上限」调整。
+  int get _maxActive => widget.maxActive.clamp(10, 200);
 
   /// 补播队列 + 每帧铺设上限：把"列表就绪瞬间几十条弹幕的文本布局"
   /// 分摊到连续几帧（每帧 10 条 ≈ 1-2ms），消除单次掉帧。

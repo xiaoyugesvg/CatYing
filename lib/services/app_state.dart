@@ -200,6 +200,26 @@ class AppState extends GetxController {
     // 不再弹免责声明（用户要求去掉首次打开的责任弹窗）
   }
 
+  /// 最近一次尝试加载的接口地址（重试用）
+  String? get lastVodUrl => _lastVodUrl;
+
+  /// 重试加载上一次的源地址（加载失败页的「重试」按钮用）。
+  Future<void> retryLastConfig() async {
+    final u = _lastVodUrl.trim();
+    if (u.isEmpty) return;
+    await loadConfig(vodUrl: u);
+  }
+
+  /// **源加载失败也能进应用**（用户 2026-10-17 要求）。
+  ///
+  /// 不改变"配置确实没加载成功"这一事实（`configLoadError` 保留），
+  /// 只把 `isConfigLoaded` 置为 true 让主界面渲染出来：
+  /// 影视/直播等模块会显示各自的空状态，用户可以去
+  /// 「设置 → 订阅管理」换源后重新加载，而不是卡在启动页。
+  void enterAppWithoutConfig() {
+    isConfigLoaded.value = true;
+  }
+
   /// 把配置里的 ads / rules 交给 AdFilterService。
   ///
   /// 🔴 2026-10-14 修（用户：「接口配置下载源文件好慢」）：
@@ -249,11 +269,14 @@ class AppState extends GetxController {
   ///     `PythonSourcesService.ensureInstalled` 按需启动，不受这里影响。
   Future<void> _ensurePythonSource() async {
     if (!PythonManager.instance.isIOS) return;
-    // 按**脚本**判：本次配置里有没有 .py 源
+    // 先把本地 Python 源清单挂到 ApiConfig（即使配置加载失败也能在源面板看到）
+    await ApiConfig.instance.reloadLocalVideoSources();
+    // 按**脚本**判：订阅里有没有 .py 源，或用户单独导入过本地 Python 源
     final hasPySource =
-        ApiConfig.instance.sourceBeanList.any((s) => s.isPythonScriptSource);
+        ApiConfig.instance.sourceBeanList.any((s) => s.isPythonScriptSource) ||
+            ApiConfig.instance.localVideoSources.isNotEmpty;
     if (!hasPySource) {
-      AppLog.instance.log('[AppState] 本次配置没有 .py 源，跳过 Python 引擎启动（按脚本判）');
+      AppLog.instance.log('[AppState] 没有 .py 源（含本地），跳过 Python 引擎启动（按脚本判）');
       return;
     }
     try {
@@ -316,6 +339,8 @@ class AppState extends GetxController {
       if (home != null &&
           home.isSpiderSource &&
           !home.isPythonScriptSource &&
+          // drpy 源的 ext 是站点规则、不是整包脚本，预热会把它当 bundle 加载失败
+          !SpiderService.isDrpySource(home.api, home.ext ?? '') &&
           home.scriptUrl.trim().isNotEmpty) {
         await SpiderService.instance.prewarmScript(home.scriptUrl);
       }
@@ -547,8 +572,13 @@ class AppState extends GetxController {
     }
 
     loadingPhase.value = LoadingPhase.downloadingSource;
+    // drpy 标准源（api=drpy2.min.js + ext=站点.js）不能直接 loadSource(api)，
+    // 由 SpiderService 分流到 drpy 宿主；其余源行为不变。
     final (loadSuccess, loadMessage) =
-        await NodeJSManager.instance.loadSource(spiderSource.api);
+        await SpiderService.instance.loadSourceSmart(
+      spiderSource.api,
+      spiderSource.ext ?? '',
+    );
 
     if (!loadSuccess) {
       loadingPhase.value = LoadingPhase.failed;
@@ -562,7 +592,12 @@ class AppState extends GetxController {
     // 🔴 还要告诉 SpiderService「槽位里现在驻留的就是它」——否则它记的还是上一轮
     //    那个脚本，`isScriptLoaded` / `_dispatchScript` 都会误判成"需要重新载入"，
     //    表现为每次切订阅后的第一次点击白等一次 loadSource（用户 2026-10-14）。
-    SpiderService.instance.markScriptLoaded(spiderSource.api);
+    // ⚠️ drpy 源由 `_ensureDrpyScript` 自己登记 `drpy::<ext>` 标记，
+    //    这里再写 api 会把标记覆盖掉（缓存/切源判断都会失效）。
+    if (!SpiderService.isDrpySource(
+        spiderSource.api, spiderSource.ext ?? '')) {
+      SpiderService.instance.markScriptLoaded(spiderSource.api);
+    }
     AppLog.instance.log('[AppState] Spider 源加载成功');
     _sourceLoadedThisSession = true;
     _loadedSpiderApi = spiderSource.api;

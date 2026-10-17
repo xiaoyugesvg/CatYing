@@ -350,6 +350,29 @@ class HikerEngine {
       _run(source, 'detail',
           params: {'url': url}, vars: vars, lazyId: lazyId, lazyIds: lazyIds, lazyInput: lazyInput);
 
+  /// 执行条目地址里的**内联规则**：`url#flags#@rule=js:<code>` / `@lazyRule=.js:<code>`。
+  ///
+  /// 漫画/短剧源的「二级页面」经常不是独立页面，而是挂在条目地址上：
+  ///   漫画条目 → `章节页 + @rule=js:$.require("er")`
+  ///   章节条目 → `图片页 + hiker://lazy#id`
+  /// [lazyIds] 非空时是"第二趟"：解析章节里由同一次执行注册的 lazy（返回 `pics://`）。
+  Future<HikerResult> inline(
+    HikerSource source, {
+    required String url,
+    required String code,
+    Map<String, dynamic> vars = const {},
+    List<String> lazyIds = const [],
+    String lazyInput = '',
+  }) =>
+      _run(source, 'inline',
+          params: {
+            'url': url,
+            'code': code,
+            if (lazyIds.isNotEmpty) 'lazyIds': lazyIds,
+            if (lazyInput.isNotEmpty) 'lazyInput': lazyInput,
+          },
+          vars: vars);
+
   /// 执行**页面事件回调**（`addListener(event, codes)` 登记的那批，见 [HikerResult.listeners]）。
   ///
   /// 宿主在**离开页面**时调用（fire-and-forget）：回调多半是清理逻辑

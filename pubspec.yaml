@@ -109,6 +109,9 @@ flutter:
     - assets/nodejs-project/src/spider/book/
     - assets/nodejs-project/src/spider/pan/
     - assets/nodejs-project/src/util/
+    # drpy 标准源运行时（TVBox `api=drpy2.min.js` + `ext=站点.js`）
+    #   见 lib/services/drpy_service.dart / assets/nodejs-project/src/drpy_host.js
+    - assets/drpy/
     # Node.js 运行时的版本元信息（不内嵌 node.exe，启动时按需下载）
     - assets/nodejs-runtime/version.json
     # Python spider 源适配层（spider_runner.py / src/ / pylib/）
@@ -133,6 +136,10 @@ flutter:
     #   Node 侧按 options.assetsDir 读文件。
     #   ⚠️ 目录式声明**不递归**，所以这个子目录必须单独声明 ✓
     - assets/hiker/files/
+    # 「海阔」远程 require 的**预置缓存**（文件名 = 源 URL 的 md5）。
+    #   源里 `$.require('https://…/f')` 时引擎按同一套 md5 缓存找本地文件；
+    #   把常用模块随包带上 ⇒ 首次运行/断网也能用（进模块时刷新 mtime 保 TTL）。
+    - assets/hiker/libs/
     # 网页去广告的**内置 CSS 过滤器**（默认启用；见 lib/services/ad_block_service.dart）
     #   ⚠️ 来源是 Adblock4limbo（MIT）：只抽了它那份 .user.css 里**元素隐藏**那块
     #      （18008 条通用广告选择器 + display:none!important，约 321 KB），
@@ -146,9 +153,9 @@ flutter:
     #     加载失败（about_page / download_page / source_repo_page / search_page ✓）
     #   2026-10-09：从 cmbok 安装目录把文件补回来 + 这里补声明 ✓
     - assets/icons/
-    # 用户头像素材（40 款内置，来自 DiceBear `fun-emoji`，CC BY 4.0）——
-    # 「我的」页「选择头像」面板用；生成命令见 lib/reading/pages/me_page.dart 注释。
-    - assets/avatars/
+    # 内置头像 / 桌宠素材（12 生肖风格插画，用户提供）——
+    # 「我的」页「选择头像」面板与桌宠皮肤共用；旧的 40 张 DiceBear PNG 已删除。
+    - assets/avatars_pets/
     # 内置阅读背景壁纸（14 张，来自 cmbok ✓）
     #   ⚠️ 目录式声明**不递归**，所以要单独声明这个子目录 ✓
     - assets/images/reader_bg/

@@ -72,6 +72,12 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
   /// 网络层兜底（[WebSniffService]）是否已触发 —— 每轮嗅探只跑一次
   bool _httpSniffStarted = false;
 
+  /// 正在做 MIME 复核的地址（防同一地址每轮重复探测）
+  final Set<String> _mimeProbing = <String>{};
+
+  /// 最近一轮 `__sniff.all()` 的候选（第 5 轮要做一次 MIME 兜底复核）
+  List<String> _lastCandidates = const [];
+
   /// 当前正在嗅探的地址（复用本页重载时会变化）
   late String _currentUrl;
 
@@ -98,15 +104,18 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
   // 不再硬编码 —— 用户在「嗅探设置 → 影视直链后缀」加/删的后缀这里同步生效。
   var MEDIA = /\.(@EXT@)(\?|#|$)/i;
   var reported = {};
-  function report(u){
+  function report(u, trusted){
     try{
       if (!u || typeof u !== 'string') return;
       if (!/^https?:\/\//i.test(u)) return;
-      if (!MEDIA.test(u)) return;
+      // 可信来源（video/audio 元素的 src）允许**没有后缀**：原生侧会用
+      // 响应头 Content-Type 复核（`/play?id=…` 这类扩展名被藏起来的直链）。
+      // XHR/fetch 仍然只收影视后缀，否则会把整页 API 请求都报上去。
+      if (trusted !== 1 && !MEDIA.test(u)) return;
       if (reported[u]) return;
       reported[u] = 1;
       if (window.SniffMedia && window.SniffMedia.postMessage){
-        window.SniffMedia.postMessage(u);
+        window.SniffMedia.postMessage((trusted === 1 ? 't:' : '') + u);
       }
     }catch(e){}
   }
@@ -132,12 +141,18 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
       Object.defineProperty(HTMLMediaElement.prototype, 'src', {
         configurable: true, enumerable: true,
         get: function(){ return d.get.call(this); },
-        set: function(v){ try{ report(v); }catch(e){} return d.set.call(this, v); }
+        set: function(v){ try{ report(v, 1); }catch(e){} return d.set.call(this, v); }
       });
     }
     var _setAttr = Element.prototype.setAttribute;
     Element.prototype.setAttribute = function(n, v){
-      try{ if (String(n).toLowerCase() === 'src') report(v); }catch(e){}
+      try{
+        if (String(n).toLowerCase() === 'src') {
+          var t = this && this.tagName ? String(this.tagName).toUpperCase() : '';
+          // 只有媒体元素的 src 才是"可信候选"（img/script 的 src 不能算）
+          report(v, (t === 'VIDEO' || t === 'AUDIO' || t === 'SOURCE') ? 1 : 0);
+        }
+      }catch(e){}
       return _setAttr.apply(this, arguments);
     };
   }catch(e){}
@@ -247,6 +262,8 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
     AppLog.instance.log('[SniffPlayer] 复用本页重载新地址: $next');
     _currentUrl = next;
     _autoSwitched = false;
+    _mimeProbing.clear();
+    _lastCandidates = const [];
     setState(() {
       _sniffedUrl = null;
       _hint = '正在嗅探页面里的视频地址…';
@@ -266,8 +283,15 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
       ..addJavaScriptChannel(
         'SniffMedia',
         onMessageReceived: (msg) {
-          final u = msg.message;
-          if (u.isNotEmpty) _onSniffed(u);
+          final raw = msg.message;
+          if (raw.isEmpty) return;
+          // `t:` 前缀 = 来自 video/audio 元素的**可信**候选，可能没有媒体后缀，
+          // 需要原生侧用 Content-Type 复核（见 _onTrustedCandidate）。
+          if (raw.startsWith('t:')) {
+            _onTrustedCandidate(raw.substring(2));
+          } else {
+            _onSniffed(raw);
+          }
         },
       )
       ..setJavaScriptMode(
@@ -355,16 +379,23 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
       if (!mounted) return;
       // 一次拿全部候选，在原生侧过 SniffFilter（后缀 + 黑/白名单）：
       // 第一个可能是广告，必须跳过广告继续挑正片，不能见一个就上。
-      final picked = _firstAccepted(result);
-      if (picked != null) {
-        _onSniffed(picked);
-        return;
+      final candidates = _candidatesOf(result);
+      _lastCandidates = candidates;
+      for (final u in candidates) {
+        if (SniffFilter.acceptSniffUrl(u)) {
+          _onSniffed(u);
+          return;
+        }
       }
       _sniffTries++;
       // 第 5 轮（约 7.5 秒）还没结果 → 大概率播放器躲在**跨域 iframe** 里
       // （WebView 注入不到子 frame）。转"网络层兜底"：Dart 直接取页面与
       // iframe 的 HTML 扫媒体地址，Dart 发 HTTP 不受同源策略限制。
-      if (_sniffTries == 5) unawaited(_httpSniffFallback());
+      if (_sniffTries == 5) {
+        unawaited(_httpSniffFallback());
+        // 顺带对"有 video 元素但地址没有后缀"的候选做一次 MIME 复核
+        unawaited(_probeLastCandidates());
+      }
       // 16 轮 × 1.5 秒 = 24 秒：慢页面 / 慢加载 / 需点播放才起播的站点
       // 之前 8 轮（12 秒）经常还没等到地址就放弃（2026-10-15）。
       if (_sniffTries >= 16) {
@@ -381,14 +412,14 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
   }
 
   /// 把 JS `__sniff.all()` 的返回（iOS/Android 可能是 List 或 JSON 字符串）
-  /// 解析成候选列表，返回第一个通过 [SniffFilter] 的链接；全被过滤返回 null。
-  String? _firstAccepted(dynamic result) {
+  /// 解析成候选列表（不做规则过滤）。
+  List<String> _candidatesOf(dynamic result) {
     final candidates = <String>[];
     if (result is List) {
       candidates.addAll(result.map((e) => '$e'));
     } else {
       final raw = '$result'.trim();
-      if (raw.isEmpty || raw == 'null' || raw == '[]') return null;
+      if (raw.isEmpty || raw == 'null' || raw == '[]') return const [];
       try {
         final decoded = jsonDecode(raw);
         if (decoded is List) {
@@ -400,18 +431,64 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
         if (raw.startsWith('http')) candidates.add(raw.replaceAll('"', ''));
       }
     }
-    for (final u in candidates) {
-      final v = u.trim();
-      if (SniffFilter.acceptSniffUrl(v)) return v;
-    }
-    return null;
+    return candidates;
   }
 
-  void _onSniffed(String url) {
+  /// 空后缀候选的 MIME 复核（来自页面里 video/audio 元素的 src）。
+  ///
+  /// 只用于**可信来源**：命中才切播放器；黑/白名单照旧生效
+  /// （[SniffFilter.acceptSniffUrl] 的 `mediaVerified: true` 分支）。
+  Future<void> _onTrustedCandidate(String url) async {
+    if (!mounted || _autoSwitched) return;
+    final u = url.trim();
+    if (u.isEmpty) return;
+    if (SniffFilter.acceptSniffUrl(u)) {
+      _onSniffed(u);
+      return;
+    }
+    // 有影视后缀却被规则挡住（黑/白名单）⇒ 尊重用户的过滤规则，不做兜底
+    if (SniffFilter.isDirectMedia(u)) return;
+    if (!_mimeProbing.add(u)) return;
+    AppLog.instance.log('[SniffPlayer] 无后缀候选，MIME 复核: $u');
+    final ok =
+        await WebSniffService.instance.looksLikeMediaByMime(u, referer: _currentUrl);
+    _mimeProbing.remove(u);
+    if (!ok || !mounted || _autoSwitched) return;
+    if (!SniffFilter.acceptSniffUrl(u, mediaVerified: true)) return;
+    setState(() => _hint = '按响应类型识别到视频，正在播放');
+    _onSniffed(u, mediaVerified: true);
+  }
+
+  /// 第 5 轮兜底：把 `__sniff.all()` 里**没有影视后缀**的候选拿去问服务器
+  /// 的 Content-Type（最多 6 个并发）。覆盖 `<video src="/play?id=…">` 这种
+  /// 页面加载时就已经存在、不会触发 src setter 的写法。
+  Future<void> _probeLastCandidates() async {
+    if (!mounted || _autoSwitched) return;
+    final batch = _lastCandidates
+        .where((u) => !SniffFilter.isDirectMedia(u))
+        .toSet()
+        .take(6)
+        .toList();
+    if (batch.isEmpty) return;
+    AppLog.instance.log('[SniffPlayer] MIME 兜底复核 ${batch.length} 个无后缀候选');
+    final checks = await Future.wait(batch.map(
+        (u) => WebSniffService.instance.looksLikeMediaByMime(u, referer: _currentUrl)));
+    for (var i = 0; i < checks.length; i++) {
+      if (!checks[i] || !mounted || _autoSwitched) continue;
+      final u = batch[i];
+      if (!SniffFilter.acceptSniffUrl(u, mediaVerified: true)) continue;
+      setState(() => _hint = '按响应类型识别到视频，正在播放');
+      _onSniffed(u, mediaVerified: true);
+      return;
+    }
+  }
+
+  void _onSniffed(String url, {bool mediaVerified = false}) {
     // 统一过嗅探规则（必须影视直链后缀 + 黑/白名单去广告）。
     // hook 实时上报的切片广告会在这里被挡住 —— 不停止轮询、不切播放器，
     // 继续等正片地址。
-    if (!SniffFilter.acceptSniffUrl(url)) {
+    // mediaVerified：地址没有后缀、但已用响应头确认是视频（见 _onTrustedCandidate）。
+    if (!SniffFilter.acceptSniffUrl(url, mediaVerified: mediaVerified)) {
       AppLog.instance.log('[SniffPlayer] 候选被嗅探规则过滤: $url');
       return;
     }
@@ -472,7 +549,9 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
       if (mounted) {
         setState(() => _hint = '已从页面 / iframe 里找到视频地址，正在播放');
       }
-      _onSniffed(hit);
+      // 没有影视后缀的命中是 MIME 兜底验证过的（Content-Type），
+      // 这里把"已验证"告诉过滤器，否则会被后缀规则再挡一次。
+      _onSniffed(hit, mediaVerified: !SniffFilter.isDirectMedia(hit));
     } catch (e) {
       AppLog.instance.log('[SniffPlayer] 网络层兜底失败: $e');
     }

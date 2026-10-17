@@ -102,6 +102,20 @@ class BookSourceDartEngine {
     final raw = body['source'];
     if (raw is! Map) return null;
 
+    // 扁平 Legado 源（老式字段：ruleSearchUrl / ruleSearchList /
+    // ruleChapterList / ruleBookContent …）不在本引擎的解析范围内：
+    // `XiaoshuoBookSource` 只读嵌套 ruleSearch/ruleToc/ruleContent。
+    // 直接交给 Node —— 那边的 normalizeLegadoSource 会做扁平→嵌套归一化，
+    // 且支持 `@Header:` / `searchKey` / `-` 倒序等老式写法。
+    final hasFlatRules = raw['ruleSearchUrl'] != null ||
+        raw['ruleSearchList'] != null ||
+        raw['ruleChapterList'] != null ||
+        raw['ruleBookContent'] != null;
+    final hasNestedRules = raw['ruleSearch'] is Map ||
+        raw['ruleToc'] is Map ||
+        raw['ruleContent'] is Map;
+    if (hasFlatRules && !hasNestedRules) return null;
+
     final XiaoshuoBookSource source;
     try {
       source = XiaoshuoBookSource.fromJson(raw.cast<String, dynamic>());

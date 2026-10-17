@@ -1,14 +1,65 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../common/theme.dart';
+import '../pages/settings/sub/data_source_settings_page.dart';
 import '../services/app_state.dart';
 import '../services/nodejs_manager.dart';
+import 'app_toast.dart';
 import 'circular_logo_progress.dart';
 
-/// 启动加载页：Logo + 进度（静默下载阶段不显示技术文案）
-class AppLoadingView extends StatelessWidget {
+/// 启动加载页：Logo + 进度（静默下载阶段不显示技术文案）。
+///
+/// ⚠️ 用户 2026-10-17：「如果源有错误，那你也不能进不去吧」——
+/// 所以本页在**加载失败**或**加载超过 15 秒**时一定会给出可操作按钮：
+///   · 重试加载
+///   · 更换源（订阅管理）
+///   · 先进入应用（影视模块显示空状态，不再卡死在启动页）
+class AppLoadingView extends StatefulWidget {
   const AppLoadingView({super.key});
+
+  @override
+  State<AppLoadingView> createState() => _AppLoadingViewState();
+}
+
+class _AppLoadingViewState extends State<AppLoadingView> {
+  Timer? _slowTimer;
+  bool _slow = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // 超过 15 秒仍未完成 → 允许"跳过"（避免卡死在启动页）
+    _slowTimer = Timer(const Duration(seconds: 15), () {
+      if (mounted) setState(() => _slow = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _slowTimer?.cancel();
+    super.dispose();
+  }
+
+  void _enterApp() {
+    final appState = Get.find<AppState>();
+    appState.enterAppWithoutConfig();
+    AppToast.show(
+      '已进入应用',
+      '当前源不可用，可在「设置 → 订阅管理」更换源后重新加载',
+    );
+  }
+
+  Future<void> _retry() async {
+    final appState = Get.find<AppState>();
+    if ((appState.lastVodUrl ?? '').trim().isEmpty) {
+      Get.to(() => const DataSourceSettingsPage());
+      return;
+    }
+    await appState.retryLastConfig();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -31,61 +82,110 @@ class AppLoadingView extends StatelessWidget {
         child: Center(
           child: Obx(() {
             final phase = appState.loadingPhase.value;
-            final downloading = phase == LoadingPhase.downloadingNodeJS;
-            if (downloading) {
-              final mgr = NodeJSManager.instance;
-              return ValueListenableBuilder<double?>(
-                valueListenable: mgr.nodeDownloadProgress,
-                builder: (ctx, p, _) {
-                  final value = p ?? 0.0;
-                  return ValueListenableBuilder<String?>(
-                    valueListenable: mgr.nodeDownloadStatus,
-                    builder: (ctx2, status, __) {
-                      String label = phase.description;
-                      if (status == 'downloading') {
-                        label = '下载源运行时';
-                      } else if (status == 'extracting') {
-                        label = '解压中';
-                      } else if (status == 'error') {
-                        label = '下载失败';
-                      }
-                      return CircularLogoProgress(
-                        progress: value > 0 ? value : null,
-                        percentText: '${(value * 100).toStringAsFixed(0)}%',
-                        caption: label,
-                        failed: status == 'error',
-                      );
-                    },
-                  );
-                },
-              );
-            }
-            final indeterminate = phase.isLoading;
             final failed = phase.isFailed;
-            // 内部阶段不展示技术文案，只留 Logo + 转圈
-            final hideCaption = switch (phase) {
-              LoadingPhase.waitingSpiderPort ||
-              LoadingPhase.fetchingSpiderConfig ||
-              LoadingPhase.initializingSpider ||
-              LoadingPhase.loadingSource ||
-              LoadingPhase.verifyingMD5 ||
-              LoadingPhase.downloadingSource ||
-              LoadingPhase.startingNodeJS ||
-              LoadingPhase.loadingConfig =>
-                true,
-              _ => false,
-            };
-            final statusText = phase.description;
-            return CircularLogoProgress(
-              progress: indeterminate ? null : (failed ? 0 : 1),
-              percentText: indeterminate ? '' : (failed ? '!' : '100%'),
-              caption: hideCaption ? '' : statusText,
-              failed: failed,
-              indeterminate: indeterminate,
+            final showActions = failed || _slow;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildProgress(appState),
+                if (showActions) ...[
+                  const SizedBox(height: 28),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 40),
+                    child: Text(
+                      failed
+                          ? '当前源加载失败，你仍可以先进入应用，\n稍后在「设置 → 订阅管理」更换源。'
+                          : '加载时间有点久，可以先进入应用。',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: AppTheme.fontSubhead,
+                        height: 1.5,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      OutlinedButton(
+                        onPressed: _retry,
+                        child: const Text('重试'),
+                      ),
+                      const SizedBox(width: 12),
+                      FilledButton(
+                        onPressed: _enterApp,
+                        child: const Text('先进入应用'),
+                      ),
+                    ],
+                  ),
+                  TextButton(
+                    onPressed: () =>
+                        Get.to(() => const DataSourceSettingsPage()),
+                    child: const Text('更换源'),
+                  ),
+                ],
+              ],
             );
           }),
         ),
       ),
+    );
+  }
+
+  Widget _buildProgress(AppState appState) {
+    final phase = appState.loadingPhase.value;
+    final downloading = phase == LoadingPhase.downloadingNodeJS;
+    if (downloading) {
+      final mgr = NodeJSManager.instance;
+      return ValueListenableBuilder<double?>(
+        valueListenable: mgr.nodeDownloadProgress,
+        builder: (ctx, p, _) {
+          final value = p ?? 0.0;
+          return ValueListenableBuilder<String?>(
+            valueListenable: mgr.nodeDownloadStatus,
+            builder: (ctx2, status, __) {
+              String label = phase.description;
+              if (status == 'downloading') {
+                label = '下载源运行时';
+              } else if (status == 'extracting') {
+                label = '解压中';
+              } else if (status == 'error') {
+                label = '下载失败';
+              }
+              return CircularLogoProgress(
+                progress: value > 0 ? value : null,
+                percentText: '${(value * 100).toStringAsFixed(0)}%',
+                caption: label,
+                failed: status == 'error',
+              );
+            },
+          );
+        },
+      );
+    }
+    final indeterminate = phase.isLoading;
+    final failed = phase.isFailed;
+    // 内部阶段不展示技术文案，只留 Logo + 转圈
+    final hideCaption = switch (phase) {
+      LoadingPhase.waitingSpiderPort ||
+      LoadingPhase.fetchingSpiderConfig ||
+      LoadingPhase.initializingSpider ||
+      LoadingPhase.loadingSource ||
+      LoadingPhase.verifyingMD5 ||
+      LoadingPhase.downloadingSource ||
+      LoadingPhase.startingNodeJS ||
+      LoadingPhase.loadingConfig =>
+        true,
+      _ => false,
+    };
+    final statusText = phase.description;
+    return CircularLogoProgress(
+      progress: indeterminate ? null : (failed ? 0 : 1),
+      percentText: indeterminate ? '' : (failed ? '!' : '100%'),
+      caption: hideCaption ? '' : statusText,
+      failed: failed,
+      indeterminate: indeterminate,
     );
   }
 }

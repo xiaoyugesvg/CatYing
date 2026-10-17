@@ -235,6 +235,10 @@ class SettingsService extends ChangeNotifier {
   static const _kCustomThemesKey = 'custom_themes'; // 自定义主题（JSON 数组）
   static const _kBookFontSizeKey = 'book_font_size';
   static const _kBookLineHeightKey = 'book_line_height';
+  // 仿真翻页细节
+  static const _kPageCurlShadowKey = 'page_curl_shadow';
+  static const _kPageCurlQualityKey = 'page_curl_quality';
+  static const _kPageCurlTextureKey = 'page_curl_texture';
   static const _kBookHorizontalPaddingKey = 'book_h_padding';
   static const _kBookVerticalPaddingKey = 'book_v_padding';
   static const _kBookReadingModeKey = 'book_reading_mode';
@@ -389,6 +393,11 @@ class SettingsService extends ChangeNotifier {
   int _preloadImageCount = defaultPreloadImages; // 在线阅读预加载图片数
   double _bookFontSize = defaultBookFontSize; // 图书字号
   double _bookLineHeight = defaultBookLineHeight; // 图书行距
+
+  // 仿真翻页：阴影强度 0~1 / 性能档位 0 流畅 1 标准 2 精细 / 纸张纹理
+  double _pageCurlShadow = 0.75;
+  int _pageCurlQuality = 1;
+  bool _pageCurlTexture = true;
   double _bookHorizontalPadding = defaultBookHorizontalPadding; // 图书左右边距
   double _bookVerticalPadding = defaultBookVerticalPadding; // 图书上下边距
   // 图书正文字体：null = 跟随阅读模式；其他含义见 _kBookFontFamilyKey 注释。
@@ -626,6 +635,9 @@ class SettingsService extends ChangeNotifier {
   int get preloadImageCount => _preloadImageCount;
   double get bookFontSize => _bookFontSize;
   double get bookLineHeight => _bookLineHeight;
+  double get pageCurlShadow => _pageCurlShadow;
+  int get pageCurlQuality => _pageCurlQuality;
+  bool get pageCurlTexture => _pageCurlTexture;
   double get bookHorizontalPadding => _bookHorizontalPadding;
   double get bookVerticalPadding => _bookVerticalPadding;
   String? get bookFontFamily => _bookFontFamily;
@@ -840,6 +852,14 @@ class SettingsService extends ChangeNotifier {
         minBookLineHeight,
         maxBookLineHeight,
       );
+      _pageCurlShadow = _clampDouble(
+        prefs.getDouble(_kPageCurlShadowKey) ?? 0.75,
+        0.0,
+        1.0,
+      );
+      _pageCurlQuality =
+          (prefs.getInt(_kPageCurlQualityKey) ?? 1).clamp(0, 2);
+      _pageCurlTexture = prefs.getBool(_kPageCurlTextureKey) ?? true;
       _bookHorizontalPadding = _clampDouble(
         prefs.getDouble(_kBookHorizontalPaddingKey) ??
             defaultBookHorizontalPadding,
@@ -1724,6 +1744,91 @@ class SettingsService extends ChangeNotifier {
     }
   }
 
+  /// 导出自定义主题为可分享的 JSON 文本（带 version/kind 外壳，便于将来兼容）。
+  ///
+  /// 不导出 id（导入端重新生成，避免与本地已有 id 冲突）；背景图片只导出路径，
+  /// 跨设备导入时该路径不存在会自动降级为纯色（见 [importCustomThemes]）。
+  String exportCustomThemes() {
+    return const JsonEncoder.withIndent('  ').convert({
+      'app': 'New-Tv',
+      'kind': 'reading_themes',
+      'version': 1,
+      'themes': _customThemes
+          .map(
+            (t) => {
+              'name': t.name,
+              'colors': t.palette.toMap(),
+              'background': t.background.toMap(),
+            },
+          )
+          .toList(),
+    });
+  }
+
+  /// 导入自定义主题 JSON；返回成功导入的条数（坏条目跳过，不会清掉已有主题）。
+  ///
+  /// 兼容入参：单主题对象 / 主题数组 / [exportCustomThemes] 的 `{themes:[...]}` 外壳。
+  Future<int> importCustomThemes(String raw) async {
+    final text = raw.trim();
+    if (text.isEmpty) return 0;
+    dynamic decoded;
+    try {
+      decoded = jsonDecode(text);
+    } catch (e) {
+      _log('导入主题失败（JSON 无法解析）: $e');
+      return 0;
+    }
+    List<dynamic> items;
+    if (decoded is List) {
+      items = decoded;
+    } else if (decoded is Map && decoded['themes'] is List) {
+      items = decoded['themes'] as List;
+    } else if (decoded is Map && decoded['colors'] is Map) {
+      items = [decoded];
+    } else {
+      return 0;
+    }
+    final added = <ThemePresetInfo>[];
+    final now = DateTime.now().millisecondsSinceEpoch;
+    for (final item in items) {
+      if (item is! Map) continue;
+      final colors = item['colors'];
+      if (colors is! Map) continue;
+      final String name;
+      final rawName = item['name'];
+      if (rawName is String && rawName.trim().isNotEmpty) {
+        name = rawName.trim();
+      } else {
+        name = '导入主题';
+      }
+      JellyPalette palette;
+      try {
+        palette = JellyPalette.fromMap(Map<String, dynamic>.from(colors));
+      } catch (e) {
+        _log('跳过损坏的导入主题 $name: $e');
+        continue;
+      }
+      var bg = ThemeBackground.fromMap(item['background']);
+      // 背景图是「上次导出设备」的绝对路径，本机不存在 → 保留淡化/模糊参数，降级纯色
+      if (bg.type == ThemeBackgroundType.image &&
+          (bg.imagePath == null || !File(bg.imagePath!).existsSync())) {
+        bg = ThemeBackground.none().copyWith(opacity: bg.opacity, blur: bg.blur);
+      }
+      final id = 'custom_${now}_${_customThemes.length + added.length}';
+      added.add(ThemePresetInfo(id, name, palette, background: bg));
+    }
+    if (added.isEmpty) return 0;
+    _customThemes = [..._customThemes, ...added];
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kCustomThemesKey, _encodeCustomThemes());
+    } catch (e) {
+      _log('保存导入主题失败: $e');
+    }
+    return added.length;
+  }
+
   /// 图片背景副本目录：`<appDocs>/theme_bg/`（不存在则建）。
   Future<Directory> _themeBgDir() async {
     final appDir = await getApplicationDocumentsDirectory();
@@ -1746,15 +1851,22 @@ class SettingsService extends ChangeNotifier {
       final src = File(background.imagePath!);
       if (!await src.exists()) {
         _log('背景图片源文件不存在，降级纯色: ${background.imagePath}');
-        return const ThemeBackground.none();
+        return const ThemeBackground.none().copyWith(
+          opacity: background.opacity,
+          blur: background.blur,
+        );
       }
       final dir = await _themeBgDir();
       final dest = File('${dir.path}/bg_$id.${_pickImageExt(src.path)}');
       await src.copy(dest.path);
-      return ThemeBackground.image(dest.path);
+      // 只改路径，保留不透明度/模糊等其它字段
+      return background.copyWith(imagePath: dest.path);
     } catch (e) {
       _log('复制背景图片失败，降级纯色: $e');
-      return const ThemeBackground.none();
+      return const ThemeBackground.none().copyWith(
+        opacity: background.opacity,
+        blur: background.blur,
+      );
     }
   }
 
@@ -1797,7 +1909,8 @@ class SettingsService extends ChangeNotifier {
           oldBg.imagePath != dest.path) {
         await _deleteBackgroundImage(oldBg.imagePath!);
       }
-      return ThemeBackground.image(dest.path);
+      // 只改路径，保留新配置里的不透明度/模糊
+      return newBg.copyWith(imagePath: dest.path);
     } catch (e) {
       _log('编辑主题：复制新背景图失败，保留旧图: $e');
       return oldBg.type == ThemeBackgroundType.image
@@ -1863,6 +1976,47 @@ class SettingsService extends ChangeNotifier {
       await prefs.setDouble(_kBookLineHeightKey, clamped);
     } catch (e) {
       _log('保存图书行距失败: $e');
+    }
+  }
+
+  /// 设置：仿真翻页阴影强度（0~1）
+  Future<void> setPageCurlShadow(double value) async {
+    final clamped = _clampDouble(value, 0.0, 1.0);
+    if (_pageCurlShadow == clamped) return;
+    _pageCurlShadow = clamped;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble(_kPageCurlShadowKey, clamped);
+    } catch (e) {
+      _log('保存仿真翻页阴影失败: $e');
+    }
+  }
+
+  /// 设置：仿真翻页性能档位（0 流畅 / 1 标准 / 2 精细）
+  Future<void> setPageCurlQuality(int value) async {
+    final v = value.clamp(0, 2);
+    if (_pageCurlQuality == v) return;
+    _pageCurlQuality = v;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_kPageCurlQualityKey, v);
+    } catch (e) {
+      _log('保存仿真翻页档位失败: $e');
+    }
+  }
+
+  /// 设置：仿真翻页纸张纹理
+  Future<void> setPageCurlTexture(bool value) async {
+    if (_pageCurlTexture == value) return;
+    _pageCurlTexture = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kPageCurlTextureKey, value);
+    } catch (e) {
+      _log('保存仿真翻页纹理失败: $e');
     }
   }
 
@@ -2034,6 +2188,9 @@ class SettingsService extends ChangeNotifier {
       _kBookHorizontalPaddingKey,
       _kBookVerticalPaddingKey,
       _kBookFontFamilyKey,
+      _kPageCurlShadowKey,
+      _kPageCurlQualityKey,
+      _kPageCurlTextureKey,
     ];
     for (final k in keys) {
       await prefs.remove(k);

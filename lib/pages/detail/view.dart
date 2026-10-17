@@ -17,7 +17,6 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import '../../models/cache_store.dart';
 import '../../models/cache_ttl.dart';
 import '../../services/tmdb_service.dart';
-import '../settings/sub/metadata_settings_page.dart';
 import '../../services/detail_page_controller.dart';
 import '../../services/player_fullscreen_controller.dart';
 import '../../services/player_prefs.dart';
@@ -103,8 +102,6 @@ class _DetailPageState extends State<DetailPage> {
 
   /// 是否已排队 post-frame 重建 Player，防止 build 内重复 schedule
   bool _playerRecreateScheduled = false;
-  SharedPreferences? _prefs;
-  int? _prefsPlayTypeVod;
   Worker? _engineWorker;
   Worker? _decodeWorker;
   Worker? _bufferWorker;
@@ -197,10 +194,8 @@ class _DetailPageState extends State<DetailPage> {
 
   Future<void> _loadPrefs() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      _prefs = prefs;
+      await SharedPreferences.getInstance();
       await PlayerPrefs.instance.load();
-      _prefsPlayTypeVod = PlayerPrefs.instance.vodEngine.value.value;
     } catch (e) {
       /* ignore */
     }
@@ -209,8 +204,6 @@ class _DetailPageState extends State<DetailPage> {
   /// 设置里切换内核 → 立刻换播放器（丢弃旧实例重建）
   void _onEngineChanged() {
     if (!mounted) return;
-    final e = PlayerPrefs.instance.vodEngine.value;
-    _prefsPlayTypeVod = e.value;
     final old = _player;
     _player = null;
     _lastPlayerUrl = '';
@@ -280,6 +273,9 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   /// 手动从 TMDB 候选中选择（解决同名剧匹配错）
+  ///
+  /// 暂未接入入口（详情页当前用自动刮削）；保留实现供后续挂到更多菜单。
+  // ignore: unused_element
   Future<void> _showTmdbPickDialog() async {
     final tmdb = TmdbService.instance;
     final info = _controller.vodInfo.value;
@@ -329,7 +325,7 @@ class _DetailPageState extends State<DetailPage> {
                 ),
                 onTap: () async {
                   Navigator.pop(ctx);
-                  final ok = await tmdb.applyCandidate(info, c.$1, it);
+                  await tmdb.applyCandidate(info, c.$1, it);
                   if (!mounted) return;
                   setState(() {});
                 },
@@ -820,8 +816,8 @@ class _DetailPageState extends State<DetailPage> {
       final url = _controller.playUrl.value;
       // 选集变化也要重建（角标/标题/切集参数）
       final _ = _controller.selectedEpisodeIndex.value;
-      final __ = _controller.playbackSessionId.value;
-      final ___ = _controller.selectedFlag.value;
+      final _ = _controller.playbackSessionId.value;
+      final _ = _controller.selectedFlag.value;
       // 非视频内容（小说 `novel://` / 漫画 `pics://`）：**整块 4:3 播放区不占面积**
       // —— 页面直接显示 封面 / 简介 / 作者 / 更新时间 / 播放列表（用户 2026-10-14）。
       // 已知非视频的源在**再次进入详情页时**也走这里（一开始就不占位）。
@@ -1554,6 +1550,7 @@ class _DetailPageState extends State<DetailPage> {
   ///
   /// 数据来自 TMDB credits（含 profile_path / character），未刮削时 castList
   /// 为空则整段隐藏，不影响原有布局。
+  // ignore: unused_element
   Widget _buildCastSection(VodInfo info) {
     if (info.castList.isEmpty) return const SizedBox.shrink();
     final tmdb = TmdbService.instance;
@@ -1611,6 +1608,7 @@ class _DetailPageState extends State<DetailPage> {
   ///
   /// 点击后用当前源的 key + TMDB 片名跳详情（与「推荐」tab 同策略），
   /// 由详情页在当前源里再搜一次 —— 只有能搜到的条目才真正可播。
+  // ignore: unused_element
   Widget _buildSimilarSection(VodInfo info) {
     if (info.similarList.isEmpty) return const SizedBox.shrink();
     final tmdb = TmdbService.instance;
@@ -2297,6 +2295,7 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   /// 播放按钮 - 对应 Swift playButton (仅未播放且有 vodInfo 时显示)
+  // ignore: unused_element
   Widget _buildPlayButton() {
     return Obx(() {
       if (_controller.isPlaying.value || _controller.vodInfo.value == null) {

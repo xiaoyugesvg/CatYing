@@ -281,12 +281,13 @@ jobs:
         # T3 Python spider 源引擎的运行时目录，最终 embed 到 Runner.app/python-home：
         #   python-home/
         #   ├── lib/python3.12/                     ← stdlib（来自 Python.xcframework）
-        #   ├── lib/python3.12/site-packages/       ← pip --target 的纯 Python 三件套
+        #   ├── lib/python3.12/site-packages/       ← pip --target 的纯 Python 库
         #   ├── spider_runner.py                    ← 适配层标准入口
         #   ├── src/spider/{video,book}/            ← 源脚本
         #   └── pylib/
-        # 一期锁纯 Python 库（requests/httpx/bs4 及其依赖均无 C 扩展，跨平台 OK）；
-        # lxml/pycryptodome 等 C 扩展无法被超时中断拦截 → 二期再引入。
+        # 纯 Python 库（requests / httpx / beautifulsoup4 / flask 及其依赖均无必须的
+        # C 扩展，跨平台 OK）；lxml / pycryptodome 的真库是 C 扩展（iOS 交叉编译不可行），
+        # 由 pylib/ 下的纯 Python 垫片提供同名 API（见 assets/python-project/pylib/）。
         run: |
           set -e
           echo "=== 构建 python-home ==="
@@ -351,15 +352,25 @@ jobs:
           ls build/python-home/lib/python3.12 | head -20
           echo "=== lib-dynload 就绪（前 10 个 .so）==="
           ls build/python-home/lib/python3.12/lib-dynload | head -10
-          echo "=== pip install 三件套 (--target site-packages) ==="
+          echo "=== pip install 常用库 (--target site-packages) ==="
           mkdir -p build/python-home/lib/python3.12/site-packages
           python3 -m pip install --quiet --target build/python-home/lib/python3.12/site-packages \
-            requests httpx beautifulsoup4
+            requests httpx beautifulsoup4 flask
           echo "=== site-packages 就绪 ==="
           ls build/python-home/lib/python3.12/site-packages | head -20
+          # 清掉 pip 装进来的**宿主平台** C 扩展（macOS .so / Windows .pyd）：
+          # iOS 加载不了它们，而且 import 时会**先命中扩展再报错**（不会自动回退到 .py）。
+          # 这几个包都带纯 Python 回退：markupsafe/_native.py、
+          # charset_normalizer/cd.py + md.py ⇒ 删掉后 import 才走回退。
+          echo "=== 清理宿主平台 C 扩展 ==="
+          find build/python-home/lib/python3.12/site-packages \
+            \( -name "*.so" -o -name "*.pyd" \) -print -delete || true
           echo "=== 合并适配层 (spider_runner.py + src/ + pylib/) ==="
           cp -R assets/python-project/. build/python-home/
           ls build/python-home/
+          echo "=== 常用库导入自检（含 lxml/pycryptodome 纯 Python 垫片）==="
+          PYTHONPATH="build/python-home/lib/python3.12/site-packages:build/python-home/pylib" \
+            python3 -c "import requests, httpx, bs4, flask; from lxml import etree; from Crypto.Cipher import AES; from pyquery import PyQuery; print('✅ requests/httpx/bs4/flask/lxml/Crypto/pyquery 导入 OK')"
           echo "✅ python-home ready"
 
       - name: Install ruby + xcodeproj gem

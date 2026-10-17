@@ -19,6 +19,7 @@ import '../theme/jelly_theme.dart';
 import '../widgets/jelly_segmented_toggle.dart';
 import '../widgets/jelly_select_badge.dart';
 import '../widgets/staggered_entrance.dart';
+import '../../services/file_export_service.dart';
 import '../widgets/theme_background_animation.dart';
 import 'book_reader_page.dart';
 import 'reader_page.dart';
@@ -862,7 +863,9 @@ class _DownloadPageState extends State<DownloadPage>
       builder: (ctx) => AlertDialog(
         title: const Text('下载目录'),
         content: SelectableText(
-          '无法直接打开文件管理器，请手动前往：\n${dir.path}',
+          '无法直接打开文件管理器。\n\n'
+          'iOS：打开「文件」App → 我的 iPhone → 猫影 → Cmbok 即可看到全部下载内容。\n\n'
+          '目录路径：\n${dir.path}',
           style: const TextStyle(fontSize: AppTheme.fontSubhead),
         ),
         actions: [
@@ -1289,6 +1292,12 @@ class _DownloadPageState extends State<DownloadPage>
             onPressed: () => BookReaderPage.open(context, t),
             visualDensity: density,
           ),
+          IconButton(
+            icon: const Icon(Icons.ios_share_rounded, size: 19),
+            tooltip: '导出',
+            onPressed: () => _exportBook(t),
+            visualDensity: density,
+          ),
         ];
     }
   }
@@ -1471,6 +1480,12 @@ class _DownloadPageState extends State<DownloadPage>
                     ),
                     tooltip: '查看章节',
                     onPressed: () => _openChapterPopup(g),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.ios_share_rounded, size: 21),
+                    tooltip: '导出（ZIP）',
+                    onPressed: () => _exportComic(g),
                     visualDensity: VisualDensity.compact,
                   ),
                 ],
@@ -1907,6 +1922,12 @@ class _DownloadPageState extends State<DownloadPage>
             visualDensity: density,
           ),
           IconButton(
+            icon: const Icon(Icons.ios_share_rounded, size: 19),
+            tooltip: '导出（ZIP）',
+            onPressed: () => _exportChapter(t),
+            visualDensity: density,
+          ),
+          IconButton(
             icon: const Icon(Icons.delete_outline_rounded, size: 20),
             tooltip: '删除',
             onPressed: () => _confirmDeleteChapter(t),
@@ -1914,6 +1935,74 @@ class _DownloadPageState extends State<DownloadPage>
           ),
         ];
     }
+  }
+
+  /// 导出整本漫画：已下载章节压成一个 ZIP，交给系统分享面板。
+  Future<void> _exportComic(_ComicGroup g) => _runExport(() async {
+    final dir = await DownloadService().comicDownloadDir(g.pathWord, g.title);
+    if (dir == null) return false;
+    return FileExportService.shareDirectory(dir, archiveName: g.title);
+  });
+
+  /// 导出单话：该话图片压成 ZIP（文件名带漫画名，便于区分）。
+  Future<void> _exportChapter(DownloadTask t) => _runExport(() async {
+    final dir = await DownloadService().chapterDownloadDir(
+      t.comicPathWord,
+      t.comicTitle,
+      t.chapterId,
+    );
+    if (dir == null) return false;
+    return FileExportService.shareDirectory(
+      dir,
+      archiveName: '${t.comicTitle}_${t.chapterTitle}',
+    );
+  });
+
+  /// 导出已下载图书：EPUB/PDF/TXT 原文件交给系统分享面板。
+  Future<void> _exportBook(BookDownloadTask t) => _runExport(() async {
+    final path = t.localPath;
+    if (path == null) return false;
+    return FileExportService.shareFiles([path]);
+  });
+
+  /// 统一导出流程：转圈 → 拉起分享面板 → 失败提示。
+  Future<void> _runExport(Future<bool> Function() task) async {
+    if (!mounted) return;
+    BuildContext? loadingCtx;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        loadingCtx = ctx;
+        return const Center(child: CircularProgressIndicator());
+      },
+    );
+    bool ok = false;
+    try {
+      ok = await task();
+    } catch (e) {
+      debugPrint('[DownloadPage] 导出失败: $e');
+    }
+    if (loadingCtx != null && loadingCtx!.mounted) {
+      Navigator.of(loadingCtx!).pop();
+    }
+    if (ok || !mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('导出失败'),
+        content: const Text(
+          '没有找到本地文件，或当前系统不支持分享面板。\n'
+          '你仍可在「文件」App → 我的 iPhone → 猫影 → Cmbok 中直接查看下载内容。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// 打开阅读器（离线：仅本漫画已下载章节）

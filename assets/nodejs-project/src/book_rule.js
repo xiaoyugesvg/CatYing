@@ -915,6 +915,57 @@ function splitLastStatement(body) {
 // ============================================================
 
 /**
+ * 整条规则是不是 JS（`@js:` / `<js>`）。
+ *
+ * JS 脚本里的 `||`（逻辑或）是**代码**，不能被当成 Legado 的
+ * 「多规则兜底」分隔符 —— 否则脚本会被拦腰切断、每段都语法错
+ * （看漫画这类正文解码器就必踩）。
+ * Legado 本身也是先判 `@js:` 再拆规则。
+ *
+ * ⚠️ 只豁免 `||`；`##正则##替换` 仍按原逻辑处理（那是规则级语法，
+ *    老源有 `@js:…##x##y` 的写法，不能破坏）。
+ */
+function looksLikeJsRule(s) {
+  return /^\s*<js>/i.test(s) || /^\s*@?js:/i.test(s);
+}
+
+/**
+ * 拆分「前置取值 + @js:脚本」组合链（Legado 官方语法）。
+ *
+ * 例：`.mh-cover@style@js:(String(result).match(/url\(([^)]+)\)/)||[])[1]`
+ *     `class.subtitle.1@text@js:result.replace('作者：','')`
+ *
+ * 语义：先按前缀取出值（含列表规则），把它作为 `result` 注入 JS 再求值。
+ * 不支持的话这类规则会把 `@js:` 当 CSS 选择器的一部分 → 选择器无效/取空。
+ */
+function splitInlineJs(rule) {
+  const s = String(rule || '');
+  if (/^\s*(<js>|@?js:)/i.test(s)) return null; // 整条就是 JS，交给前缀分支
+  let depth = 0;
+  let q = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (q) {
+      if (c === q && s[i - 1] !== '\\') q = null;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      q = c;
+      continue;
+    }
+    if (c === '[' || c === '(') depth++;
+    else if (c === ']' || c === ')') depth = Math.max(0, depth - 1);
+    if (depth === 0 && s.startsWith('@js:', i)) {
+      const pre = s.slice(0, i).trim();
+      const js = s.slice(i + 4);
+      if (!pre || !js.trim()) return null;
+      return { pre, js };
+    }
+  }
+  return null;
+}
+
+/**
  * 对整条规则求值，并执行 Legado 的 `##正则##替换`（可链式）。
  * 拆分放在最外层：`a||b##r##rep` = (a/b 兜底取值) 后整体替换。
  */
@@ -1040,10 +1091,36 @@ function evalRuleCore({ rule, input, vars = {}, ctx = {}, isList = false }) {
   let r = applyVars(raw, vars).trim();
   if (!r) return isList ? [] : '';
 
+  // ── 组合链：`前置取值@js:脚本`（Legado：先取到值，再作为 result 跑 JS）──
+  // ⚠️ 必须放在 `||` 拆分**之前**：脚本里常有 `||`（逻辑或），
+  //    先拆会把脚本拦腰切断（`.mh-cover@style@js:(…||[])[1]` 就是这种）。
+  {
+    const combo = splitInlineJs(r);
+    if (combo) {
+      let baseVal = '';
+      try {
+        baseVal = evalRule({ rule: combo.pre, input, vars, ctx, isList });
+      } catch (_) {
+        baseVal = '';
+      }
+      const res = Array.isArray(baseVal)
+        ? baseVal.map((x) => (x == null ? '' : String(x))).join('\n')
+        : (baseVal == null ? '' : String(baseVal));
+      return runJs(combo.js, {
+        ...ctx,
+        result: res,
+        // 保持 java.getElements 等宿主方法可用
+        __cheerio: input && input.__cheerio ? input.__cheerio : ctx.__cheerio,
+        __nodes: input && input.__nodes ? input.__nodes : ctx.__nodes,
+      });
+    }
+  }
+
   // ── || 多规则兜底（Legado 语义：前者为空/失败才试后者）──
   // 在 splitRule 之前拆分，这样 `a@text||b@text`、`@css:x||@css:y`
   // 都能逐段完整解析；拆分跳过 {{ }} 变量内部，防止误拆。
-  if (r.includes('||')) {
+  // ⚠️ 整条 JS 规则不拆：`||` 是 JS 逻辑或，切断后脚本必然语法错。
+  if (!looksLikeJsRule(r) && r.includes('||')) {
     const segments = splitTopLevelOr(r);
     if (segments.length > 1) {
       for (const seg of segments) {
@@ -1372,7 +1449,14 @@ function splitTopLevelOr(s) {
 /** 统一的「取列表」入口 */
 function evalList({ rule, input, vars, ctx }) {
   if (!rule) return [];
-  const r = applyVars(String(rule), vars).trim();
+  let r = applyVars(String(rule), vars).trim();
+  // Legado 列表规则前缀 `-`：结果倒序。
+  // 旧式书源的目录规则常写 `-.chapter-list li a`（页面是最新章在前，
+  // 取完再翻转成正序）。`-` 不是合法选择器字符，这里直接剥掉再递归。
+  if (r.startsWith('-') && r.length > 1) {
+    const out = evalList({ rule: r.substring(1), input, vars, ctx });
+    return Array.isArray(out) ? out.slice().reverse() : out;
+  }
   const { prefix, parts } = splitRule(r);
 
   if (prefix === 'js') {
@@ -1473,4 +1557,5 @@ export {
   xpathToCss,
   jsonPath,
   runJs,
+  looksLikeJsRule,
 };

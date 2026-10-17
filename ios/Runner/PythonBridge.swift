@@ -176,7 +176,9 @@ import Python
         setenv("PYTHONHOME", home, 1)
         // PYTHONPATH 两个路径：
         //   - python-home 根：spider_runner.py / src/ / pylib/
-        //   - <home>/lib/python3.12/site-packages：CI pip --target 装的三件套
+        //   - <home>/lib/python3.12/site-packages：CI pip --target 装的常用库
+        //     （requests / httpx / beautifulsoup4 / flask；lxml / pycryptodome /
+        //       pyquery 由 pylib 下的纯 Python 垫片提供）
         let sitePath = "\(home)/lib/python3.12/site-packages"
         // 运行时兜底：把 xcframework（真机 slice）自带的 C 扩展目录也挂上 PYTHONPATH。
         // 为什么需要：标准库的 C 扩展（math / _socket / _ssl …）在两个地方各有一份，

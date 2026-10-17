@@ -13,6 +13,7 @@ import 'sub/danmu_settings_page.dart';
 import 'sub/data_source_settings_page.dart';
 import 'sub/general_settings_page.dart';
 import 'sub/home_pages_settings_page.dart';
+import 'sub/emby_settings_page.dart';
 import 'sub/metadata_settings_page.dart';
 import 'sub/playback_settings_page.dart';
 
@@ -140,6 +141,14 @@ class _SettingsPageState extends State<SettingsPage> {
                 icon: Icons.movie_filter_outlined,
                 title: 'TMDB管理',
                 onTap: () => Get.to(() => const MetadataSettingsPage()),
+              ),
+              const SizedBox(height: AppTheme.spacingMD),
+              // Emby 管理（自建媒体库：电影 / 剧集）
+              // 对应底栏「Emby」分类；分类默认关闭，可在「菜单设置」开启。
+              _categoryTile(
+                icon: Icons.video_settings_outlined,
+                title: 'Emby管理',
+                onTap: () => Get.to(() => const EmbySettingsPage()),
               ),
               const SizedBox(height: AppTheme.spacingMD),
 

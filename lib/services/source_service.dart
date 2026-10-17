@@ -93,6 +93,24 @@ class SourceService {
 
     var result = _parseSort(jsonStr, sourceBean: sourceBean);
 
+    // MacCMS / LunaTV 兼容：标准苹果 CMS 的分类接口是 `ac=list`，
+    // 而不是 TVBox JSON 习惯的 `ac=class`。`ac=class` 返回空时自动重试一次，
+    // 避免「LunaTV / 影视仓配置整包没有分类和首页」。
+    if (result.$1.isEmpty &&
+        result.$2.isEmpty &&
+        (sourceBean.type == 1 || sourceBean.type == 0)) {
+      try {
+        final alt = await _network.getString(_buildURL(api, {'ac': 'list'}));
+        final altResult = _parseSort(alt, sourceBean: sourceBean);
+        if (altResult.$1.isNotEmpty || altResult.$2.isNotEmpty) {
+          result = altResult;
+          jsonStr = alt;
+        }
+      } catch (e) {
+        AppLog.instance.log('[source_service] MacCMS ac=list 回退失败: $e');
+      }
+    }
+
     // 当大多数推荐视频的 vod_pic 为空时，额外请求列表接口获取带完整海报的推荐视频
     final picMissingCount =
         result.$2.where((v) => v.pic.trim().isEmpty).length;
@@ -288,9 +306,29 @@ class SourceService {
       url = _buildURL(api, queryParams);
     }
 
-    final jsonStr = await _network.getString(url);
-    return _parseVideoList(jsonStr,
+    var jsonStr = await _network.getString(url);
+    var videos = _parseVideoList(jsonStr,
         sourceKey: sourceBean.key, type: sourceBean.type);
+
+    // MacCMS / LunaTV 兼容：`ac=videolist` 在标准苹果 CMS 上可能为空，
+    // 回退到 `ac=list`（同样是 t + pg 参数）。
+    if (videos.isEmpty && (sourceBean.type == 0 || sourceBean.type == 1)) {
+      try {
+        final altUrl = _buildURL(api, {
+          'ac': 'list',
+          't': sortData.id,
+          'pg': page.toString(),
+          if (filters != null) ...filters,
+        });
+        final alt = await _network.getString(altUrl);
+        final altVideos = _parseVideoList(alt,
+            sourceKey: sourceBean.key, type: sourceBean.type);
+        if (altVideos.isNotEmpty) videos = altVideos;
+      } catch (e) {
+        AppLog.instance.log('[source_service] MacCMS ac=list 列表回退失败: $e');
+      }
+    }
+    return videos;
   }
 
   List<Video> _parseVideoList(String jsonStr,

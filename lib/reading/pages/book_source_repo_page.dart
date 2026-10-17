@@ -10,6 +10,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/book_source.dart';
+import '../services/book_source_compatibility.dart';
+import '../services/book_source_import_parser.dart';
 import '../services/book_source_service.dart';
 import 'book_source_editor_page.dart';
 import 'book_source_health_page.dart';
@@ -390,6 +392,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
     }
     final r = await store.addAll(parsed);
     _toast(r.added > 0 ? '已导入 ${r.added} 个书源' : '已更新 ${r.updated} 个书源');
+    await _showCompatReport(parsed);
   }
 
   /// 从顶部地址栏导入
@@ -1761,6 +1764,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
     var totalUpdated = 0;
     var tried = 0;
     var failed = 0;
+    final allParsed = <BookSource>[];
 
     for (final f in archive) {
       if (!f.isFile) continue;
@@ -1778,6 +1782,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
         final r = await store.addAll(parsed);
         totalAdded += r.added;
         totalUpdated += r.updated;
+        allParsed.addAll(parsed);
       } catch (_) {
         failed++;
       }
@@ -1796,6 +1801,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
       '${totalUpdated > 0 ? '、更新 $totalUpdated 个' : ''}'
       '${failed > 0 ? '（$failed 个文件解析失败）' : ''}',
     );
+    await _showCompatReport(allParsed);
   }
 
   /// 本地文件导入。
@@ -1971,73 +1977,99 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
     _toast(r.added > 0 && r.updated > 0
         ? '新增 ${r.added} 个、更新 ${r.updated} 个书源'
         : (r.added > 0 ? '已导入 ${r.added} 个书源' : '已更新 ${r.updated} 个书源'));
+    await _showCompatReport(parsed);
   }
 
-  /// 解析书源 JSON。兼容 4 种形态 + 带尾随逗号的脏 JSON。
-  List<BookSource> _parseSources(String text) {
-    dynamic decoded;
-    try {
-      decoded = jsonDecode(text);
-    } catch (_) {
-      // 有些分发文件带尾随逗号 / 前后有说明文字，退回"截取首尾括号"再试
-      final a = text.indexOf('[');
-      final b = text.lastIndexOf(']');
-      final c = text.indexOf('{');
-      final d = text.lastIndexOf('}');
-      String? candidate;
-      if (a >= 0 && b > a) {
-        candidate = text.substring(a, b + 1);
-      } else if (c >= 0 && d > c) {
-        candidate = text.substring(c, d + 1);
-      }
-      if (candidate == null) rethrow;
-      decoded = jsonDecode(candidate);
-    }
+  /// 导入后的兼容性报告：只在有 blocker / warning 时弹窗。
+  ///
+  /// 源已经入库（不阻断导入），这里只是把"哪些源可能跑不通、为什么"说清楚，
+  /// 用户可以在书源管理里直接停用它们。
+  Future<void> _showCompatReport(List<BookSource> parsed) async {
+    if (parsed.isEmpty || !mounted) return;
+    final results = parsed.map(BookSourceCompatibility.analyze).toList();
+    final sum = BookSourceCompatibility.summarize(results);
+    if (sum.blocked == 0 && sum.warning == 0) return;
 
-    final out = <BookSource>[];
-    void take(dynamic e) {
-      if (e is! Map) return;
-      final m = e.cast<String, dynamic>();
-      // Cmbok 导出包装：{seq,id,name,url,enabled,...,json:"<Legado 书源 JSON>"}
-      // 书源本体在 json 字段（字符串），顶层没有 bookSourceName/bookSourceUrl ——
-      // 必须先解包再走 BookSource.fromJson，否则整包判"没解析出书源"。
-      if (m['json'] is String && !m.containsKey('bookSourceName')) {
-        try {
-          final inner = jsonDecode(m['json'] as String);
-          if (inner is List) {
-            for (final x in inner) {
-              take(x);
-            }
-            return;
-          }
-          if (inner is Map) {
-            take(inner);
-            return;
-          }
-        } catch (_) {
-          // 解包失败就当普通对象继续走下方分支
-        }
-      }
-      final s = BookSource.fromJson(m);
-      if (s != null) out.add(s);
-    }
-
-    if (decoded is List) {
-      for (final e in decoded) {
-        take(e);
-      }
-    } else if (decoded is Map) {
-      final m = decoded.cast<String, dynamic>();
-      if (m['sources'] is List) {
-        for (final e in (m['sources'] as List)) {
-          take(e);
-        }
-      } else {
-        take(m);
-      }
-    }
-    return out;
+    final problems = results.where((r) => r.hasAny).toList();
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('导入完成 · 兼容性检查'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '可直接使用 ${sum.ok} 个，可能有问题 ${sum.warning} 个，'
+                '不可用 ${sum.blocked} 个。',
+                style: const TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 10),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 300),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: problems.length > 30 ? 30 : problems.length,
+                  itemBuilder: (_, i) {
+                    final r = problems[i];
+                    final color =
+                        r.usable ? Colors.orangeAccent : Colors.redAccent;
+                    final detail = r.issues
+                        .take(3)
+                        .map((e) => e.message)
+                        .join('；');
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            r.usable
+                                ? Icons.warning_amber_rounded
+                                : Icons.error_outline,
+                            size: 16,
+                            color: color,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              '${r.source.name}：$detail',
+                              style: TextStyle(fontSize: 12, color: color),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+              if (problems.length > 30) ...[
+                const SizedBox(height: 6),
+                Text(
+                  '仅显示前 30 个，其余可在书源管理里逐条查看。',
+                  style: TextStyle(
+                      fontSize: 11, color: Theme.of(ctx).disabledColor),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
   }
+
+  /// 解析书源 JSON（兼容 4 种形态 + 脏 JSON）。
+  /// 实现收敛到 [BookSourceImportParser]，订阅更新与本页导入共用一份。
+  List<BookSource> _parseSources(String text) =>
+      BookSourceImportParser.parseSources(text);
 
   // ============================================================
   // 详情 / 删除

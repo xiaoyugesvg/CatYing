@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../common/theme.dart';
 import '../services/browse_history_service.dart';
+import '../services/reading_checkin_service.dart';
 import '../services/reading_plan_service.dart';
 import '../theme/jelly_theme.dart';
 
@@ -37,7 +38,8 @@ class _ReadingPlanPageState extends State<ReadingPlanPage> {
 
   Future<void> _load() async {
     await ReadingPlanService.instance.load();
-    // 最近阅读：图书 + 漫画各取第一条 ✓（数据源与「阅读经历」同一套 ✓，不新增存储 ✓）
+    await ReadingCheckinService.instance.load();
+    // 最近阅读：图书 + 漫画各取第一条（数据源与「阅读历程」同一套，不新增存储）
     String recent = '';
     try {
       final books = BrowseHistoryService().books;
@@ -77,74 +79,235 @@ class _ReadingPlanPageState extends State<ReadingPlanPage> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListenableBuilder(
-              listenable: ReadingPlanService.instance,
+              listenable: Listenable.merge([
+                ReadingPlanService.instance,
+                ReadingCheckinService.instance,
+              ]),
               builder: (context, _) {
                 final plans = ReadingPlanService.instance.plans;
-                if (plans.isEmpty) return _buildEmpty(isDark);
-                return ListView.separated(
+                return ListView(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                  itemCount: plans.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 12),
-                  itemBuilder: (_, i) => _PlanCard(
-                    plan: plans[i],
-                    isDark: isDark,
-                    onDelete: () =>
-                        ReadingPlanService.instance.remove(plans[i].id),
-                  ),
+                  children: [
+                    // ── 每日阅读打卡（从旧「笔记与历程」页搬来这里）──
+                    _buildCheckinCard(isDark),
+                    const SizedBox(height: 16),
+                    if (plans.isEmpty)
+                      _buildEmpty(isDark)
+                    else
+                      for (final p in plans) ...[
+                        _PlanCard(
+                          plan: p,
+                          isDark: isDark,
+                          onDelete: () =>
+                              ReadingPlanService.instance.remove(p.id),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                  ],
                 );
               },
             ),
     );
   }
 
-  /// 空态 ✓（截图原文：还没有阅读计划 / 最近常读《X》，可以为它创建一个 小目标。/ + 创建阅读计划 ✓）
+  /// 今日阅读 / 打卡 / 连续天数 / 每日目标。
+  Widget _buildCheckinCard(bool isDark) {
+    final svc = ReadingCheckinService.instance;
+    final card = isDark ? JellyTheme.cardDark : JellyTheme.cardLight;
+    final labelColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    final sub = JellyTheme.textSecondary;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: card,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: JellyTheme.primary.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.local_fire_department_rounded,
+                    color: JellyTheme.primary, size: 24),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '连续打卡 ${svc.streak} 天',
+                      style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: labelColor),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '累计 ${svc.totalCheckinDays} 天',
+                      style: TextStyle(fontSize: 12, color: sub),
+                    ),
+                    const SizedBox(height: 2),
+                    FutureBuilder<int>(
+                      future: svc.todayMinutes(),
+                      builder: (context, snap) {
+                        final mins = snap.data ?? 0;
+                        final goal = svc.goalMinutes;
+                        return Text(
+                          '今日已读 $mins 分钟'
+                          '${goal > 0 ? ' / 目标 $goal 分钟' : ''}',
+                          style: TextStyle(fontSize: 12, color: sub),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: JellyTheme.primary,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor:
+                      JellyTheme.primary.withValues(alpha: 0.3),
+                ),
+                onPressed: svc.checkedToday
+                    ? null
+                    : () async {
+                        final added = await svc.checkIn();
+                        if (!context.mounted || !added) return;
+                        ScaffoldMessenger.of(context)
+                          ..hideCurrentSnackBar()
+                          ..showSnackBar(SnackBar(
+                            content:
+                                Text('今日打卡成功，已连续 ${svc.streak} 天'),
+                            duration: const Duration(seconds: 2),
+                            behavior: SnackBarBehavior.floating,
+                          ));
+                      },
+                child: Text(svc.checkedToday ? '今日已打卡' : '今日打卡'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          // 今日目标进度条
+          FutureBuilder<int>(
+            future: svc.todayMinutes(),
+            builder: (context, snap) {
+              final mins = snap.data ?? 0;
+              final goal = svc.goalMinutes <= 0 ? 30 : svc.goalMinutes;
+              final v = (mins / goal).clamp(0.0, 1.0);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: LinearProgressIndicator(
+                      value: v,
+                      minHeight: 8,
+                      color: JellyTheme.primary,
+                      backgroundColor:
+                          JellyTheme.primary.withValues(alpha: 0.12),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    v >= 1
+                        ? '今日目标已完成 🎉'
+                        : '今天还差 ${(goal - mins).clamp(0, goal)} 分钟',
+                    style: TextStyle(fontSize: 12, color: sub),
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 14),
+          Text('每日目标时长', style: TextStyle(fontSize: 13, color: sub)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            children: [15, 30, 45, 60].map((m) {
+              final selected = svc.goalMinutes == m;
+              return GestureDetector(
+                onTap: () => svc.setGoal(m),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? JellyTheme.primary
+                        : (isDark
+                            ? JellyTheme.backgroundDark
+                            : JellyTheme.backgroundLight),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Text(
+                    '$m 分钟',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: selected ? Colors.white : sub,
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 空态（作为 ListView 的一个子项，不再用 Center 撑满全屏）。
   Widget _buildEmpty(bool isDark) {
     final sub = _recentTitle.isEmpty
-        ? '从「阅读经历」里选一本常读的书，为它定一个小目标。'
-        : '最近常读《$_recentTitle》，可以为它创建一个 小目标。';
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.event_available_rounded,
-              size: 56,
-              color: isDark ? Colors.white24 : Colors.black26,
+        ? '从「阅读历程」里选一本常读的书，为它定一个小目标。'
+        : '最近常读《$_recentTitle》，可以为它创建一个小目标。';
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.event_available_rounded,
+            size: 56,
+            color: isDark ? Colors.white24 : Colors.black26,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            '还没有阅读计划',
+            style: TextStyle(
+              fontSize: AppTheme.fontHeadline,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
             ),
-            const SizedBox(height: 16),
-            Text(
-              '还没有阅读计划',
-              style: TextStyle(
-                fontSize: AppTheme.fontHeadline,
-                fontWeight: FontWeight.w600,
-                color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
-              ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            sub,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: AppTheme.fontBody,
+              color: JellyTheme.textSecondary,
             ),
-            const SizedBox(height: 8),
-            Text(
-              sub,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: AppTheme.fontBody,
-                color: isDark
-                    ? JellyTheme.textSecondary
-                    : JellyTheme.textSecondary,
-              ),
+          ),
+          const SizedBox(height: 20),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: JellyTheme.primary,
+              foregroundColor: Colors.white,
             ),
-            const SizedBox(height: 20),
-            FilledButton.icon(
-              style: FilledButton.styleFrom(
-                backgroundColor: JellyTheme.primary,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () => _showCreateSheet(isDark),
-              icon: const Icon(Icons.add_rounded, size: 18),
-              label: const Text('创建阅读计划'),
-            ),
-          ],
-        ),
+            onPressed: () => _showCreateSheet(isDark),
+            icon: const Icon(Icons.add_rounded, size: 18),
+            label: const Text('创建阅读计划'),
+          ),
+        ],
       ),
     );
   }
@@ -156,6 +319,8 @@ class _ReadingPlanPageState extends State<ReadingPlanPage> {
     var minutes = 30;
     var pickedTitle = _recentTitle;
     var pickedId = '';
+    // 漫画进度按 pathWord 存（与 id 不是同一个值）；图书走 itemId。
+    var pickedPathWord = '';
     final titleCtl = TextEditingController(text: pickedTitle);
 
     await showModalBottomSheet<void>(
@@ -242,7 +407,7 @@ class _ReadingPlanPageState extends State<ReadingPlanPage> {
                     onChanged: (v) => pickedTitle = v,
                   ),
                   const SizedBox(height: 8),
-                  // 最近阅读快选 ✓（数据源与「阅读经历」一致 ✓）
+                  // 最近阅读快选（数据源与「阅读历程」一致）
                   Wrap(
                     spacing: 8,
                     runSpacing: 4,
@@ -255,6 +420,7 @@ class _ReadingPlanPageState extends State<ReadingPlanPage> {
                               onPressed: () => setSheet(() {
                                 pickedTitle = b.title;
                                 pickedId = b.id;
+                                pickedPathWord = '';
                                 titleCtl.text = b.title;
                               }),
                             ),
@@ -267,6 +433,9 @@ class _ReadingPlanPageState extends State<ReadingPlanPage> {
                               onPressed: () => setSheet(() {
                                 pickedTitle = c.title;
                                 pickedId = c.id;
+                                pickedPathWord = c.pathWord.isNotEmpty
+                                    ? c.pathWord
+                                    : c.id;
                                 titleCtl.text = c.title;
                               }),
                             ),
@@ -310,6 +479,7 @@ class _ReadingPlanPageState extends State<ReadingPlanPage> {
                           kind: kind,
                           title: title,
                           itemId: pickedId,
+                          pathWord: pickedPathWord,
                           deadline:
                               DateTime(now.year, now.month, now.day + days),
                           dailyMinutes: minutes,
@@ -391,40 +561,37 @@ class _PlanCard extends StatelessWidget {
             style: TextStyle(fontSize: AppTheme.fontFootnote, color: sub),
           ),
           const SizedBox(height: 10),
-          // 进度：每日阅读 → 今日分钟 ÷ 目标 ✓（数据来自两个阅读器的真实记录 ✓）
-          if (plan.isDaily)
-            FutureBuilder<double>(
-              future: ReadingPlanService.instance.dailyProgress(plan),
-              builder: (context, snap) {
-                final v = (snap.data ?? 0).clamp(0.0, 1.0);
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: LinearProgressIndicator(
-                        value: v,
-                        minHeight: 6,
-                        backgroundColor: isDark
-                            ? Colors.white12
-                            : Colors.black12,
-                      ),
+          // 真实进度：每日阅读 = 今日分钟/目标；读完一本 = 阅读器里的真实进度
+          // （漫画按 pathWord、图书按 bookId，见 ReadingPlanService.progressOf）
+          FutureBuilder<({double percent, String label})>(
+            future: ReadingPlanService.instance.progressOf(plan),
+            builder: (context, snap) {
+              final data = snap.data;
+              final v = (data?.percent ?? 0).clamp(0.0, 1.0);
+              final text = data?.label ?? '统计中…';
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: v,
+                      minHeight: 6,
+                      color: v >= 1 ? Colors.green : JellyTheme.primary,
+                      backgroundColor:
+                          isDark ? Colors.white12 : Colors.black12,
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '今日 ${(v * 100).round()}%',
-                      style:
-                          TextStyle(fontSize: AppTheme.fontFootnote, color: sub),
-                    ),
-                  ],
-                );
-              },
-            )
-          else
-            Text(
-              '进度按阅读进度统计（读完一本即完成）',
-              style: TextStyle(fontSize: AppTheme.fontFootnote, color: sub),
-            ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '$text${data == null ? '' : ' · ${(v * 100).round()}%'}',
+                    style:
+                        TextStyle(fontSize: AppTheme.fontFootnote, color: sub),
+                  ),
+                ],
+              );
+            },
+          ),
         ],
       ),
     );

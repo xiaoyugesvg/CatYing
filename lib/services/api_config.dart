@@ -5,6 +5,8 @@ import 'package:crypto/crypto.dart';
 import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
 import 'app_log.dart';
+import 'local_python_sources.dart';
+import 'moontv_converter.dart';
 import 'prefs_mirror.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_config.dart';
@@ -62,6 +64,12 @@ class ApiConfig extends GetxController {
 
   final sourceBeanList = <SourceBean>[].obs;
   final homeSourceBean = Rx<SourceBean?>(null);
+
+  /// 用户单独导入的本地 Python 源（与订阅线路**分开**）。
+  ///
+  /// 不放进 [sourceBeanList]：那张表是"以接口下发的 sites 为准整表替换"的，
+  /// 本地源混进去会被 /config 覆盖/污染；这里单独一份，源面板单独成组。
+  final localVideoSources = <SourceBean>[].obs;
   final parseBeanList = <ParseBean>[].obs;
   final dohList = <(String, String)>[].obs;
   final isLoaded = false.obs;
@@ -154,6 +162,8 @@ class ApiConfig extends GetxController {
     try {
       final normalized = normalizeConfigUrl(apiUrl.trim());
       if (normalized.isEmpty) return;
+      // 本地转换配置不走网络
+      if (ConvertedConfigStore.isLocal(normalized)) return;
       // 单 js/jar spider 源不是 JSON，预取没意义（那类走 Node 加载那套）
       if (_isSpiderSourceUrl(normalized)) return;
 
@@ -190,6 +200,9 @@ class ApiConfig extends GetxController {
       final config = AppConfigData.fromJson(decoded);
       if (config.hasUsableContent) return null;
 
+      // MoonTV 影视仓不是多仓库入口（加载时会现场转换），这里直接放行
+      if (MoonTvConverter.tryConvert(decoded) != null) return null;
+
       // 尝试多仓库
       try {
         final multiRepo = MultiRepoConfigData.fromJson(decoded);
@@ -219,18 +232,55 @@ class ApiConfig extends GetxController {
     return null;
   }
 
-  /// 获取指定 key 的源
+  /// 获取指定 key 的源（订阅线路 + 本地 Python 源）
   SourceBean? getSource(String key) {
-    return sourceBeanList.firstWhereOrNull((s) => s.key == key);
+    return sourceBeanList.firstWhereOrNull((s) => s.key == key) ??
+        localVideoSources.firstWhereOrNull((s) => s.key == key);
   }
 
-  /// 获取可搜索的源列表
+  /// 获取可搜索的源列表（本地 Python 源也参与搜索）
   List<SourceBean> getSearchableSources() {
     final result = sourceBeanList
         .where((s) => s.isSearchable && s.key != 'douban' && s.key != 'baseset')
         .toList();
-    AppLog.instance.log('[ApiConfig] getSearchableSources: 总源数=${sourceBeanList.length}, 可搜索源数=${result.length}');
+    result.addAll(localVideoSources.where((s) => s.isSearchable));
+    AppLog.instance.log(
+        '[ApiConfig] getSearchableSources: 总源数=${sourceBeanList.length}+${localVideoSources.length} 本地源, 可搜索源数=${result.length}');
     return result;
+  }
+
+  /// 重新读取「本地 Python 源」清单（导入/删除后调用）。
+  ///
+  /// 只更新 [localVideoSources]，**不动** [sourceBeanList] —— 订阅线路与本地源是两套。
+  Future<void> reloadLocalVideoSources() async {
+    try {
+      await LocalPythonSources.instance.load(force: true);
+      final list = LocalPythonSources.instance.sources
+          .map((e) => e.toSourceBean())
+          .toList();
+      localVideoSources.assignAll(list);
+
+      // 当前主页源就是被删掉的那个 → 回退到订阅线路第一条；
+      // 只是改名/重新导入 → 换成新的 bean（否则标题栏还是旧名字）
+      final cur = homeSourceBean.value;
+      if (cur != null && cur.key.startsWith('localpy_')) {
+        SourceBean? updated;
+        for (final s in list) {
+          if (s.key == cur.key) {
+            updated = s;
+            break;
+          }
+        }
+        if (updated == null) {
+          // 删掉的是当前本地源：本地还有别的就切过去，否则回订阅线路第一条
+          homeSourceBean.value = list.firstOrNull ?? sourceBeanList.firstOrNull;
+        } else if (updated.name != cur.name) {
+          homeSourceBean.value = updated;
+        }
+      }
+    } catch (e) {
+      AppLog.instance.w('[ApiConfig] 读取本地 Python 源失败: $e');
+    }
   }
 
   /// 主页源选择：按**订阅（配置地址）分别记住**。
@@ -792,14 +842,17 @@ class ApiConfig extends GetxController {
     _syncInvalidCount();
 
     sourceBeanList.value = newSources;
+    // 本地 Python 源是独立一套：订阅线路整表替换后重新挂上（不混入 newSources）
+    await reloadLocalVideoSources();
 
     // 关键修复：当前 homeSourceBean 可能是之前 _createSpiderSourceConfig
     // 临时创建的**占位 SourceBean**（基于 .js URL 派生），它的 key 不在
     // newSources 中。必须把 homeSourceBean 重置到新列表的真实第一项，
     // 否则用户在 PopupMenu 中看到的就是"基于源地址的占位线路"。
     final currentKey = homeSourceBean.value?.key;
-    final isCurrentInNewList =
-        currentKey != null && newSources.any((s) => s.key == currentKey);
+    final isCurrentInNewList = currentKey != null &&
+        (newSources.any((s) => s.key == currentKey) ||
+            localVideoSources.any((s) => s.key == currentKey));
 
     // 优先恢复保存的主页源
     await _restoreHomeSource(newSources);
@@ -859,6 +912,18 @@ class ApiConfig extends GetxController {
 
     // 尝试作为正常配置解析
     if (decoded != null) {
+      // MoonTV / LunaTV 影视仓（`api_site`）→ 现场转成 TVBox `sites`
+      final moon = MoonTvConverter.tryConvert(decoded);
+      if (moon != null) {
+        AppLog.instance.log(
+            '[ApiConfig] MoonTV video.json 已转换：${moon.sites.length} 个源'
+            '${moon.warnings.isEmpty ? "" : "（跳过 ${moon.warnings.length} 条）"}');
+        return (
+          config: AppConfigData.fromJson(moon.toConfig()),
+          loadedFrom: normalizedUrl,
+        );
+      }
+
       final config = AppConfigData.fromJson(decoded);
       if (config.hasUsableContent) {
         return (config: config, loadedFrom: normalizedUrl);
@@ -930,6 +995,15 @@ class ApiConfig extends GetxController {
 
   /// 读取配置文本并做短时缓存（LRU：访问会刷新 lastAccess）
   Future<String> _fetchConfigText(String normalizedUrl) async {
+    // 本地转换配置（`local://<name>`）：直接读 Documents，不走网络
+    if (ConvertedConfigStore.isLocal(normalizedUrl)) {
+      final content = await ConvertedConfigStore.read(normalizedUrl);
+      if (content == null || content.trim().isEmpty) {
+        throw ConfigError.parseError.message('本地转换配置不存在: $normalizedUrl');
+      }
+      return content;
+    }
+
     final key = normalizedUrl.toLowerCase();
     final now = DateTime.now();
 
@@ -1121,6 +1195,8 @@ class ApiConfig extends GetxController {
       _dropInvalidSources(sources);
       _syncInvalidCount();
       sourceBeanList.value = sources;
+      // 本地 Python 源单独一组：每次配置解析后重新读取（切订阅不丢）
+      await reloadLocalVideoSources();
 
       // 直播 lives：交给 LiveService 解析（内嵌 channels 或 m3u URL）
       //
@@ -1174,8 +1250,9 @@ class ApiConfig extends GetxController {
       // 残留的是上一个订阅的 key（非 null），只判 null 不会重置 → 首页继续
       // 指向已不存在的源，表现为「切了订阅但首页还是旧源/空白」。
       final curKey = homeSourceBean.value?.key;
-      final curInList =
-          curKey != null && sources.any((s) => s.key == curKey);
+      final curInList = curKey != null &&
+          (sources.any((s) => s.key == curKey) ||
+              localVideoSources.any((s) => s.key == curKey));
       if (!curInList) {
         homeSourceBean.value = sources.firstOrNull;
       }
@@ -1234,6 +1311,12 @@ class ApiConfig extends GetxController {
         final found = sources.where((s) => s.key == saved).firstOrNull;
         if (found != null) {
           homeSourceBean.value = found;
+          return;
+        }
+        // 本地 Python 源不在订阅线路表里，单独找一次
+        final local = localVideoSources.where((s) => s.key == saved).firstOrNull;
+        if (local != null) {
+          homeSourceBean.value = local;
           return;
         }
       }

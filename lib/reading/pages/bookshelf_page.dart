@@ -23,6 +23,7 @@ import '../services/shelf_update_service.dart';
 import '../source/adapter.dart';
 import '../source/source_manager.dart';
 import '../services/download_service.dart';
+import '../services/local_comic_import_service.dart';
 import '../services/reading_progress_service.dart';
 import '../services/settings_service.dart';
 import '../utils/list_pagination.dart';
@@ -36,10 +37,12 @@ import '../widgets/jelly_segmented_toggle.dart';
 import 'book_source_detail_page.dart';
 import '../widgets/jelly_select_badge.dart';
 import '../widgets/staggered_entrance.dart';
+import '../../services/file_export_service.dart';
 import 'book_detail_page.dart';
 import 'book_reader_page.dart';
 import 'comic_detail_page.dart';
 import 'reader_page.dart';
+import 'local_library_page.dart';
 import '../../widgets/app_empty_view.dart';
 import '../../common/theme.dart';
 // 🔴 这里原来还有一行 `import '../../widgets/app_icon_button.dart';` ✗ —— 已删除 ✓。
@@ -1044,7 +1047,10 @@ class _BookshelfPageState extends State<BookshelfPage>
           .where((x) => x.id != BookshelfService.presetLocal)
           .toList();
     }
-    return shelves;
+    // 图书 tab 不显示「本地漫画」书架（其内仅 Comic 类型）
+    return shelves
+        .where((x) => x.id != BookshelfService.presetLocalComic)
+        .toList();
   }
 
   /// 切换书架并滚动标签栏让当前 chip 可见
@@ -1965,10 +1971,19 @@ class _BookshelfPageState extends State<BookshelfPage>
                 item(
                   icon: Icons.file_download_outlined,
                   title: '导入本地图书',
-                  subtitle: '从本地文件导入 epub / pdf / txt 等图书',
+                  subtitle: '从本地文件导入 epub / pdf / txt 图书',
                   onTap: () {
                     Navigator.pop(context);
                     _importLocalBook();
+                  },
+                ),
+                item(
+                  icon: Icons.photo_library_outlined,
+                  title: '导入本地漫画',
+                  subtitle: '图片 / 文件夹 / ZIP / CBZ，导入后离线阅读',
+                  onTap: () {
+                    Navigator.pop(context);
+                    _importLocalComic();
                   },
                 ),
                 item(
@@ -1978,6 +1993,20 @@ class _BookshelfPageState extends State<BookshelfPage>
                   onTap: () {
                     Navigator.pop(context);
                     _scanLibraryFolder();
+                  },
+                ),
+                item(
+                  icon: Icons.inventory_2_outlined,
+                  title: '本地库管理',
+                  subtitle: '多库根 · 标签 · 查重 · 回收站',
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const LocalLibraryPage(),
+                      ),
+                    );
                   },
                 ),
                 item(
@@ -2465,22 +2494,174 @@ class _BookshelfPageState extends State<BookshelfPage>
     kindleC.dispose();
   }
 
+  /// 导入本地漫画：图片多选 / 文件夹 / ZIP / CBZ。
+  ///
+  /// 落盘结构复用「下载漫画」，所以导入后：
+  ///   · 书架 → 本地漫画（presetLocalComic）
+  ///   · 点开直接离线阅读（ReaderPage 先查本地图片）
+  ///   · 进度/书签/下载记录与在线漫画完全一致
+  Future<void> _importLocalComic() async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final source = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF1E1E22) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+              child: Row(
+                children: [
+                  Text(
+                    '导入本地漫画',
+                    style: TextStyle(
+                      fontSize: AppTheme.fontHeadline,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('选择图片'),
+              subtitle: const Text('多选图片，合并为一话'),
+              onTap: () => Navigator.pop(ctx, 'images'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.folder_open_outlined),
+              title: const Text('选择文件夹'),
+              subtitle: const Text('每个含图片的子文件夹算一话'),
+              onTap: () => Navigator.pop(ctx, 'folder'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.archive_outlined),
+              title: const Text('选择 ZIP / CBZ'),
+              subtitle: const Text('压缩包内按目录分话'),
+              onTap: () => Navigator.pop(ctx, 'archive'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (source == null || !mounted) return;
+
+    String defaultTitle = '本地漫画';
+    List<PlatformFile> images = const [];
+    String? folder;
+    PlatformFile? archive;
+    try {
+      if (source == 'images') {
+        images = await LocalComicImportService.pickImages();
+        if (images.isEmpty) return;
+        final n = images.first.name;
+        defaultTitle = n.contains('.') ? n.substring(0, n.lastIndexOf('.')) : n;
+      } else if (source == 'folder') {
+        folder = await LocalComicImportService.pickFolder();
+        if (folder == null || folder.trim().isEmpty) return;
+        final parts =
+            folder.split(RegExp(r'[/\\]')).where((e) => e.trim().isNotEmpty);
+        if (parts.isNotEmpty) defaultTitle = parts.last;
+      } else {
+        archive = await LocalComicImportService.pickArchive();
+        if (archive == null) return;
+        defaultTitle = archive.name.replaceAll(
+          RegExp(r'\.(zip|cbz)$', caseSensitive: false),
+          '',
+        );
+      }
+    } catch (e) {
+      _showToast('选择失败：$e');
+      return;
+    }
+    if (!mounted) return;
+
+    final title = await _askLocalComicTitle(defaultTitle);
+    if (title == null || title.trim().isEmpty || !mounted) return;
+
+    final rootNav = Navigator.of(context, rootNavigator: true);
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const PopScope(
+        canPop: false,
+        child: Center(child: CircularProgressIndicator()),
+      ),
+    );
+    try {
+      final r = source == 'images'
+          ? await LocalComicImportService.importImages(images, title: title)
+          : source == 'folder'
+              ? await LocalComicImportService.importFolder(folder!, title: title)
+              : await LocalComicImportService.importArchive(archive!, title: title);
+      if (!mounted) return;
+      rootNav.pop();
+      _switchTab(NavTab.manga);
+      _switchShelf(BookshelfService.presetLocalComic);
+      _showToast('已导入《${r.title}》：${r.chapterCount} 话 / ${r.imageCount} 张');
+    } catch (e) {
+      if (!mounted) return;
+      rootNav.pop();
+      _showToast('导入失败：$e');
+    }
+  }
+
+  Future<String?> _askLocalComicTitle(String initial) async {
+    final ctrl = TextEditingController(text: initial);
+    final r = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('漫画名称'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: '输入名称'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('导入'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    return r;
+  }
+
+  void _showToast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(msg),
+        duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+      ));
+  }
+
   /// 导入本地图书：多选文件 -> 逐本建已完成任务 -> 入"本地图书"书架（Book 类型，固定 id）
   Future<void> _importLocalBook() async {
     // file_picker 13：pickFiles 是静态方法，直接返回 List<PlatformFile>
     // （旧版是 FilePicker.platform.pickFiles() 返回 FilePickerResult?）
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
+      // 只列真正能解析的格式：MOBI/AZW/AZW3/FB2/DOCX/RTF 解析器已不支持，
+      // 放进来只会"可选但打不开"（用户 2026-10-17 明确要修）。
       allowedExtensions: const [
         'epub',
         'pdf',
         'txt',
-        'mobi',
-        'azw',
-        'azw3',
-        'fb2',
-        'docx',
-        'rtf',
       ],
     );
     if (result.isEmpty) return;
@@ -2867,7 +3048,7 @@ class _BookshelfPageState extends State<BookshelfPage>
           'name': name,
           'tocUrl': tocUrl,
           'progress': prog is Map
-              ? ((prog as Map)['chapter'] ?? '')
+              ? (prog['chapter'] ?? '')
               : '',
           'bookmarks': marks,
         };
@@ -4508,6 +4689,27 @@ class _ShelfCoverState extends State<_ShelfCover> {
                     ),
                   ),
                 ),
+              // 底部细进度条：图书按页数百分比（漫画无总数时只显示文字徽标）
+              if (SettingsService().cardInfo && widget.progress != null)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.vertical(
+                      bottom: Radius.circular(
+                        SettingsService().coverRadiusPx,
+                      ),
+                    ),
+                    child: LinearProgressIndicator(
+                      value: (widget.progress ?? 0).clamp(0.0, 1.0),
+                      minHeight: 3,
+                      backgroundColor:
+                          Colors.white.withValues(alpha: 0.25),
+                      color: JellyTheme.primary,
+                    ),
+                  ),
+                ),
               if (SettingsService().cardInfo && widget.progress != null)
                 badge(
                   Text(
@@ -4731,6 +4933,25 @@ void _showShelfItemMenu(
                   style: TextStyle(fontSize: AppTheme.fontFootnote),
                 ),
               ),
+            // ③.5 导出本地文件：与「删除本地文件」同一门槛（确实有文件才出现）
+            if (_hasLocalFiles(e))
+              ListTile(
+                leading: Icon(
+                  Icons.ios_share_rounded,
+                  color: JellyTheme.primary,
+                ),
+                title: const Text('导出本地文件'),
+                subtitle: Text(
+                  e.type == BookshelfItemType.comic
+                      ? '整本打包成 ZIP 后分享'
+                      : '用系统分享面板另存',
+                  style: const TextStyle(fontSize: AppTheme.fontCaption),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _exportLocalFiles(context, e);
+                },
+              ),
             // ④ 硬删除：删掉本地已下载内容（不可恢复）。
             //    只在**确实有本地文件**时才出现 ✓（否则点了没反应会让人困惑）
             //    不依赖当前书架 ⇒ 「全部」视图下也提供 ✓
@@ -4765,6 +4986,43 @@ bool _hasLocalFiles(_ShelfEntry e) {
     return DownloadService().downloadedChapters(e.itemId).isNotEmpty;
   }
   return BookDownloadService().task(e.itemId) != null;
+}
+
+/// **导出**本地文件：漫画整本打包 ZIP，图书直接分享文件。
+Future<void> _exportLocalFiles(BuildContext context, _ShelfEntry e) async {
+  var ok = false;
+  try {
+    if (e.type == BookshelfItemType.comic) {
+      final dir = await DownloadService().comicDownloadDir(e.itemId, e.title);
+      if (dir != null) {
+        ok = await FileExportService.shareDirectory(dir, archiveName: e.title);
+      }
+    } else {
+      final path = BookDownloadService().task(e.itemId)?.localPath;
+      if (path != null) {
+        ok = await FileExportService.shareFiles([path]);
+      }
+    }
+  } catch (err) {
+    debugPrint('[Bookshelf] 导出失败: $err');
+  }
+  if (ok || !context.mounted) return;
+  await showDialog<void>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('导出失败'),
+      content: const Text(
+        '没有找到本地文件，或当前系统不支持分享面板。\n'
+        '你仍可在「文件」App → 我的 iPhone → 猫影 → Cmbok 中直接查看下载内容。',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('知道了'),
+        ),
+      ],
+    ),
+  );
 }
 
 /// **硬删除**本地文件（不可恢复）：菜单「删除本地文件」的实现。

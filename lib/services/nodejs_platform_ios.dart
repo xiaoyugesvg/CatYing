@@ -716,6 +716,73 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
     if (onProgress != null) onProgress(1.0);
     return;
   }
+
+  // ============================================================
+  // 小程序 Node 后端（manifest.json 的 `node`）
+  // ============================================================
+
+  /// 让 Node 侧 require 小程序目录里的 `server/index.js` 并 listen。
+  ///
+  /// 返回 `http://127.0.0.1:<port>`；失败返回 null（具体原因看 Node 日志）。
+  /// 走 management 端口，因为只有它知道 Node 进程的实时端口。
+  @override
+  Future<String?> startMiniAppService({
+    required String appId,
+    required String dir,
+    String entry = 'server/index.js',
+    String config = 'server/index.config.js',
+  }) async {
+    if (_managementPort <= 0) {
+      AppLog.instance.log('[IOSNodeJS] 启动小程序 node 失败：management 端口未就绪');
+      return null;
+    }
+    try {
+      final r = await _dio.post<dynamic>(
+        'http://127.0.0.1:$_managementPort/miniapp/start',
+        data: {
+          'appId': appId,
+          'dir': dir,
+          'entry': entry,
+          'config': config,
+        },
+        options: Options(
+          responseType: ResponseType.json,
+          contentType: Headers.jsonContentType,
+        ),
+      );
+      final m = r.data;
+      if (m is Map && m['ok'] == true) {
+        final url = (m['url'] ?? '').toString().trim();
+        if (url.isNotEmpty) {
+          AppLog.instance.log('[IOSNodeJS] 小程序 node 已启动：$appId → $url');
+          return url;
+        }
+      }
+      AppLog.instance.log('[IOSNodeJS] 小程序 node 启动失败：$m');
+      return null;
+    } catch (e) {
+      AppLog.instance.log('[IOSNodeJS] /miniapp/start 失败: $e');
+      return null;
+    }
+  }
+
+  @override
+  Future<void> stopMiniAppService(String appId) async {
+    if (_managementPort <= 0) return;
+    try {
+      await _dio.post<dynamic>(
+        'http://127.0.0.1:$_managementPort/miniapp/stop',
+        data: {'appId': appId},
+        options: Options(
+          responseType: ResponseType.json,
+          contentType: Headers.jsonContentType,
+        ),
+      );
+    } catch (e) {
+      // 页面已经在退出，停不掉不影响功能（下次 start 会复用/重启）
+      AppLog.instance.log('[IOSNodeJS] /miniapp/stop 失败: $e');
+    }
+  }
 }
 
 /// 工具：从 url 解析 host（用于在 iOS 上传 source path 时的归一化）

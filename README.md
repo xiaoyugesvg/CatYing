@@ -152,7 +152,7 @@ Dart 端 Node 平台分派：[nodejs_platform.dart](lib/services/nodejs_platform
 ### 双引擎说明
 
 - **Node.js 引擎**：`assets/nodejs-project/src/*` 经 esbuild 打包成 `dist/main.js`，跑 TVBox 爬虫 / 书源 / 音乐插件源（洛雪、MusicFree）/ 网盘工具 / **海阔规则（`hiker_engine.js`）**。**改动只能改 `src/`，`dist/` 由 CI 重新构建**。
-- **CPython 引擎**：`assets/python-project/`（`spider_runner.py` + 适配层），把 catvod 风格 Python 源映射到本项目五接口；第三方 C 扩展依赖（lxml / pyquery / pycryptodome）用**纯 Python 垫片**解决。
+- **CPython 引擎**：`assets/python-project/`（`spider_runner.py` + 适配层），把 catvod 风格 Python 源映射到本项目五接口；运行时预装 `requests / httpx / beautifulsoup4 / flask`，`lxml / pyquery / pycryptodome` 用**纯 Python 垫片**（真库是 C 扩展，iOS 无法交叉编译）。
 
 ---
 

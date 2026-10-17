@@ -1,7 +1,7 @@
 /// 书名展示清洗：去掉外层书名号《》与首尾装饰性标点（！？，。、空格），
 /// 只改显示层，不动原始数据。z-library 返回的书名常带《》或尾部感叹号。
 String cleanBookTitle(String raw) {
-  var s = (raw ?? '').trim();
+  var s = raw.trim();
   if (s.startsWith('《') && s.endsWith('》') && s.length > 2) {
     s = s.substring(1, s.length - 1).trim();
   }

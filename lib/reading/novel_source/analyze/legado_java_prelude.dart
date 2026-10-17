@@ -24,10 +24,11 @@
 /// 的异步回调：本引擎规则求值是**同步**的，异步回调无法在同步栈里还回结果。
 ///
 /// ── 明确未实现（显式抛错，不再静默返回空串）──────────────────
-/// `aesEncodeToString`、`getByteArray`（二进制通道，P1）、
-/// `webView` / `startBrowser(Await)`（人机验证，P3）、`refreshCookie`。
+/// `webView` / `startBrowser(Await)`（人机验证，P3）。
 /// ✅ 已实现：`createSymmetricCrypto` / `cryptoOp` / `aesBase64DecodeToString` /
 ///    `desBase64DecodeToString`（句柄通道，补丁 0012 —— 不再是未实现项）、
+///    `aesEncodeToString`（AES 加密 → Base64）、`getByteArray`（二进制通道）、
+///    `refreshCookie`（WebView 取 cookie 并写回存储）、
 ///    `getCookie`/`setCookie` 与 JS 全局 `cookie.*`（`cookie_store.dart`，补丁 0015）。
 library;
 
@@ -117,6 +118,27 @@ var java = (function () {
     }
     _err(_NEED + JSON.stringify({
       k: key, m: 'BROWSER', u: String(url), h: h, b: null
+    }));
+  }
+
+  // ════ ③ 二进制通道：getByteArray ════
+  //   getByteArray(url) 需要**原始字节**（图片/加密数据），不能按 UTF-8 解码。
+  //   协议：抛 NEED 时带 x:'b64'，Dart 侧（SyncHttpBridge）让代理以 base64
+  //   回传原始字节；这里再解成 JS 字节数组（0~255），可直接交给
+  //   `java.util.Base64.encodeToString(bytes)` / `android.util.Base64`。
+  function _binary(url) {
+    var u = String(url);
+    var key = 'BIN GET ' + u;
+    var box = (typeof httpCache !== 'undefined' && httpCache) ? httpCache : {};
+    if (Object.prototype.hasOwnProperty.call(box, key)) {
+      var v = box[key];
+      if (v && typeof v === 'object' && v.__error) {
+        _err('java.getByteArray 失败: ' + v.__error);
+      }
+      return (v === null || v === undefined) ? '' : String(v);
+    }
+    _err(_NEED + JSON.stringify({
+      k: key, m: 'GET', u: u, h: null, b: null, x: 'b64'
     }));
   }
 
@@ -372,7 +394,8 @@ var java = (function () {
       return out;
     },
     // ── 未实现（显式抛错，留日志线索）──
-    getByteArray: _unsupported('getByteArray'),
+    // 二进制：原始字节以 base64 走重放通道，再解成 JS 字节数组
+    getByteArray: function (url) { return _b64ToBytes(_binary(String(url))); },
     // ── 对称加密（句柄通道：createSymmetricCrypto → cryptoOp）──
     // Dart 侧 createSymmetricCrypto 返回 {'__handle': id}，这里取出 id 供后续
     // cryptoOp(handle, op, data) 使用（与 analyze_rule 的既有契约一致）。
@@ -390,7 +413,9 @@ var java = (function () {
     desBase64DecodeToString: function (data, key, mode, iv) {
       return _call('desBase64DecodeToString', [data, key, mode, iv]);
     },
-    aesEncodeToString: _unsupported('aesEncodeToString'),
+    aesEncodeToString: function (data, key, mode, iv) {
+      return _call('aesEncodeToString', [data, key, mode, iv]);
+    },
     // ── 浏览器栈（实测 10 处 startBrowserAwait + 1 处 webView）──
     // legado 语义：webView(content, url, js) 用 WebView 加载 url（可注入 js）
     // 后返回结果；未传 content 时按 url 加载。
@@ -408,7 +433,17 @@ var java = (function () {
     // 实测 0 处使用，但语义与全局 cookie 对象一致 ⇒ 一并接到同一存储
     getCookie: function (url) { return _legadoHostCall('cookie.getCookie', [url]); },
     setCookie: function (url, c) { return _legadoHostCall('cookie.setCookie', [url, c]); },
-    refreshCookie: _unsupported('refreshCookie')
+    // 刷新 cookie：用真浏览器栈加载页面并取 `document.cookie`，
+    // 写回 cookie 存储后返回；页面没有 JS cookie 时回退到存储里的值。
+    refreshCookie: function (url) {
+      var u = String(url);
+      var c = _browser(u, 'fetch', 'document.cookie');
+      if (c && String(c).length > 0) {
+        _legadoHostCall('cookie.setCookie', [u, String(c)]);
+        return String(c);
+      }
+      return _legadoHostCall('cookie.getCookie', [u]);
+    }
   };
 })();
 

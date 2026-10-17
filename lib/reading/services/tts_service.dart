@@ -9,6 +9,7 @@ import 'package:media_kit/media_kit.dart';
 
 import '../models/tts_source.dart';
 import '../source/global_proxy.dart';
+import 'tts_now_playing.dart';
 import 'tts_source_store.dart';
 
 /// 语音朗读（听书）。
@@ -71,6 +72,13 @@ class TtsService extends GetxService {
   /// 出错信息
   final lastError = ''.obs;
 
+  /// 定时关闭剩余秒数（0 = 未开启）
+  final sleepRemaining = 0.obs;
+
+  Timer? _sleepTimer;
+  String _npTitle = '听书';
+  String _npSubtitle = '';
+
   List<String> _segments = [];
   bool _stopRequested = false;
 
@@ -115,10 +123,15 @@ class TtsService extends GetxService {
       if (call.method == 'onDone') _onSegmentDone();
       return null;
     });
+    // 锁屏 / 控制中心：远程按键统一交给本服务
+    TtsNowPlaying.instance.onRemote = _handleRemote;
+    TtsNowPlaying.instance.init();
   }
 
   @override
   void onClose() {
+    _sleepTimer?.cancel();
+    _sleepTimer = null;
     // 释放网络播放器与订阅（service 为 permanent，正常不触发，
     // 但 Get 清空时会走这里，避免播放器/订阅泄漏）
     _netCompleteSub?.cancel();
@@ -126,6 +139,81 @@ class TtsService extends GetxService {
     _netPlayer?.dispose();
     _netPlayer = null;
     super.onClose();
+  }
+
+  // ============================================================
+  // 定时关闭 / 锁屏控制
+  // ============================================================
+
+  /// 设置听书标题（锁屏/控制中心显示）。
+  void setNowPlayingMeta(String title, [String subtitle = '']) {
+    _npTitle = title.trim().isEmpty ? '听书' : title.trim();
+    _npSubtitle = subtitle.trim();
+    _updateNowPlaying();
+  }
+
+  /// 定时关闭：到点自动暂停朗读。
+  void startSleep(Duration d) {
+    _sleepTimer?.cancel();
+    var secs = d.inSeconds;
+    if (secs <= 0) {
+      cancelSleep();
+      return;
+    }
+    sleepRemaining.value = secs;
+    _sleepTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      secs--;
+      sleepRemaining.value = secs < 0 ? 0 : secs;
+      if (secs <= 0) {
+        t.cancel();
+        _sleepTimer = null;
+        sleepRemaining.value = 0;
+        pause();
+      }
+    });
+  }
+
+  void cancelSleep() {
+    _sleepTimer?.cancel();
+    _sleepTimer = null;
+    sleepRemaining.value = 0;
+  }
+
+  Future<void> _updateNowPlaying({bool? playing}) async {
+    await TtsNowPlaying.instance.update(
+      title: _npTitle,
+      subtitle: _npSubtitle,
+      position: currentIndex.value,
+      duration: totalSegments.value,
+      playing: playing ?? isSpeaking.value,
+    );
+  }
+
+  Future<void> _handleRemote(String action) async {
+    switch (action) {
+      case 'play':
+        if (isPaused.value) await resume();
+        break;
+      case 'pause':
+        await pause();
+        break;
+      case 'toggle':
+        if (isPaused.value) {
+          await resume();
+        } else if (isSpeaking.value) {
+          await pause();
+        }
+        break;
+      case 'stop':
+        await stop();
+        break;
+      case 'next':
+        await jumpTo(currentIndex.value + 1);
+        break;
+      case 'previous':
+        await jumpTo(currentIndex.value - 1);
+        break;
+    }
   }
 
   // ============================================================
@@ -160,6 +248,8 @@ class TtsService extends GetxService {
     _stopRequested = false;
     isSpeaking.value = true;
     isPaused.value = false;
+    await TtsNowPlaying.instance.activate();
+    _updateNowPlaying(playing: true);
     if (_netSource != null) {
       await _speakNetworkCurrent();
     } else {
@@ -193,6 +283,7 @@ class TtsService extends GetxService {
       } catch (_) {}
       isPaused.value = true;
       isSpeaking.value = false;
+      _updateNowPlaying(playing: false);
       return;
     }
     try {
@@ -200,12 +291,14 @@ class TtsService extends GetxService {
     } catch (_) {}
     isPaused.value = true;
     isSpeaking.value = false;
+    _updateNowPlaying(playing: false);
   }
 
   Future<void> resume() async {
     if (!isPaused.value) return;
     isSpeaking.value = true;
     isPaused.value = false;
+    _updateNowPlaying(playing: true);
     if (_netSource != null) {
       // 合成中暂停的：直接等当前段合成完开播即可
       if (!_netSynthesizing) {
@@ -239,6 +332,8 @@ class TtsService extends GetxService {
     } catch (_) {}
     isSpeaking.value = false;
     isPaused.value = false;
+    _updateNowPlaying(playing: false);
+    await TtsNowPlaying.instance.deactivate();
   }
 
   /// 跳到某一段并继续念
@@ -248,6 +343,7 @@ class TtsService extends GetxService {
     _stopRequested = false;
     isSpeaking.value = true;
     isPaused.value = false;
+    _updateNowPlaying(playing: true);
     if (_netSource != null) {
       _netSynthesizing = false;
       try {
@@ -582,11 +678,13 @@ class TtsService extends GetxService {
     final next = currentIndex.value + 1;
     if (next >= _segments.length) {
       isSpeaking.value = false;
+      _updateNowPlaying(playing: false);
       final cb = onFinished;
       if (cb != null) cb();
       return;
     }
     currentIndex.value = next;
+    _updateNowPlaying();
     _speakCurrent();
   }
 

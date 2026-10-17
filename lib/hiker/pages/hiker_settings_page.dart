@@ -520,9 +520,12 @@ class _HikerSettingsPageState extends State<HikerSettingsPage> {
     final (added, updated, total) = await HikerBuiltin.install();
     // 顺带把「App 自带资源」铺到 Documents/hiker/builtin（hiker://assets/* 用）
     final files = await HikerBuiltin.installAssets();
+    // 预置远程 require 缓存（源里的 `$.require('https://…/f')` 用）
+    final libs = await HikerBuiltin.installRequireLibs();
     if (!mounted) return;
     AppToast.message('内置源：新增 $added、更新 $updated，共 $total 个源'
-        '${files > 0 ? '；自带资源已释放 $files 个' : ''}');
+        '${files > 0 ? '；自带资源已释放 $files 个' : ''}'
+        '${libs > 0 ? '；预置模块已释放 $libs 个' : ''}');
     setState(() {});
   }
 

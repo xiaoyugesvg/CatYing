@@ -61,6 +61,16 @@ async function getMusicSource() {
     return musicSourceCache;
 }
 
+// ── drpy 标准源宿主（TVBox `api=drpy2.min.js` + `ext=站点.js`）──────
+// 惰性加载：只有真正遇到 drpy 源时才求值（启动路径零风险）。
+let drpyHostCache = null;
+
+async function getDrpyHost() {
+    if (drpyHostCache) return drpyHostCache;
+    drpyHostCache = await import('./drpy_host.js');
+    return drpyHostCache;
+}
+
 // ── 小说书源引擎（Legado 格式）────────────────────────────────
 //
 // 为什么要惰性加载而不是顶层 import：
@@ -298,6 +308,146 @@ if (addon && addon.registerCallback) {
     });
 }
 
+// ── 小程序 Node 后端（manifest.json 的 `node` 字段）─────────────────
+//
+// 有的小程序（例如 LX音乐）页面只是壳，真正的数据接口在它自带的
+// `server/index.js` 里，需要通过 `ant.resolveService('miniapp://appId')`
+// 拿到本机服务地址。以前宿主只跑网页，这类小程序一打开就报
+// "无法解析服务地址"。
+//
+// 这里按「小程序契约」把它拉起来：
+//   1. 临时把 `process.env.DEV_HTTP_PORT` 设为 0（让 server.listen 拿随机端口）
+//   2. 提供 `catServerFactory` + 临时接管 `http.createServer`，捕获它建的 server
+//   3. 调 `module.exports.start(config)`，等 listening 后把端口记到 miniAppServers
+//   4. 页面关闭时 `/miniapp/stop` 调 `module.stop()` 并关掉 server
+const miniAppServers = new Map(); // appId -> { server, module, port, dir }
+
+function miniAppReadBody(req, limit) {
+    return new Promise((resolve, reject) => {
+        let body = '';
+        let tooLarge = false;
+        req.on('data', (chunk) => {
+            if (tooLarge) return;
+            body += chunk;
+            if (body.length > limit) {
+                tooLarge = true;
+                reject(new Error('请求体过大'));
+            }
+        });
+        req.on('end', () => { if (!tooLarge) resolve(body); });
+        req.on('error', (e) => reject(e));
+    });
+}
+
+async function miniAppStart(data) {
+    const fs = require('fs');
+    const path = require('path');
+    const appId = String((data && data.appId) || '').trim();
+    const root = String((data && data.dir) || '').trim();
+    if (!appId) throw new Error('缺少 appId');
+    if (!root) throw new Error('缺少 dir');
+
+    const running = miniAppServers.get(appId);
+    if (running && running.server && running.server.listening) {
+        return { url: `http://127.0.0.1:${running.port}`, port: running.port, reused: true };
+    }
+
+    const entryRel = String((data && data.entry) || 'server/index.js');
+    const cfgRel = String((data && data.config) || 'server/index.config.js');
+    const entryPath = path.isAbsolute(entryRel) ? entryRel : path.join(root, entryRel);
+    const cfgPath = path.isAbsolute(cfgRel) ? cfgRel : path.join(root, cfgRel);
+    if (!fs.existsSync(entryPath)) throw new Error('node 入口不存在：' + entryPath);
+
+    try { delete require.cache[require.resolve(entryPath)]; } catch (_) { /* 首次加载 */ }
+    let mod = require(entryPath);
+    let cfg = {};
+    try {
+        if (fs.existsSync(cfgPath)) {
+            try { delete require.cache[require.resolve(cfgPath)]; } catch (_) {}
+            cfg = require(cfgPath) || {};
+        }
+    } catch (e) {
+        console.error('miniAppStart: 读 config 失败（忽略）:', e && e.message);
+    }
+    if (!mod || typeof mod.start !== 'function') {
+        throw new Error('node 入口没有导出 start(config)：' + entryRel);
+    }
+
+    const httpMod = require('http');
+    const prevFactory = globalThis.catServerFactory;
+    const prevPort = process.env.DEV_HTTP_PORT;
+    const origCreateServer = httpMod.createServer;
+    let handed = null;
+
+    // 两种写法都吃：`globalThis.catServerFactory(handler)` 或直接 `http.createServer`
+    //（用 rest 参数，兼容 `createServer(options, handler)` 这类调用）
+    globalThis.catServerFactory = (...args) => {
+        const s = origCreateServer(...args);
+        handed = s;
+        return s;
+    };
+    httpMod.createServer = (...args) => {
+        const s = origCreateServer(...args);
+        handed = s;
+        return s;
+    };
+    process.env.DEV_HTTP_PORT = '0';
+
+    let timer = null;
+    let poll = null;
+    try {
+        await Promise.resolve(mod.start(cfg));
+        const port = await new Promise((resolve, reject) => {
+            timer = setTimeout(() => reject(new Error('node 服务启动超时（未 listen）')), 8000);
+            poll = setInterval(() => {
+                if (handed && handed.listening) {
+                    clearTimeout(timer);
+                    clearInterval(poll);
+                    resolve(handed.address().port);
+                }
+            }, 30);
+        });
+        miniAppServers.set(appId, { server: handed, module: mod, port, dir: root });
+        console.log(`miniapp node started: ${appId} @ ${port}`);
+        return { url: `http://127.0.0.1:${port}`, port };
+    } finally {
+        if (timer) clearTimeout(timer);
+        if (poll) clearInterval(poll);
+        httpMod.createServer = origCreateServer;
+        if (prevFactory) globalThis.catServerFactory = prevFactory;
+        else delete globalThis.catServerFactory;
+        if (prevPort === undefined) delete process.env.DEV_HTTP_PORT;
+        else process.env.DEV_HTTP_PORT = prevPort;
+    }
+}
+
+async function miniAppStop(appId) {
+    const key = String(appId || '').trim();
+    const rec = miniAppServers.get(key);
+    if (!rec) return { stopped: false };
+    miniAppServers.delete(key);
+    try {
+        if (rec.module && typeof rec.module.stop === 'function') {
+            await Promise.resolve(rec.module.stop());
+        }
+    } catch (e) {
+        console.error(`miniapp node stop(${key}) 失败:`, (e && e.message) || e);
+    }
+    try {
+        if (rec.server) {
+            await new Promise((resolve) => rec.server.close(() => resolve()));
+        }
+    } catch (_) { /* 已经关了 */ }
+    // 下次重新导入同一小程序时要拿到最新代码
+    try {
+        for (const k of Object.keys(require.cache)) {
+            if (rec.dir && k.startsWith(rec.dir)) delete require.cache[k];
+        }
+    } catch (_) {}
+    console.log(`miniapp node stopped: ${key}`);
+    return { stopped: true };
+}
+
 const mgmtServer = createServer((req, res) => {
     // CORS：管理面允许任意来源（含 file:// 的 'null'）
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -457,6 +607,9 @@ const mgmtServer = createServer((req, res) => {
                 } catch (e) {}
 
                 spiderPort = 0;
+                // 单槽位：载入 CatVod 整包源前，先关掉驻留的 drpy 宿主
+                // （没加载过就别为它白 import 一次）
+                try { if (drpyHostCache) drpyHostCache.stopDrpy(); } catch (_) {}
                 loadScript(sourcePath);
 
                 res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -467,6 +620,70 @@ const mgmtServer = createServer((req, res) => {
                 res.end(JSON.stringify({ error: e.message }));
             }
         });
+        return;
+    }
+
+    // ── drpy 标准源：载入 / 停止 ─────────────────────────────────
+    //
+    // Dart 侧把运行时（drpy2.min.js）、模板库、站点规则（ext）的**文本**发上来，
+    // 这样宿主不必再联网下载（也避开 ext 的鉴权/代理问题）。
+    if (req.method === 'POST' && url.pathname === '/drpy/load') {
+        miniAppReadBody(req, 32 * 1024 * 1024).then(async (body) => {
+            try {
+                const data = JSON.parse(body || '{}');
+                // 单槽位：drpy 与 CatVod 整包源互斥
+                try {
+                    if (sourceModule && typeof sourceModule.stop === 'function') {
+                        sourceModule.stop();
+                    }
+                } catch (_) {}
+                sourceModule = null;
+                const host = await getDrpyHost();
+                const r = await host.loadDrpy(data);
+                res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+                res.end(JSON.stringify(r));
+            } catch (e) {
+                console.error('ERROR in /drpy/load:', (e && e.stack) || e);
+                try {
+                    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+                    res.end(JSON.stringify({
+                        ok: false,
+                        error: String((e && e.message) || e),
+                    }));
+                } catch (_) { /* 响应已开始写出 */ }
+            }
+        });
+        return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/drpy/stop') {
+        miniAppReadBody(req, 4096).then(async () => {
+            try {
+                const host = await getDrpyHost();
+                host.stopDrpy();
+                res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+                res.end(JSON.stringify({ ok: true }));
+            } catch (e) {
+                res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+                res.end(JSON.stringify({ ok: false, error: String((e && e.message) || e) }));
+            }
+        });
+        return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/drpy/info') {
+        try {
+            if (!drpyHostCache) {
+                res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+                res.end(JSON.stringify({ loaded: false }));
+                return;
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify(drpyHostCache.drpyInfo()));
+        } catch (e) {
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ loaded: false, error: String((e && e.message) || e) }));
+        }
         return;
     }
 
@@ -494,6 +711,42 @@ const mgmtServer = createServer((req, res) => {
                         error: '音乐接口异常：' + ((e && e.message) || String(e)),
                     }));
                 } catch (_) { /* 响应已开始写出，忽略二次写入错误 */ }
+            }
+        });
+        return;
+    }
+
+    // ── 小程序 Node 后端：启动 / 停止（manifest.json 的 `node`）──
+    if (req.method === 'POST' && url.pathname === '/miniapp/start') {
+        miniAppReadBody(req, 256 * 1024).then(async (body) => {
+            try {
+                const data = JSON.parse(body || '{}');
+                const r = await miniAppStart(data);
+                res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+                res.end(JSON.stringify({ ok: true, ...r }));
+            } catch (e) {
+                console.error('ERROR in /miniapp/start:', (e && e.message) || e);
+                res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+                res.end(JSON.stringify({
+                    ok: false,
+                    error: String((e && e.message) || e),
+                }));
+            }
+        });
+        return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/miniapp/stop') {
+        miniAppReadBody(req, 16 * 1024).then(async (body) => {
+            try {
+                const data = JSON.parse(body || '{}');
+                const r = await miniAppStop(data.appId);
+                res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+                res.end(JSON.stringify({ ok: true, ...r }));
+            } catch (e) {
+                console.error('ERROR in /miniapp/stop:', (e && e.message) || e);
+                res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+                res.end(JSON.stringify({ ok: false, error: String((e && e.message) || e) }));
             }
         });
         return;

@@ -98,7 +98,8 @@ class HikerSource {
   /// 规则里引用的 `hiker://page|assets/xxx` 目标（已去掉 `#`/`?` 尾巴）
   Set<String> get _builtinRefs {
     final out = <String>{};
-    final re = RegExp(r'''hiker://(?:page|assets)/([^\s'"#?;,)]+)''');
+    final re = RegExp(
+        r'''hiker://(?:page|assets)/([A-Za-z0-9_./\u4e00-\u9fff-]+)''');
     for (final m in re.allMatches(_allRuleText)) {
       final k = (m.group(1) ?? '').split(RegExp(r'[#?]')).first.trim();
       if (k.isNotEmpty) out.add(k);
@@ -120,6 +121,186 @@ class HikerSource {
 
   /// 规则是否读取 `config.xxx`（需要在「源配置」里填值）
   bool get needsConfig => _configKeys.isNotEmpty;
+
+  // ============================================================
+  // 源诊断（源管理页的标签）
+  // ============================================================
+
+  /// 诊断这个源**缺什么**（不联网、纯静态判断）。
+  ///
+  /// 和 [usable] 的区别：[usable] 只回答"能不能试着跑"，这里回答"为什么跑不动、
+  /// 要补什么" —— 用户要求（2026-10-17）在源详情里直接标出
+  /// 「缺 Apollo / 缺 lazy / 需填配置」，而不是点进去才看到一句看不懂的报错。
+  ///
+  /// [bundledAssets]：随包资源名（`assets/hiker/files/` 下的文件名，见
+  /// `HikerBuiltin.assetNames()`）；命中的 `hiker://assets/x` 不算缺。
+  /// [importedFiles]：用户文件区里的相对路径（`HikerFiles.list()`）；
+  /// 命中的 `hiker://files/x` 不算缺。
+  /// [config]：该源已保存的配置；[needsConfig] 且为空 ⇒ 标「需填配置」。
+  List<HikerSourceDiagnosis> diagnose({
+    Set<String> bundledAssets = const {},
+    Set<String> importedFiles = const {},
+    Map<String, dynamic>? config,
+  }) {
+    final out = <HikerSourceDiagnosis>[];
+    final text = _allRuleText;
+    final names = _moduleNames;
+    final files = importedFiles.map(_normPath).toSet();
+
+    // ① 连首页规则都没有
+    if (findRule.isEmpty) {
+      out.add(const HikerSourceDiagnosis(
+        '无首页规则',
+        '这条源没有 find_rule，导入的可能是残缺数据。',
+        blocking: true,
+      ));
+    }
+
+    // ② Apollo 规则包（社区分发，App 不自带，原版海阔也要用户自己导入）
+    final apolloRef = RegExp(r'''\bApollo\b''').hasMatch(text);
+    final apolloProvided = names.contains('Apollo') ||
+        _hasFileUnder(files, 'apollo');
+    if (apolloRef && !apolloProvided) {
+      out.add(const HikerSourceDiagnosis(
+        '缺 Apollo',
+        '规则依赖 Apollo 规则包（不在 App 内）。去「海阔设置 → 文件管理」'
+        '导入 Apollo 的 zip / 文件后再试。',
+        blocking: true,
+      ));
+    }
+
+    // ③ 官方内置页 lazy（漫画/短剧的「章节→图片」全靠它）
+    final lazyRef = RegExp(r'''hiker://page/lazy'''
+            r'''|(?:require|evalPrivateJS)\s*\(\s*['"]lazy['"]\s*\)''')
+        .hasMatch(text);
+    if (lazyRef && !names.contains('lazy')) {
+      out.add(const HikerSourceDiagnosis(
+        '缺 lazy',
+        '规则引用了内置页 hiker://page/lazy，但源里没带这个模块、'
+        '随包也没有 ⇒ 目录/看图那一步解不出来。',
+        blocking: true,
+      ));
+    }
+
+    // ④ 其它内置页 / assets：源里没有、随包也没有
+    //    ⚠️ 模块名只收"正常字符"：实测源里夹着大段说明文字
+    //    （`hiker://page/ruleHome</code>），宽字符集会把整段正文当成模块名。
+    const placeholders = {'xxx', 'xxx.js', 'x', 'test', 'example'};
+    final others = <String>[];
+    for (final r in _builtinRefs) {
+      final low = r.toLowerCase();
+      if (low == 'apollo' || low == 'lazy') continue; // 上面已单独报
+      if (placeholders.contains(low)) continue; // 教程里的占位名
+      if (_providedBySource(r, names)) continue;
+      if (_providedByAsset(r, bundledAssets)) continue;
+      others.add(r);
+    }
+    if (others.isNotEmpty) {
+      others.sort();
+      out.add(HikerSourceDiagnosis(
+        '缺内置页',
+        '规则引用了 ${_preview(others.map((r) => 'hiker://page|assets/$r').toList())}，'
+        '但源里没带、随包也没有 ⇒ 这些页面打不开。',
+        blocking: true,
+      ));
+    }
+
+    // ⑤ 文件区缺文件（`hiker://files/…`）
+    //
+    // ⚠️ 只认 **libs/ 与 rules/ 下的 .js 代码文件**：
+    //    实测 `cache/…js`、`data/…js` 是源**运行时自己下载/生成**的
+    //    （弹幕后端、音乐后端、豆瓣 Cookie），把它们标成"缺文件"
+    //    会把本来能用的源吓成不可用；而 `libs/*.js` / `rules/**` 才是
+    //    用户必须跟着源一起导入的规则包（115 个源里 7 个卡在这）。
+    final missingFiles = <String>[];
+    for (final f in _fileRefs) {
+      final p = _normPath(f).toLowerCase();
+      if (!p.endsWith('.js')) continue;
+      final inRuleDir = p.startsWith('libs/') ||
+          p.startsWith('rules/') ||
+          p.contains('/libs/') ||
+          p.contains('/rules/');
+      if (!inRuleDir) continue;
+      if (files.contains(_normPath(f))) continue;
+      missingFiles.add(f);
+    }
+    if (missingFiles.isNotEmpty) {
+      missingFiles.sort();
+      out.add(HikerSourceDiagnosis(
+        '缺文件',
+        '规则要读 ${_preview(missingFiles.map((f) => 'hiker://files/$f').toList())}，'
+        '文件区里没有 ⇒ 去「海阔设置 → 文件管理」导入对应规则包。',
+        blocking: true,
+      ));
+    }
+
+    // ⑥ 源配置
+    if (needsConfig && (config == null || config.isEmpty)) {
+      out.add(HikerSourceDiagnosis(
+        '需填配置',
+        '规则要读 ${configKeys.map((k) => 'config.$k').join('、')}，'
+        '点右上角「源配置」填上对应值（如域名 / 口令）。',
+      ));
+    }
+
+    // 阻塞项排前面，同级按标签字典序（输出稳定，测试好写）
+    out.sort((a, b) {
+      if (a.blocking != b.blocking) return a.blocking ? -1 : 1;
+      return a.label.compareTo(b.label);
+    });
+    return out;
+  }
+
+  /// `hiker://files/…` 里**字面量**引用的相对路径
+  Set<String> get _fileRefs {
+    final out = <String>{};
+    // 只收正常路径字符：源里常把说明文字跟地址写在同一行，
+    // 宽字符集会把「；本规则不会…」这类正文一起吞进来
+    final re = RegExp(r'''hiker://files/([A-Za-z0-9_./\u4e00-\u9fff-]+)''');
+    for (final m in re.allMatches(_allRuleText)) {
+      final p = (m.group(1) ?? '').trim();
+      // 动态拼接（`hiker://files/' + config.dir`）会被正则截成半截，跳过
+      if (p.isEmpty || p.endsWith('/') || p.endsWith('+') || p.contains(r'$')) {
+        continue;
+      }
+      out.add(p);
+    }
+    return out;
+  }
+
+  /// 列表太长时只列前几个（源里动辄几十个文件，全塞进弹窗没法看）
+  static String _preview(List<String> items, [int max = 4]) =>
+      items.length <= max
+          ? items.join('、')
+          : '${items.take(max).join('、')} 等 ${items.length} 个';
+
+  /// 引用的模块名是不是源自己在 `pages` 里带的
+  static bool _providedBySource(String ref, Set<String> names) {
+    if (names.contains(ref)) return true;
+    final base = ref.split('/').last;
+    if (base.isNotEmpty && names.contains(base)) return true;
+    if (base.endsWith('.js') &&
+        names.contains(base.substring(0, base.length - 3))) {
+      return true;
+    }
+    return false;
+  }
+
+  /// 引用的模块名是不是随包资源（`assets/hiker/files/x.js`）
+  static bool _providedByAsset(String ref, Set<String> assets) {
+    if (assets.isEmpty) return false;
+    final base = ref.split('/').last;
+    return assets.contains(ref) || (base.isNotEmpty && assets.contains(base));
+  }
+
+  /// 文件区里有没有 `apollo` 相关文件（大小写、目录层级都认）
+  static bool _hasFileUnder(Set<String> files, String keyword) {
+    final k = keyword.toLowerCase();
+    return files.any((f) => f.toLowerCase().contains(k));
+  }
+
+  static String _normPath(String p) =>
+      p.replaceAll('\\', '/').replaceFirst(RegExp(r'^/+'), '').trim();
 
   /// 规则里用到的 `config.xxx` 键（给源配置编辑器做提示）
   List<String> get configKeys => _configKeys;
@@ -205,6 +386,23 @@ class HikerSource {
     }
     return out;
   }
+}
+
+/// 一条「源诊断」结论 —— 在源管理页显示成标签，点开看 [detail]。
+///
+/// 标签只回答"缺什么"（缺 Apollo / 缺 lazy / 缺文件 / 需填配置 …）；
+/// [blocking] = true 表示不补这个，源现在肯定跑不动。
+class HikerSourceDiagnosis {
+  /// 短标签（直接印在源卡片上）
+  final String label;
+
+  /// 人话说明 + 怎么补
+  final String detail;
+
+  /// 是否会直接导致源跑不起来
+  final bool blocking;
+
+  const HikerSourceDiagnosis(this.label, this.detail, {this.blocking = false});
 }
 
 /// 规则产出的一条列表项（节点引擎已归一化）

@@ -35,8 +35,9 @@ import '../widgets/book_page_cover.dart';
 import '../widgets/book_page_curl.dart';
 import '../widgets/jelly_mode_picker.dart';
 import '../widgets/pomodoro_button.dart';
+import '../widgets/wavy_underline.dart';
 import 'book_prefetch_page.dart';
-import 'notes_and_journey_page.dart';
+import 'book_notes_page.dart';
 import '../../common/theme.dart';
 import '../../common/system_ui.dart';
 
@@ -1350,6 +1351,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
         onTurnNext: () => _turnTo(_spreadLeftPage(spread + 1)),
         onTurnPrev: () => _turnTo(_spreadLeftPage(spread - 1)),
         onTapCenter: _toggleControls,
+        shadowStrength: SettingsService().pageCurlShadow,
+        quality: SettingsService().pageCurlQuality,
+        paperTexture: SettingsService().pageCurlTexture,
       );
     }
     return BookPageCurl(
@@ -1408,6 +1412,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
       onTurnNext: () => _turnTo(_currentPage + 1),
       onTurnPrev: () => _turnTo(_currentPage - 1),
       onTapCenter: _toggleControls,
+      shadowStrength: SettingsService().pageCurlShadow,
+      quality: SettingsService().pageCurlQuality,
+      paperTexture: SettingsService().pageCurlTexture,
     );
   }
 
@@ -1946,8 +1953,196 @@ class _BookReaderPageState extends State<BookReaderPage> {
         borderRadius: BorderRadius.circular(6),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 2),
-      child: child,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          child,
+          // 波浪线 + 右侧小气泡入口：不抢正文的选字手势
+          Row(
+            children: [
+              Expanded(
+                child: WavyUnderline(
+                  color: Color(n.color),
+                  height: 5,
+                  amplitude: 1.1,
+                ),
+              ),
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => _showLocalNoteBubble(n, blockIndex),
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 4, top: 3, bottom: 2),
+                  child: Icon(
+                    Icons.chat_bubble_outline_rounded,
+                    size: 12,
+                    color: Color(n.color),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
+  }
+
+  /// 本地图书的「笔记气泡」：编辑批注 / 删除。
+  Future<void> _showLocalNoteBubble(ReaderNote note, int blockIndex) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = isDark ? const Color(0xFF1E1E22) : Colors.white;
+    final fg = isDark ? Colors.white : Colors.black87;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.format_quote_rounded,
+                        size: 18, color: Color(note.color)),
+                    const SizedBox(width: 6),
+                    Text(
+                      '笔记',
+                      style: TextStyle(
+                        fontSize: AppTheme.fontSubhead,
+                        fontWeight: FontWeight.w700,
+                        color: fg,
+                      ),
+                    ),
+                  ],
+                ),
+                if (note.text.trim().isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                    decoration: BoxDecoration(
+                      color: Color(note.color).withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border(
+                        left: BorderSide(color: Color(note.color), width: 3),
+                      ),
+                    ),
+                    child: Text(
+                      note.text.trim(),
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: AppTheme.fontFootnote,
+                        height: 1.5,
+                        color: fg,
+                      ),
+                    ),
+                  ),
+                ],
+                if (note.note.trim().isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    note.note,
+                    style: TextStyle(
+                      fontSize: AppTheme.fontSubhead,
+                      height: 1.5,
+                      color: fg,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => Navigator.pop(ctx, 'edit'),
+                        icon: const Icon(Icons.edit_outlined, size: 18),
+                        label: const Text('编辑批注'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => Navigator.pop(ctx, 'delete'),
+                        icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                        label: const Text('删除'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.redAccent,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'delete') {
+      await ReaderNotesService.instance.remove(note.id);
+      if (mounted) setState(() {});
+      return;
+    }
+    if (action != 'edit') return;
+
+    // 反查章节（与选中菜单同一套逻辑）
+    final cs = _content?.chapterStarts;
+    var ci = 0;
+    if (cs != null && blockIndex >= 0) {
+      for (var i = 0; i < cs.length; i++) {
+        if (cs[i] <= blockIndex) ci = i;
+      }
+    }
+    final cname = (_content != null && ci < _content!.chapters.length)
+        ? _content!.chapters[ci].title
+        : '';
+
+    final ctrl = TextEditingController(text: note.note);
+    final text = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('编辑批注'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLines: 4,
+          decoration: const InputDecoration(hintText: '写点什么…'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (text == null || !mounted) return;
+    await ReaderNotesService.instance.addNote(
+      sourceId: 'local',
+      sourceName: '本地图书',
+      bookName: widget.task.title,
+      chapterIndex: ci,
+      chapterName: cname,
+      paragraphIndex: blockIndex,
+      text: note.text,
+      note: text,
+      color: note.color,
+    );
+    if (mounted) setState(() {});
   }
 
   Widget _buildEntry(PageEntry entry, Color textColor, double contentWidth) {
@@ -2566,6 +2761,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
       BookReaderPage._toast(context, '这一章没有可朗读的内容');
       return;
     }
+
+    // 锁屏 / 控制中心显示：书名 + 当前章节
+    final ci = _currentChapterIndex();
+    final cname = (_content != null && ci < _content!.chapters.length)
+        ? _content!.chapters[ci].title
+        : '';
+    _tts.setNowPlayingMeta(widget.task.title, cname);
 
     // 念完本章 → 自动跳下一章接着念
     _tts.onFinished = () {

@@ -172,6 +172,15 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   /// 选中的源常常在很下面、还没被 build，拿不到 context 就定位不了）。
   void _locateSelected(List<SourceBean> list, String? selectedKey) {
     if (selectedKey == null || !_scrollController.hasClients) return;
+    // 本地 Python 源单独排在最上面，直接回到顶部
+    if (selectedKey.startsWith('localpy_')) {
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOut,
+      );
+      return;
+    }
     final idx = list.indexWhere((s) => s.key == selectedKey);
     if (idx < 0) return;
     final panelW = context.size?.width ?? MediaQuery.of(context).size.width;
@@ -203,6 +212,21 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
     if (_keyword.isEmpty) return all;
     final kw = _keyword.toLowerCase();
     return all.where((s) => s.name.toLowerCase().contains(kw)).toList();
+  }
+
+  /// 分组小标题（只有「本地 Python / 订阅线路」两处用）
+  Widget _sectionHeader(String text) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: AppTheme.fontCaption,
+          color: AppTheme.textTertiary,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
   }
 
   void _selectSource(SourceBean source) {
@@ -357,7 +381,12 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                   final all = ApiConfig.instance.sourceBeanList.value;
                   final selectedKey = _selectedKey;
                   final list = _filteredSourcesFrom(all);
-                  if (list.isEmpty) {
+                  // 本地 Python 源：单独一组（用户 2026-10-17），不跟订阅线路混排
+                  final local = _filteredSourcesFrom(
+                    // ignore: invalid_use_of_protected_member
+                    ApiConfig.instance.localVideoSources.value,
+                  );
+                  if (list.isEmpty && local.isEmpty) {
                     return Padding(
                       padding: EdgeInsets.symmetric(vertical: 32),
                       child: Center(
@@ -369,12 +398,51 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                     );
                   }
                   // 用户 2026-10-13：「搜索源里面不要需要区分分类，例如 CMS 还有 js 这些」
-                  // ⇒ 不再按源类型分组（去掉 CMS/JS/T4/Jar 组标题），平铺展示。
+                  // ⇒ 订阅线路仍然平铺；只有「本地 Python」单独放在最上面一组。
                   return ListView(
                     controller: _scrollController,
                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
                     physics: const AlwaysScrollableScrollPhysics(),
                     children: [
+                      if (local.isNotEmpty) ...[
+                        _sectionHeader('本地 Python（${local.length}）'),
+                        if (_gridMode)
+                          GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate:
+                                const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              mainAxisSpacing: 8,
+                              crossAxisSpacing: 10,
+                              childAspectRatio: 3.4,
+                            ),
+                            itemCount: local.length,
+                            itemBuilder: (context, index) {
+                              final source = local[index];
+                              return _SourceTile(
+                                name: source.name,
+                                api: source.api,
+                                selected: source.key == selectedKey,
+                                onTap: () => _selectSource(source),
+                                // 本地源不走「移入失效」，删除在设置页里
+                                onLongPress: null,
+                              );
+                            },
+                          )
+                        else
+                          for (final source in local)
+                            _SourceRow(
+                              name: source.name,
+                              api: source.api,
+                              selected: source.key == selectedKey,
+                              onTap: () => _selectSource(source),
+                              onLongPress: null,
+                            ),
+                        const SizedBox(height: 10),
+                      ],
+                      if (list.isNotEmpty && local.isNotEmpty)
+                        _sectionHeader('订阅线路'),
                       if (_gridMode)
                         GridView.builder(
                           shrinkWrap: true,

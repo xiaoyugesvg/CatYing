@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/app_log.dart';
+import '../services/moontv_converter.dart';
 
 /// 订阅的「导入分类」——用于在订阅管理里按来源分组显示。
 ///
@@ -49,6 +50,8 @@ enum SubscriptionKind {
   static SubscriptionKind inferKind(String url) {
     final u = url.trim().toLowerCase();
     if (u.isEmpty) return SubscriptionKind.unknown;
+    // 转换器写入本地的配置（`local://xxx`）本质是 TVBox JSON
+    if (u.startsWith('local://')) return SubscriptionKind.tvbox;
     // TVBox 的 `;md5;<hash>` 语法：分号后是校验和、不属于地址
     final raw = u.split(';').first.trim();
     final path = Uri.tryParse(raw)?.path ?? raw;
@@ -423,7 +426,11 @@ class SubscriptionService extends GetxService {
   }
 
   Future<void> remove(String id) async {
+    final removed = subscriptions.firstWhereOrNull((s) => s.id == id);
     subscriptions.removeWhere((s) => s.id == id);
+    if (removed != null && ConvertedConfigStore.isLocal(removed.url)) {
+      await ConvertedConfigStore.delete(removed.url);
+    }
     if (activeId.value == id) {
       activeId.value = subscriptions.isEmpty ? '' : subscriptions.first.id;
     }
@@ -568,6 +575,11 @@ class SubscriptionService extends GetxService {
     if (i < 0) return SyncResult.notFound;
     final s = subscriptions[i];
     if (s.url.trim().isEmpty) return SyncResult.failed;
+    // 本地转换配置：没有远程地址可拉，直接算"已同步"
+    if (ConvertedConfigStore.isLocal(s.url)) {
+      await markSynced(id, s.url);
+      return SyncResult.unchanged;
+    }
     if (syncingId.value.isNotEmpty) return SyncResult.busy;
 
     syncingId.value = id;

@@ -612,8 +612,17 @@ class BookSourceService {
   ///
   /// ⚠️ 我原来只返回 content，把漫画的 images 丢了 → 漫画源一片空白。
   /// 所以这里两个都返回，由阅读器按 `images.isNotEmpty` 决定怎么渲染。
-  Future<({bool ok, String? error, String content, List<String> images})>
-      content(
+  ///
+  /// [headers] = 规则自带 `@Header:{...}` 解析出的图片请求头（漫画图床常靠
+  /// Referer/UA 过防盗链）；空表示源没配，客户端回退用书源 header。
+  Future<
+      ({
+        bool ok,
+        String? error,
+        String content,
+        List<String> images,
+        Map<String, String> headers,
+      })> content(
     BookSource source,
     String chapterUrl,
   ) async {
@@ -626,7 +635,13 @@ class BookSourceService {
     });
     // 引擎可能直接返回字符串，也可能包成 {ok, content} 或 {ok,type,images}
     if (raw is String) {
-      return (ok: true, error: null, content: raw, images: const <String>[]);
+      return (
+        ok: true,
+        error: null,
+        content: raw,
+        images: const <String>[],
+        headers: const <String, String>{},
+      );
     }
     final m = _asMap(raw);
     if (m['ok'] == false) {
@@ -635,6 +650,7 @@ class BookSourceService {
         error: (m['error'] ?? '未知错误').toString(),
         content: '',
         images: const <String>[],
+        headers: const <String, String>{},
       );
     }
 
@@ -647,11 +663,21 @@ class BookSourceService {
     final imageList = imgs is List
         ? imgs.map((e) => e.toString()).where((e) => e.isNotEmpty).toList()
         : const <String>[];
+    // 规则尾部 `@Header:{...}` 解析出的图片请求头（漫画源取图用）
+    final hdr = m['headers'];
+    final headerMap = hdr is Map
+        ? <String, String>{
+            for (final e in hdr.entries)
+              if (e.key != null && e.value != null && '${e.value}'.isNotEmpty)
+                '${e.key}': '${e.value}',
+          }
+        : const <String, String>{};
     return (
       ok: true,
       error: null,
       content: c.toString(),
       images: imageList,
+      headers: headerMap,
     );
   }
 
@@ -983,14 +1009,19 @@ class BookSourceService {
   /// 所以我们复用引擎自己的 dio，而不是另起一个 HttpClient。
   ///
   /// 返回 null 表示失败（失败原因不在这里抛，调用方给用户提示就行）。
-  Future<Uint8List?> fetchBytes(BookSource source, String url) async {
+  /// [headers] 额外覆盖的请求头（漫画章用 `@Header:{...}` 给的图片 Referer/UA）。
+  Future<Uint8List?> fetchBytes(
+    BookSource source,
+    String url, {
+    Map<String, String>? headers,
+  }) async {
     if (url.trim().isEmpty) return null;
     try {
       final res = await _dio.get<List<int>>(
         url,
         options: Options(
           responseType: ResponseType.bytes,
-          headers: _headersOf(source),
+          headers: {..._headersOf(source), ...?headers},
           // 图片可能较大，给长一点的接收超时
           receiveTimeout: const Duration(seconds: 30),
           // 有些图床对 3xx 跳转后的 URL 才给图，dio 默认跟随
@@ -1018,10 +1049,17 @@ class BookSourceService {
         if (decoded is Map) m = decoded;
       } catch (_) {}
     }
-    if (m == null) return const {};
-    return {
-      for (final e in m.entries) '${e.key}': '${e.value}',
+    final out = <String, String>{
+      if (m != null)
+        for (final e in m.entries) '${e.key}': '${e.value}',
     };
+    // Legado 的 httpUserAgent 是独立字段（不在 header 里）：源没显式配 UA 时补上
+    final ua = (source.raw['httpUserAgent'] ?? '').toString().trim();
+    if (ua.isNotEmpty &&
+        !out.keys.any((k) => k.toLowerCase() == 'user-agent')) {
+      out['User-Agent'] = ua;
+    }
+    return out;
   }
 
   /// 把 Cookie 写进书源的 header（其它自定义头保留）。

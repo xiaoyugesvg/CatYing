@@ -1,15 +1,20 @@
 import 'package:flutter/foundation.dart';
 import '../services/settings_service.dart';
+import 'builtin_comic_sources.dart';
 import 'config_manga_source.dart';
 import 'copy_manga_source.dart';
 import 'copymanga_config.dart';
+import 'legado_comic_source.dart';
 import 'manga_source.dart';
 import 'manhuaren_config.dart';
 import 'manhuaren_source.dart';
 import 'models.dart';
+import '../models/book_source.dart' show BookSourceStore;
+import '../novel_source/model/book_source.dart' show XiaoshuoBookSource;
 import 'site_config.dart';
 import 'source_config_store.dart';
 import 'source_definition.dart';
+import 'venera/venera_manga_source.dart';
 import 'zaimanhua_config.dart';
 import 'zaimanhua_source.dart';
 
@@ -109,6 +114,36 @@ class SourceManager extends ChangeNotifier {
       }
     }
 
+    // Legado 漫画源（type=2）：直接复用书源仓库里的规则源，
+    // 让 @js / JSONPath / @Header / ## / Base64-zlib 这套规则引擎对漫画生效。
+    // 书源仓库在 main() 里先于本 init 完成加载。
+    try {
+      for (final bs in BookSourceStore.instance.all) {
+        if (bs.type != '2') continue;
+        try {
+          _register(LegadoComicMangaSource(
+            XiaoshuoBookSource.fromJson(bs.raw),
+          ));
+        } catch (e) {
+          _log('Legado 漫画源注册失败: ${bs.name} -> $e');
+        }
+      }
+      _log('已注册 Legado 漫画源: '
+          '${_sources.values.where((s) => s.id.startsWith('legado:')).length}');
+    } catch (e) {
+      _log('读取书源仓库失败（Legado 漫画源未注册）: $e');
+    }
+
+    // 随包内置漫画源（如「瓜子漫画」）：不需要用户导入。
+    // 放在用户源 / Legado 源之后注册 ⇒ 同名时内置源自动带「（2）」后缀。
+    for (final src in builtinComicSources()) {
+      try {
+        _register(src);
+      } catch (e) {
+        _log('内置漫画源注册失败: ${src.id} -> $e');
+      }
+    }
+
     // 禁用源列表（持久化，与 sources.json 解耦）
     _disabledIds = SettingsService().disabledSourceIds.toSet();
 
@@ -168,6 +203,28 @@ class SourceManager extends ChangeNotifier {
             _log('未知 api engine，跳过: ${def.engine} (id=${def.id})');
             return null;
         }
+      case 'venera':
+        final script = (def.config['script'] ?? '').toString();
+        if (script.trim().isEmpty) {
+          _log('Venera 源缺少脚本内容，跳过: ${def.id}');
+          return null;
+        }
+        return VeneraMangaSource(
+          definitionId: def.id,
+          sourceKey: (def.config['key'] ?? def.id).toString(),
+          displayName: (def.config['name'] ?? 'Venera').toString(),
+          script: script,
+          scriptUrl: (def.config['scriptUrl'] ?? '').toString(),
+        );
+      case 'legado':
+        try {
+          return LegadoComicMangaSource(
+            XiaoshuoBookSource.fromJson(def.config),
+          );
+        } catch (e) {
+          _log('Legado 漫画源解析失败: ${def.id} -> $e');
+          return null;
+        }
       default:
         _log('未知 source type，跳过: ${def.type} (id=${def.id})');
         return null;
@@ -175,7 +232,11 @@ class SourceManager extends ChangeNotifier {
   }
 
   void _register(MangaSource source) {
-    _sources[source.id] = source;
+    // 名称去重：同名源自动追加（2）（3）…（用户 2026-10-17 要求）
+    final existingNames = _sources.values.map((s) => s.name).toSet();
+    final unique = uniqueSourceName(source.name, existingNames);
+    _sources[source.id] =
+        unique == source.name ? source : _RenamedSource(source, unique);
   }
 
   /// 切换当前源
@@ -319,3 +380,98 @@ class _NoSource extends MangaSource {
     throw StateError(_msg);
   }
 }
+
+/// 同名源的改名包装：只改显示名，其余全部委托给原源。
+///
+/// 为什么不直接改 `MangaSource.name`：它是抽象 getter，各源都写成常量；
+/// 包一层可以保证 id / 行为完全不变，只有 UI 显示名带「（2）」。
+class _RenamedSource extends MangaSource {
+  _RenamedSource(this._inner, this._displayName);
+
+  final MangaSource _inner;
+  final String _displayName;
+
+  @override
+  String get id => _inner.id;
+
+  @override
+  String get name => _displayName;
+
+  @override
+  String get lang => _inner.lang;
+
+  @override
+  bool get supportsLatest => _inner.supportsLatest;
+
+  @override
+  bool get supportsCategories => _inner.supportsCategories;
+
+  @override
+  Future<List<FilterGroup>> fetchCategories() => _inner.fetchCategories();
+
+  @override
+  Future<MangasPage> getCategoryList(
+    List<FilterGroup> groups, {
+    int page = 0,
+  }) =>
+      _inner.getCategoryList(groups, page: page);
+
+  @override
+  Future<MangasPage> search(
+    String query, {
+    int page = 0,
+    FilterList filters = const FilterList(),
+  }) =>
+      _inner.search(query, page: page, filters: filters);
+
+  @override
+  Future<MangasPage> getPopular({int page = 0}) =>
+      _inner.getPopular(page: page);
+
+  @override
+  Future<MangasPage> getLatestUpdates({int page = 0}) =>
+      _inner.getLatestUpdates(page: page);
+
+  @override
+  FilterList getFilterList() => _inner.getFilterList();
+
+  @override
+  Future<CManga> getMangaDetails(CManga manga) =>
+      _inner.getMangaDetails(manga);
+
+  @override
+  Future<List<CChapter>> getChapterList(CManga manga) =>
+      _inner.getChapterList(manga);
+
+  @override
+  Future<({CManga manga, List<CChapter> chapters})>
+      getMangaDetailsAndChapters(CManga manga) =>
+          _inner.getMangaDetailsAndChapters(manga);
+
+  @override
+  Future<List<String>> getChapterImages(CManga manga, CChapter chapter) =>
+      _inner.getChapterImages(manga, chapter);
+
+  @override
+  Map<String, String> get imageHeaders => _inner.imageHeaders;
+
+  @override
+  String? get referer => _inner.referer;
+
+  @override
+  String? refererForChapter(CChapter chapter) =>
+      _inner.refererForChapter(chapter);
+
+  @override
+  bool get chapterSortByOrder => _inner.chapterSortByOrder;
+
+  @override
+  bool get chapterOrderDescending => _inner.chapterOrderDescending;
+
+  @override
+  bool get needsMagic => _inner.needsMagic;
+
+  @override
+  set needsMagic(bool value) => _inner.needsMagic = value;
+}
+

@@ -1,6 +1,7 @@
 import Flutter
 import UIKit
 import AVFoundation
+import Vision
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
@@ -170,6 +171,23 @@ import AVFoundation
       print("[AppDelegate] ❌ 无法获取 MusicNowPlaying 的 registrar")
     }
 
+    // 注册**听书（TTS）的锁屏 / 控制中心**控制
+    // 与 MusicNowPlaying 同文件、同款注册方式；只在 TTS 播放时 activate。
+    if let ttsNowPlayingRegistrar =
+      engineBridge.pluginRegistry.registrar(forPlugin: "TtsNowPlaying") {
+      TtsNowPlaying.shared.register(messenger: ttsNowPlayingRegistrar.messenger())
+    } else {
+      print("[AppDelegate] ❌ 无法获取 TtsNowPlaying 的 registrar")
+    }
+
+    // 注册**文件导出**（系统分享面板）：阅读/音乐下载完成后"导出到文件"用
+    if let fileExportRegistrar =
+      engineBridge.pluginRegistry.registrar(forPlugin: "FileExport") {
+      FileExport.shared.register(messenger: fileExportRegistrar.messenger())
+    } else {
+      print("[AppDelegate] ❌ 无法获取 FileExport 的 registrar")
+    }
+
     // 注册 PrefsFlush（让 NSUserDefaults 立刻落盘）
     //
     // 用户 2026-10-14：「为啥非要恢复备份呢？就不能改了就是改了？」
@@ -180,6 +198,13 @@ import AVFoundation
       PrefsFlush.shared.register(messenger: prefsRegistrar.messenger())
     } else {
       print("[AppDelegate] ❌ 无法获取 PrefsFlush 的 registrar")
+    }
+
+    // 注册 OcrEngine（漫画/影视翻译用的本机 OCR，走 Apple Vision）
+    if let ocrRegistrar = engineBridge.pluginRegistry.registrar(forPlugin: "OcrEngine") {
+      OcrEngine.shared.register(messenger: ocrRegistrar.messenger())
+    } else {
+      print("[AppDelegate] ❌ 无法获取 OcrEngine 的 registrar")
     }
   }
 }
@@ -233,5 +258,88 @@ final class PrefsFlush {
       }
     }
     channel = ch
+  }
+}
+
+// MARK: - OcrEngine
+
+/// 本机 OCR（Apple Vision）—— 漫画 / 影视翻译管线的第一环。
+///
+/// ── 为什么用 Vision 而不是 ML Kit / PaddleOCR ───────────────────
+/// · 系统自带、**离线**、免下载模型，包体不增加；
+/// · 支持 `zh-Hans / zh-Hant / en-US / ja-JP / ko-KR`（正是漫画最常见语种）；
+/// · 返回每个文本块的**归一化坐标**（左上原点），Flutter 侧才能把译文
+///   精确盖回原位置。
+///
+/// 通道：`tvbox/ocr`，方法 `recognize`，参数 `{bytes, languages}`。
+/// 返回 `[{text, x, y, w, h, confidence}]`（坐标 0~1）。
+final class OcrEngine {
+  static let shared = OcrEngine()
+  private static let channelName = "tvbox/ocr"
+  private var channel: FlutterMethodChannel?
+
+  func register(messenger: FlutterBinaryMessenger) {
+    let ch = FlutterMethodChannel(name: Self.channelName, binaryMessenger: messenger)
+    ch.setMethodCallHandler { call, result in
+      guard call.method == "recognize" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      guard let args = call.arguments as? [String: Any],
+            let typed = args["bytes"] as? FlutterStandardTypedData
+      else {
+        result(FlutterError(code: "BAD_ARGS", message: "缺少 bytes", details: nil))
+        return
+      }
+      let langs = (args["languages"] as? [String]) ?? ["zh-Hans", "en-US"]
+      // Vision 是同步阻塞的，必须离开主线程，否则大图会卡住 UI
+      DispatchQueue.global(qos: .userInitiated).async {
+        let blocks = Self.recognize(typed.data, languages: langs)
+        DispatchQueue.main.async { result(blocks) }
+      }
+    }
+    channel = ch
+  }
+
+  private static func recognize(_ data: Data, languages: [String]) -> [[String: Any]] {
+    guard let image = UIImage(data: data), let cg = image.cgImage else { return [] }
+    let request = VNRecognizeTextRequest()
+    request.recognitionLevel = .accurate
+    request.usesLanguageCorrection = true
+    if #available(iOS 16.0, *) {
+      request.revision = VNRecognizeTextRequestRevision3
+    }
+    // 传了 Vision 不认的语言会抛异常 ⇒ 先按系统支持清单过滤
+    let supported = (try? VNRecognizeTextRequest.supportedRecognitionLanguages(
+      for: .accurate, revision: request.revision)) ?? languages
+    let picked = languages.filter { supported.contains($0) }
+    request.recognitionLanguages = picked.isEmpty ? supported : picked
+
+    let handler = VNImageRequestHandler(cgImage: cg, options: [:])
+    do {
+      try handler.perform([request])
+      let obs = request.results ?? []
+      var out: [[String: Any]] = []
+      out.reserveCapacity(obs.count)
+      for o in obs {
+        guard let top = o.topCandidates(1).first else { continue }
+        let text = top.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty { continue }
+        let bb = o.boundingBox // 归一化，原点在左下
+        out.append([
+          "text": text,
+          "x": Double(bb.minX),
+          // Vision 用左下原点，Flutter 用左上 ⇒ 翻一下
+          "y": Double(1.0 - bb.maxY),
+          "w": Double(bb.width),
+          "h": Double(bb.height),
+          "confidence": Double(top.confidence),
+        ])
+      }
+      return out
+    } catch {
+      NSLog("[OcrEngine] Vision 识别失败: \(error)")
+      return []
+    }
   }
 }
