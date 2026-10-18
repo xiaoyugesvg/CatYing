@@ -192,6 +192,90 @@ class JellyPalette {
       textPrimaryDark = const Color(0xFFEDEDED),
       textSecondary = const Color(0xFF8E8E93);
 
+  /// 森野青岚：深青绿 + 雾灰绿底，配暖木强调（护眼、偏自然）。
+  const JellyPalette.forest()
+    : primary = const Color(0xFF4E7C6A),
+      primaryLight = const Color(0xFF7FA995),
+      primaryDark = const Color(0xFF35594C),
+      accent = const Color(0xFFD9A66A),
+      success = const Color(0xFF66BB6A),
+      warning = const Color(0xFFFFD97D),
+      error = const Color(0xFFEF5350),
+      blue = const Color(0xFF2196F3),
+      backgroundLight = const Color(0xFFF1F5F1),
+      backgroundDark = const Color(0xFF182420),
+      cardLight = Colors.white,
+      cardDark = const Color(0xFF22322C),
+      navSelectedBg = const Color(0xFFCFE0D7),
+      navSelectedFg = const Color(0xFF35594C),
+      navUnselected = const Color(0xFF1E2A25),
+      textPrimaryLight = const Color(0xFF24362F),
+      textPrimaryDark = const Color(0xFFE8F0EB),
+      textSecondary = const Color(0xFF8A9C93);
+
+  /// 薰衣草梦：柔雾紫 + 粉调强调，安静柔和。
+  const JellyPalette.lavender()
+    : primary = const Color(0xFF8A7BB8),
+      primaryLight = const Color(0xFFB0A3D6),
+      primaryDark = const Color(0xFF665791),
+      accent = const Color(0xFFE8B4C8),
+      success = const Color(0xFF66BB6A),
+      warning = const Color(0xFFFFD97D),
+      error = const Color(0xFFEF5350),
+      blue = const Color(0xFF2196F3),
+      backgroundLight = const Color(0xFFF5F2FA),
+      backgroundDark = const Color(0xFF1F1B2B),
+      cardLight = Colors.white,
+      cardDark = const Color(0xFF2B263B),
+      navSelectedBg = const Color(0xFFDDD5F0),
+      navSelectedFg = const Color(0xFF665791),
+      navUnselected = const Color(0xFF262235),
+      textPrimaryLight = const Color(0xFF2E2740),
+      textPrimaryDark = const Color(0xFFEFEAF7),
+      textSecondary = const Color(0xFF9A93AA);
+
+  /// 暖棕咖啡：焦糖棕 + 奶油米白，配金色点缀。
+  const JellyPalette.coffee()
+    : primary = const Color(0xFF8C6A52),
+      primaryLight = const Color(0xFFB8937A),
+      primaryDark = const Color(0xFF6A4C39),
+      accent = const Color(0xFFC9A227),
+      success = const Color(0xFF66BB6A),
+      warning = const Color(0xFFFFD97D),
+      error = const Color(0xFFEF5350),
+      blue = const Color(0xFF2196F3),
+      backgroundLight = const Color(0xFFFAF5EF),
+      backgroundDark = const Color(0xFF241D18),
+      cardLight = Colors.white,
+      cardDark = const Color(0xFF33291F),
+      navSelectedBg = const Color(0xFFE6D6C6),
+      navSelectedFg = const Color(0xFF6A4C39),
+      navUnselected = const Color(0xFF2A221C),
+      textPrimaryLight = const Color(0xFF3A2C22),
+      textPrimaryDark = const Color(0xFFF3EAE1),
+      textSecondary = const Color(0xFFA08F82);
+
+  /// 沙丘暖阳：燕麦沙色 + 雾蓝强调，低饱和暖调。
+  const JellyPalette.sand()
+    : primary = const Color(0xFFC2A26B),
+      primaryLight = const Color(0xFFDCC39A),
+      primaryDark = const Color(0xFF99804F),
+      accent = const Color(0xFF7FA8B8),
+      success = const Color(0xFF66BB6A),
+      warning = const Color(0xFFFFD97D),
+      error = const Color(0xFFEF5350),
+      blue = const Color(0xFF2196F3),
+      backgroundLight = const Color(0xFFFBF7EC),
+      backgroundDark = const Color(0xFF26221A),
+      cardLight = Colors.white,
+      cardDark = const Color(0xFF353026),
+      navSelectedBg = const Color(0xFFEADFC5),
+      navSelectedFg = const Color(0xFF99804F),
+      navUnselected = const Color(0xFF2D2820),
+      textPrimaryLight = const Color(0xFF3A3225),
+      textPrimaryDark = const Color(0xFFF4EFE3),
+      textSecondary = const Color(0xFFA69A85);
+
   final Color primary;
   final Color primaryLight;
   final Color primaryDark;
@@ -336,6 +420,14 @@ class JellyPalette {
         return const JellyPalette.sunset();
       case 'sky':
         return const JellyPalette.sky();
+      case 'forest':
+        return const JellyPalette.forest();
+      case 'lavender':
+        return const JellyPalette.lavender();
+      case 'coffee':
+        return const JellyPalette.coffee();
+      case 'sand':
+        return const JellyPalette.sand();
       default:
         return const JellyPalette.jelly();
     }
@@ -369,10 +461,13 @@ class ThemeBackground {
       opacity = 1.0,
       blur = 0.0;
 
-  const ThemeBackground.animation(String id, {this.opacity = 1.0, this.blur = 0.0})
-    : type = ThemeBackgroundType.animation,
-      animationId = id,
-      imagePath = null;
+  const ThemeBackground.animation(
+    String id, {
+    this.opacity = 1.0,
+    this.blur = 0.0,
+  }) : type = ThemeBackgroundType.animation,
+       animationId = id,
+       imagePath = null;
 
   const ThemeBackground.image(
     String path, {
@@ -508,4 +603,8 @@ const List<ThemePresetInfo> themePresets = [
   ThemePresetInfo('ocean', '蓝色海洋', JellyPalette.ocean()),
   ThemePresetInfo('sunset', '落日余晖', JellyPalette.sunset()),
   ThemePresetInfo('sky', '蓝色天空', JellyPalette.sky()),
+  ThemePresetInfo('forest', '森野青岚', JellyPalette.forest()),
+  ThemePresetInfo('lavender', '薰衣草梦', JellyPalette.lavender()),
+  ThemePresetInfo('coffee', '暖棕咖啡', JellyPalette.coffee()),
+  ThemePresetInfo('sand', '沙丘暖阳', JellyPalette.sand()),
 ];

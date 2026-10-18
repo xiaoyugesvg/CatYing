@@ -931,9 +931,22 @@ function runSecondaryRule(html, rule, fallbackColType, maxItems) {
   return out;
 }
 
+function cleanItemText(v) {
+  return String(v == null ? '' : v)
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function normItem(it, fallbackColType) {
   if (!it || typeof it !== 'object') return null;
-  const title = String(it.title ?? it.name ?? '').trim();
+  let title = cleanItemText(it.title ?? it.name ?? '');
   const rawUrl = it.url ?? it.link ?? it.href ?? '';
   // 官方允许条目 url 直接放**播放地址对象**（`url: {urls:['…m3u8']}`，实测探色视频）；
   // 直接 String() 会变成 "[object Object]"，播放页就永远打不开。
@@ -949,8 +962,13 @@ function normItem(it, fallbackColType) {
   }
   if (url.startsWith('x5://')) url = url.slice(5);
   const pic = String(it.pic_url ?? it.pic ?? it.img ?? it.cover ?? '').trim();
-  const desc = String(it.desc ?? it.description ?? it.remarks ?? '').trim();
+  const desc = cleanItemText(it.desc ?? it.description ?? it.remarks ?? '');
   const colType = String(it.col_type ?? fallbackColType ?? '').trim();
+  // 某些源的标题选择器抓空了，但简介/描述是好的 ⇒ 用描述兜底当标题，
+  // 否则整条内容会被当成"无标题无链接"丢掉（用户反馈"真正的内容没抓到"）。
+  if (!title && desc) {
+    title = desc.length > 40 ? desc.slice(0, 40) : desc;
+  }
   if (!title && !url) return null;
   return {
     title,
@@ -1016,6 +1034,111 @@ function parseHikerListDsl(text) {
       if (k) it[k] = v;
     }
     if (Object.keys(it).length) out.push(it);
+  }
+  return out;
+}
+
+// ============================================================
+// 列表清洗（首页 / 分类 / 搜索）
+// ============================================================
+//
+// 用户 2026-10-18：「分类抓取太差，一行标题、广告、悬浮广告都抓了，
+// 真正的内容反而没抓到」。海阔源的容器选择器经常过宽（比如直接取
+// `body&&.item` / `a`），把板块标题、广告位也当成条目。
+// 这里在**结果层**做一次保守清洗：只清洗 home/category/search，
+// 不动详情/选集（那里文本项可能是"排序/换线"之类的工具按钮）。
+
+const JUNK_TITLES = new Set([
+  '广告', '广告位', '赞助', '推广', '推荐', '热门', '最新', '更多',
+  '查看更多', '换一换', '上一页', '下一页', '首页', '尾页', '上一章',
+  '下一章', '目录', '返回', '登录', '注册', '打开app', '下载app',
+  'app下载', '客户端', '版权', '免责声明', '友情链接', '相关推荐',
+  '猜你喜欢', '全部', '搜索', '网站地图', '关于我们', '联系我们',
+]);
+
+/** 广告网络的域名 / 落地页特征 */
+const AD_HOST_RE =
+  /(^|\.)(doubleclick|googlesyndication|googleadservices|adservice|adsystem|adnxs|taboola|outbrain)\./i;
+const AD_PATH_RE = /(\/ad[sv]?\/|\/ads?\.|advert|\/banner\/|\/popup\/|guanggao|tuiguang)/i;
+const TOOL_COL_TYPES = new Set(['text_2', 'text_3', 'text_4', 'text_5']);
+
+function normTitleForJunk(title) {
+  return String(title || '')
+    .replace(/[\s\-—_·:：|｜\[\]【】()（）「」『』<>《》]/g, '')
+    .toLowerCase();
+}
+
+function looksLikeJunkItem(it) {
+  if (!it || typeof it !== 'object') return true;
+  const title = String(it.title || '').trim();
+  const url = String(it.url || '').trim();
+  const pic = String(it.pic || '').trim();
+  const desc = String(it.desc || '').trim();
+  const col = String(it.colType || it.col_type || '').trim();
+  const t = normTitleForJunk(title);
+
+  // 占位链接
+  if (url && /^(javascript:;?|#|hiker:\/\/empty)$/i.test(url)) return true;
+
+  // 板块标题 / 广告文案（短文本精确或前后缀匹配，避免误杀正常书名）
+  if (t && JUNK_TITLES.has(t)) return true;
+  if (/^(广告|赞助|推广)/.test(t) && t.length <= 10) return true;
+  if (/(广告|赞助|推广)$/.test(t) && t.length <= 10) return true;
+  // 板块标题变体：最新更新 / 热门推荐 / 精选专区 / 排行榜 / AD …
+  if (
+    /^(最新|最近|热门|推荐|精选|排行|榜单|分类|栏目|板块|专题|活动)(更新|推荐|排行|列表|更多|专区)?$/.test(t)
+  ) {
+    return true;
+  }
+  if (/^ad\d*$/.test(t)) return true;
+
+  // 纯文字、无链接、无图、无简介 ⇒ 板块标题（工具按钮类保留）
+  if (!url && !pic && !desc && !TOOL_COL_TYPES.has(col)) return true;
+
+  // 广告网络落地页 / 只有图片的广告
+  if (/^https?:\/\//i.test(url)) {
+    try {
+      const u = new URL(url);
+      if (AD_HOST_RE.test(`${u.hostname}.`)) return true;
+      if (AD_PATH_RE.test(u.pathname) && /(广告|推广|赞助)/.test(title)) {
+        return true;
+      }
+    } catch (_) {/* 非法 URL 交给后续流程 */}
+  }
+  if (!url && pic && /(广告|推广|赞助)/.test(`${title}${desc}`)) return true;
+
+  return false;
+}
+
+/**
+ * 清洗列表：去掉板块标题 / 广告 / 重复条目。
+ * 如果过滤后一条不剩（说明这个页面本来就是纯文字菜单），保留原列表，
+ * 避免把"工具页"误清空。
+ */
+function filterContentList(list, action) {
+  if (!Array.isArray(list) || list.length === 0) return list;
+  if (!['home', 'category', 'search'].includes(String(action))) return list;
+  const out = [];
+  const seen = new Set();
+  for (const it of list) {
+    if (looksLikeJunkItem(it)) continue;
+    const key = `${it.title || ''}\u0001${it.url || ''}\u0001${it.pic || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(it);
+  }
+  if (out.length === 0) {
+    // 整页都是标题/广告（>=3 条）⇒ 宁可返回空，也不要展示一屏垃圾。
+    // 只有 1~2 条时保留，避免把纯工具页误清空。
+    if (list.length >= 3) {
+      console.log(`[hiker] 整页均为标题/广告，已清空 ${list.length} 条（${action}）`);
+      return [];
+    }
+    console.log(`[hiker] 列表清洗后只剩 ${list.length} 条，保留原始（${action}）`);
+    return list;
+  }
+  if (out.length !== list.length) {
+    console.log(`[hiker] 列表清洗：${list.length} → ${out.length}（${action}）`);
   }
   return out;
 }
@@ -4219,7 +4342,8 @@ export async function handleHikerApi(data) {
     });
     return {
       ok: true,
-      list: r.list || [],
+      // 首页/分类/搜索：清洗掉板块标题、广告位、悬浮广告，只留真正的条目
+      list: filterContentList(r.list || [], action),
       playUrl: r.playUrl || '',
       /// 播放请求头（海阔播放 JSON 里的 `headers`，防盗链要用）
       playHeaders: r.playHeaders || null,

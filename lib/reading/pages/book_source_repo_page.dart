@@ -26,6 +26,7 @@ import 'source_warehouse_page.dart';
 //     （`dart analyze` 没带仓库根 → 分析的是别的项目 ✓ → 假绿 ✓）。
 //   （书源页本身不再提供「浏览记录 / 收藏」入口，如需查看请到漫画/图书搜索页或“我的”页。）
 import '../widgets/jelly_search_bar.dart';
+import '../widgets/swipe_action_tile.dart';
 import '../theme/jelly_theme.dart';
 import '../../common/theme.dart';
 import '../../services/python_manager.dart';
@@ -276,7 +277,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
         // 普通模式：分享 + 盾牌（体检）两个图标**同时并排显示**，不用滑动切换。
         if (!_selectMode)
           // 书源仓（用户 2026-10-18）：从「我的」页移到这里，右上角图标进入
-          _appBarIcon(Icons.inventory_2_outlined, '书源仓', () {
+          _appBarIcon(Icons.storage_rounded, '书源仓', () {
             Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const SourceWarehousePage()),
@@ -989,141 +990,175 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   ///   · 点正文 / 复选框 → 进入多选并勾选；长按 / ⓘ → 源菜单
   Widget _sourceTile(BookSource s) {
     final sel = _selected.contains(s.id);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: _card,
-        borderRadius: BorderRadius.circular(14),
-        border: sel ? Border.all(color: JellyTheme.primary, width: 1.2) : null,
-      ),
-      child: Row(
-        children: [
-          // 复选框（常驻）
-          Padding(
-            padding: const EdgeInsets.only(left: 10),
-            child: GestureDetector(
-              onTap: () => setState(() {
-                if (sel) {
-                  _selected.remove(s.id);
-                } else {
-                  _selected.add(s.id);
-                  // 勾选即进入选择模式（顶栏出现"选中 N"）
-                  _selectMode = true;
-                }
-                if (_selected.isEmpty) _selectMode = false;
-              }),
-              child: Icon(
-                sel ? Icons.check_box : Icons.check_box_outline_blank,
-                size: 22,
-                color: sel ? JellyTheme.primary : JellyTheme.textSecondary,
-              ),
-            ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: SwipeActionTile(
+        // 多选模式下关闭左滑，避免与勾选/点击冲突
+        enabled: !_selectMode,
+        backgroundColor: _card,
+        actions: [
+          SwipeAction(
+            icon: Icons.edit_outlined,
+            label: '编辑',
+            color: JellyTheme.primary,
+            onTap: () => _editSource(s),
           ),
-          Expanded(
-            child: ListTile(
-              contentPadding: const EdgeInsets.fromLTRB(8, 2, 6, 2),
-              leading: Container(
-                width: 40,
-                height: 40,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: _isDark
-                      ? Colors.white.withValues(alpha: 0.08)
-                      : Colors.black.withValues(alpha: 0.05),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  _groupEmoji(s.group),
-                  style: const TextStyle(fontSize: 20),
-                ),
-              ),
-              title: Row(
-                children: [
-                  // 状态点：启用=绿勾，停用=灰⊘
-                  Icon(
-                    s.enabled
-                        ? Icons.check_circle_rounded
-                        : Icons.block_rounded,
-                    size: 14,
-                    color: s.enabled ? Colors.green : JellyTheme.textSecondary,
-                  ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      s.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: AppTheme.fontHeadline,
-                        fontWeight: FontWeight.w600,
-                        color: s.enabled
-                            ? _titleColor
-                            : JellyTheme.textSecondary,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 5),
-                  // ⓘ 小标：点它打开书源菜单（编辑/置顶/登录/删除/设置分组）
-                  GestureDetector(
-                    onTap: () => _showSourceMenu(s),
-                    child: Icon(
-                      Icons.info_outline_rounded,
-                      size: 15,
-                      color: JellyTheme.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-              subtitle: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // 分组小标签（如「通常书源」）
-                  Container(
-                    margin: const EdgeInsets.only(top: 3),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 7,
-                      vertical: 1.5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _isDark
-                          ? Colors.white.withValues(alpha: 0.07)
-                          : Colors.black.withValues(alpha: 0.045),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      s.group.isEmpty ? '未分组' : s.group,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: AppTheme.fontCaption,
-                        color: JellyTheme.textSecondary,
-                      ),
-                    ),
-                  ),
-                  if (s.isPythonSource) _pythonBadge(),
-                  if (_health[s.id] != null) _healthBadge(_health[s.id]!),
-                ],
-              ),
-              // 点正文 = 进入多选并勾选；长按 = 源菜单
-              onTap: () => setState(() {
-                if (sel) {
-                  _selected.remove(s.id);
-                } else {
-                  _selected.add(s.id);
-                  _selectMode = true;
-                }
-                if (_selected.isEmpty) _selectMode = false;
-              }),
-              onLongPress: () => _showSourceMenu(s),
-              trailing: Switch(
-                value: s.enabled,
-                activeThumbColor: JellyTheme.primary,
-                onChanged: (v) => store.setEnabled(s.id, v),
-              ),
-            ),
+          SwipeAction(
+            icon: Icons.ios_share_rounded,
+            label: '分享',
+            color: const Color(0xFF3AA0FF),
+            onTap: () => _shareOne(s),
+          ),
+          SwipeAction(
+            icon: Icons.delete_outline_rounded,
+            label: '删除',
+            color: const Color(0xFFFF5A5A),
+            onTap: () => _deleteOne(s),
           ),
         ],
+        child: Container(
+          decoration: BoxDecoration(
+            color: _card,
+            borderRadius: BorderRadius.circular(14),
+            border: sel
+                ? Border.all(color: JellyTheme.primary, width: 1.2)
+                : null,
+          ),
+          child: Row(
+            children: [
+              // 复选框（常驻）
+              Padding(
+                padding: const EdgeInsets.only(left: 10),
+                child: GestureDetector(
+                  onTap: () => setState(() {
+                    if (sel) {
+                      _selected.remove(s.id);
+                    } else {
+                      _selected.add(s.id);
+                      // 勾选即进入选择模式（顶栏出现"选中 N"）
+                      _selectMode = true;
+                    }
+                    if (_selected.isEmpty) _selectMode = false;
+                  }),
+                  child: Icon(
+                    sel ? Icons.check_box : Icons.check_box_outline_blank,
+                    size: 22,
+                    color: sel ? JellyTheme.primary : JellyTheme.textSecondary,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: ListTile(
+                  contentPadding: const EdgeInsets.fromLTRB(8, 2, 6, 2),
+                  leading: Container(
+                    width: 40,
+                    height: 40,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: _isDark
+                          ? Colors.white.withValues(alpha: 0.08)
+                          : Colors.black.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      _groupEmoji(s.group),
+                      style: const TextStyle(fontSize: 20),
+                    ),
+                  ),
+                  title: Row(
+                    children: [
+                      // 状态点：启用=绿勾，停用=灰⊘
+                      Icon(
+                        s.enabled
+                            ? Icons.check_circle_rounded
+                            : Icons.block_rounded,
+                        size: 14,
+                        color: s.enabled
+                            ? Colors.green
+                            : JellyTheme.textSecondary,
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          s.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: AppTheme.fontHeadline,
+                            fontWeight: FontWeight.w600,
+                            color: s.enabled
+                                ? _titleColor
+                                : JellyTheme.textSecondary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                      // ⓘ 小标：点它打开书源菜单（编辑/置顶/登录/删除/设置分组）
+                      GestureDetector(
+                        onTap: () => _showSourceMenu(s),
+                        child: Icon(
+                          Icons.info_outline_rounded,
+                          size: 15,
+                          color: JellyTheme.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // 分组小标签（如「通常书源」）
+                      Container(
+                        margin: const EdgeInsets.only(top: 3),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 1.5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _isDark
+                              ? Colors.white.withValues(alpha: 0.07)
+                              : Colors.black.withValues(alpha: 0.045),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          s.group.isEmpty ? '未分组' : s.group,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: AppTheme.fontCaption,
+                            color: JellyTheme.textSecondary,
+                          ),
+                        ),
+                      ),
+                      if (s.isPythonSource) _pythonBadge(),
+                      if (_health[s.id] != null) _healthBadge(_health[s.id]!),
+                    ],
+                  ),
+                  // 点正文 = 进入多选并勾选；长按 = 进入多选并勾上（不再弹菜单）
+                  onTap: () => setState(() {
+                    if (sel) {
+                      _selected.remove(s.id);
+                    } else {
+                      _selected.add(s.id);
+                      _selectMode = true;
+                    }
+                    if (_selected.isEmpty) _selectMode = false;
+                  }),
+                  onLongPress: () => setState(() {
+                    _selectMode = true;
+                    _selected.add(s.id);
+                  }),
+                  trailing: Switch(
+                    value: s.enabled,
+                    activeThumbColor: JellyTheme.primary,
+                    onChanged: (v) => store.setEnabled(s.id, v),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1149,6 +1184,56 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
         ),
       ),
     );
+  }
+
+  /// 打开书源编辑页（config 型源不能走 Legado 的 7-tab 表单）
+  Future<void> _editSource(BookSource s) async {
+    if (s.isConfig) {
+      // config 源的数据在 `config` 体内，7-tab 表单读顶层键 → 打开就是空表单，
+      // 保存还会把 62 个字段塞进 raw 造成 id 漂移（详见 _showSourceMenu 注释）。
+      _toast('这是 config 型源：请用它的配置编辑方式修改，此编辑页会写坏它的 JSON');
+      return;
+    }
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => BookSourceEditorPage(source: s)),
+    );
+    if (mounted) setState(() {});
+  }
+
+  /// 分享单个书源（JSON 复制到剪贴板）
+  Future<void> _shareOne(BookSource s) async {
+    final json = BookSourceService.instance.exportSources([s]);
+    await Clipboard.setData(ClipboardData(text: json));
+    _toast('已复制「${s.name}」到剪贴板');
+  }
+
+  /// 删除单个书源（二次确认）
+  Future<void> _deleteOne(BookSource s) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text(
+          '删除书源',
+          style: TextStyle(fontSize: AppTheme.fontHeadline),
+        ),
+        content: Text('删除「${s.name}」？不可恢复。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('删除', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await store.remove(s.id);
+    if (mounted) setState(() {});
+    _toast('已删除「${s.name}」');
   }
 
   /// 点书源卡片弹出的底部菜单（按截图）：
@@ -1210,33 +1295,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                     ),
                     _groupActionBtn(Icons.edit_outlined, '编辑', () async {
                       Navigator.pop(ctx);
-                      // 🔴 config 型源**不能**走 Legado 的 7-tab 编辑页 ✗：
-                      // 那个表单是给 Legado 书源写的（读 `bookSourceName/Url/rule*`
-                      // 等顶层键 ✓），而 config 源的数据在 **`config` 体内** ✗ →
-                      // 打开后**表单全空** ✓（用户会以为源坏了 ✓）。
-                      // 更糟的是保存：`_save` 会把 62 个字段全部写进 raw ✓ →
-                      // ① **污染 JSON**（凭空多出 5 个空 `ruleSearch/ruleExplore/
-                      //    ruleBookInfo/ruleToc/ruleContent` 对象 ✗）
-                      // ② 重算 id（`config:正式名` → 用户填的名字 ✓）→ **id 漂移** ✗，
-                      //    连带按 id 存的键（`bsr.progress.<id>.<书名>`、笔记 sourceId）
-                      //    全部失配 ✓（重启后又变回 `config:原名` ✓）。
-                      // 所以这里**直接拦住** ✓，比"打开一个会写坏数据的表单"好 ✓；
-                      // 真想改 config 源应走它自己的配置编辑页 ✓（待做 ✓）
-                      if (s.isConfig) {
-                        _toast(
-                          '这是 config 型源：请用它的配置编辑方式修改，'
-                          '此编辑页会写坏它的 JSON',
-                        );
-                        return;
-                      }
-                      // 打开 7-tab 完整编辑页（源变量/基础/搜索/发现/详情/目录/正文）
-                      await Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => BookSourceEditorPage(source: s),
-                        ),
-                      );
-                      if (mounted) setState(() {});
+                      await _editSource(s);
                     }),
                     const SizedBox(width: 8),
                     _groupActionBtn(Icons.vertical_align_top_rounded, '置顶', () {
@@ -1266,29 +1325,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                       '删除',
                       () async {
                         Navigator.pop(ctx);
-                        final ok = await showDialog<bool>(
-                          context: context,
-                          builder: (c) => AlertDialog(
-                            title: const Text('删除书源'),
-                            content: Text('删除「${s.name}」？不可恢复。'),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(c, false),
-                                child: const Text('取消'),
-                              ),
-                              TextButton(
-                                onPressed: () => Navigator.pop(c, true),
-                                child: const Text(
-                                  '删除',
-                                  style: TextStyle(color: Colors.redAccent),
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                        if (ok == true) {
-                          await store.remove(s.id);
-                        }
+                        await _deleteOne(s);
                       },
                     ),
                   ],

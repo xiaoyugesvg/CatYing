@@ -50,19 +50,19 @@ class JellyNavBar extends StatefulWidget {
     this.floating = false,
     this.palette,
   }) : assert(
-          items.length >= 2 && items.length <= 6,
-          // ── 为什么上限从 5 放宽到 6 ────────────────────────────────
-          // cmbok 原生是 5 项（漫画/图书/书架/收藏/我的）。
-          // 猫影把阅读嵌进了影视 App，阅读自带悬浮栏而影视底栏被隐藏，
-          // 所以**必须在阅读栏里给一条回影视的路**（第 6 项「影视」）。
-          //
-          // ⚠️ 只放宽上限是不够的：项数一变，宽度算法必须能跟着缩。
-          // 原来的 `perItem = (屏宽×0.2).clamp(80,120)` 在 6 项时
-          // 需要 480~600px 而手机只有 ~350px 可用 → 必然溢出。
-          // 宽度算法已改成"按可用宽度反算"（见 _buildFloatingNavBar），
-          // 那里才是让 6 项能安全容纳的关键。
-          '导航项数需在 2~6 之间（5 项是 cmbok 原生，第 6 项是「返回影视」）',
-        );
+         items.length >= 2 && items.length <= 6,
+         // ── 为什么上限从 5 放宽到 6 ────────────────────────────────
+         // cmbok 原生是 5 项（漫画/图书/书架/收藏/我的）。
+         // 猫影把阅读嵌进了影视 App，阅读自带悬浮栏而影视底栏被隐藏，
+         // 所以**必须在阅读栏里给一条回影视的路**（第 6 项「影视」）。
+         //
+         // ⚠️ 只放宽上限是不够的：项数一变，宽度算法必须能跟着缩。
+         // 原来的 `perItem = (屏宽×0.2).clamp(80,120)` 在 6 项时
+         // 需要 480~600px 而手机只有 ~350px 可用 → 必然溢出。
+         // 宽度算法已改成"按可用宽度反算"（见 _buildFloatingNavBar），
+         // 那里才是让 6 项能安全容纳的关键。
+         '导航项数需在 2~6 之间（5 项是 cmbok 原生，第 6 项是「返回影视」）',
+       );
 
   /// 悬浮导航栏总占用高度（高度 + 底部外边距），用于页面 FAB 等避让
   static const double floatingTotalHeight =
@@ -76,9 +76,8 @@ class JellyNavBar extends StatefulWidget {
   /// 页面自己必须留出足够底部 padding，否则最后一项会被导航栏
   /// 或 Home 指示器遮挡（表现为"内容压导航栏、点不到"）。
   /// +40 用于覆盖 Home 指示器（iPhone 34 / Android 手势条 24~48）。
-  static double get contentBottomAvoid => SettingsService().navFloating
-      ? floatingTotalHeight + 8 + 40
-      : 0.0;
+  static double get contentBottomAvoid =>
+      SettingsService().navFloating ? floatingTotalHeight + 8 + 40 : 0.0;
 
   @override
   State<JellyNavBar> createState() => _JellyNavBarState();
@@ -219,8 +218,10 @@ class _JellyNavBarState extends State<JellyNavBar>
           // 这样**无论几项都不会溢出** —— 项数增加只会让每项变窄。
           // 可用宽度 = 屏宽 - 两侧外边距（外层 Padding 只加了 horizontalMargin；
           // sidePad 是"内容比可用宽度窄时"的补足量，不算进上限）
-          final available =
-              (constraints.maxWidth - horizontalMargin * 2).clamp(1.0, constraints.maxWidth);
+          final available = (constraints.maxWidth - horizontalMargin * 2).clamp(
+            1.0,
+            constraints.maxWidth,
+          );
           final ideal = (screenWidth * _floatingItemFactor).clamp(
             _floatingItemMin,
             _floatingItemMax,
@@ -262,7 +263,8 @@ class _JellyNavBarState extends State<JellyNavBar>
             ),
           );
           // 炫彩/霓虹是不透明底，模糊背景没有意义（白耗一次全屏高斯）
-          final useBlur = !bgAnim &&
+          final useBlur =
+              !bgAnim &&
               (_style == FloatingNavStyle.ink ||
                   _style == FloatingNavStyle.liquid);
           return Padding(
@@ -341,8 +343,10 @@ class _JellyNavBarState extends State<JellyNavBar>
         );
       case FloatingNavStyle.ink:
         return BoxDecoration(
-          color: FloatingNavSpec.barColor(isDark, _pal)
-              .withValues(alpha: opaque ? FloatingNavSpec.barAlpha : 0.8),
+          color: FloatingNavSpec.barColor(
+            isDark,
+            _pal,
+          ).withValues(alpha: opaque ? FloatingNavSpec.barAlpha : 0.8),
           borderRadius: radius,
         );
     }
@@ -428,8 +432,7 @@ class _JellyNavBarState extends State<JellyNavBar>
                           isDark: isDark,
                           palette: _pal,
                         ),
-                        borderRadius:
-                            BorderRadius.circular(bandHeight / 2),
+                        borderRadius: BorderRadius.circular(bandHeight / 2),
                       ),
                     ),
                   ),
@@ -515,6 +518,10 @@ class _JellyNavItem extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
+        // 用户 2026-10-18：「悬浮栏长按松手后有哒的一声」——
+        // InkWell 默认 enableFeedback=true 会触发系统点击音（Android 的
+        // SystemSound.click / iOS 的按键声）。底栏不需要任何声音反馈。
+        enableFeedback: false,
         splashColor: Colors.transparent,
         highlightColor: Colors.transparent,
         child: Center(

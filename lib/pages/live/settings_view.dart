@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -18,11 +20,49 @@ class LiveSettingsPage extends StatefulWidget {
 
 class _LiveSettingsPageState extends State<LiveSettingsPage> {
   final _epgCtrl = TextEditingController();
+  final _searchCtrl = TextEditingController();
+
+  /// 直播源排序：0 时间 / 1 名称 / 2 频率
+  int _sort = 0;
+  bool _searching = false;
+  bool _compact = false;
+  String _keyword = '';
+
+  /// 源使用次数（选台/切源时累加，供「频率」排序）
+  Map<String, int> _usage = {};
+
+  static const _usageKey = 'live_source_usage_v1';
 
   @override
   void initState() {
     super.initState();
     _restoreEpg();
+    _restoreUsage();
+  }
+
+  Future<void> _restoreUsage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_usageKey);
+      if (raw == null || raw.isEmpty) return;
+      final decoded = jsonDecode(raw);
+      if (decoded is Map && mounted) {
+        setState(() {
+          _usage = {
+            for (final e in decoded.entries)
+              if (e.value is num) '${e.key}': (e.value as num).toInt(),
+          };
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _bumpUsage(String name) async {
+    _usage[name] = (_usage[name] ?? 0) + 1;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_usageKey, jsonEncode(_usage));
+    } catch (_) {}
   }
 
   Future<void> _restoreEpg() async {
@@ -38,7 +78,51 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
   @override
   void dispose() {
     _epgCtrl.dispose();
+    _searchCtrl.dispose();
     super.dispose();
+  }
+
+  /// 排序 + 关键词过滤后的源（保留真实下标，切源/编辑/删除都用它）
+  List<(int, LiveSource)> _visibleSources(List<LiveSource> srcs) {
+    final kw = _keyword.trim().toLowerCase();
+    final list = <(int, LiveSource)>[];
+    for (var i = 0; i < srcs.length; i++) {
+      final s = srcs[i];
+      final url = LiveService.instance.getSourceUrl(i) ?? '';
+      if (kw.isNotEmpty &&
+          !s.name.toLowerCase().contains(kw) &&
+          !url.toLowerCase().contains(kw)) {
+        continue;
+      }
+      list.add((i, s));
+    }
+    switch (_sort) {
+      case 0: // 时间：最近更新在前
+        list.sort(
+          (a, b) => (b.$2.updatedAt ?? 0).compareTo(a.$2.updatedAt ?? 0),
+        );
+        break;
+      case 1: // 名称
+        list.sort((a, b) => a.$2.name.compareTo(b.$2.name));
+        break;
+      case 2: // 频率：使用次数多的在前
+        list.sort((a, b) {
+          final c = (_usage[b.$2.name] ?? 0).compareTo(_usage[a.$2.name] ?? 0);
+          return c != 0 ? c : a.$2.name.compareTo(b.$2.name);
+        });
+        break;
+    }
+    return list;
+  }
+
+  Future<void> _selectSource(int index, LiveSource src) async {
+    await LiveService.instance.loadSource(index);
+    if (!mounted) return;
+    await _bumpUsage(src.name);
+    if (!mounted) return;
+    final err = LiveService.instance.error.value;
+    AppToast.message(err == null ? '已切换到 ${src.name}' : '切换失败：$err');
+    setState(() {});
   }
 
   @override
@@ -79,27 +163,105 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                 ),
               ),
               const Spacer(),
+              // 搜索
               IconButton(
-                tooltip: '自动排序',
+                tooltip: _searching ? '关闭搜索' : '搜索直播源',
                 visualDensity: VisualDensity.compact,
                 icon: Icon(
-                  Icons.sort_by_alpha_rounded,
+                  _searching ? Icons.search_off_rounded : Icons.search_rounded,
                   size: 20,
                   color: AppTheme.textSecondary,
                 ),
-                onPressed: () async {
-                  final svc = LiveService.instance;
-                  final multi = svc.sources.length >= 2;
-                  await svc.autoSortSources();
-                  if (!mounted) return;
-                  AppToast.message(
-                    multi ? '已按名称自动排序' : '当前只有一个直播源，无需排序',
-                  );
-                  setState(() {});
-                },
+                onPressed: () => setState(() {
+                  _searching = !_searching;
+                  if (!_searching) {
+                    _keyword = '';
+                    _searchCtrl.clear();
+                  }
+                }),
+              ),
+              // 排序：时间 / 名称 / 频率
+              PopupMenuButton<int>(
+                tooltip: '排序',
+                initialValue: _sort,
+                color: AppTheme.backgroundSecondary,
+                onSelected: (v) => setState(() => _sort = v),
+                itemBuilder: (_) => [
+                  for (final o in const [
+                    (0, '时间', Icons.schedule_rounded),
+                    (1, '名称', Icons.sort_by_alpha_rounded),
+                    (2, '频率', Icons.local_fire_department_rounded),
+                  ])
+                    PopupMenuItem(
+                      value: o.$1,
+                      child: Row(
+                        children: [
+                          Icon(
+                            _sort == o.$1 ? Icons.check_rounded : o.$3,
+                            size: 17,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(o.$2, style: const TextStyle(fontSize: 13)),
+                        ],
+                      ),
+                    ),
+                ],
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Icon(
+                    Icons.sort_rounded,
+                    size: 20,
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ),
+              // 视图：标准 / 紧凑
+              IconButton(
+                tooltip: _compact ? '标准视图' : '紧凑视图',
+                visualDensity: VisualDensity.compact,
+                icon: Icon(
+                  _compact
+                      ? Icons.view_agenda_rounded
+                      : Icons.view_headline_rounded,
+                  size: 20,
+                  color: AppTheme.textSecondary,
+                ),
+                onPressed: () => setState(() => _compact = !_compact),
               ),
             ],
           ),
+          if (_searching)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(0, 6, 0, 6),
+              child: TextField(
+                controller: _searchCtrl,
+                autofocus: true,
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontSubhead,
+                ),
+                onChanged: (v) => setState(() => _keyword = v),
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: '搜索源名称或地址',
+                  hintStyle: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontFootnote,
+                  ),
+                  prefixIcon: Icon(
+                    Icons.search,
+                    size: 18,
+                    color: AppTheme.textTertiary,
+                  ),
+                  filled: true,
+                  fillColor: AppTheme.backgroundSecondary,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ),
           const SizedBox(height: 2),
           Container(
             decoration: BoxDecoration(
@@ -111,13 +273,21 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
               final _ = LiveService.instance.sourcesTick.value;
               final svc = LiveService.instance;
               final srcs = svc.sources.toList();
+              final visible = _visibleSources(srcs);
+              // 只有「无关键词 + 时间排序」时才允许拖动，避免排序把手错位
+              final canReorder = _keyword.trim().isEmpty && _sort == 0;
               // 「添加直播源」按钮必须**始终**可见：空列表时也要能直接加，
               // 否则全新安装要先到直播页加一个源、设置页才冒出按钮（用户实测困惑）。
               return Column(
                 children: [
                   if (srcs.isEmpty)
                     const _EmptyRow()
-                  else
+                  else if (visible.isEmpty)
+                    const ListTile(
+                      title: Text('没有匹配的直播源'),
+                      subtitle: Text('换个关键词试试'),
+                    )
+                  else if (canReorder)
                     // 源列表可拖动排序；「添加直播源」放在 ReorderableListView
                     // 之外，因此不参与排序、也不可拖。
                     ReorderableListView(
@@ -133,6 +303,23 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                             key: ValueKey(
                               '$i|${srcs[i].name}|${svc.getSourceUrl(i) ?? ''}',
                             ),
+                            dense: _compact,
+                          ),
+                      ],
+                    )
+                  else
+                    Column(
+                      children: [
+                        for (final e in visible)
+                          _sourceTile(
+                            e.$1,
+                            e.$2,
+                            key: ValueKey(
+                              '${e.$1}|${e.$2.name}|'
+                              '${svc.getSourceUrl(e.$1) ?? ''}',
+                            ),
+                            showHandle: false,
+                            dense: _compact,
                           ),
                       ],
                     ),
@@ -204,8 +391,8 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                         // ink 强调色 #3A3A3A 上的黑字对比只有约 1.3:1。
                         foregroundColor:
                             AppTheme.accentColor.computeLuminance() > 0.5
-                                ? Colors.black
-                                : Colors.white,
+                            ? Colors.black
+                            : Colors.white,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 18,
                           vertical: 14,
@@ -290,7 +477,13 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
     );
   }
 
-  Widget _sourceTile(int index, LiveSource src, {required Key key}) {
+  Widget _sourceTile(
+    int index,
+    LiveSource src, {
+    required Key key,
+    bool showHandle = true,
+    bool dense = false,
+  }) {
     final svc = LiveService.instance;
     final loaded = src.loaded;
     final sourceUrl = svc.getSourceUrl(index);
@@ -302,30 +495,35 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
     final sub = isXtream
         ? 'Xtream${expiry == null ? ' · ${src.statusText()}' : ' · $expiry'}'
         : isMaiyou
-            ? '麦优订阅 · ${src.statusText()}'
-            : src.statusText();
+        ? '麦优订阅 · ${src.statusText()}'
+        : src.statusText();
     return ListTile(
       key: key,
-      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      onTap: () => _selectSource(index, src),
+      contentPadding: EdgeInsets.symmetric(
+        horizontal: 12,
+        vertical: dense ? 0 : 4,
+      ),
       // 左侧：拖动手柄 + 图标。手柄套 ReorderableDragStartListener，
       // 只有按住手柄才进入拖动，点击整行仍是「切换加载该源」。
       leading: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          ReorderableDragStartListener(
-            index: index,
-            child: Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: Icon(
-                Icons.drag_indicator,
-                color: AppTheme.textTertiary,
-                size: 20,
+          if (showHandle)
+            ReorderableDragStartListener(
+              index: index,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Icon(
+                  Icons.drag_indicator,
+                  color: AppTheme.textTertiary,
+                  size: dense ? 18 : 20,
+                ),
               ),
             ),
-          ),
           Container(
-            width: 36,
-            height: 36,
+            width: dense ? 30 : 36,
+            height: dense ? 30 : 36,
             decoration: BoxDecoration(
               color: loaded
                   ? AppTheme.accentColor.withValues(alpha: 0.18)
@@ -335,7 +533,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
             child: Icon(
               Icons.live_tv,
               color: loaded ? AppTheme.accentColor : AppTheme.textTertiary,
-              size: 20,
+              size: dense ? 17 : 20,
             ),
           ),
         ],
@@ -344,7 +542,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
         src.name,
         style: TextStyle(
           color: AppTheme.textPrimary,
-          fontSize: AppTheme.fontHeadline,
+          fontSize: dense ? AppTheme.fontBody : AppTheme.fontHeadline,
           fontWeight: FontWeight.w500,
         ),
       ),
@@ -352,7 +550,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
         sub,
         style: TextStyle(
           color: loaded ? AppTheme.textSecondary : AppTheme.textTertiary,
-          fontSize: AppTheme.fontFootnote,
+          fontSize: dense ? AppTheme.fontCaption : AppTheme.fontFootnote,
         ),
       ),
       trailing: PopupMenuButton<String>(
@@ -523,11 +721,13 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
       ),
       trailing: Icon(Icons.chevron_right, color: AppTheme.textTertiary),
       onTap: () async {
-        final result = await showDialog<
-            ({String name, String url, bool xtream, bool maiyou})>(
-          context: context,
-          builder: (ctx) => const _AddLiveSourceDialog(),
-        );
+        final result =
+            await showDialog<
+              ({String name, String url, bool xtream, bool maiyou})
+            >(
+              context: context,
+              builder: (ctx) => const _AddLiveSourceDialog(),
+            );
         if (result != null && result.url.isNotEmpty) {
           await LiveService.instance.addSource(
             result.url,
@@ -584,6 +784,7 @@ class _AddLiveSourceDialogState extends State<_AddLiveSourceDialog> {
   final _hostCtrl = TextEditingController();
   final _userCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
+
   /// 0=m3u/txt，1=Xtream 账号，2=麦优订阅
   int _mode = 0;
 
@@ -621,33 +822,47 @@ class _AddLiveSourceDialogState extends State<_AddLiveSourceDialog> {
         AppToast.message('请输入有效的 host:port 或完整账号链接');
         return;
       }
-      final user =
-          _userCtrl.text.trim().isNotEmpty ? _userCtrl.text.trim() : acc.user;
-      final pass =
-          _passCtrl.text.trim().isNotEmpty ? _passCtrl.text.trim() : acc.pass;
+      final user = _userCtrl.text.trim().isNotEmpty
+          ? _userCtrl.text.trim()
+          : acc.user;
+      final pass = _passCtrl.text.trim().isNotEmpty
+          ? _passCtrl.text.trim()
+          : acc.pass;
       if (user.isEmpty || pass.isEmpty) {
         AppToast.message('请填写用户名和密码');
         return;
       }
       final url = XtreamService.instance.buildAccountUrl(acc.base, user, pass);
-      Navigator.pop(context,
-          (name: name, url: url, xtream: true, maiyou: false));
+      Navigator.pop(context, (
+        name: name,
+        url: url,
+        xtream: true,
+        maiyou: false,
+      ));
     } else if (_mode == 2) {
       final url = _urlCtrl.text.trim();
       if (url.isEmpty) {
         AppToast.message('请输入麦优订阅地址（json.txt 链接）');
         return;
       }
-      Navigator.pop(context,
-          (name: name, url: url, xtream: false, maiyou: true));
+      Navigator.pop(context, (
+        name: name,
+        url: url,
+        xtream: false,
+        maiyou: true,
+      ));
     } else {
       final url = _urlCtrl.text.trim();
       if (url.isEmpty) {
         AppToast.message('请输入 m3u / txt 地址');
         return;
       }
-      Navigator.pop(context,
-          (name: name, url: url, xtream: false, maiyou: false));
+      Navigator.pop(context, (
+        name: name,
+        url: url,
+        xtream: false,
+        maiyou: false,
+      ));
     }
   }
 

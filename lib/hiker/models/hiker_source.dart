@@ -39,15 +39,23 @@ class HikerSource {
   List<Map<String, dynamic>> get pages {
     final p = raw['pages'];
     if (p is List) {
-      return p.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+      return p
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
     }
     if (p is String && p.trim().isNotEmpty) {
       try {
         final d = jsonDecode(p);
         if (d is List) {
-          return d.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+          return d
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
         }
-      } catch (_) {/* 坏数据当没有 */}
+      } catch (_) {
+        /* 坏数据当没有 */
+      }
     }
     return const [];
   }
@@ -66,7 +74,8 @@ class HikerSource {
       if (names.contains(r)) continue;
       final base = r.split('/').last;
       if (names.contains(base)) continue;
-      if (base.endsWith('.js') && names.contains(base.substring(0, base.length - 3))) {
+      if (base.endsWith('.js') &&
+          names.contains(base.substring(0, base.length - 3))) {
         continue;
       }
       return true; // 有一个引用确实找不到 ⇒ 依赖内置模块
@@ -99,7 +108,8 @@ class HikerSource {
   Set<String> get _builtinRefs {
     final out = <String>{};
     final re = RegExp(
-        r'''hiker://(?:page|assets)/([A-Za-z0-9_./\u4e00-\u9fff-]+)''');
+      r'''hiker://(?:page|assets)/([A-Za-z0-9_./\u4e00-\u9fff-]+)''',
+    );
     for (final m in re.allMatches(_allRuleText)) {
       final k = (m.group(1) ?? '').split(RegExp(r'[#?]')).first.trim();
       if (k.isNotEmpty) out.add(k);
@@ -149,37 +159,44 @@ class HikerSource {
 
     // ① 连首页规则都没有
     if (findRule.isEmpty) {
-      out.add(const HikerSourceDiagnosis(
-        '无首页规则',
-        '这条源没有 find_rule，导入的可能是残缺数据。',
-        blocking: true,
-      ));
+      out.add(
+        const HikerSourceDiagnosis(
+          '无首页规则',
+          '这条源没有 find_rule，导入的可能是残缺数据。',
+          blocking: true,
+        ),
+      );
     }
 
     // ② Apollo 规则包（社区分发，App 不自带，原版海阔也要用户自己导入）
     final apolloRef = RegExp(r'''\bApollo\b''').hasMatch(text);
-    final apolloProvided = names.contains('Apollo') ||
-        _hasFileUnder(files, 'apollo');
+    final apolloProvided =
+        names.contains('Apollo') || _hasFileUnder(files, 'apollo');
     if (apolloRef && !apolloProvided) {
-      out.add(const HikerSourceDiagnosis(
-        '缺 Apollo',
-        '规则依赖 Apollo 规则包（不在 App 内）。去「海阔设置 → 文件管理」'
-        '导入 Apollo 的 zip / 文件后再试。',
-        blocking: true,
-      ));
+      out.add(
+        const HikerSourceDiagnosis(
+          '缺 Apollo',
+          '规则依赖 Apollo 规则包（不在 App 内）。去「海阔设置 → 文件管理」'
+              '导入 Apollo 的 zip / 文件后再试。',
+          blocking: true,
+        ),
+      );
     }
 
     // ③ 官方内置页 lazy（漫画/短剧的「章节→图片」全靠它）
-    final lazyRef = RegExp(r'''hiker://page/lazy'''
-            r'''|(?:require|evalPrivateJS)\s*\(\s*['"]lazy['"]\s*\)''')
-        .hasMatch(text);
+    final lazyRef = RegExp(
+      r'''hiker://page/lazy'''
+      r'''|(?:require|evalPrivateJS)\s*\(\s*['"]lazy['"]\s*\)''',
+    ).hasMatch(text);
     if (lazyRef && !names.contains('lazy')) {
-      out.add(const HikerSourceDiagnosis(
-        '缺 lazy',
-        '规则引用了内置页 hiker://page/lazy，但源里没带这个模块、'
-        '随包也没有 ⇒ 目录/看图那一步解不出来。',
-        blocking: true,
-      ));
+      out.add(
+        const HikerSourceDiagnosis(
+          '缺 lazy',
+          '规则引用了内置页 hiker://page/lazy，但源里没带这个模块、'
+              '随包也没有 ⇒ 目录/看图那一步解不出来。',
+          blocking: true,
+        ),
+      );
     }
 
     // ④ 其它内置页 / assets：源里没有、随包也没有
@@ -197,12 +214,14 @@ class HikerSource {
     }
     if (others.isNotEmpty) {
       others.sort();
-      out.add(HikerSourceDiagnosis(
-        '缺内置页',
-        '规则引用了 ${_preview(others.map((r) => 'hiker://page|assets/$r').toList())}，'
-        '但源里没带、随包也没有 ⇒ 这些页面打不开。',
-        blocking: true,
-      ));
+      out.add(
+        HikerSourceDiagnosis(
+          '缺内置页',
+          '规则引用了 ${_preview(others.map((r) => 'hiker://page|assets/$r').toList())}，'
+              '但源里没带、随包也没有 ⇒ 这些页面打不开。',
+          blocking: true,
+        ),
+      );
     }
 
     // ⑤ 文件区缺文件（`hiker://files/…`）
@@ -216,7 +235,8 @@ class HikerSource {
     for (final f in _fileRefs) {
       final p = _normPath(f).toLowerCase();
       if (!p.endsWith('.js')) continue;
-      final inRuleDir = p.startsWith('libs/') ||
+      final inRuleDir =
+          p.startsWith('libs/') ||
           p.startsWith('rules/') ||
           p.contains('/libs/') ||
           p.contains('/rules/');
@@ -226,21 +246,25 @@ class HikerSource {
     }
     if (missingFiles.isNotEmpty) {
       missingFiles.sort();
-      out.add(HikerSourceDiagnosis(
-        '缺文件',
-        '规则要读 ${_preview(missingFiles.map((f) => 'hiker://files/$f').toList())}，'
-        '文件区里没有 ⇒ 去「海阔设置 → 文件管理」导入对应规则包。',
-        blocking: true,
-      ));
+      out.add(
+        HikerSourceDiagnosis(
+          '缺文件',
+          '规则要读 ${_preview(missingFiles.map((f) => 'hiker://files/$f').toList())}，'
+              '文件区里没有 ⇒ 去「海阔设置 → 文件管理」导入对应规则包。',
+          blocking: true,
+        ),
+      );
     }
 
     // ⑥ 源配置
     if (needsConfig && (config == null || config.isEmpty)) {
-      out.add(HikerSourceDiagnosis(
-        '需填配置',
-        '规则要读 ${configKeys.map((k) => 'config.$k').join('、')}，'
-        '点右上角「源配置」填上对应值（如域名 / 口令）。',
-      ));
+      out.add(
+        HikerSourceDiagnosis(
+          '需填配置',
+          '规则要读 ${configKeys.map((k) => 'config.$k').join('、')}，'
+              '点右上角「源配置」填上对应值（如域名 / 口令）。',
+        ),
+      );
     }
 
     // 阻塞项排前面，同级按标签字典序（输出稳定，测试好写）
@@ -271,8 +295,8 @@ class HikerSource {
   /// 列表太长时只列前几个（源里动辄几十个文件，全塞进弹窗没法看）
   static String _preview(List<String> items, [int max = 4]) =>
       items.length <= max
-          ? items.join('、')
-          : '${items.take(max).join('、')} 等 ${items.length} 个';
+      ? items.join('、')
+      : '${items.take(max).join('、')} 等 ${items.length} 个';
 
   /// 引用的模块名是不是源自己在 `pages` 里带的
   static bool _providedBySource(String ref, Set<String> names) {
@@ -306,14 +330,14 @@ class HikerSource {
   List<String> get configKeys => _configKeys;
 
   String get _allRuleText => [
-        url,
-        findRule,
-        searchFind,
-        searchUrl,
-        detailFindRule,
-        preRule,
-        for (final p in pages) (p['rule'] ?? '').toString(),
-      ].join('\n');
+    url,
+    findRule,
+    searchFind,
+    searchUrl,
+    detailFindRule,
+    preRule,
+    for (final p in pages) (p['rule'] ?? '').toString(),
+  ].join('\n');
 
   List<String> get _configKeys {
     final out = <String>{};
@@ -326,7 +350,8 @@ class HikerSource {
   }
 
   /// 能否用（Phase 1 判定）：有首页规则、不依赖内置模块、不依赖宿主能力
-  bool get usable => findRule.isNotEmpty && !needsBuiltinModule && !needsHostApi;
+  bool get usable =>
+      findRule.isNotEmpty && !needsBuiltinModule && !needsHostApi;
 
   /// 不可用原因（界面直接展示）
   String get unusableReason {
@@ -422,10 +447,18 @@ class HikerItem {
   });
 
   factory HikerItem.fromJson(Map<String, dynamic> j) => HikerItem(
-        title: (j['title'] ?? '').toString(),
-        url: (j['url'] ?? '').toString(),
-        pic: (j['pic'] ?? '').toString(),
-        desc: (j['desc'] ?? '').toString(),
-        colType: (j['colType'] ?? j['col_type'] ?? '').toString(),
-      );
+    title: (j['title'] ?? '').toString(),
+    url: (j['url'] ?? '').toString(),
+    pic: (j['pic'] ?? '').toString(),
+    desc: (j['desc'] ?? '').toString(),
+    colType: (j['colType'] ?? j['col_type'] ?? '').toString(),
+  );
+
+  Map<String, dynamic> toJson() => {
+    'title': title,
+    'url': url,
+    'pic': pic,
+    'desc': desc,
+    'colType': colType,
+  };
 }

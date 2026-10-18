@@ -1083,6 +1083,26 @@ class _LivePageState extends State<LivePage> {
                                   ),
                                 );
                               }),
+                              const SizedBox(width: 8),
+                              // 直播设置：从这里可直接进设置页，不用绕到「设置 → 直播管理」
+                              GestureDetector(
+                                onTap: () => Get.toNamed('/live/settings'),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 10,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.backgroundTertiary,
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Icon(
+                                    Icons.settings_outlined,
+                                    size: 18,
+                                    color: AppTheme.textSecondary,
+                                  ),
+                                ),
+                              ),
                             ],
                           ),
                           const SizedBox(height: 8),
@@ -2182,7 +2202,7 @@ class _LivePageState extends State<LivePage> {
         return Material(
           color: isActive
               ? AppTheme.accentColor.withValues(alpha: 0.12)
-              : AppTheme.backgroundTertiary.withValues(alpha: 0.55),
+              : AppTheme.backgroundCard,
           borderRadius: BorderRadius.circular(12),
           child: InkWell(
             borderRadius: BorderRadius.circular(12),
@@ -2499,7 +2519,7 @@ class _LivePageState extends State<LivePage> {
         return Material(
           color: selected
               ? AppTheme.accentColor.withValues(alpha: 0.12)
-              : AppTheme.backgroundTertiary.withValues(alpha: 0.55),
+              : AppTheme.backgroundCard,
           borderRadius: BorderRadius.circular(12),
           child: InkWell(
             borderRadius: BorderRadius.circular(12),
@@ -3013,6 +3033,16 @@ class _LivePageState extends State<LivePage> {
     );
   }
 
+  /// 当前频道是否就是这一个（按名称 + 分组比对）。
+  ///
+  /// 原来的 `selectedChannelIndex == i` 一旦切换分组/搜索，下标换个列表就
+  /// 会指到别的频道，看起来像"两个同时选中"（用户实测）。
+  bool _isSelected(LiveController c, LiveChannel ch) {
+    final cur = c.currentChannel;
+    if (cur == null) return false;
+    return identical(cur, ch) || (cur.name == ch.name && cur.group == ch.group);
+  }
+
   Widget _buildChannelList(LiveController c, List<LiveChannel> channels) {
     if (channels.isEmpty) {
       return Center(
@@ -3047,12 +3077,12 @@ class _LivePageState extends State<LivePage> {
       separatorBuilder: (_, __) => const SizedBox(height: 6),
       itemBuilder: (_, i) {
         final ch = channels[i];
-        final selected = c.selectedChannelIndex.value == i;
+        final selected = _isSelected(c, ch);
         final fav = c.isFavorite(ch);
         return Material(
           color: selected
               ? AppTheme.accentColor.withValues(alpha: 0.12)
-              : AppTheme.backgroundTertiary.withValues(alpha: 0.55),
+              : AppTheme.backgroundCard,
           borderRadius: BorderRadius.circular(12),
           child: InkWell(
             borderRadius: BorderRadius.circular(12),
@@ -3147,12 +3177,12 @@ class _LivePageState extends State<LivePage> {
       separatorBuilder: (_, __) => const SizedBox(height: 8),
       itemBuilder: (_, i) {
         final ch = channels[i];
-        final selected = c.selectedChannelIndex.value == i;
+        final selected = _isSelected(c, ch);
         final fav = c.isFavorite(ch);
         return Material(
           color: selected
               ? AppTheme.accentColor.withValues(alpha: 0.12)
-              : AppTheme.backgroundTertiary.withValues(alpha: 0.55),
+              : AppTheme.backgroundCard,
           borderRadius: BorderRadius.circular(14),
           child: InkWell(
             borderRadius: BorderRadius.circular(14),
@@ -3243,13 +3273,13 @@ class _LivePageState extends State<LivePage> {
       itemCount: channels.length,
       itemBuilder: (_, i) {
         final ch = channels[i];
-        final selected = c.selectedChannelIndex.value == i;
+        final selected = _isSelected(c, ch);
         final fav = c.isFavorite(ch);
         final compact = cols >= 4;
         return Material(
           color: selected
               ? AppTheme.accentColor.withValues(alpha: 0.12)
-              : AppTheme.backgroundTertiary.withValues(alpha: 0.55),
+              : AppTheme.backgroundCard,
           borderRadius: BorderRadius.circular(12),
           child: InkWell(
             borderRadius: BorderRadius.circular(12),

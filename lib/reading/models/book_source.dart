@@ -349,10 +349,20 @@ class BookSourceStore {
           ..addAll(_decode(raw));
       }
       await _removeLegacyBuiltins(prefs);
+      await _removeMisroutedConfigs();
     } catch (e) {
       debugPrint('[BookSource] 加载失败: $e');
     }
     revision.value++;
+  }
+
+  /// 旧版把漫画配置包误当书源导入 → 书源仓库里出现漫画源。
+  /// 配置源应只存在于 SourceConfigStore，这里把误入的配置源清掉。
+  Future<void> _removeMisroutedConfigs() async {
+    final hasConfig = _items.any((s) => s.isConfig);
+    if (!hasConfig) return;
+    _items.removeWhere((s) => s.isConfig);
+    await _persist();
   }
 
   /// 清掉旧版本播种的内置源（只做一次；用户之后重新导入不会被误删）。

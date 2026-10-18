@@ -12,9 +12,10 @@ import 'pet_models.dart';
 /// 桌宠状态与成长系统。
 ///
 /// 数值规则：
-///   · 阅读 1 分钟 = 2 经验；每 10 分钟额外 1 书币
-///   · 每日打卡 = 20 书币（每天只发一次）
-///   · 喂食 = 10 书币 → 饱食度 +30、经验 +20、心情 +8
+///   · 阅读 1 分钟 = 2 经验
+///   · 任意模块前台使用每 10 分钟 = 1 猫币（影视/直播/漫画/阅读/音乐…）
+///   · 每日打卡 = 20 猫币（每天只发一次）
+///   · 喂食 = 10 猫币 → 饱食度 +30、经验 +20、心情 +8
 ///   · 摸摸 = 心情 +12、经验 +4（30 秒冷却）
 ///   · 饱食度/心情随时间缓慢下降（按真实小时）
 class PetService extends ChangeNotifier {
@@ -59,9 +60,10 @@ class PetService extends ChangeNotifier {
   double posY = 0.55;
 
   /// 悬浮桌宠尺寸（px）。用户 2026-10-18：可在「显示设置」里滑动或输入调整。
-  static const double minSize = 72;
-  static const double maxSize = 160;
-  double size = 112;
+  /// 范围按用户最新要求收敛到 50~120。
+  static const double minSize = 50;
+  static const double maxSize = 120;
+  double size = 100;
 
   /// 自定义桌宠图片（PNG / GIF）的本机绝对路径；空 = 没用自定义皮肤。
   ///
@@ -79,6 +81,9 @@ class PetService extends ChangeNotifier {
   int lastReadingMinutes = 0;
   String lastCheckinDate = '';
   int lastPlayMs = 0;
+
+  /// 全模块使用时长（分钟，累计到 10 分钟发 1 猫币）
+  int usageMinutes = 0;
 
   bool isLoaded = false;
 
@@ -120,6 +125,7 @@ class PetService extends ChangeNotifier {
           lastReadingMinutes = (j['lastReadingMinutes'] as num?)?.toInt() ?? 0;
           lastCheckinDate = '${j['lastCheckinDate'] ?? ''}';
           lastPlayMs = (j['lastPlayMs'] as num?)?.toInt() ?? 0;
+          usageMinutes = (j['usageMinutes'] as num?)?.toInt() ?? 0;
           final us = j['unlocked'];
           if (us is List) {
             unlockedSpecies
@@ -218,6 +224,7 @@ class PetService extends ChangeNotifier {
           'lastReadingMinutes': lastReadingMinutes,
           'lastCheckinDate': lastCheckinDate,
           'lastPlayMs': lastPlayMs,
+          'usageMinutes': usageMinutes,
           'unlocked': unlockedSpecies.toList(),
           'outfits': ownedOutfits.toList(),
           'equipped': equippedOutfit,
@@ -250,7 +257,7 @@ class PetService extends ChangeNotifier {
     lastTickMs = now;
   }
 
-  /// 把「阅读时长 / 打卡」同步成经验与书币（幂等：按当日分钟增量）。
+  /// 把「阅读时长 / 打卡」同步成经验（猫币改由全模块使用时长发放）。
   Future<void> syncReading() async {
     try {
       final minutes = await ReadingTimeService.instance.todayMinutes();
@@ -263,7 +270,6 @@ class PetService extends ChangeNotifier {
         final diff = minutes - lastReadingMinutes;
         lastReadingMinutes = minutes;
         grantExp(diff * 2);
-        coins += diff ~/ 10;
       }
 
       final checkin = ReadingCheckinService.instance;
@@ -279,6 +285,18 @@ class PetService extends ChangeNotifier {
     } catch (e) {
       debugPrint('[Pet] 同步阅读数据失败: $e');
     }
+  }
+
+  /// 全模块使用时长：影视 / 直播 / 漫画 / 阅读 / 音乐…只要 App 在前台
+  /// 每分钟调用一次，累计 10 分钟发 1 猫币。
+  Future<void> addUsageMinute() async {
+    usageMinutes++;
+    if (usageMinutes >= 10) {
+      usageMinutes -= 10;
+      coins++;
+    }
+    await _persist();
+    notifyListeners();
   }
 
   /// 加经验并处理升级。

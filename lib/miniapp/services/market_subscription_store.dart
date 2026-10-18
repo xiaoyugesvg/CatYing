@@ -54,8 +54,7 @@ class MarketSubscription {
 class MarketSubscriptionStore extends ChangeNotifier {
   MarketSubscriptionStore._();
 
-  static final MarketSubscriptionStore instance =
-      MarketSubscriptionStore._();
+  static final MarketSubscriptionStore instance = MarketSubscriptionStore._();
 
   static const _key = 'miniapp_market_subs_v1';
   static const _legacyKey = 'miniapp_market_url';
@@ -92,11 +91,13 @@ class MarketSubscriptionStore extends ChangeNotifier {
       if (_items.isEmpty) {
         final old = (sp.getString(_legacyKey) ?? '').trim();
         if (old.isNotEmpty) {
-          _items.add(MarketSubscription(
-            id: 'market_${DateTime.now().millisecondsSinceEpoch}',
-            name: MarketSubscription._hostOf(old),
-            url: old,
-          ));
+          _items.add(
+            MarketSubscription(
+              id: 'market_${DateTime.now().millisecondsSinceEpoch}',
+              name: MarketSubscription._hostOf(old),
+              url: old,
+            ),
+          );
           await _persist();
         }
       }
@@ -148,6 +149,23 @@ class MarketSubscriptionStore extends ChangeNotifier {
 
   Future<void> remove(String id) async {
     _items.removeWhere((e) => e.id == id);
+    await _persist();
+    notifyListeners();
+  }
+
+  /// 手动拖动排序（用户 2026-10-18：市场 tab 可移动顺序）
+  Future<void> reorder(List<String> ids) async {
+    await load();
+    final byId = {for (final e in _items) e.id: e};
+    final ordered = <MarketSubscription>[];
+    for (final id in ids) {
+      final s = byId.remove(id);
+      if (s != null) ordered.add(s);
+    }
+    ordered.addAll(byId.values);
+    _items
+      ..clear()
+      ..addAll(ordered);
     await _persist();
     notifyListeners();
   }

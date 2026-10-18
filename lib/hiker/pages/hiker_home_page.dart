@@ -13,6 +13,7 @@ import '../../widgets/app_toast.dart';
 import '../widgets/card_source_sheet.dart';
 import '../models/hiker_source.dart';
 import '../services/hiker_builtin.dart';
+import '../services/hiker_cache.dart';
 import '../services/hiker_engine.dart';
 import '../services/hiker_prefs.dart';
 import '../services/hiker_store.dart';
@@ -204,6 +205,18 @@ class _HikerHomePageState extends State<HikerHomePage> {
       _loading = true;
       _error = null;
     });
+    // 首页/分类第一页：先秒显示本地缓存，再等网络刷新（用户 2026-10-18：
+    // 「每次进去加载好长时间」—— 规则常要抓多页，不能每次都干等）。
+    final cacheKey = HikerCache.keyOf(src.id, _cate, page);
+    if (page == 1 && _items.isEmpty) {
+      final cached = await HikerCache.read(cacheKey, allowExpired: true);
+      if (cached != null && mounted && seq == _loadSeq && _items.isEmpty) {
+        setState(() {
+          _items = cached.items;
+          _loadedSrcId = src.id;
+        });
+      }
+    }
     final vars = _store.varsOf(src.id);
     final r = _cate.isEmpty
         ? await HikerEngine.instance.home(
@@ -251,6 +264,10 @@ class _HikerHomePageState extends State<HikerHomePage> {
               ...r.list.where((x) => !_items.any((y) => y.url == x.url)),
             ];
     });
+    // 首页/分类第一页成功后落缓存，下次进入先秒开
+    if (page == 1 && r.ok && r.list.isNotEmpty) {
+      unawaited(HikerCache.write(cacheKey, r.list));
+    }
     // 规则调过 `refreshPage()`（海阔的分类按钮 / 自定义刷新都这么写）：
     // 官方会重拉一次当前页 —— 我们跟着补一轮（只补一轮，防坏规则死循环）。
     if (r.needRefresh) {

@@ -88,6 +88,9 @@ class SourceManager extends ChangeNotifier {
   /// 所有已注册源
   List<MangaSource> get sources => _sources.values.toList();
 
+  /// 是否已完成首次加载（仓库页用它判断能否校验 sourceIds）
+  bool get isReady => _initialized;
+
   /// 初始化：从 SourceConfigStore 加载源（**云端覆盖层优先 → 内置源兜底** ✓），恢复当前源选择。
   ///
   /// ⚠️ 本段原来写「**软件不自带源**…**无缓存则零源**」✗ —— **与代码不符，已改正** ✓（同上）：

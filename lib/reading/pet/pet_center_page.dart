@@ -85,8 +85,9 @@ class _PetCenterPageState extends State<PetCenterPage>
               _collection(),
               const SizedBox(height: 16),
               Text(
-                '阅读时长会自动转化为经验：每读 1 分钟 +2 经验、每 10 分钟 +1 书币；'
-                '每日打卡额外 +20 书币。',
+                '影视 / 直播 / 漫画 / 阅读 / 音乐等所有模块，只要 App 在前台使用，'
+                '每 10 分钟自动 +1 猫币；阅读 1 分钟额外 +2 经验，'
+                '每日打卡额外 +20 猫币。',
                 style: TextStyle(
                   fontSize: AppTheme.fontCaption,
                   height: 1.5,
@@ -152,7 +153,7 @@ class _PetCenterPageState extends State<PetCenterPage>
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Lv.${_pet.level} · ${_pet.coins} 书币',
+                  'Lv.${_pet.level} · ${_pet.coins} 猫币',
                   style: TextStyle(
                     fontSize: 12,
                     color: JellyTheme.textSecondary,
@@ -554,7 +555,7 @@ class _PetCenterPageState extends State<PetCenterPage>
             child: OutlinedButton.icon(
               onPressed: () async {
                 final ok = await _pet.feed();
-                _toast(ok ? '喂食成功：饱食 +30、经验 +20' : '书币不够（需要 10）');
+                _toast(ok ? '喂食成功：饱食 +30、经验 +20' : '猫币不够（需要 10）');
               },
               icon: const Icon(Icons.restaurant_rounded, size: 18),
               label: const Text('喂食 10 币'),
@@ -671,7 +672,7 @@ class _PetCenterPageState extends State<PetCenterPage>
         }
         final ok = await _pet.buyOutfit(item);
         if (!ok) {
-          _toast('需要 Lv.${item.unlockLevel} / ${item.price} 书币');
+          _toast('需要 Lv.${item.unlockLevel} / ${item.price} 猫币');
         }
       },
       child: Container(
@@ -839,16 +840,16 @@ class _PetCenterPageState extends State<PetCenterPage>
       return;
     }
     if (_pet.coins < s.price) {
-      _toast('书币不足：需要 ${s.price}，当前 ${_pet.coins}');
+      _toast('猫币不足：需要 ${s.price}，当前 ${_pet.coins}');
       return;
     }
-    // 免费宠物（小Q / 小秀）直接解锁，不用弹「消耗 0 书币」的框
+    // 免费宠物（小Q / 小秀）直接解锁，不用弹「消耗 0 猫币」的框
     if (s.price > 0) {
       final ok = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: Text('解锁「${s.name}」？'),
-          content: Text('${s.description}\n\n将消耗 ${s.price} 书币。'),
+          content: Text('${s.description}\n\n将消耗 ${s.price} 猫币。'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),

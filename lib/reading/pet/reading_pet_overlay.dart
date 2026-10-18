@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
+import '../../common/theme.dart';
 import 'pet_center_page.dart';
 import 'pet_service.dart';
 import 'pet_view.dart';
@@ -27,9 +28,13 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
   )..repeat();
 
   Timer? _syncTimer;
+  Timer? _usageTimer;
   Timer? _bubbleTimer;
   String? _bubble;
   bool _dragging = false;
+
+  /// App 是否在前台（前台才累计使用时长发猫币）
+  bool _resumed = true;
 
   /// 点一下弹一下（互动反馈）
   bool _bounce = false;
@@ -47,12 +52,17 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
     _syncTimer = Timer.periodic(const Duration(seconds: 45), (_) {
       _pet.syncReading();
     });
+    // 全模块使用时长：只要 App 在前台，每分钟累计一次，10 分钟 +1 猫币
+    _usageTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (_resumed) _pet.addUsageMinute();
+    });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _syncTimer?.cancel();
+    _usageTimer?.cancel();
     _bubbleTimer?.cancel();
     _anim.dispose();
     super.dispose();
@@ -60,6 +70,7 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _resumed = state == AppLifecycleState.resumed;
     if (state == AppLifecycleState.resumed) {
       _pet.load();
       _pet.syncReading();
@@ -91,23 +102,23 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
       '今天也要加油呀～',
       '这一页好好看！',
       '摸摸头，继续读～',
-      '嘿嘿，书币又多了吗？',
+      '嘿嘿，猫币又多了吗？',
     ];
     _say(lines[Random().nextInt(lines.length)]);
   }
 
   Future<void> _feed() async {
     final ok = await _pet.feed();
-    _say(ok ? '好吃！谢谢投喂～' : '书币不够啦，多读一会儿书吧');
+    _say(ok ? '好吃！谢谢投喂～' : '猫币不够啦，多读一会儿书吧');
   }
 
   void _openMenu() {
     final s = _pet;
     Get.bottomSheet(
       Container(
-        decoration: const BoxDecoration(
-          color: Color(0xFF1E1E22),
-          borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundSecondary,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
         ),
         child: SafeArea(
           top: false,
@@ -121,17 +132,17 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                   children: [
                     Text(
                       s.species.name,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
                         fontSize: 17,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      'Lv.${s.level} · ${s.coins} 书币',
-                      style: const TextStyle(
-                        color: Colors.white54,
+                      'Lv.${s.level} · ${s.coins} 猫币',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
                         fontSize: 12,
                       ),
                     ),
@@ -140,7 +151,10 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                 const SizedBox(height: 4),
                 Text(
                   s.statusLine,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 12,
+                  ),
                 ),
                 const SizedBox(height: 12),
                 Row(
@@ -151,6 +165,9 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                           Get.back();
                           _feed();
                         },
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppTheme.textPrimary,
+                        ),
                         icon: const Icon(Icons.restaurant_rounded, size: 18),
                         label: const Text('喂食 10 币'),
                       ),
@@ -162,6 +179,9 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                           Get.back();
                           _onTap();
                         },
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppTheme.textPrimary,
+                        ),
                         icon: const Icon(Icons.favorite_rounded, size: 18),
                         label: const Text('摸摸'),
                       ),
@@ -172,13 +192,13 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                 ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  leading: const Icon(
+                  leading: Icon(
                     Icons.menu_book_rounded,
-                    color: Colors.white70,
+                    color: AppTheme.textSecondary,
                   ),
-                  title: const Text(
+                  title: Text(
                     '宠物中心 / 图鉴 / 换装',
-                    style: TextStyle(color: Colors.white),
+                    style: TextStyle(color: AppTheme.textPrimary),
                   ),
                   onTap: () {
                     Get.back();
@@ -188,17 +208,20 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                 ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  leading: const Icon(
+                  leading: Icon(
                     Icons.visibility_off_rounded,
-                    color: Colors.white70,
+                    color: AppTheme.textSecondary,
                   ),
-                  title: const Text(
+                  title: Text(
                     '隐藏悬浮桌宠',
-                    style: TextStyle(color: Colors.white),
+                    style: TextStyle(color: AppTheme.textPrimary),
                   ),
-                  subtitle: const Text(
+                  subtitle: Text(
                     '可在「我的 → 桌宠」重新打开',
-                    style: TextStyle(color: Colors.white38, fontSize: 11),
+                    style: TextStyle(
+                      color: AppTheme.textTertiary,
+                      fontSize: 11,
+                    ),
                   ),
                   onTap: () {
                     Get.back();
@@ -244,7 +267,6 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
             Widget petBody = Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (_bubble != null) _bubbleView(),
                 GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: _onTap,
@@ -323,11 +345,11 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
             );
 
             if (dockLeft || dockRight) {
-              // 探出屏幕 ~14%，并以内侧边缘为轴朝屏幕里倾 6°
+              // 贴边时把身体大半藏到屏幕外，只露出头和手（用户 2026-10-18）
               petBody = Transform.translate(
-                offset: Offset(dockLeft ? -petSize * 0.14 : petSize * 0.14, 0),
+                offset: Offset(dockLeft ? -petSize * 0.55 : petSize * 0.55, 0),
                 child: Transform.rotate(
-                  angle: dockLeft ? 0.10 : -0.10,
+                  angle: dockLeft ? 0.05 : -0.05,
                   alignment: dockLeft
                       ? Alignment.centerLeft
                       : Alignment.centerRight,
@@ -336,14 +358,30 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
               );
             }
 
+            // 气泡单独定位：永远留在屏幕内；顶部空间不够时改到宠物下方
+            const bubbleW = _bubbleMaxWidth;
+            final bubbleLeft = (left + petSize / 2 - bubbleW / 2).clamp(
+              8.0,
+              (constraints.maxWidth - bubbleW - 8).clamp(8.0, double.infinity),
+            );
+            final showBelow = top < 92;
+
             return Stack(
               clipBehavior: Clip.none,
               children: [
-                Positioned(
-                  left: left,
-                  top: top,
-                  child: petBody,
-                ),
+                Positioned(left: left, top: top, child: petBody),
+                if (_bubble != null)
+                  Positioned(
+                    left: bubbleLeft,
+                    top: showBelow ? top + petSize + 28 : null,
+                    bottom: showBelow
+                        ? null
+                        : (constraints.maxHeight - top + 4).clamp(
+                            4.0,
+                            double.infinity,
+                          ),
+                    child: _bubbleView(),
+                  ),
               ],
             );
           },
@@ -355,11 +393,11 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
   Widget _bubbleView() {
     return Container(
       constraints: const BoxConstraints(maxWidth: _bubbleMaxWidth),
-      margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppTheme.backgroundCard,
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.borderLight, width: 0.5),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.12),
@@ -370,8 +408,8 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
       ),
       child: Text(
         _bubble ?? '',
-        style: const TextStyle(
-          color: Color(0xFF2B2B2B),
+        style: TextStyle(
+          color: AppTheme.textPrimary,
           fontSize: 12,
           height: 1.35,
         ),

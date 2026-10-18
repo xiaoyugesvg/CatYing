@@ -427,14 +427,34 @@ class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
   Widget _subscriptionBar(List<MarketSubscription> subs) {
     return SizedBox(
       height: 44,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacingMD),
-        itemCount: subs.length + 1,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (_, i) {
-          if (i == subs.length) {
-            return GestureDetector(
+      child: Row(
+        children: [
+          Expanded(
+            child: ReorderableListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.only(left: AppTheme.spacingMD),
+              buildDefaultDragHandles: false,
+              itemCount: subs.length,
+              onReorder: (oldIndex, newIndex) async {
+                if (newIndex > oldIndex) newIndex -= 1;
+                final ids = subs.map((e) => e.id).toList();
+                final moved = ids.removeAt(oldIndex);
+                ids.insert(newIndex.clamp(0, ids.length), moved);
+                await _store.reorder(ids);
+              },
+              itemBuilder: (_, i) => Padding(
+                key: ValueKey('market-sub-${subs[i].id}'),
+                padding: const EdgeInsets.only(right: 8),
+                child: ReorderableDelayedDragStartListener(
+                  index: i,
+                  child: _marketChip(subs[i]),
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(left: 4, right: AppTheme.spacingMD),
+            child: GestureDetector(
               onTap: () => _showSubscriptionDialog(),
               child: Container(
                 padding: const EdgeInsets.symmetric(
@@ -466,48 +486,50 @@ class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
                   ],
                 ),
               ),
-            );
-          }
-          final sub = subs[i];
-          final selected = sub.id == _selectedId;
-          return GestureDetector(
-            onTap: () => _switchTo(sub),
-            onLongPress: () => _showSubscriptionDialog(existing: sub),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: selected
-                    ? AppTheme.accentColor
-                    : AppTheme.backgroundTertiary,
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(
-                  color: selected ? Colors.transparent : AppTheme.borderLight,
-                  width: 0.6,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.storefront_rounded,
-                    size: 15,
-                    color: selected ? Colors.white : AppTheme.textSecondary,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    sub.name,
-                    style: TextStyle(
-                      color: selected ? Colors.white : AppTheme.textSecondary,
-                      fontSize: 12.5,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-                    ),
-                  ),
-                ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _marketChip(MarketSubscription sub) {
+    final selected = sub.id == _selectedId;
+    return GestureDetector(
+      // 已选中的再点一次 = 编辑；长按拖动排序
+      onTap: selected
+          ? () => _showSubscriptionDialog(existing: sub)
+          : () => _switchTo(sub),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.accentColor : AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: selected ? Colors.transparent : AppTheme.borderLight,
+            width: 0.6,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.storefront_rounded,
+              size: 15,
+              color: selected ? Colors.white : AppTheme.textSecondary,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              sub.name,
+              style: TextStyle(
+                color: selected ? Colors.white : AppTheme.textSecondary,
+                fontSize: 12.5,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
               ),
             ),
-          );
-        },
+          ],
+        ),
       ),
     );
   }

@@ -53,6 +53,25 @@ class SourceSubscriptionStore extends ChangeNotifier {
         _items.removeWhere((e) => e.builtin);
         await _persist();
       }
+      // 迁移：旧版把漫画订阅记成「综合源」，会同时出现在书源仓与漫画仓。
+      // 按链接里的 comic / novel 关键字拆分，两个仓恢复独立。
+      var kindMigrated = false;
+      for (var i = 0; i < _items.length; i++) {
+        final s = _items[i];
+        if (s.kind != SourceSubscriptionKind.legado) continue;
+        final u = s.url.toLowerCase();
+        if (u.contains('venera')) {
+          _items[i] = s.copyWith(kind: SourceSubscriptionKind.venera);
+          kindMigrated = true;
+        } else if (u.contains('comic')) {
+          _items[i] = s.copyWith(kind: SourceSubscriptionKind.comic);
+          kindMigrated = true;
+        } else if (u.contains('novel') || u.contains('book')) {
+          _items[i] = s.copyWith(kind: SourceSubscriptionKind.novel);
+          kindMigrated = true;
+        }
+      }
+      if (kindMigrated) await _persist();
     } catch (e) {
       _log('读取源订阅失败: $e');
     }
@@ -105,6 +124,23 @@ class SourceSubscriptionStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 手动拖动排序：按 [ids] 的顺序重排（不在列表里的保持原相对位置追加）。
+  Future<void> reorder(List<String> ids) async {
+    await load();
+    final byId = {for (final e in _items) e.id: e};
+    final ordered = <SourceSubscription>[];
+    for (final id in ids) {
+      final s = byId.remove(id);
+      if (s != null) ordered.add(s);
+    }
+    ordered.addAll(byId.values);
+    _items
+      ..clear()
+      ..addAll(ordered);
+    await _persist();
+    notifyListeners();
+  }
+
   Future<void> remove(String id) async {
     _items.removeWhere((e) => e.id == id);
     await _persist();
@@ -135,6 +171,14 @@ class SourceSubscriptionStore extends ChangeNotifier {
     if (sub.kind == SourceSubscriptionKind.venera) {
       return _updateVenera(sub, i);
     }
+    // 旧记录 / 在书源仓误加的 Venera 地址：自动纠正为 Venera 订阅
+    if (sub.url.toLowerCase().contains('venera')) {
+      final fixed = sub.copyWith(kind: SourceSubscriptionKind.venera);
+      _items[i] = fixed;
+      await _persist();
+      notifyListeners();
+      return _updateVenera(fixed, i);
+    }
     if (!sub.kind.supported) {
       const msg = '该源类型暂未支持';
       _items[i] = sub.copyWith(lastError: msg);
@@ -161,37 +205,93 @@ class SourceSubscriptionStore extends ChangeNotifier {
       final res = await dio.get<String>(sub.url);
       final text = res.data ?? '';
       if (text.trim().isEmpty) throw Exception('订阅返回为空');
-      final all = BookSourceImportParser.parseSources(text);
-      final wanted = all.where((s) {
+
+      // ── 漫画配置包（{"version":1,"sources":[{type,engine,config}]}）──
+      // 这类文件（如 x.muiu.site/…/comic.json）不是 Legado 书源，必须写进
+      // SourceConfigStore；以前误走 BookSourceStore，结果漫画源出现在书源仓库。
+      final configDefs = _parseConfigDefs(text);
+      if (sub.kind != SourceSubscriptionKind.comic && configDefs.isNotEmpty) {
+        throw Exception('这是漫画配置源，请在「漫画仓」添加订阅');
+      }
+
+      var all = BookSourceImportParser.parseSources(text);
+      var wanted = all.where((s) {
         // 统一判据：兼容没写 bookSourceType 的漫画脚本
         if (sub.kind == SourceSubscriptionKind.comic) return s.isComicSource;
         if (sub.kind == SourceSubscriptionKind.novel) return !s.isComicSource;
         // legado 综合源：小说 + 漫画都收，更新后两个仓同时有内容
         return true;
       }).toList();
-      if (wanted.isEmpty) {
+      // 漫画仓的订阅：一律按漫画源入库，避免没有 bookSourceType 的脚本
+      // 被当成小说源跑到书源仓库里。
+      if (sub.kind == SourceSubscriptionKind.comic) {
+        wanted = [
+          for (final s in wanted)
+            BookSource(raw: {...s.raw, 'bookSourceType': 2}, id: s.id),
+        ];
+      }
+      if (wanted.isEmpty && configDefs.isEmpty) {
         throw Exception('没有解析到${sub.kind.label}（共 ${all.length} 条）');
       }
-      final r = await BookSourceStore.instance.addAll(wanted);
-      // 含漫画源时刷新漫画模块的源列表（Legado 漫画源从 BookSourceStore 注册）
-      if (wanted.any((s) => s.isComicSource)) {
-        await SourceManager().reload();
+
+      // 配置源写入 SourceConfigStore（与漫画源仓库共用同一份）
+      var configAdded = 0;
+      var configUpdated = 0;
+      if (configDefs.isNotEmpty) {
+        final store = SourceConfigStore();
+        final local = await store.loadLocal();
+        final byId = {for (final d in local) d.id: d};
+        for (final d in configDefs) {
+          if (d.id.trim().isEmpty) continue;
+          if (byId.containsKey(d.id)) {
+            configUpdated++;
+          } else {
+            configAdded++;
+          }
+          byId[d.id] = d;
+        }
+        await store.saveLocal(byId.values.toList());
       }
+
+      var added = 0;
+      var updated = 0;
+      if (wanted.isNotEmpty) {
+        final r = await BookSourceStore.instance.addAll(wanted);
+        added = r.added;
+        updated = r.updated;
+      }
+      await SourceManager().reload();
 
       final now = DateTime.now().millisecondsSinceEpoch;
       _items[i] = sub.copyWith(
-        count: wanted.length,
+        count: configDefs.length + wanted.length,
         lastUpdated: now,
         lastError: '',
         // 记下这条订阅带来的源 ⇒ 仓库页的订阅 tab 只显示它们
-        sourceIds: [for (final s in wanted) s.id],
+        sourceIds: [
+          for (final d in configDefs) d.id,
+          for (final s in wanted) s.id,
+        ],
       );
       await _persist();
       notifyListeners();
+      final parts = <String>[];
+      if (configDefs.isNotEmpty) {
+        parts.add(
+          configAdded > 0 && configUpdated > 0
+              ? '配置源新增 $configAdded 个、更新 $configUpdated 个'
+              : (configAdded > 0
+                    ? '已导入 $configAdded 个配置源'
+                    : '已更新 $configUpdated 个配置源'),
+        );
+      }
+      if (wanted.isNotEmpty) {
+        parts.add('书源新增 $added 个、更新 $updated 个');
+      }
       return (
         ok: true,
-        message: '新增 ${r.added} 个、更新 ${r.updated} 个',
-        count: wanted.length,
+        message: parts.join('；'),
+        count: configDefs.length + wanted.length,
       );
     } catch (e) {
       final msg = _friendly(e);
@@ -232,7 +332,12 @@ class SourceSubscriptionStore extends ChangeNotifier {
       final res = await dio.get<String>(sub.url);
       final text = res.data ?? '';
       if (text.trim().isEmpty) throw Exception('订阅返回为空');
-      final decoded = jsonDecode(text);
+      final trimmed = text.trimLeft();
+      if (!trimmed.startsWith('[')) {
+        // gh-proxy 等加速地址被限流/拦截时会返回 HTML 错误页
+        throw Exception('订阅地址返回的不是 Venera index.json（可能被加速代理拦截）');
+      }
+      final decoded = jsonDecode(trimmed);
       if (decoded is! List) throw Exception('Venera 源列表不是 JSON 数组');
 
       final base = Uri.parse(sub.url);
@@ -250,55 +355,57 @@ class SourceSubscriptionStore extends ChangeNotifier {
           final fileName = '${e['fileName'] ?? ''}'.trim();
           if (fileName.isEmpty) continue;
           final scriptUrl = base.resolve(fileName).toString();
-          try {
-            final js = (await dio.get<String>(scriptUrl)).data ?? '';
-            if (js.trim().isEmpty) {
-              failed++;
-              continue;
-            }
-            final idBase = fileName
-                .split('/')
-                .last
-                .replaceAll(RegExp(r'\.js$', caseSensitive: false), '');
-            final storageKey = '${e['key'] ?? ''}'.trim();
-            defs.add(
-              SourceDefinition(
-                id: 'venera:$idBase',
-                type: 'venera',
-                engine: 'venera',
-                config: {
-                  'id': 'venera:$idBase',
-                  'name': '${e['name'] ?? idBase}',
-                  'key': storageKey.isEmpty ? idBase : storageKey,
-                  'version': '${e['version'] ?? ''}',
-                  'scriptUrl': scriptUrl,
-                  'script': js,
-                },
-              ),
-            );
-          } catch (err) {
+          final js = await _fetchVeneraScript(dio, scriptUrl);
+          if (js == null || js.trim().isEmpty) {
             failed++;
-            _log('Venera 脚本下载失败 $scriptUrl: $err');
+            continue;
           }
+          final idBase = fileName
+              .split('/')
+              .last
+              .replaceAll(RegExp(r'\.js$', caseSensitive: false), '');
+          final storageKey = '${e['key'] ?? ''}'.trim();
+          defs.add(
+            SourceDefinition(
+              id: 'venera:$idBase',
+              type: 'venera',
+              engine: 'venera',
+              config: {
+                'id': 'venera:$idBase',
+                'name': '${e['name'] ?? idBase}',
+                'key': storageKey.isEmpty ? idBase : storageKey,
+                'version': '${e['version'] ?? ''}',
+                'scriptUrl': scriptUrl,
+                'script': js,
+              },
+            ),
+          );
         }
       }
 
-      // 6 路并发：33 个脚本串行下载太慢，全并发又容易被 GitHub 限流
-      await Future.wait([for (var w = 0; w < 6; w++) worker()]);
+      // 4 路并发：33 个脚本串行下载太慢，全并发容易被加速代理限流
+      await Future.wait([for (var w = 0; w < 4; w++) worker()]);
       if (defs.isEmpty) {
-        throw Exception('没有成功下载到任何脚本（失败 $failed 个）');
+        throw Exception(
+          '没有成功下载到任何脚本（失败 $failed 个，'
+          '多半是加速代理限流或脚本地址不可达）',
+        );
       }
 
       final existing = await SourceConfigStore().loadLocal();
       final newUrls = defs.map((d) => '${d.config['scriptUrl'] ?? ''}').toSet();
-      // 部分脚本下载失败时保留上一版，避免一次网络抖动把源删掉
+      // 部分脚本下载失败时保留上一版，避免一次网络抖动把源删掉；
+      // 但上一版里如果是被代理拦截存下来的 HTML（不含 ComicSource），直接丢弃。
       final kept = failed == 0
           ? const <SourceDefinition>[]
           : existing
                 .where(
                   (d) =>
                       d.type == 'venera' &&
-                      !newUrls.contains('${d.config['scriptUrl'] ?? ''}'),
+                      !newUrls.contains('${d.config['scriptUrl'] ?? ''}') &&
+                      _veneraClassRe.hasMatch(
+                        '${d.config['script'] ?? ''}',
+                      ),
                 )
                 .toList();
       final merged = existing.where((d) => d.type != 'venera').toList()
@@ -381,6 +488,96 @@ class SourceSubscriptionStore extends ChangeNotifier {
     } finally {
       _autoRunning = false;
     }
+  }
+
+  /// 解析漫画配置包（SiteConfig / ApiSourceConfig / 裸 config）。
+  ///
+  /// `{"version":1,"sources":[{type,engine?,config}]}` 是漫画源仓库的格式，
+  /// 和 Legado 书源 JSON 完全不同 —— 必须写进 SourceConfigStore。
+  List<SourceDefinition> _parseConfigDefs(String text) {
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is Map && decoded['sources'] is List) {
+        return SourceConfigFile.fromJson(
+          Map<String, dynamic>.from(decoded),
+        ).sources.where((d) => d.id.trim().isNotEmpty).toList();
+      }
+      final list = <dynamic>[];
+      if (decoded is List) {
+        list.addAll(decoded);
+      } else if (decoded is Map) {
+        list.add(decoded);
+      }
+      final out = <SourceDefinition>[];
+      for (final e in list) {
+        if (e is! Map) continue;
+        final m = Map<String, dynamic>.from(e);
+        // Legado 书源（bookSourceName）不在这里处理
+        if (m.containsKey('bookSourceName')) continue;
+        if (m['config'] is Map) {
+          final d = SourceDefinition.fromJson(m);
+          if (d.id.trim().isNotEmpty) out.add(d);
+        } else if (m.containsKey('name') && m.containsKey('url')) {
+          out.add(
+            SourceDefinition(
+              id: 'config:${m['name']}',
+              type: 'config',
+              config: m,
+            ),
+          );
+        }
+      }
+      return out;
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  static final RegExp _veneraClassRe = RegExp(
+    r'extends\s+ComicSource',
+    caseSensitive: false,
+  );
+
+  /// 下载一个 Venera 脚本：校验内容确实是 `class X extends ComicSource`。
+  ///
+  /// 走 gh-proxy 这类加速地址时，被限流会返回 **HTML 错误页**（非空字符串），
+  /// 旧逻辑只判空 ⇒ 把 HTML 当脚本存进去，结果 33 个源全部加载失败。
+  /// 这里先校验；失效时再退回原始 GitHub 地址重试一次。
+  Future<String?> _fetchVeneraScript(Dio dio, String url) async {
+    final candidates = <String>[url];
+    final direct = _directGithubUrl(url);
+    if (direct != null && direct != url) candidates.add(direct);
+    // jsDelivr 镜像：国内通常比 raw.githubusercontent 稳定
+    final cdn = _jsdelivrUrl(direct ?? url);
+    if (cdn != null && !candidates.contains(cdn)) candidates.add(cdn);
+    for (final u in candidates) {
+      try {
+        final js = (await dio.get<String>(u)).data ?? '';
+        if (_veneraClassRe.hasMatch(js)) return js;
+        _log('Venera 脚本内容不是 ComicSource（可能被代理拦截）: $u');
+      } catch (e) {
+        _log('Venera 脚本下载失败 $u: $e');
+      }
+    }
+    return null;
+  }
+
+  /// `https://raw.githubusercontent.com/owner/repo/branch/path`
+  /// → `https://cdn.jsdelivr.net/gh/owner/repo@branch/path`
+  String? _jsdelivrUrl(String url) {
+    final m = RegExp(
+      r'raw\.githubusercontent\.com/([^/]+)/([^/]+)/([^/]+)/(.+)$',
+    ).firstMatch(url);
+    if (m == null) return null;
+    return 'https://cdn.jsdelivr.net/gh/'
+        '${m.group(1)}/${m.group(2)}@${m.group(3)}/${m.group(4)}';
+  }
+
+  /// `https://gh-proxy.com/https://raw.githubusercontent.com/...`
+  /// → `https://raw.githubusercontent.com/...`
+  String? _directGithubUrl(String url) {
+    final m = RegExp(r'^https?://[^/]+/(https?://.+)$').firstMatch(url);
+    return m?.group(1);
   }
 
   String _friendly(Object e) {

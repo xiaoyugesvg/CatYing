@@ -40,6 +40,7 @@ import 'source_warehouse_page.dart';
 import '../../common/theme.dart';
 import '../utils/source_fail_text.dart';
 import '../widgets/jelly_search_bar.dart';
+import '../widgets/swipe_action_tile.dart';
 
 class SourceRepoPage extends StatefulWidget {
   const SourceRepoPage({super.key});
@@ -332,6 +333,9 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
               Expanded(
                 child: ReorderableListView.builder(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  // 卡片里已有拖拽把手（ReorderableDragStartListener）：
+                  // 关掉默认的"整行长按拖动"，否则会抢走"长按进多选"的手势
+                  buildDefaultDragHandles: false,
                   // 计数 / 清空固定在列表头部（不参与拖动排序）
                   header: Padding(
                     padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
@@ -537,14 +541,11 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
   /// 但本页没 import `dart:io` / `path_provider` / `share_plus`，
   /// 而且书源仓库那边早就用 Clipboard 这套了 ——
   /// **同一件事不要有两种做法**（多一条依赖路径就多一处会坏的地方）。
-  Future<void> _shareSelected() async {
-    final picked = SourceManager().sources
-        .where((s) => _selected.contains(s.id))
-        .toList();
-    if (picked.isEmpty) return;
+  /// 把漫画源序列化成可分享的 JSON 数组
+  List<Map<String, dynamic>> _exportPayload(List<MangaSource> picked) {
     // ConfigMangaSource 的配置在 `site` 上（不是 rawConfig —— 我先写错了）；
     // Legado 漫画源直接导书源原始 JSON，别人贴进漫画源仓库即可导入。
-    final arr = [
+    return [
       for (final s in picked)
         if (s is ConfigMangaSource)
           {'type': 'config', 'config': s.site.toJson()}
@@ -559,6 +560,24 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
         else
           {'type': 'builtin', 'id': s.id},
     ];
+  }
+
+  /// 分享单个漫画源（JSON 复制到剪贴板）
+  Future<void> _shareOne(MangaSource src) async {
+    final text = const JsonEncoder.withIndent(
+      '  ',
+    ).convert(_exportPayload([src]));
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    _toast('已复制「${src.name}」到剪贴板');
+  }
+
+  Future<void> _shareSelected() async {
+    final picked = SourceManager().sources
+        .where((s) => _selected.contains(s.id))
+        .toList();
+    if (picked.isEmpty) return;
+    final arr = _exportPayload(picked);
     final text = const JsonEncoder.withIndent('  ').convert(arr);
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
@@ -1278,124 +1297,148 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
   Widget _buildSourceCard(bool isDark, MangaSource src) {
     final enabled = SourceManager().isEnabled(src.id);
     final sel = _selected.contains(src.id);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.fromLTRB(6, 8, 8, 8),
-      decoration: BoxDecoration(
-        color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-        borderRadius: BorderRadius.circular(16),
-        border: sel ? Border.all(color: JellyTheme.primary, width: 1.2) : null,
-      ),
-      child: Row(
-        children: [
-          // 拖动把手（长按拖动排序，用的是 ReorderableListView 的
-          // ReorderableDragStartListener —— 见 _buildList）
-          ReorderableDragStartListener(
-            index: _orderedIndex(src),
-            child: Icon(
-              Icons.drag_handle_rounded,
-              size: 20,
-              color: JellyTheme.textSecondary,
-            ),
+    final cardColor = isDark ? JellyTheme.cardDark : JellyTheme.cardLight;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: SwipeActionTile(
+        // 多选模式下关闭左滑，避免与勾选/拖动排序冲突
+        enabled: _selected.isEmpty,
+        backgroundColor: cardColor,
+        actions: [
+          SwipeAction(
+            icon: Icons.edit_outlined,
+            label: '编辑',
+            color: JellyTheme.primary,
+            onTap: () => _editSource(src),
           ),
-          const SizedBox(width: 2),
-          // 复选框（批量选择）
-          GestureDetector(
-            onTap: () => setState(() {
-              if (sel) {
-                _selected.remove(src.id);
-              } else {
-                _selected.add(src.id);
-              }
-            }),
-            child: Icon(
-              sel ? Icons.check_box : Icons.check_box_outline_blank,
-              size: 21,
-              color: sel ? JellyTheme.primary : JellyTheme.textSecondary,
-            ),
+          SwipeAction(
+            icon: Icons.ios_share_rounded,
+            label: '分享',
+            color: const Color(0xFF3AA0FF),
+            onTap: () => _shareOne(src),
           ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: InkWell(
-              onTap: () => _editSource(src),
-              borderRadius: BorderRadius.circular(10),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  children: [
-                    _buildSourceIcon(src),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  src.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: AppTheme.fontHeadline,
-                                    fontWeight: FontWeight.w600,
-                                    color: enabled
-                                        ? (isDark
-                                              ? Colors.white
-                                              : JellyTheme.textPrimaryLight)
-                                        : JellyTheme.textSecondary,
-                                  ),
-                                ),
-                              ),
-                              if (src.needsMagic) ...[
-                                const SizedBox(width: 6),
-                                Image.asset(
-                                  'assets/icons/magic_stick.png',
-                                  width: 14,
-                                  height: 14,
-                                ),
-                              ],
-                            ],
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            // 标识：优先取 config 里的短名（如 copymanga / zaimanhua），
-                            // 没有就用 id（book 源常见 "config:某某漫画" 这种形式）
-                            _sourceShortId(src),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: AppTheme.fontFootnote,
-                              color: JellyTheme.textSecondary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Switch(
-            value: enabled,
-            activeThumbColor: JellyTheme.primary,
-            onChanged: (v) {
-              SourceManager().setEnabled(src.id, v);
-            },
-          ),
-          // 单个删除：能导入就得能删，否则用户导错一个源没法收拾
-          // （批量删除走底部的多选栏）
-          IconButton(
-            tooltip: '删除这个源',
-            icon: Icon(
-              Icons.delete_outline,
-              size: 19,
-              color: JellyTheme.textSecondary,
-            ),
-            onPressed: () => _confirmRemove(src),
+          SwipeAction(
+            icon: Icons.delete_outline_rounded,
+            label: '删除',
+            color: const Color(0xFFFF5A5A),
+            onTap: () => _confirmRemove(src),
           ),
         ],
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(6, 8, 8, 8),
+          decoration: BoxDecoration(
+            color: cardColor,
+            borderRadius: BorderRadius.circular(16),
+            border: sel
+                ? Border.all(color: JellyTheme.primary, width: 1.2)
+                : null,
+          ),
+          child: Row(
+            children: [
+              // 拖动把手（长按拖动排序，用的是 ReorderableListView 的
+              // ReorderableDragStartListener —— 见 _buildList）
+              ReorderableDragStartListener(
+                index: _orderedIndex(src),
+                child: Icon(
+                  Icons.drag_handle_rounded,
+                  size: 20,
+                  color: JellyTheme.textSecondary,
+                ),
+              ),
+              const SizedBox(width: 2),
+              // 复选框（批量选择）
+              GestureDetector(
+                onTap: () => setState(() {
+                  if (sel) {
+                    _selected.remove(src.id);
+                  } else {
+                    _selected.add(src.id);
+                  }
+                }),
+                child: Icon(
+                  sel ? Icons.check_box : Icons.check_box_outline_blank,
+                  size: 21,
+                  color: sel ? JellyTheme.primary : JellyTheme.textSecondary,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: InkWell(
+                  onTap: () => _editSource(src),
+                  // 长按进入多选并勾上（编辑/分享/删除在左滑里，避免手势冲突）
+                  onLongPress: () => setState(() {
+                    _selected.add(src.id);
+                  }),
+                  borderRadius: BorderRadius.circular(10),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: [
+                        _buildSourceIcon(src),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      src.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: AppTheme.fontHeadline,
+                                        fontWeight: FontWeight.w600,
+                                        color: enabled
+                                            ? (isDark
+                                                  ? Colors.white
+                                                  : JellyTheme.textPrimaryLight)
+                                            : JellyTheme.textSecondary,
+                                      ),
+                                    ),
+                                  ),
+                                  if (src.needsMagic) ...[
+                                    const SizedBox(width: 6),
+                                    Image.asset(
+                                      'assets/icons/magic_stick.png',
+                                      width: 14,
+                                      height: 14,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                // 标识：优先取 config 里的短名（如 copymanga / zaimanhua），
+                                // 没有就用 id（book 源常见 "config:某某漫画" 这种形式）
+                                _sourceShortId(src),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: AppTheme.fontFootnote,
+                                  color: JellyTheme.textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Switch(
+                value: enabled,
+                activeThumbColor: JellyTheme.primary,
+                onChanged: (v) {
+                  SourceManager().setEnabled(src.id, v);
+                },
+              ),
+              // 单个删除已移到「左滑」，列表里不再放删除按钮（用户 2026-10-18）
+            ],
+          ),
+        ),
       ),
     );
   }
