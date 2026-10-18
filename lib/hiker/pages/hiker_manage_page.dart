@@ -22,19 +22,54 @@ import '../services/hiker_store.dart';
 /// 用户 2026-10-18：「去设置就不能直接到源配置吗？」
 /// 原来首页提示只会跳到海阔设置首页，用户还得再进「源管理」找到该源、
 /// 再点调节图标；现在直接弹这个框，一步到位。
+///
+/// [prefillDefaults]：打开时就把能推断的默认值填进去（诊断「需填配置」的
+/// 「填入默认配置」按钮走这里），用户确认后保存即可。
 Future<void> showHikerSourceConfigDialog(
   BuildContext context,
-  HikerSource s,
-) async {
+  HikerSource s, {
+  bool prefillDefaults = false,
+}) async {
   final store = HikerStore.instance;
   final existing = store.configOf(s.id);
-  final ctrl = TextEditingController(
-    text: existing.isEmpty
-        ? ''
-        : const JsonEncoder.withIndent('  ').convert(existing),
-  );
   // 从规则里榨出用到的 config 键，给用户一个"要填什么"的提示
   final keys = s.configKeys;
+  final defaults = s.defaultConfig;
+
+  Map<String, dynamic> initial = existing;
+  if (prefillDefaults) {
+    // 默认值打底，已填的值优先（不覆盖用户手填的）
+    initial = <String, dynamic>{...defaults, ...existing};
+  }
+  final ctrl = TextEditingController(
+    text: initial.isEmpty
+        ? ''
+        : const JsonEncoder.withIndent('  ').convert(initial),
+  );
+
+  /// 把默认值并进输入框（保留用户已填的键）
+  void fillDefaults() {
+    final merged = <String, dynamic>{};
+    final cur = ctrl.text.trim();
+    if (cur.isNotEmpty) {
+      try {
+        final j = jsonDecode(cur);
+        if (j is Map) merged.addAll(Map<String, dynamic>.from(j));
+      } catch (_) {
+        // 输入框里不是合法 JSON ⇒ 直接按默认值重建
+      }
+    }
+    if (merged.isEmpty) {
+      merged.addAll(defaults);
+    } else {
+      defaults.forEach((k, v) {
+        final cur = merged[k];
+        if (cur == null || '$cur'.trim().isEmpty) merged[k] = v;
+      });
+    }
+    ctrl.text = const JsonEncoder.withIndent('  ').convert(merged);
+    ctrl.selection = TextSelection.collapsed(offset: ctrl.text.length);
+  }
 
   final saved = await showDialog<String>(
     context: context,
@@ -85,7 +120,8 @@ Future<void> showHikerSourceConfigDialog(
             ),
             const SizedBox(height: 6),
             Text(
-              '留空 = 清空该源配置；必须是 JSON 对象。',
+              '留空 = 清空该源配置；必须是 JSON 对象。'
+              '${keys.isEmpty ? '' : '「填入默认配置」会按规则兜底值和源域名自动补一版。'}',
               style: TextStyle(
                 color: AppTheme.textTertiary,
                 fontSize: AppTheme.fontCaption,
@@ -95,6 +131,14 @@ Future<void> showHikerSourceConfigDialog(
         ),
       ),
       actions: [
+        if (keys.isNotEmpty)
+          TextButton(
+            onPressed: fillDefaults,
+            child: Text(
+              '填入默认配置',
+              style: TextStyle(color: AppTheme.accentOnSurface),
+            ),
+          ),
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(),
           child: Text('取消', style: TextStyle(color: AppTheme.textSecondary)),
@@ -1181,6 +1225,19 @@ class _HikerManagePageState extends State<HikerManagePage> {
           ),
         ),
         actions: [
+          // 「需填配置」直接给一键默认值：打开配置框时就把能推断的值填好，
+          // 用户看一眼点保存即可（比"去填一下"再开空白框少绕一圈）。
+          if (d.label == '需填配置')
+            TextButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                showHikerSourceConfigDialog(context, s, prefillDefaults: true);
+              },
+              child: Text(
+                '填入默认配置',
+                style: TextStyle(color: AppTheme.accentOnSurface),
+              ),
+            ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
             child: Text(

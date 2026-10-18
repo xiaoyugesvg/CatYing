@@ -132,6 +132,99 @@ class HikerSource {
   /// 规则是否读取 `config.xxx`（需要在「源配置」里填值）
   bool get needsConfig => _configKeys.isNotEmpty;
 
+  /// 能自动推断出的「默认源配置」（源配置编辑框的「填入默认配置」用）。
+  ///
+  /// 取值优先级：
+  ///   ① 规则里自己写了兜底值时照抄：`config.host || 'https://a.com'`、
+  ///      `config['host'] || "https://a.com"`；
+  ///   ② 键名像域名/地址（host / url / domain / api / base / site / server /
+  ///      home）⇒ 用源自身的 `url` 取 `scheme://host`；
+  ///   ③ 其余（账号、口令、目录…）给空串 —— **不编造假值**，用户点开就能改。
+  ///
+  /// 目的：让「需填配置」不是一句干瘪的"去填一下"，而是一键得到可保存的骨架。
+  Map<String, dynamic> get defaultConfig {
+    final out = <String, dynamic>{};
+    final keys = configKeys;
+    if (keys.isEmpty) return out;
+    final origin = _originOf(url);
+    for (final k in keys) {
+      final fallback = _configFallback(k);
+      if (fallback != null) {
+        out[k] = fallback;
+        continue;
+      }
+      final low = k.toLowerCase();
+      // 口令/账号类即使带 host、api 前缀也**不能**拿域名去填
+      // （如 `apiKey`、`hostToken`）—— 填错比空着更坑。
+      final secret = _kSecretHints.any(low.contains);
+      final hostLike = _kHostKeyPrefixes.any(low.startsWith);
+      out[k] = (!secret && hostLike && origin.isNotEmpty) ? origin : '';
+    }
+    return out;
+  }
+
+  /// 键名含这些片段 ⇒ 按"要用户自己填的敏感值"处理
+  static const List<String> _kSecretHints = [
+    'key',
+    'token',
+    'secret',
+    'pass',
+    'pwd',
+    'cookie',
+    'account',
+    'user',
+    'uid',
+    'sid',
+    'auth',
+    'sign',
+  ];
+
+  /// 键名以这些开头 ⇒ 大概率是站点地址（`host` / `hostUrl` / `apiBase` …）
+  static const List<String> _kHostKeyPrefixes = [
+    'host',
+    'url',
+    'domain',
+    'api',
+    'base',
+    'site',
+    'server',
+    'home',
+  ];
+
+  /// 从规则里挖 `config.key || '字面量'` 的兜底值（单/双引号、点/中括号都认）
+  String? _configFallback(String key) {
+    final escaped = RegExp.escape(key);
+    final patterns = <RegExp>[
+      RegExp(r'config\.' + escaped + r'''\s*(?:\|\||\?\?)\s*(["'])(.*?)\1'''),
+      RegExp(
+        r'''config\[\s*["']'''
+        + escaped +
+        r'''["']\s*\]\s*(?:\|\||\?\?)\s*(["'])(.*?)\1''',
+      ),
+    ];
+    for (final re in patterns) {
+      final m = re.firstMatch(_allRuleText);
+      final v = (m?.group(2) ?? '').trim();
+      if (v.isNotEmpty) return v;
+    }
+    return null;
+  }
+
+  /// `https://a.com/x/y` → `https://a.com`（带非默认端口时保留端口）
+  static String _originOf(String u) {
+    final t = u.trim();
+    if (t.isEmpty) return '';
+    try {
+      final uri = Uri.parse(t);
+      if (uri.host.isEmpty) return '';
+      final scheme = uri.hasScheme ? uri.scheme : 'https';
+      final port = uri.hasPort ? ':${uri.port}' : '';
+      return '$scheme://${uri.host}$port';
+    } catch (_) {
+      return '';
+    }
+  }
+
   // ============================================================
   // 源诊断（源管理页的标签）
   // ============================================================
@@ -162,7 +255,10 @@ class HikerSource {
       out.add(
         const HikerSourceDiagnosis(
           '无首页规则',
-          '这条源没有 find_rule，导入的可能是残缺数据。',
+          '这条源没有 find_rule（首页规则），导入的多半是残缺数据或被截断的 JSON。\n'
+              '怎么补：回到海阔 App 重新导出这个源（单个或整包都行），'
+              '再在「海阔设置 → 源管理 → 导入」里重新导入一次；'
+              '只有搜索规则（search_url）的源不能当首页源用。',
           blocking: true,
         ),
       );
@@ -176,8 +272,10 @@ class HikerSource {
       out.add(
         const HikerSourceDiagnosis(
           '缺 Apollo',
-          '规则依赖 Apollo 规则包（不在 App 内）。去「海阔设置 → 文件管理」'
-              '导入 Apollo 的 zip / 文件后再试。',
+          '规则依赖 Apollo 规则包（社区分发，App 不自带）。\n'
+              '怎么补：找到这个源的配套 Apollo.zip，在「海阔设置 → 文件管理」'
+              '导入 zip（或单独把 apollo 相关的 .js 放进文件区），'
+              '导入后重新进入「源管理」页，标签就会消失。',
           blocking: true,
         ),
       );
@@ -192,8 +290,11 @@ class HikerSource {
       out.add(
         const HikerSourceDiagnosis(
           '缺 lazy',
-          '规则引用了内置页 hiker://page/lazy，但源里没带这个模块、'
-              '随包也没有 ⇒ 目录/看图那一步解不出来。',
+          '规则要打开内置页 hiker://page/lazy（漫画/短剧靠它把章节变成图片），'
+              '但源里没带这个模块、App 也不自带。\n'
+              '怎么补：换这个源的「完整版」重新导入（完整版的 pages 里会带 lazy）；'
+              '或把 lazy.js 放进文件区（「海阔设置 → 文件管理 → 导入」），'
+              '保持相对路径不变。',
           blocking: true,
         ),
       );
@@ -217,8 +318,11 @@ class HikerSource {
       out.add(
         HikerSourceDiagnosis(
           '缺内置页',
-          '规则引用了 ${_preview(others.map((r) => 'hiker://page|assets/$r').toList())}，'
-              '但源里没带、随包也没有 ⇒ 这些页面打不开。',
+          '缺失的页面：${_preview(others.map((r) => 'hiker://page|assets/$r').toList())}，'
+              '源里没带、App 随包资源里也没有 ⇒ 这些页面打不开。\n'
+              '怎么补：找源作者要完整规则包（通常是 zip），在'
+              '「海阔设置 → 文件管理」导入，确认解压后在 rules/ 或 libs/ 下能看到'
+              '对应文件；实在找不到就换一个源。',
           blocking: true,
         ),
       );
@@ -250,7 +354,10 @@ class HikerSource {
         HikerSourceDiagnosis(
           '缺文件',
           '规则要读 ${_preview(missingFiles.map((f) => 'hiker://files/$f').toList())}，'
-              '文件区里没有 ⇒ 去「海阔设置 → 文件管理」导入对应规则包。',
+              '文件区里没有。\n'
+              '怎么补：「海阔设置 → 文件管理 → 导入」这个源的规则包（zip 或单个 .js），'
+              '保持相对路径不变（如 libs/xxx.js）。\n'
+              '说明：cache/、data/ 下的文件由源运行时自动生成，不算缺文件，不会误报。',
           blocking: true,
         ),
       );
@@ -262,7 +369,9 @@ class HikerSource {
         HikerSourceDiagnosis(
           '需填配置',
           '规则要读 ${configKeys.map((k) => 'config.$k').join('、')}，'
-              '点右上角「源配置」填上对应值（如域名 / 口令）。',
+              '现在还空着。\n'
+              '怎么补：点下面的「填入默认配置」——会按规则里的兜底值和源域名'
+              '自动填好一版，对的话直接保存；不对再点「源配置」手动改。',
         ),
       );
     }
@@ -341,10 +450,14 @@ class HikerSource {
 
   List<String> get _configKeys {
     final out = <String>{};
-    final re = RegExp(r'config\.([A-Za-z_]\w*)');
+    // `config.xxx` 与 `config['xxx'] / config["xxx"]` 两种写法都收
+    // （社区源里中括号写法不少，漏掉会导致"需填配置"漏报）。
+    final re = RegExp(
+      r'''config\.([A-Za-z_]\w*)|config\[\s*["']([A-Za-z_]\w*)["']\s*\]''',
+    );
     for (final m in re.allMatches(_allRuleText)) {
-      final k = m.group(1);
-      if (k != null && k.isNotEmpty) out.add(k);
+      final k = (m.group(1) ?? m.group(2) ?? '').trim();
+      if (k.isNotEmpty) out.add(k);
     }
     return out.toList()..sort();
   }
