@@ -219,6 +219,7 @@ class _ChartsPageState extends State<ChartsPage>
         source: _source,
         // ⚠️ QQ 的 topId 不是歌单 id（用歌单接口查会得到空列表）
         isTopList: true,
+        coverUrl: t.coverUrl,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

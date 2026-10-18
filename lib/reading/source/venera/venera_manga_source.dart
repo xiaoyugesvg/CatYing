@@ -198,7 +198,9 @@ class VeneraMangaSource extends MangaSource {
       rt.executePendingJob();
       final state = rt.evaluate('__veneraJobState').stringResult;
       if (state == 'ok') {
-        final raw = rt.evaluate('JSON.stringify(__veneraJobValue)').stringResult;
+        // __veneraStringify：把 JS Map/Set 转成普通对象/数组再序列化
+        // （Venera 源用 Map 表示章节分组，JSON.stringify 直出会是空对象）
+        final raw = rt.evaluate('__veneraStringify(__veneraJobValue)').stringResult;
         if (raw.isEmpty || raw == 'undefined' || raw == 'null') return null;
         return jsonDecode(raw);
       }
@@ -284,30 +286,39 @@ class VeneraMangaSource extends MangaSource {
   }
 
   Future<MangasPage> _mapPage(dynamic r, int page) async {
-    // multiPartPage：explore.load() 返回 [{title, comics}]，这里拍平成一个列表
+    // 三种返回形态都要兼容（对应 Venera explore.type）：
+    //   · multiPartPage           → [{title, comics: [...]}, ...]（列表）
+    //   · singlePageWithMultiPart → {分区名: [Comic, ...], ...}（对象套数组）
+    //   · *ComicList              → {comics: [...], maxPage: n}（对象）
+    var maxPage = 1;
+    var hasPageInfo = false;
+    final flat = <Map>[];
     if (r is List) {
-      final flat = <Map>[];
       for (final part in r.whereType<Map>()) {
         final comics = part['comics'];
-        if (comics is List) {
-          flat.addAll(comics.whereType<Map>());
+        if (comics is List) flat.addAll(comics.whereType<Map>());
+      }
+    } else if (r is Map) {
+      final comics = r['comics'];
+      if (comics is List) {
+        flat.addAll(comics.whereType<Map>());
+        maxPage = (r['maxPage'] as num?)?.toInt() ?? 1;
+        hasPageInfo = true;
+      } else {
+        for (final v in r.values) {
+          if (v is List) flat.addAll(v.whereType<Map>());
         }
       }
-      final list = _mapComics(flat);
-      if (list.isNotEmpty) await _applyThumbnailHeaders(list);
-      return MangasPage(items: list, hasNextPage: false);
     }
-    if (r is! Map) return const MangasPage(items: [], hasNextPage: false);
-    final comics = r['comics'];
-    final list = _mapComics(
-      comics is List ? comics.whereType<Map>().toList() : const [],
-    );
-    final maxPage = (r['maxPage'] as num?)?.toInt() ?? 1;
+    final list = _mapComics(flat);
     if (list.isNotEmpty) {
       // 封面防盗链头要先拿到，否则首屏封面会以默认头请求而 403
       await _applyThumbnailHeaders(list);
     }
-    return MangasPage(items: list, hasNextPage: page + 1 < maxPage);
+    return MangasPage(
+      items: list,
+      hasNextPage: hasPageInfo && page + 1 < maxPage,
+    );
   }
 
   List<CManga> _mapComics(List<Map> comics) {
@@ -451,10 +462,12 @@ class VeneraMangaSource extends MangaSource {
   @override
   Future<List<String>> getChapterImages(CManga manga, CChapter chapter) async {
     final r = await _run('ep', {'comicId': manga.id, 'epId': chapter.id});
-    if (r is! Map || r['images'] is! List) {
+    // 标准返回 {images: [...]}；少数源直接返回图片数组，一并兼容
+    final raw = r is Map ? r['images'] : (r is List ? r : null);
+    if (raw is! List) {
       return const [];
     }
-    final images = (r['images'] as List)
+    final images = raw
         .map((e) => _normalizeUrl('$e'))
         .where((e) => e.isNotEmpty)
         .toList();

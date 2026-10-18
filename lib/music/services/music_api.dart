@@ -1482,7 +1482,10 @@ class MusicApi {
         ? Playlist(
             id: asInt(p['id']),
             name: (p['name'] ?? '').toString(),
-            coverUrl: p['cover']?.toString(),
+            // ⚠️ 与 `Playlist.fromJson` 同一套兜底：QQ 歌单详情返回的字段名
+            // 可能是 `coverUrl` / `cover` / `picUrl` 中的任意一个，
+            // 只读 `cover` 会漏掉 `coverUrl`（IMG_9021 封面为空的原因）。
+            coverUrl: (p['coverUrl'] ?? p['cover'] ?? p['picUrl'])?.toString(),
             trackCount: asInt(p['trackCount']),
             description: p['description']?.toString(),
             creator: p['creator']?.toString(),

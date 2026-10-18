@@ -52,6 +52,13 @@ class _RssPageState extends State<RssPage> {
   /// 本次请求的序号：防止"快速换源 / 连续刷新"时旧结果覆盖新结果。
   int _seq = 0;
 
+  /// 正在加载的源 id（空 = 无请求在飞）。
+  ///
+  /// 为什么要单独记：用户 A→B→A 快速切换时，`_loadedId` 仍是 A，
+  /// 只凭它判断会认为"已经加载好了、不用重载"，而 B 的在飞请求随后返回
+  /// 并把列表写成 B 的内容（看起来就是"切回来又变成别的源"）。
+  String _loadingId = '';
+
   /// ── 站点型源（Legado `singleUrl`）的**内嵌网页** ──────────────────
   ///
   /// 用户 2026-10-15：「我其实就想用这种订阅源」—— 这类源（源仓库 / Yiove /
@@ -137,9 +144,13 @@ class _RssPageState extends State<RssPage> {
     if (!mounted || !_started) return;
     final cur = store.current;
     if (cur == null) {
+      // 源被全部删除/禁用：作废在飞请求，避免它回来又把列表写出来
+      _seq++;
+      _loadingId = '';
       setState(() {
         _articles = [];
         _error = '';
+        _loading = false;
         _loadedId = '';
         _nextUrl = '';
         _siteLike = false;
@@ -147,7 +158,8 @@ class _RssPageState extends State<RssPage> {
       });
       return;
     }
-    if (cur.id != _loadedId) {
+    if (cur.id != _loadedId ||
+        (_loadingId.isNotEmpty && _loadingId != cur.id)) {
       _channel = 0;
       _reload();
     } else {
@@ -171,6 +183,9 @@ class _RssPageState extends State<RssPage> {
         _web!.reload();
         return;
       }
+      // 换到站点型源：作废在飞的列表请求，否则旧源的响应回来会写乱状态
+      _seq++;
+      _loadingId = '';
       setState(() {
         _siteLike = false;
         _loadedId = src.id;
@@ -225,6 +240,7 @@ class _RssPageState extends State<RssPage> {
       // ⚠️ 也要占一个序号：否则"在飞的旧请求"回来时仍能通过 my == _seq 校验，
       //    把上一个源的列表写进这个站点型源里
       _seq++;
+      _loadingId = '';
       setState(() {
         _articles = [];
         _error = '';
@@ -236,6 +252,7 @@ class _RssPageState extends State<RssPage> {
       return;
     }
     final my = ++_seq;
+    _loadingId = src.id;
     setState(() {
       _loading = true;
       if (!append) {
@@ -270,7 +287,10 @@ class _RssPageState extends State<RssPage> {
         _error = '抓取失败：${e.toString().split('\n').first}';
       });
     } finally {
-      if (mounted && my == _seq) setState(() => _loading = false);
+      if (mounted && my == _seq) {
+        _loadingId = '';
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -408,8 +428,19 @@ class _RssPageState extends State<RssPage> {
                           ),
                         ),
                         const SizedBox(width: 4),
-                        Icon(Icons.expand_more_rounded,
-                            size: 16, color: AppTheme.textTertiary),
+                        // 换源/刷新中：箭头换成小转圈，点下去立刻有反馈
+                        if (_loading)
+                          SizedBox(
+                            width: 12,
+                            height: 12,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.6,
+                              color: AppTheme.accentColor,
+                            ),
+                          )
+                        else
+                          Icon(Icons.expand_more_rounded,
+                              size: 16, color: AppTheme.textTertiary),
                       ],
                     ),
                   ),

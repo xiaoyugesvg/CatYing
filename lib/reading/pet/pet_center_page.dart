@@ -1,4 +1,8 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../common/theme.dart';
 import '../theme/jelly_theme.dart';
@@ -60,6 +64,8 @@ class _PetCenterPageState extends State<PetCenterPage>
           children: [
             _headerCard(),
             const SizedBox(height: 14),
+            _customPetCard(),
+            const SizedBox(height: 14),
             _actionsCard(),
             const SizedBox(height: 18),
             _sectionTitle('换装'),
@@ -96,13 +102,20 @@ class _PetCenterPageState extends State<PetCenterPage>
         children: [
           AnimatedBuilder(
             animation: _anim,
-            builder: (context, _) => PetView(
-              species: s,
-              outfit: _pet.equippedOutfit,
-              t: _anim.value * 4,
-              size: 118,
-              mood: _pet.mood,
-            ),
+            builder: (context, _) => _pet.isCustomPet &&
+                    _pet.customPetPath.isNotEmpty
+                ? CustomPetImage(
+                    path: _pet.customPetPath,
+                    size: 118,
+                    bob: 0,
+                  )
+                : PetView(
+                    species: s,
+                    outfit: _pet.equippedOutfit,
+                    t: _anim.value * 4,
+                    size: 118,
+                    mood: _pet.mood,
+                  ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -155,6 +168,142 @@ class _PetCenterPageState extends State<PetCenterPage>
         ],
       ),
     );
+  }
+
+  /// 自定义桌宠（PNG / GIF）—— 用户 2026-10-18
+  Widget _customPetCard() {
+    final has = _pet.customPetPath.isNotEmpty &&
+        File(_pet.customPetPath).existsSync();
+    final label = _isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: _card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: _pet.isCustomPet
+              ? JellyTheme.primary.withValues(alpha: 0.45)
+              : Colors.transparent,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: JellyTheme.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: has
+                    ? Image.file(File(_pet.customPetPath), fit: BoxFit.cover)
+                    : Icon(Icons.add_photo_alternate_outlined,
+                        color: JellyTheme.primary),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '自定义桌宠',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: label,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '支持 PNG / GIF，选好后悬浮桌宠立刻换成它',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: JellyTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _pickCustomPet,
+                  icon: Icon(
+                    has ? Icons.swap_horiz_rounded : Icons.photo_library_outlined,
+                    size: 18,
+                  ),
+                  label: Text(has ? '更换图片' : '选择图片'),
+                ),
+              ),
+              if (has) ...[
+                if (!_pet.isCustomPet) ...[
+                  const SizedBox(width: 10),
+                  OutlinedButton(
+                    onPressed: () =>
+                        _pet.setCustomPet(_pet.customPetPath),
+                    child: const Text('使用'),
+                  ),
+                ],
+                const SizedBox(width: 10),
+                OutlinedButton(
+                  onPressed: _removeCustomPet,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.redAccent,
+                  ),
+                  child: const Text('移除'),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickCustomPet() async {
+    try {
+      final r = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['png', 'gif', 'jpg', 'jpeg', 'webp'],
+      );
+      final srcPath =
+          (r == null || r.isEmpty) ? null : r.first.path;
+      if (srcPath == null) return;
+      final src = File(srcPath);
+      final ext = srcPath.contains('.')
+          ? srcPath.split('.').last.toLowerCase()
+          : 'png';
+      final dir = await getApplicationSupportDirectory();
+      final dst = File(
+        '${dir.path}/pet_custom_${DateTime.now().millisecondsSinceEpoch}.$ext',
+      );
+      await dst.writeAsBytes(await src.readAsBytes());
+      final old = _pet.customPetPath;
+      await _pet.setCustomPet(dst.path);
+      // 换图后删掉旧文件，避免每次换图都留一份垃圾
+      if (old.isNotEmpty && old != dst.path) {
+        try {
+          final f = File(old);
+          if (f.existsSync()) f.deleteSync();
+        } catch (_) {}
+      }
+      _toast('已切换为自定义桌宠');
+    } catch (e) {
+      _toast('选择图片失败：$e');
+    }
+  }
+
+  Future<void> _removeCustomPet() async {
+    await _pet.clearCustomPet();
+    _toast('已移除自定义桌宠');
   }
 
   Widget _actionsCard() {

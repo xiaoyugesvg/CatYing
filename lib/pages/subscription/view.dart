@@ -27,6 +27,10 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
   bool _editing = false;
 
+  /// 正在激活的订阅 id（空 = 空闲）。
+  /// 激活要重新加载整份配置（网络 + 引擎），需要即时反馈并防连点。
+  String _activatingId = '';
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -384,9 +388,12 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   }
 
   Widget _activateButton(Subscription s, bool isActive) {
+    final busy = _activatingId == s.id;
+    // 正在切换别的订阅时，全部禁用，避免并发 loadConfig
+    final locked = _activatingId.isNotEmpty;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: isActive ? null : () => _activate(s),
+      onTap: (isActive || locked) ? null : () => _activate(s),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
@@ -402,12 +409,26 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (isActive) ...[
+            if (busy) ...[
+              // 切换中：按钮内转圈（整页没有别的 loading 反馈）
+              SizedBox(
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.8,
+                  // 激活成功后按钮变成实底白字，转圈也要跟着变白才看得见
+                  color: isActive ? Colors.white : AppTheme.accentColor,
+                ),
+              ),
+              const SizedBox(width: 6),
+            ] else if (isActive) ...[
               const Icon(Icons.check, size: 13, color: Colors.white),
               const SizedBox(width: 4),
             ],
             Text(
-              isActive ? '已激活' : '激活',
+              busy
+                  ? '切换中'
+                  : (isActive ? '已激活' : '激活'),
               style: TextStyle(
                 color: isActive ? Colors.white : AppTheme.accentColor,
                 fontSize: AppTheme.fontCaption,
@@ -422,16 +443,23 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
   /// 激活 = 切换生效的订阅，并把它的地址交给 ApiConfig 真正加载
   Future<void> _activate(Subscription s) async {
+    // 正在切换时忽略再次点击（避免两次 loadConfig 并发、高亮来回跳）
+    if (_activatingId.isNotEmpty) return;
     // 上锁的订阅需要先验证
     if (s.locked && svc.pinSet.value && !svc.unlocked.value) {
       final ok = await _askPin();
       if (!ok) return;
     }
-    await svc.setActive(s.id);
-    if (!mounted) return;
-    await _applyActiveToApi();
-    if (!mounted) return;
-    AppToast.message('已激活「${s.name}」');
+    setState(() => _activatingId = s.id);
+    try {
+      await svc.setActive(s.id);
+      if (!mounted) return;
+      await _applyActiveToApi();
+      if (!mounted) return;
+      AppToast.message('已切换到「${s.name}」');
+    } finally {
+      if (mounted) setState(() => _activatingId = '');
+    }
   }
 
   Future<bool> _askPin() async {

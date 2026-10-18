@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/book_view_mode.dart';
+import '../pet/pet_center_page.dart';
+import '../pet/pet_service.dart';
 import '../services/reading_layout.dart';
 import '../services/settings_service.dart';
 import '../services/view_mode.dart';
@@ -109,6 +111,40 @@ class _DisplaySettingsPageState extends State<DisplaySettingsPage> {
               ),
             ),
           ),
+          const SizedBox(height: 12),
+          // ── 桌宠中心（用户 2026-10-18：从「我的」页挪到这里）──────────
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const PetCenterPage()),
+            ),
+            child: _buildCard(
+              isDark,
+              title: '桌宠中心',
+              subtitle: '养成 · 图鉴 · 换装 · 自定义 PNG / GIF',
+              trailing: Icon(
+                Icons.chevron_right_rounded,
+                color: JellyTheme.textSecondary,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          // ── 悬浮桌宠（用户 2026-10-18）：显示 / 隐藏 + 大小 ──────────
+          ListenableBuilder(
+            listenable: PetService.instance,
+            builder: (context, _) => _buildCard(
+              isDark,
+              title: '悬浮桌宠',
+              subtitle: '在页面角落显示 / 隐藏宠物',
+              trailing: Switch.adaptive(
+                value: PetService.instance.enabled,
+                onChanged: (v) => PetService.instance.setEnabled(v),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _PetSizeCard(isDark: isDark),
           const SizedBox(height: 12),
           _buildViewCard(
             isDark,
@@ -530,6 +566,162 @@ class _DisplaySettingsPageState extends State<DisplaySettingsPage> {
           ),
           const SizedBox(width: 8),
           trailing,
+        ],
+      ),
+    );
+  }
+}
+
+/// 桌宠大小卡片：**滑动 + 输入数值**两种方式（72~160px）。
+///
+/// 用户 2026-10-18：「可以滑动或输入尺寸调整大小」。
+class _PetSizeCard extends StatefulWidget {
+  const _PetSizeCard({required this.isDark});
+
+  final bool isDark;
+
+  @override
+  State<_PetSizeCard> createState() => _PetSizeCardState();
+}
+
+class _PetSizeCardState extends State<_PetSizeCard> {
+  final _pet = PetService.instance;
+  final _ctl = TextEditingController();
+  final _focus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _ctl.text = _pet.size.round().toString();
+    _pet.addListener(_onPet);
+    _focus.addListener(_onFocus);
+  }
+
+  @override
+  void dispose() {
+    _pet.removeListener(_onPet);
+    _focus.dispose();
+    _ctl.dispose();
+    super.dispose();
+  }
+
+  void _onPet() {
+    if (!mounted) return;
+    // 滑动时同步输入框；用户正在输入时不打断
+    if (!_focus.hasFocus) {
+      _ctl.text = _pet.size.round().toString();
+    }
+    setState(() {});
+  }
+
+  void _onFocus() {
+    if (!_focus.hasFocus) _apply(_ctl.text);
+  }
+
+  void _apply(String raw) {
+    final v = double.tryParse(raw.trim());
+    if (v == null) {
+      _ctl.text = _pet.size.round().toString();
+      return;
+    }
+    _pet.setSize(v);
+    _ctl.text = _pet.size.round().toString();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = widget.isDark;
+    final labelColor =
+        isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+      decoration: BoxDecoration(
+        color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '桌宠大小',
+                      style: TextStyle(
+                        fontSize: AppTheme.fontHeadline,
+                        fontWeight: FontWeight.bold,
+                        color: labelColor,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '滑动或输入数值（${PetService.minSize.round()}–'
+                      '${PetService.maxSize.round()}px）',
+                      style: TextStyle(
+                        fontSize: AppTheme.fontFootnote,
+                        color: JellyTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Text(
+                '${_pet.size.round()} px',
+                style: TextStyle(
+                  fontSize: AppTheme.fontSubhead,
+                  fontWeight: FontWeight.w700,
+                  color: JellyTheme.primary,
+                ),
+              ),
+            ],
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: Slider(
+                  value: _pet.size
+                      .clamp(PetService.minSize, PetService.maxSize)
+                      .toDouble(),
+                  min: PetService.minSize,
+                  max: PetService.maxSize,
+                  divisions:
+                      (PetService.maxSize - PetService.minSize).round(),
+                  activeColor: JellyTheme.primary,
+                  onChanged: (v) => _pet.setSize(v),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 64,
+                child: TextField(
+                  controller: _ctl,
+                  focusNode: _focus,
+                  keyboardType: TextInputType.number,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 13, color: labelColor),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                        vertical: 8, horizontal: 6),
+                    filled: true,
+                    fillColor: isDark
+                        ? Colors.white.withValues(alpha: 0.06)
+                        : Colors.black.withValues(alpha: 0.04),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                  onSubmitted: _apply,
+                  onTapOutside: (_) => _focus.unfocus(),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );

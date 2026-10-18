@@ -12,6 +12,10 @@ abstract class MangaSource {
   /// 显示名
   String get name;
 
+  /// 源分组（与「漫画仓」同一口径：Legado 的 `bookSourceGroup`；空 = 未分组）。
+  /// 用户 2026-10-18：快速源弹窗的分类 tab 按这个分组。
+  String get group => '';
+
   /// 语言（ISO 639-1）
   String get lang;
 

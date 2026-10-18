@@ -1001,60 +1001,73 @@ class _ComicFavoritesTabState extends State<_ComicFavoritesTab> {
                         target: isGrid ? 170 : 360,
                         max: isGrid ? 6 : 4,
                       );
-                      return MasonryGridView.count(
-                        controller: _scrollController,
-                        padding: EdgeInsets.only(
-                          top: 4,
-                          left: 12,
-                          right: 12,
-                          bottom: 12 + JellyNavBar.contentBottomAvoid,
-                        ),
-                        crossAxisCount: cols,
-                        mainAxisSpacing: 8,
-                        crossAxisSpacing: 12,
-                        itemCount: min(comics.length, _displayCount),
-                        itemBuilder: (context, index) {
-                          final comic = comics[index];
-                          final selected = widget.selectedIds.contains(
-                            comic.id,
-                          );
-                          final card = isGrid
-                              ? JellyComicCard(
-                                  comic: comic,
-                                  heroTag: comicCoverHeroTag('fav', comic),
-                                  onTap: widget.isSelecting
-                                      ? () => widget.onSelect(comic.id)
-                                      : () => _openDetail(context, comic),
-                                  onLongPress: () => widget.onSelect(comic.id),
-                                  showSourceBadge: true,
-                                  updateCount: ShelfUpdateService.instance
-                                      .newChapters(
-                                          ShelfUpdateService.keyForComic(
-                                              comic.pathWord)),
-                                )
-                              : JellyComicListTile(
-                                  comic: comic,
-                                  heroTag: comicCoverHeroTag('fav', comic),
-                                  onTap: widget.isSelecting
-                                      ? () => widget.onSelect(comic.id)
-                                      : () => _openDetail(context, comic),
-                                  onLongPress: () => widget.onSelect(comic.id),
-                                  showSourceBadge: true,
-                                );
-                          return StaggeredEntrance(
-                            key: ValueKey('${_session}_${comic.id}'),
-                            index: index,
-                            child: Stack(
-                              children: [
-                                card,
-                                if (widget.isSelecting)
-                                  Positioned(
-                                    top: 4,
-                                    right: 4,
-                                    child: JellySelectBadge(selected: selected),
-                                  ),
-                              ],
+                      return ListenableBuilder(
+                        listenable: SettingsService(),
+                        builder: (context, _) {
+                          // 列表密度 + 卡片信息开关（与书架/显示设置保持同一口径）
+                          final density = SettingsService().densityScale;
+                          final showInfo = SettingsService().cardInfo;
+                          return MasonryGridView.count(
+                            controller: _scrollController,
+                            padding: EdgeInsets.only(
+                              top: 4,
+                              left: 12,
+                              right: 12,
+                              bottom: 12 + JellyNavBar.contentBottomAvoid,
                             ),
+                            crossAxisCount: cols,
+                            mainAxisSpacing: 8 * density,
+                            crossAxisSpacing: 12 * density,
+                            itemCount: min(comics.length, _displayCount),
+                            itemBuilder: (context, index) {
+                              final comic = comics[index];
+                              final selected = widget.selectedIds.contains(
+                                comic.id,
+                              );
+                              final card = isGrid
+                                  ? JellyComicCard(
+                                      comic: comic,
+                                      heroTag: comicCoverHeroTag('fav', comic),
+                                      onTap: widget.isSelecting
+                                          ? () => widget.onSelect(comic.id)
+                                          : () => _openDetail(context, comic),
+                                      onLongPress: () =>
+                                          widget.onSelect(comic.id),
+                                      showSourceBadge: showInfo,
+                                      updateCount: showInfo
+                                          ? ShelfUpdateService.instance
+                                              .newChapters(
+                                                  ShelfUpdateService.keyForComic(
+                                                      comic.pathWord))
+                                          : null,
+                                    )
+                                  : JellyComicListTile(
+                                      comic: comic,
+                                      heroTag: comicCoverHeroTag('fav', comic),
+                                      onTap: widget.isSelecting
+                                          ? () => widget.onSelect(comic.id)
+                                          : () => _openDetail(context, comic),
+                                      onLongPress: () =>
+                                          widget.onSelect(comic.id),
+                                      showSourceBadge: showInfo,
+                                    );
+                              return StaggeredEntrance(
+                                key: ValueKey('${_session}_${comic.id}'),
+                                index: index,
+                                child: Stack(
+                                  children: [
+                                    card,
+                                    if (widget.isSelecting)
+                                      Positioned(
+                                        top: 4,
+                                        right: 4,
+                                        child: JellySelectBadge(
+                                            selected: selected),
+                                      ),
+                                  ],
+                                ),
+                              );
+                            },
                           );
                         },
                       );
@@ -1259,44 +1272,52 @@ class _BookFavoritesTabState extends State<_BookFavoritesTab> {
                         target: isGrid ? 170 : 360,
                         max: isGrid ? 6 : 4,
                       );
-                      return MasonryGridView.count(
-                        controller: _scrollController,
-                        padding: EdgeInsets.only(
-                          top: 4,
-                          left: 12,
-                          right: 12,
-                          bottom: 12 + JellyNavBar.contentBottomAvoid,
-                        ),
-                        crossAxisCount: cols,
-                        mainAxisSpacing: 8,
-                        crossAxisSpacing: 12,
-                        itemCount: min(books.length, _displayCount),
-                        itemBuilder: (context, index) {
-                          final book = books[index];
-                          final selected = widget.selectedIds.contains(book.id);
-                          final card = JellyBookCard(
-                            book: book,
-                            isGrid: isGrid,
-                            heroTag: bookCoverHeroTag('fav', book),
-                            onTap: widget.isSelecting
-                                ? () => widget.onSelect(book.id)
-                                : () => _openDetail(book),
-                            onLongPress: () => widget.onSelect(book.id),
-                          );
-                          return StaggeredEntrance(
-                            key: ValueKey('book_${book.id}'),
-                            index: index,
-                            child: Stack(
-                              children: [
-                                card,
-                                if (widget.isSelecting)
-                                  Positioned(
-                                    top: 4,
-                                    right: 4,
-                                    child: JellySelectBadge(selected: selected),
-                                  ),
-                              ],
+                      return ListenableBuilder(
+                        listenable: SettingsService(),
+                        builder: (context, _) {
+                          final density = SettingsService().densityScale;
+                          return MasonryGridView.count(
+                            controller: _scrollController,
+                            padding: EdgeInsets.only(
+                              top: 4,
+                              left: 12,
+                              right: 12,
+                              bottom: 12 + JellyNavBar.contentBottomAvoid,
                             ),
+                            crossAxisCount: cols,
+                            mainAxisSpacing: 8 * density,
+                            crossAxisSpacing: 12 * density,
+                            itemCount: min(books.length, _displayCount),
+                            itemBuilder: (context, index) {
+                              final book = books[index];
+                              final selected =
+                                  widget.selectedIds.contains(book.id);
+                              final card = JellyBookCard(
+                                book: book,
+                                isGrid: isGrid,
+                                heroTag: bookCoverHeroTag('fav', book),
+                                onTap: widget.isSelecting
+                                    ? () => widget.onSelect(book.id)
+                                    : () => _openDetail(book),
+                                onLongPress: () => widget.onSelect(book.id),
+                              );
+                              return StaggeredEntrance(
+                                key: ValueKey('book_${book.id}'),
+                                index: index,
+                                child: Stack(
+                                  children: [
+                                    card,
+                                    if (widget.isSelecting)
+                                      Positioned(
+                                        top: 4,
+                                        right: 4,
+                                        child: JellySelectBadge(
+                                            selected: selected),
+                                      ),
+                                  ],
+                                ),
+                              );
+                            },
                           );
                         },
                       );

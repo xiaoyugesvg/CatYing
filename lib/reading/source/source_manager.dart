@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
 import '../services/settings_service.dart';
-import 'builtin_comic_sources.dart';
 import 'config_manga_source.dart';
 import 'copy_manga_source.dart';
 import 'copymanga_config.dart';
@@ -22,6 +21,17 @@ void _log(String message) {
   if (kDebugMode) {
     debugPrint('[SourceManager] $message');
   }
+}
+
+/// 源名称去重：同名时依次追加 `（2）`、`（3）`…
+String uniqueSourceName(String base, Iterable<String> existing) {
+  final names = existing.toSet();
+  if (!names.contains(base)) return base;
+  var i = 2;
+  while (names.contains('$base（$i）')) {
+    i++;
+  }
+  return '$base（$i）';
 }
 
 /// 封面/列表缩略图加载头（防盗链/UA）。
@@ -134,18 +144,25 @@ class SourceManager extends ChangeNotifier {
       _log('读取书源仓库失败（Legado 漫画源未注册）: $e');
     }
 
-    // 随包内置漫画源（如「瓜子漫画」）：不需要用户导入。
-    // 放在用户源 / Legado 源之后注册 ⇒ 同名时内置源自动带「（2）」后缀。
-    for (final src in builtinComicSources()) {
-      try {
-        _register(src);
-      } catch (e) {
-        _log('内置漫画源注册失败: ${src.id} -> $e');
-      }
-    }
+    // 随包内置漫画源已移除（用户 2026-10-18：去掉内置的「瓜子漫画（2）」）——
+    // 漫画源统一由用户自己导入 / 云端仓库更新。
 
     // 禁用源列表（持久化，与 sources.json 解耦）
     _disabledIds = SettingsService().disabledSourceIds.toSet();
+
+    // 应用用户自定义顺序（用户 2026-10-18：长按源标签拖动后保存的顺序）
+    final savedOrder = SettingsService().mangaSourceOrder;
+    if (savedOrder.isNotEmpty) {
+      final next = <String, MangaSource>{};
+      for (final id in savedOrder) {
+        final s = _sources.remove(id);
+        if (s != null) next[id] = s;
+      }
+      next.addAll(_sources);
+      _sources
+        ..clear()
+        ..addAll(next);
+    }
 
     // 恢复当前源：已保存 id 优先（且未禁用），否则取首个启用源
     final savedId = SettingsService().currentSourceId;
@@ -261,6 +278,14 @@ class SourceManager extends ChangeNotifier {
   List<MangaSource> get enabledSources =>
       sources.where((s) => !_disabledIds.contains(s.id)).toList();
 
+  /// **可浏览**的启用源（有分类/发现规则，能撑起漫画首页板块流）。
+  ///
+  /// 用户 2026-10-18：「如果只是搜索就不要再漫画页显示」——
+  /// 纯搜索源（`supportsCategories == false`）只保留在搜索源选择器里，
+  /// 不再出现在漫画首页的源 chip 行（它们的首页永远是空的）。
+  List<MangaSource> get browsableSources =>
+      enabledSources.where((s) => s.supportsCategories).toList();
+
   /// 源是否启用。
   bool isEnabled(String id) => !_disabledIds.contains(id);
 
@@ -286,11 +311,10 @@ class SourceManager extends ChangeNotifier {
     await setEnabled(list.first, enabled);
   }
 
-  /// 按给定 id 顺序重排源（「拖动排序」用）。
+  /// 按给定 id 顺序重排源（「长按源标签拖动」用）。
   ///
-  /// `_sources` 是 Map，本身有插入顺序；重建它能改顺序，
-  /// 但**顺序不持久化**（下次 reload 会回到 sources.json 的顺序）。
-  /// 所以这里明确说明：本方法只影响本次会话的显示顺序。
+  /// 用户 2026-10-18：顺序现在**会持久化**（存 `manga_source_order_v1`），
+  /// 重启后仍按用户拖出来的顺序展示。
   void reorder(List<String> orderedIds) {
     final next = <String, MangaSource>{};
     for (final id in orderedIds) {
@@ -304,6 +328,18 @@ class SourceManager extends ChangeNotifier {
     _sources
       ..clear()
       ..addAll(next);
+    SettingsService().setMangaSourceOrder(_sources.keys.toList());
+    notifyListeners();
+  }
+
+  /// 从源列表里移除（双击源标签删除用；不做落盘，调用方负责删源本体）。
+  void dropSource(String id) {
+    _sources.remove(id);
+    if (_current?.id == id) {
+      _current = enabledSources.isNotEmpty
+          ? enabledSources.first
+          : (_sources.values.isNotEmpty ? _sources.values.first : null);
+    }
     notifyListeners();
   }
 
@@ -396,6 +432,9 @@ class _RenamedSource extends MangaSource {
 
   @override
   String get name => _displayName;
+
+  @override
+  String get group => _inner.group;
 
   @override
   String get lang => _inner.lang;

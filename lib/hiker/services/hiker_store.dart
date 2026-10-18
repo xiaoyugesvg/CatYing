@@ -260,6 +260,12 @@ class HikerStore extends ChangeNotifier {
       _disabled.remove(id);
     } else {
       _disabled.add(id);
+      // 停用的正是当前源 ⇒ 顺延到第一个仍启用的源（与 RSS / 影视的换源语义一致），
+      // 否则首页会继续跑一个用户已经停用的源。
+      if (_currentId == id) {
+        final next = _sources.where(isEnabled).toList();
+        if (next.isNotEmpty) _currentId = next.first.id;
+      }
     }
     await _savePrefs();
     notifyListeners();

@@ -48,6 +48,8 @@ class HomeController extends GetxController {
   Future<void> loadSorts() async {
     final source = ApiConfig.instance.homeSourceBean.value;
     if (source == null) return;
+    // 每次进入首页加载都算一次新的「首页请求」：切源/重试时旧响应自动作废
+    final reqId = ++_homeRequestId;
 
     // 缓存优先：首页轮播立刻出片
     final cacheKey = 'home_videos:${source.key}';
@@ -73,6 +75,8 @@ class HomeController extends GetxController {
 
     try {
       final result = await SourceService.instance.getSort(source);
+      // 源已切换（用户在等待期间又换了源）→ 丢弃这次旧响应
+      if (reqId != _homeRequestId) return;
       sorts.value = result.$1;
       // ── Webhtv 站点健康：本次「首页/分类」加载成功（Webhtv → 站点健康排序）
       SiteHealthStore.instance.record(source.key, 'home', true);
@@ -95,16 +99,19 @@ class HomeController extends GetxController {
         currentPage.value = 1;
         hasMore.value = true;
         await _loadCategoryVideos(page: 1, sort: sorts.first);
+        if (reqId != _homeRequestId) return;
         // 源没给推荐列表时用第一个分类兜底当幻灯片
         _fillBannerFromCategory(source.key);
       }
     } catch (e) {
+      // 旧源的失败不能覆盖新源的界面
+      if (reqId != _homeRequestId) return;
       // ── Webhtv 站点健康：本次「首页/分类」加载失败
       SiteHealthStore.instance.record(source.key, 'home', false);
       errorMessage.value = _friendlyErrorMessage(e);
     }
 
-    isLoading.value = false;
+    if (reqId == _homeRequestId) isLoading.value = false;
   }
 
   void selectSort(SortData sort) {
@@ -138,6 +145,13 @@ class HomeController extends GetxController {
 
   /// 列表请求序号：筛选/分类快速切换时丢弃过期响应
   int _listRequestId = 0;
+
+  /// 首页级请求序号：**切源**时自增，旧源迟到的响应一律丢弃。
+  ///
+  /// 为什么需要：`getSort()` 对脚本源（猫源/TVBox/Py）要走引擎初始化，
+  /// 耗时可能几秒；如果用户在 A 源还没回来时切到 B 源，
+  /// A 的结果晚到会把 B 的分类/幻灯片覆盖掉（看起来就是"切了源又跳回去"）。
+  int _homeRequestId = 0;
 
   /// 上一次请求的「分类+筛选」签名；变了就跳过缓存强制走网络
   String _lastQuerySig = '';
@@ -314,10 +328,13 @@ class HomeController extends GetxController {
     errorMessage.value = null;
     final source = ApiConfig.instance.homeSourceBean.value;
     if (source == null) return;
+    // 与 loadSorts 共用序号：切源时旧源的迟到响应一律丢弃
+    final reqId = ++_homeRequestId;
 
     isLoading.value = true;
     try {
       final result = await SourceService.instance.getSort(source);
+      if (reqId != _homeRequestId) return;
       sorts.value = result.$1;
       // 同 loadSorts：只在非空时覆盖，别把兜底/缓存的幻灯片清掉
       if (result.$2.isNotEmpty) {
@@ -333,7 +350,7 @@ class HomeController extends GetxController {
           ? keepSort
           : (sorts.isNotEmpty ? sorts.first : null);
       if (sort == null) {
-        isLoading.value = false;
+        if (reqId == _homeRequestId) isLoading.value = false;
         return;
       }
       selectedSort.value = sort;
@@ -345,12 +362,14 @@ class HomeController extends GetxController {
       hasMore.value = true;
       // 不清空旧列表：请求回来再替换，避免刷新时白屏
       await _loadCategoryVideos(page: 1, sort: sort);
+      if (reqId != _homeRequestId) return;
       // 与 loadSorts 同一套兜底：源没给推荐列表就用第一个分类当幻灯片
       _fillBannerFromCategory(source.key);
     } catch (e) {
+      if (reqId != _homeRequestId) return;
       errorMessage.value = _friendlyErrorMessage(e);
     }
-    isLoading.value = false;
+    if (reqId == _homeRequestId) isLoading.value = false;
   }
 
   String _friendlyErrorMessage(Object error) {

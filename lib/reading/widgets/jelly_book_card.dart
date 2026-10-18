@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/book.dart';
 import '../services/book_favorites_service.dart';
 import '../services/book_reading_progress_service.dart';
+import '../services/settings_service.dart';
 import '../theme/jelly_theme.dart';
 import '../../common/theme.dart';
 
@@ -148,40 +149,49 @@ class _JellyBookCardState extends State<JellyBookCard>
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return GestureDetector(
-      onTapDown: _onTapDown,
-      onTapUp: _onTapUp,
-      onTapCancel: _onTapCancel,
-      onLongPress: widget.onLongPress == null
-          ? null
-          : () {
-              setState(() => _isPressed = false);
-              _controller.reverse();
-              widget.onLongPress!();
-            },
-      child: AnimatedBuilder(
-        animation: _scaleAnimation,
-        builder: (context, child) => Transform.scale(
-          scale: _scaleAnimation.value,
-          child: child,
-        ),
-        // ── 用户 2026-10-07：「名称不要纳入进卡片，只有封面才是卡片」──
-        //   宫格：卡片外壳只包封面，书名/作者/收藏落在卡片**外面** ✓；
-        //   列表：本来就是"一整行一张卡"，保持不变 ✓
-        child: widget.isGrid
-            ? _buildGrid(isDark)
-            : _card(isDark, _buildList(isDark)),
-      ),
+    // 卡片外观跟随「显示设置」：封面圆角 + 卡片信息角标。
+    // 用 ListenableBuilder 监听，设置页改完返回即生效（无需重建整页）。
+    return ListenableBuilder(
+      listenable: SettingsService(),
+      builder: (context, _) {
+        final radius = SettingsService().coverRadiusPx;
+        final showInfo = SettingsService().cardInfo;
+        return GestureDetector(
+          onTapDown: _onTapDown,
+          onTapUp: _onTapUp,
+          onTapCancel: _onTapCancel,
+          onLongPress: widget.onLongPress == null
+              ? null
+              : () {
+                  setState(() => _isPressed = false);
+                  _controller.reverse();
+                  widget.onLongPress!();
+                },
+          child: AnimatedBuilder(
+            animation: _scaleAnimation,
+            builder: (context, child) => Transform.scale(
+              scale: _scaleAnimation.value,
+              child: child,
+            ),
+            // ── 用户 2026-10-07：「名称不要纳入进卡片，只有封面才是卡片」──
+            //   宫格：卡片外壳只包封面，书名/作者/收藏落在卡片**外面** ✓；
+            //   列表：本来就是"一整行一张卡"，保持不变 ✓
+            child: widget.isGrid
+                ? _buildGrid(isDark, radius, showInfo)
+                : _card(isDark, _buildList(isDark), radius),
+          ),
+        );
+      },
     );
   }
 
   /// 卡片外壳（底色 + 阴影 + 圆角 + 裁剪）。宫格只包封面，列表包整行。
-  Widget _card(bool isDark, Widget child) {
+  Widget _card(bool isDark, Widget child, double radius) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       curve: Curves.easeOut,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(radius),
         color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
         boxShadow: _isPressed
             ? [
@@ -202,7 +212,7 @@ class _JellyBookCardState extends State<JellyBookCard>
               ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(radius),
         child: child,
       ),
     );
@@ -278,7 +288,7 @@ class _JellyBookCardState extends State<JellyBookCard>
     );
   }
 
-  Widget _buildGrid(bool isDark) {
+  Widget _buildGrid(bool isDark, double radius, bool showInfo) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -311,31 +321,34 @@ class _JellyBookCardState extends State<JellyBookCard>
                   ),
                 ),
               ),
-              Positioned(
-                top: 6,
-                left: 6,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: JellyTheme.primary.withValues(alpha: 0.9),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    _extBadge,
-                    style: const TextStyle(
-                      fontSize: AppTheme.fontCaption,
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
+              // 格式角标（TXT/EPUB…）：显示设置里关掉「卡片信息」时隐藏
+              if (showInfo)
+                Positioned(
+                  top: 6,
+                  left: 6,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: JellyTheme.primary.withValues(alpha: 0.9),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      _extBadge,
+                      style: const TextStyle(
+                        fontSize: AppTheme.fontCaption,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ),
-              ),
             ],
           ),
         ),
+          radius,
         ),
         // 名称 / 元信息：放在卡片**外面**
         Padding(

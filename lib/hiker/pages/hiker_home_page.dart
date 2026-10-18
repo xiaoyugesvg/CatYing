@@ -17,6 +17,7 @@ import '../services/hiker_store.dart';
 import '../widgets/hiker_blocks.dart';
 import '../widgets/hiker_widgets.dart';
 import 'hiker_detail_page.dart';
+import 'hiker_manage_page.dart';
 import 'hiker_search_page.dart';
 import 'hiker_settings_page.dart';
 
@@ -38,6 +39,12 @@ class _HikerHomePageState extends State<HikerHomePage> {
   bool _loading = false;
   String? _error;
   List<HikerItem> _items = const [];
+
+  /// 当前列表属于哪个源。
+  ///
+  /// 从「海阔设置」返回时用它判断当前源是否被删除/切换过：
+  /// 变了就必须重载，否则界面还挂着上一个源的列表。
+  String _loadedSrcId = '';
 
   /// 当前分类（空 = 首页）
   String _cate = '';
@@ -170,6 +177,7 @@ class _HikerHomePageState extends State<HikerHomePage> {
         _items = const [];
         _error = null;
         _hasMore = false;
+        _loadedSrcId = '';
       });
       return;
     }
@@ -223,6 +231,7 @@ class _HikerHomePageState extends State<HikerHomePage> {
       _elapsedMs = r.elapsedMs;
       _error = r.ok ? null : (r.error ?? '规则执行失败');
       _hasMore = r.ok && r.nextPage.isNotEmpty && r.list.isNotEmpty;
+      _loadedSrcId = src.id;
       _items = page == 1
           ? r.list
           : [
@@ -666,10 +675,23 @@ class _HikerHomePageState extends State<HikerHomePage> {
     );
     if (picked != null && picked != _store.currentId) {
       await _store.setCurrent(picked);
+      // ⚠️ 换源必须把**上一个源的会话状态**全部清掉：
+      //    · `_lazyChain` 是上一源规则的链条，带给新源会查错内容甚至空列表；
+      //    · `_lastVars` / `_onClose` 同理属于上一个源；
+      //    · 分页与统计也归零，避免"新源第一页却带着旧页码"。
       setState(() {
         _cate = '';
         _cateName = '首页';
         _items = const [];
+        _lazyChain = const [];
+        _lastVars = const {};
+        _onClose.clear();
+        _didAutoRefresh = false;
+        _page = 1;
+        _hasMore = false;
+        _reqCount = 0;
+        _elapsedMs = 0;
+        _error = null;
       });
       _load(page: 1);
     }
@@ -679,7 +701,26 @@ class _HikerHomePageState extends State<HikerHomePage> {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const HikerSettingsPage()),
     );
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    // 设置页里可能删掉/停用了当前源 → 回到首页必须换到新的 current 并重载，
+    // 否则列表还挂着一个已经不存在的源。
+    final cur = _store.current;
+    if (cur?.id != _loadedSrcId) {
+      setState(() {
+        _cate = '';
+        _cateName = '首页';
+        _items = const [];
+        _lazyChain = const [];
+        _lastVars = const {};
+        _onClose.clear();
+        _didAutoRefresh = false;
+        _page = 1;
+        _hasMore = false;
+      });
+      _load(page: 1);
+    } else {
+      setState(() {});
+    }
   }
 
   void _openSearch() {
@@ -724,7 +765,8 @@ class _HikerHomePageState extends State<HikerHomePage> {
 
   Widget _configHint(HikerSource s) {
     return GestureDetector(
-      onTap: _openSettings,
+      // 用户 2026-10-18：直接弹「源配置」编辑框，不再绕到海阔设置首页
+      onTap: () => showHikerSourceConfigDialog(context, s),
       child: Container(
         margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -781,28 +823,57 @@ class _HikerHomePageState extends State<HikerHomePage> {
                     ),
                   ),
                   const SizedBox(width: 4),
-                  Icon(Icons.expand_more_rounded,
-                      size: 16, color: AppTheme.textTertiary),
+                  // 换源/加载中：箭头换成小转圈，点下去立刻有反馈
+                  if (_loading)
+                    SizedBox(
+                      width: 12,
+                      height: 12,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.6,
+                        color: AppTheme.accentColor,
+                      ),
+                    )
+                  else
+                    Icon(Icons.expand_more_rounded,
+                        size: 16, color: AppTheme.textTertiary),
                 ],
               ),
             ),
             const Spacer(),
-            IconButton(
-              tooltip: '搜索',
-              onPressed: _openSearch,
-              icon: Icon(Icons.search_rounded,
-                  color: AppTheme.textSecondary, size: 20),
-            ),
-            IconButton(
-              tooltip: '海阔设置',
-              onPressed: _openSettings,
-              icon: Icon(Icons.tune_rounded, color: AppTheme.textSecondary, size: 20),
-            ),
+            // 顶栏图标统一成 30×30 圆底（与 CCTV/RSS/影视首页同款）
+            _topIcon(Icons.search_rounded, '搜索', _openSearch),
+            const SizedBox(width: 8),
+            _topIcon(Icons.tune_rounded, '海阔设置', _openSettings),
           ],
         ),
       ),
     );
   }
+
+  /// 顶栏圆形图标按钮（与 RSS / 影视首页同款）
+  Widget _topIcon(IconData icon, String tooltip, VoidCallback? onTap) =>
+      Tooltip(
+        message: tooltip,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: AppTheme.backgroundTertiary,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              icon,
+              size: 15,
+              color: onTap == null
+                  ? AppTheme.textTertiary
+                  : AppTheme.textSecondary,
+            ),
+          ),
+        ),
+      );
 
   Widget _categoryBar(List<({String name, String url})> cats) {
     final items = <({String name, String url})>[
@@ -823,14 +894,19 @@ class _HikerHomePageState extends State<HikerHomePage> {
               padding: const EdgeInsets.symmetric(horizontal: 14),
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: on ? AppTheme.accentSurface : AppTheme.backgroundTertiary,
-                borderRadius: BorderRadius.circular(10),
+                // 与 RSS / 影视首页分类条同一套胶囊：选中实底 + 白字
+                color: on ? AppTheme.accentColor : AppTheme.backgroundTertiary,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: on ? AppTheme.accentColor : AppTheme.borderLight,
+                  width: 0.6,
+                ),
               ),
               child: Text(c.name,
                   style: TextStyle(
-                      color: on ? AppTheme.accentOnSurface : AppTheme.textSecondary,
-                      fontSize: AppTheme.fontFootnote,
-                      fontWeight: on ? FontWeight.w700 : FontWeight.w500)),
+                      color: on ? Colors.white : AppTheme.textSecondary,
+                      fontSize: AppTheme.fontSubhead,
+                      fontWeight: on ? FontWeight.w600 : FontWeight.normal)),
             ),
           );
         }).toList(),

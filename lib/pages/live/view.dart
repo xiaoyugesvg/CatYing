@@ -2,6 +2,7 @@ import 'dart:async';
 import '../../widgets/common_widgets.dart';
 import 'dart:io';
 
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -308,9 +309,24 @@ class _LivePageState extends State<LivePage> {
   void _autoplayCurrent() {
     // 直播要出声了 → 让音乐/点播先闭嘴（用户能直接听到的"双声"问题）
     unawaited(AudioFocus.request('live'));
-    final url = _controller.currentChannel?.playUrl ?? '';
-    if (url.isEmpty) return;
-    _playChannel(url);
+    final ch = _controller.currentChannel;
+    if (ch == null) return;
+    _playChannelEntry(ch);
+  }
+
+  /// 当前频道的全部线路 + 正在尝试的下标（播放失败自动顺延下一条）。
+  List<String> _playCandidates = const [];
+  int _playCandidateIndex = 0;
+
+  /// 从频道条目开播：记住它的所有备用线路，主线路失败时自动换下一条。
+  ///
+  /// 直播源里同一频道常带多个地址（不同 CDN/清晰度），原来只播 `urls.first`
+  /// —— 第一条失效就整台黑屏，明明还有可用线路。
+  void _playChannelEntry(LiveChannel ch) {
+    _playCandidates = ch.urls;
+    _playCandidateIndex = 0;
+    if (_playCandidates.isEmpty) return;
+    _playChannel(_playCandidates.first);
   }
 
   void _playChannel(String url) {
@@ -446,6 +462,19 @@ class _LivePageState extends State<LivePage> {
       AppLog.instance.log('[live] 播放失败: '
           '核心=${_iosUseKs ? 'KS(FF)' : (_iosUseMpv ? 'MPV' : (Platform.isIOS ? 'AVPlayer' : 'MPV'))} '
           'url=$_lastOpenUrl 错误=$msg');
+      // 备用线路：同频道还有下一条地址 → 自动顺延重开，不打断观看。
+      // 只在"报错的正是当前候选"时才顺延，避免别的入口开播时误用旧列表。
+      final hasMore = _playCandidates.isNotEmpty &&
+          _playCandidateIndex + 1 < _playCandidates.length &&
+          _lastOpenUrl == _playCandidates[_playCandidateIndex];
+      if (hasMore) {
+        _playCandidateIndex++;
+        final next = _playCandidates[_playCandidateIndex];
+        AppLog.instance.log('[live] 主线路失败，换备用线路 '
+            '($_playCandidateIndex/${_playCandidates.length - 1}): $next');
+        _playChannel(next);
+        return;
+      }
       setState(() {
         _playError = msg.isEmpty ? '播放失败，点此重试' : msg;
         _switching = false;
@@ -568,9 +597,10 @@ class _LivePageState extends State<LivePage> {
     if (!mounted) return;
     setState(() {}); // 刷新右上按钮的内核短标签
     // 立即用新内核重新拉流（无正在播放的频道时仅保存偏好）
-    final url = _controller.currentChannel?.playUrl ?? '';
-    if (url.isNotEmpty) {
-      _playChannel(url);
+    final ch = _controller.currentChannel;
+    if (ch != null && ch.playUrl.isNotEmpty) {
+      // 走 entry：重置备用线路下标，重试时仍能自动顺延
+      _playChannelEntry(ch);
     }
     AppToast.message('已切换到 ${picked.title}');
   }
@@ -1500,10 +1530,10 @@ class _LivePageState extends State<LivePage> {
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: () {
-                  final url = current?.playUrl ?? '';
-                  if (url.isNotEmpty) {
+                  // 重试也走 entry：从主线路重新开始，备用线路重新可用
+                  if (current != null && current.playUrl.isNotEmpty) {
                     setState(() => _playError = null);
-                    _playChannel(url);
+                    _playChannelEntry(current);
                   }
                 },
                 child: Container(
@@ -1924,52 +1954,102 @@ class _LivePageState extends State<LivePage> {
                   Flexible(
                     child: ListView.separated(
                       shrinkWrap: true,
-                      padding: EdgeInsets.symmetric(horizontal: 8),
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                       itemCount: srcs.length,
-                      separatorBuilder: (_, __) =>
-                          Divider(height: 1, color: AppTheme.borderLight),
+                      separatorBuilder: (_, __) => const SizedBox(height: 6),
                       itemBuilder: (_, i) {
                         final src = srcs[i];
                         final isActive = c.selectedSourceIndex == i;
-                        return ListTile(
-                          dense: true,
-                          leading: Icon(
-                            Icons.play_circle_fill,
-                            color: isActive
-                                ? AppTheme.accentColor
-                                : AppTheme.textTertiary,
-                            size: 22,
-                          ),
-                          title: Text(
-                            src.name,
-                            style: TextStyle(
-                              color: isActive
-                                  ? AppTheme.accentColor
-                                  : AppTheme.textPrimary,
-                              fontSize: AppTheme.fontBody,
+                        return Material(
+                          color: isActive
+                              ? AppTheme.accentColor.withValues(alpha: 0.12)
+                              : AppTheme.backgroundTertiary
+                                  .withValues(alpha: 0.55),
+                          borderRadius: BorderRadius.circular(12),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(12),
+                            onTap: () async {
+                              Navigator.pop(ctx);
+                              await c.selectSource(i);
+                              if (mounted) _autoplayCurrent();
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 10),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(12),
+                                border: isActive
+                                    ? Border.all(
+                                        color: AppTheme.accentColor
+                                            .withValues(alpha: 0.45),
+                                        width: 0.8)
+                                    : null,
+                              ),
+                              child: Row(
+                                children: [
+                                  // 状态点：绿=已加载，灰=未下载
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: isActive
+                                          ? AppTheme.accentColor
+                                          : (src.loaded
+                                              ? const Color(0xFF4CAF50)
+                                              : AppTheme.textTertiary),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          src.name,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: isActive
+                                                ? AppTheme.accentColor
+                                                : AppTheme.textPrimary,
+                                            fontSize: AppTheme.fontBody,
+                                            fontWeight: isActive
+                                                ? FontWeight.w600
+                                                : FontWeight.w500,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          isActive
+                                              ? '当前播放'
+                                              : src.statusText(),
+                                          style: TextStyle(
+                                            color: isActive
+                                                ? AppTheme.accentColor
+                                                    .withValues(alpha: 0.75)
+                                                : AppTheme.textTertiary,
+                                            fontSize: AppTheme.fontCaption,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Icon(
+                                    isActive
+                                        ? Icons.check_circle_rounded
+                                        : Icons.chevron_right_rounded,
+                                    color: isActive
+                                        ? AppTheme.accentColor
+                                        : AppTheme.textTertiary,
+                                    size: 20,
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                          subtitle: Text(
-                            isActive ? '当前播放' : src.statusText(),
-                            style: TextStyle(
-                              color: isActive
-                                  ? AppTheme.accentColor.withValues(alpha: 0.7)
-                                  : AppTheme.textTertiary,
-                              fontSize: AppTheme.fontCaption,
-                            ),
-                          ),
-                          trailing: isActive
-                              ? Icon(
-                                  Icons.check_circle,
-                                  color: AppTheme.accentColor,
-                                  size: 20,
-                                )
-                              : null,
-                          onTap: () async {
-                            Navigator.pop(ctx);
-                            await c.selectSource(i);
-                            if (mounted) _autoplayCurrent();
-                          },
                         );
                       },
                     ),
@@ -2024,50 +2104,81 @@ class _LivePageState extends State<LivePage> {
                 Flexible(
                   child: ListView.separated(
                     shrinkWrap: true,
-                    padding: EdgeInsets.symmetric(horizontal: 8),
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                     itemCount: groups.length,
-                    separatorBuilder: (_, __) =>
-                        Divider(height: 1, color: AppTheme.borderLight),
+                    separatorBuilder: (_, __) => const SizedBox(height: 6),
                     itemBuilder: (_, i) {
                       final g = groups[i];
                       final selected = c.selectedGroup == i;
-                      return ListTile(
-                        dense: true,
-                        leading: Icon(
-                          Icons.playlist_play,
-                          color: selected
-                              ? AppTheme.accentColor
-                              : AppTheme.textTertiary,
-                          size: 22,
-                        ),
-                        title: Text(
-                          g.name,
-                          style: TextStyle(
-                            color: selected
-                                ? AppTheme.accentColor
-                                : AppTheme.textPrimary,
-                            fontSize: AppTheme.fontBody,
+                      return Material(
+                        color: selected
+                            ? AppTheme.accentColor.withValues(alpha: 0.12)
+                            : AppTheme.backgroundTertiary
+                                .withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(12),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            c.selectGroup(i);
+                            _autoplayCurrent();
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 10),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              border: selected
+                                  ? Border.all(
+                                      color: AppTheme.accentColor
+                                          .withValues(alpha: 0.45),
+                                      width: 0.8)
+                                  : null,
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.playlist_play_rounded,
+                                  color: selected
+                                      ? AppTheme.accentColor
+                                      : AppTheme.textTertiary,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    g.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: selected
+                                          ? AppTheme.accentColor
+                                          : AppTheme.textPrimary,
+                                      fontSize: AppTheme.fontBody,
+                                      fontWeight: selected
+                                          ? FontWeight.w600
+                                          : FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                                Text(
+                                  '${g.channels.length} 个',
+                                  style: TextStyle(
+                                    color: AppTheme.textTertiary,
+                                    fontSize: AppTheme.fontCaption,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                if (selected)
+                                  Icon(
+                                    Icons.check_circle_rounded,
+                                    color: AppTheme.accentColor,
+                                    size: 20,
+                                  ),
+                              ],
+                            ),
                           ),
                         ),
-                        subtitle: Text(
-                          '${g.channels.length} 个频道',
-                          style: TextStyle(
-                            color: AppTheme.textTertiary,
-                            fontSize: AppTheme.fontCaption,
-                          ),
-                        ),
-                        trailing: selected
-                            ? Icon(
-                                Icons.check_circle,
-                                color: AppTheme.accentColor,
-                                size: 20,
-                              )
-                            : null,
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          c.selectGroup(i);
-                          _autoplayCurrent();
-                        },
                       );
                     },
                   ),
@@ -2322,61 +2433,116 @@ class _LivePageState extends State<LivePage> {
       );
     }
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 0), // 底部 padding 归 0（与首页统一）
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 12),
       itemCount: channels.length,
-      separatorBuilder: (_, __) =>
-          Divider(height: 1, color: AppTheme.borderLight),
+      separatorBuilder: (_, __) => const SizedBox(height: 6),
       itemBuilder: (_, i) {
         final ch = channels[i];
         final selected = c.selectedChannelIndex.value == i;
         final fav = c.isFavorite(ch);
-        return ListTile(
-          dense: true,
-          contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          title: Text(
-            ch.name,
-            style: TextStyle(
-              color: selected ? AppTheme.accentColor : AppTheme.textPrimary,
-              fontSize: AppTheme.fontHeadline,
-              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-            ),
-          ),
-          subtitle: Text(
-            ch.urls.isNotEmpty ? (ch.group) : '未下载',
-            style: TextStyle(
-              color: AppTheme.textTertiary,
-              fontSize: AppTheme.fontCaption,
-            ),
-          ),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => c.toggleFavorite(ch),
-                child: Padding(
-                  padding: EdgeInsets.all(6),
-                  child: Icon(
-                    fav ? Icons.star : Icons.star_border,
-                    color: fav ? AppTheme.accentColor : AppTheme.textTertiary,
-                    size: 20,
+        return Material(
+          color: selected
+              ? AppTheme.accentColor.withValues(alpha: 0.12)
+              : AppTheme.backgroundTertiary.withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () {
+              c.selectChannel(i);
+              _playChannelEntry(ch);
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: selected
+                    ? Border.all(
+                        color: AppTheme.accentColor.withValues(alpha: 0.45),
+                        width: 0.8)
+                    : null,
+              ),
+              child: Row(
+                children: [
+                  // 频道台标（源里带 logo 就显示，加载失败回退 TV 图标）
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      color: AppTheme.backgroundSecondary,
+                      alignment: Alignment.center,
+                      child: (ch.logo ?? '').trim().isEmpty
+                          ? Icon(Icons.live_tv_rounded,
+                              size: 20, color: AppTheme.textTertiary)
+                          : CachedNetworkImage(
+                              imageUrl: ch.logo!.trim(),
+                              width: 36,
+                              height: 36,
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, __, ___) => Icon(
+                                  Icons.live_tv_rounded,
+                                  size: 20,
+                                  color: AppTheme.textTertiary),
+                            ),
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          ch.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: selected
+                                ? AppTheme.accentColor
+                                : AppTheme.textPrimary,
+                            fontSize: AppTheme.fontSubhead,
+                            fontWeight: selected
+                                ? FontWeight.w600
+                                : FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          ch.urls.isNotEmpty ? ch.group : '未下载',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: AppTheme.textTertiary,
+                            fontSize: AppTheme.fontCaption,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => c.toggleFavorite(ch),
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: Icon(
+                        fav ? Icons.star_rounded : Icons.star_border_rounded,
+                        color:
+                            fav ? AppTheme.accentColor : AppTheme.textTertiary,
+                        size: 21,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    Icons.play_circle_fill_rounded,
+                    color: selected
+                        ? AppTheme.accentColor
+                        : AppTheme.textTertiary.withValues(alpha: 0.5),
+                    size: 22,
+                  ),
+                ],
               ),
-              SizedBox(width: 4),
-              Icon(
-                Icons.play_circle_fill,
-                color: selected
-                    ? AppTheme.accentColor
-                    : AppTheme.textTertiary.withValues(alpha: 0.5),
-                size: 22,
-              ),
-            ],
+            ),
           ),
-          onTap: () {
-            c.selectChannel(i);
-            _playChannel(ch.playUrl);
-          },
         );
       },
     );

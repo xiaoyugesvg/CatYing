@@ -43,6 +43,12 @@ class MiniAppMarketViewState extends State<MiniAppMarketView> {
   String? _error;
   bool _loading = false;
 
+  /// 当前清单属于哪个市场地址（换地址时先清旧清单，避免"地址已换、列表还是旧的"）
+  String _loadedUrl = '';
+
+  /// 载入序号：快速换地址/连点加载时，旧响应一律丢弃
+  int _loadSeq = 0;
+
   /// 正在安装的 appId
   final _installing = <String>{};
 
@@ -56,6 +62,7 @@ class MiniAppMarketViewState extends State<MiniAppMarketView> {
     if (pre != null && pre.isNotEmpty) {
       // 导入时已解析过 → 直接用，不再下载；地址也顺手记住
       _list = pre;
+      _loadedUrl = _urlCtrl.text.trim();
       if (_urlCtrl.text.isNotEmpty) _service.setMarketUrl(_urlCtrl.text);
     } else if (_urlCtrl.text.isNotEmpty) {
       _load();
@@ -73,6 +80,7 @@ class MiniAppMarketViewState extends State<MiniAppMarketView> {
     if (pre != null && pre.isNotEmpty) {
       setState(() {
         _list = pre;
+        _loadedUrl = incoming;
         _error = null;
         _loading = false;
       });
@@ -94,22 +102,27 @@ class MiniAppMarketViewState extends State<MiniAppMarketView> {
       AppToast.message('先填市场地址');
       return;
     }
+    final seq = ++_loadSeq;
     setState(() {
       _loading = true;
       _error = null;
+      // 换了地址：先清掉旧地址的清单，别让两个市场的条目混在一屏
+      if (url != _loadedUrl) _list = null;
     });
     // 记住地址：下次进「市场」自动填回并加载
     await _service.setMarketUrl(url);
     try {
       final list = await _service.fetchMarket(url);
-      if (!mounted) return;
+      // 期间又换过地址/重新加载 → 这次结果作废
+      if (!mounted || seq != _loadSeq) return;
       setState(() {
         _list = list;
+        _loadedUrl = url;
         _loading = false;
         _error = (list == null || list.isEmpty) ? '这个地址不是小程序市场清单' : null;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || seq != _loadSeq) return;
       setState(() {
         _loading = false;
         _error = '加载失败: $e';
@@ -137,6 +150,21 @@ class MiniAppMarketViewState extends State<MiniAppMarketView> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _addressRow(),
+        // 已有清单时重新加载：顶部细进度条，避免"点了加载没反应"
+        if (_loading && (_list?.isNotEmpty ?? false))
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppTheme.spacingMD, 8, AppTheme.spacingMD, 0),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(2),
+              child: LinearProgressIndicator(
+                minHeight: 2,
+                color: AppTheme.accentColor,
+                backgroundColor:
+                    AppTheme.textTertiary.withValues(alpha: 0.18),
+              ),
+            ),
+          ),
         const SizedBox(height: 10),
         Expanded(child: _body()),
       ],

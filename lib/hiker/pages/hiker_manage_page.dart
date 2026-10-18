@@ -15,6 +15,98 @@ import '../services/hiker_files.dart';
 import '../services/hiker_prefs.dart';
 import '../services/hiker_store.dart';
 
+/// 弹出「源配置」编辑框 —— **首页的「去设置」和源管理页共用**。
+///
+/// 用户 2026-10-18：「去设置就不能直接到源配置吗？」
+/// 原来首页提示只会跳到海阔设置首页，用户还得再进「源管理」找到该源、
+/// 再点调节图标；现在直接弹这个框，一步到位。
+Future<void> showHikerSourceConfigDialog(
+    BuildContext context, HikerSource s) async {
+  final store = HikerStore.instance;
+  final existing = store.configOf(s.id);
+  final ctrl = TextEditingController(
+    text: existing.isEmpty
+        ? ''
+        : const JsonEncoder.withIndent('  ').convert(existing),
+  );
+  // 从规则里榨出用到的 config 键，给用户一个"要填什么"的提示
+  final keys = s.configKeys;
+
+  final saved = await showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: AppTheme.backgroundCard,
+      title: Text('源配置 · ${s.title}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+              color: AppTheme.textPrimary, fontSize: AppTheme.fontHeadline)),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              keys.isEmpty
+                  ? '这个源的规则没有用到 config.xxx。'
+                  : '规则用到的配置键：${keys.map((k) => 'config.$k').join('、')}',
+              style: TextStyle(
+                  color: keys.isEmpty
+                      ? AppTheme.textTertiary
+                      : AppTheme.accentOnSurface,
+                  fontSize: AppTheme.fontCaption,
+                  height: 1.5),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: ctrl,
+              maxLines: 6,
+              style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontFootnote),
+              decoration: InputDecoration(
+                hintText: '{\n  "host": "https://xxx.com"\n}',
+                hintStyle: TextStyle(color: AppTheme.textTertiary),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text('留空 = 清空该源配置；必须是 JSON 对象。',
+                style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontCaption)),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(),
+          child: Text('取消', style: TextStyle(color: AppTheme.textSecondary)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(ctrl.text),
+          child:
+              Text('保存', style: TextStyle(color: AppTheme.accentOnSurface)),
+        ),
+      ],
+    ),
+  );
+  ctrl.dispose();
+  if (saved == null) return;
+  if (!isJsonObjectText(saved)) {
+    AppToast.error('不是合法的 JSON 对象');
+    return;
+  }
+  final t = saved.trim();
+  final cfg = t.isEmpty
+      ? <String, dynamic>{}
+      : Map<String, dynamic>.from(jsonDecode(t) as Map);
+  await store.saveConfig(s.id, cfg);
+  AppToast.message(cfg.isEmpty ? '已清空该源配置' : '已保存源配置');
+}
+
 /// 「海阔源管理」—— 导入 / 启停 / 删除 / 逐源配置。
 ///
 /// 从「海阔设置 → 海阔源管理」进入；本页只动 `HikerStore`，与其它模块无关。
@@ -166,80 +258,8 @@ class _HikerManagePageState extends State<HikerManagePage> {
 
   // ── 逐源配置（规则里的 config.xxx）─────────────────────
 
-  Future<void> _editConfig(HikerSource s) async {
-    final existing = _store.configOf(s.id);
-    final ctrl = TextEditingController(
-      text: existing.isEmpty ? '' : const JsonEncoder.withIndent('  ').convert(existing),
-    );
-    // 从规则里榨出用到的 config 键，给用户一个"要填什么"的提示
-    final keys = s.configKeys;
-
-    final saved = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.backgroundCard,
-        title: Text('源配置 · ${s.title}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-                color: AppTheme.textPrimary, fontSize: AppTheme.fontHeadline)),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                keys.isEmpty
-                    ? '这个源的规则没有用到 config.xxx。'
-                    : '规则用到的配置键：${keys.map((k) => 'config.$k').join('、')}',
-                style: TextStyle(
-                    color: keys.isEmpty ? AppTheme.textTertiary : AppTheme.accentOnSurface,
-                    fontSize: AppTheme.fontCaption,
-                    height: 1.5),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: ctrl,
-                maxLines: 6,
-                style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTheme.fontFootnote),
-                decoration: InputDecoration(
-                  hintText: '{\n  "host": "https://xxx.com"\n}',
-                  hintStyle: TextStyle(color: AppTheme.textTertiary),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text('留空 = 清空该源配置；必须是 JSON 对象。',
-                  style: TextStyle(
-                      color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption)),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: Text('取消', style: TextStyle(color: AppTheme.textSecondary)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(ctrl.text),
-            child: Text('保存', style: TextStyle(color: AppTheme.accentOnSurface)),
-          ),
-        ],
-      ),
-    );
-    if (saved == null) return;
-    if (!isJsonObjectText(saved)) {
-      AppToast.error('不是合法的 JSON 对象');
-      return;
-    }
-    final t = saved.trim();
-    final cfg = t.isEmpty
-        ? <String, dynamic>{}
-        : Map<String, dynamic>.from(jsonDecode(t) as Map);
-    await _store.saveConfig(s.id, cfg);
-    if (mounted) AppToast.message(cfg.isEmpty ? '已清空该源配置' : '已保存源配置');
-  }
+  Future<void> _editConfig(HikerSource s) =>
+      showHikerSourceConfigDialog(context, s);
 
   // ── 通用小弹窗 ────────────────────────────────────────
 

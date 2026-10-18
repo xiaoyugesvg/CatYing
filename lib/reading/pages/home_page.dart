@@ -54,6 +54,13 @@ class _HomePageState extends State<HomePage>
   /// 书架页外部触发多选（底部导航「书架」上滑时自增，书架页监听进入多选模式）
   final ValueNotifier<int> _shelfSelectTrigger = ValueNotifier(0);
 
+  /// 每个 tab 上一次打开的内嵌子页（如「图书 → 拉绳 → 书源页」）。
+  ///
+  /// 用户 2026-10-18：图书 tab 打开书源页后切到漫画、再切回图书，
+  /// 应该**回到书源页**而不是被重置成图书首页。
+  /// 之前只有一个全局 `shellEmbeddedPage`，切 tab 时被无条件清空。
+  final Map<NavTab, Widget?> _embeddedByTab = {};
+
   // NavTab 与导航项、页面的映射
   static final Map<NavTab, JellyNavItem> _tabNavItems = {
     NavTab.manga: JellyNavItem(icon: Icons.palette_rounded, label: '漫画'),
@@ -77,10 +84,28 @@ class _HomePageState extends State<HomePage>
     )..value = 1;
     // 监听设置变化（默认首页、可见 tab 变化时响应）
     SettingsService().addListener(_onSettingsChanged);
+    // 内嵌子页被**主动关闭**（子页自己的返回键）时，同步清掉当前 tab 的记忆，
+    // 否则下次切回该 tab 会莫名其妙又冒出书源页。
+    shellEmbeddedPage.addListener(_onEmbeddedChanged);
+  }
+
+  void _onEmbeddedChanged() {
+    if (!mounted) return;
+    final page = shellEmbeddedPage.value;
+    setState(() {
+      if (page == null) {
+        // 子页自己的返回键关闭 → 清掉当前 tab 的记忆
+        _embeddedByTab.remove(_currentTab);
+      } else {
+        // 打开内嵌子页 → 记到**当前 tab** 名下，切走它也不会被销毁
+        _embeddedByTab[_currentTab] = page;
+      }
+    });
   }
 
   @override
   void dispose() {
+    shellEmbeddedPage.removeListener(_onEmbeddedChanged);
     SettingsService().removeListener(_onSettingsChanged);
     _shelfSelectTrigger.dispose();
     _tabAnim.dispose();
@@ -90,59 +115,23 @@ class _HomePageState extends State<HomePage>
   void _onSettingsChanged() {
     final visible = SettingsService().visibleNavTabs;
     if (!visible.contains(_currentTab)) {
-      // 当前 tab 被隐藏，切到第一个可见 tab
+      // 当前 tab 被隐藏，切到第一个可见 tab（同时同步内嵌页通知器）
       setState(() => _currentTab = visible.first);
+      shellEmbeddedPage.value = _embeddedByTab[visible.first];
     }
   }
 
   /// tab 内容：`IndexedStack` **保各 tab 状态**（滚动位置等 ✓）+
   /// 切换时给整块内容一个**淡入 + 从点击方向轻微滑入**的进场动画 ✓。
-  /// 内嵌子页（书源页 ↔ 图书页）与 tab 内容之间的**滑入 / 滑出**切换。
-  /// 从 `build` 里抽出来：宽屏左侧竖栏与窄屏底部栏**两条路径共用同一份内容** ✓。
-  Widget _embeddedOrTabs(int currentIndex, List<Widget> pages) {
-    return ValueListenableBuilder<Widget?>(
-      valueListenable: shellEmbeddedPage,
-      builder: (_, embedded, __) {
-        // ✅ 内嵌子页（书源页 ↔ 图书页）**滑入 / 滑出**，不再是"瞬间替换" ✓
-        //   · 打开：内嵌页从右滑入，压在底下的 tab 内容**不动** ✓
-        //   · 关闭：内嵌页向右滑出，tab 内容原地露出 ✓
-        //   ⇒ 两层永不互相穿过（用户实测过"界面切换有点重叠"✗）
-        final opening = embedded != null;
-        return AnimatedSwitcher(
-          duration: const Duration(milliseconds: 280),
-          layoutBuilder: (current, previous) => Stack(
-            fit: StackFit.expand,
-            children: [
-              ...previous,
-              if (current != null) current,
-            ],
-          ),
-          transitionBuilder: (child, anim) {
-            // 只有**内嵌页**动：开 = 进场（正向），关 = 退场（反向）；
-            // tab 内容始终不动 ✓
-            final moves = opening
-                ? anim.status != AnimationStatus.reverse
-                : anim.status == AnimationStatus.reverse;
-            if (!moves) return child;
-            return SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(1, 0),
-                end: Offset.zero,
-              ).animate(CurvedAnimation(
-                parent: anim,
-                curve: Curves.easeOutCubic,
-                reverseCurve: Curves.easeInCubic,
-              )),
-              child: child,
-            );
-          },
-          child: embedded ?? _tabContent(currentIndex, pages),
-        );
-      },
-    );
-  }
-
-  Widget _tabContent(int currentIndex, List<Widget> pages) {
+  ///
+  /// ── 内嵌子页（书源页等）的渲染方式（用户 2026-10-18）──────────────
+  /// 每个 tab 的内嵌子页**放进该 tab 的槽位里、跟随 IndexedStack 常驻**，
+  /// 而不是全局只留一份「当前内嵌页」：
+  ///   · 图书 tab 打开书源页 → 切漫画 → 再切回图书 ⇒ 书源页仍在（State 也没丢）；
+  ///   · 只有主动点「当前 tab」或子页自己的返回才会关掉它。
+  /// 之前全局单例在切 tab 时被清空，表现为"切回来变回图书首页"。
+  Widget _embeddedOrTabs(int currentIndex, List<NavTab> visible, List<Widget> pages) {
+    final index = currentIndex.clamp(0, pages.length - 1);
     return AnimatedBuilder(
       animation: _tabAnim,
       builder: (context, child) {
@@ -156,27 +145,46 @@ class _HomePageState extends State<HomePage>
           ),
         );
       },
-      child: IndexedStack(index: currentIndex, children: pages),
+      child: IndexedStack(
+        index: index,
+        children: [
+          for (var i = 0; i < pages.length; i++)
+            _tabSlot(i < visible.length ? visible[i] : _currentTab, pages[i]),
+        ],
+      ),
+    );
+  }
+
+  /// 单个 tab 的槽位：tab 内容 + （可选）覆盖其上的内嵌子页。
+  /// 内嵌页即使切换 tab 也保持挂载（IndexedStack 只隐藏不销毁）⇒ 状态记忆。
+  Widget _tabSlot(NavTab tab, Widget content) {
+    final embedded = _embeddedByTab[tab];
+    if (embedded == null) return content;
+    return Stack(
+      fit: StackFit.expand,
+      children: [content, embedded],
     );
   }
 
   /// 底部导航栏上滑回调：书架 tab 上滑唤起批量多选（参考 cmbok 引导）
   /// 导航项点击（底部胶囊栏 + 宽屏左侧竖栏**共用** ✓，避免两处逻辑各写一遍）
   void _onNavTap(int index, List<NavTab> visible, int currentIndex) {
-    setState(() {
-      // 切 tab 进场动画：按"往左 / 往右"给个方向 ✓
-      if (index != currentIndex) {
-        _tabDir = index > currentIndex ? 1 : -1;
-        _tabAnim.forward(from: 0);
-      }
-      _currentTab = visible[index];
-      // 内嵌页（书源页等）打开时，点导航栏要先退出内嵌页：
-      // 否则 body 一直被 embedded 占据，界面切不过去
-      // （用户 2026-10-06 反馈"书源页悬浮导航栏点击没反应"）
-      if (shellEmbeddedPage.value != null) {
-        shellEmbeddedPage.value = null;
-      }
-    });
+    final target = visible[index];
+    final sameTab = index == currentIndex;
+    if (!sameTab) {
+      _tabDir = index > currentIndex ? 1 : -1;
+      _tabAnim.forward(from: 0);
+    }
+    setState(() => _currentTab = target);
+    if (sameTab) {
+      // 点当前 tab = 主动退出该 tab 的内嵌子页（回到 tab 首页）
+      _embeddedByTab.remove(target);
+      shellEmbeddedPage.value = null;
+    } else {
+      // 切到别的 tab：内嵌页已随各自的槽位常驻，这里只把**全局通知器**
+      // 同步成目标 tab 的状态（读 `shellEmbeddedPage` 的其它逻辑语义一致）。
+      shellEmbeddedPage.value = _embeddedByTab[target];
+    }
   }
 
   void _onNavSlideUp(int index) {
@@ -495,11 +503,11 @@ class _HomePageState extends State<HomePage>
                                 items: navItems,
                               ),
                               Expanded(
-                                child: _embeddedOrTabs(currentIndex, pages),
+                                child: _embeddedOrTabs(currentIndex, visible, pages),
                               ),
                             ],
                           )
-                        : _embeddedOrTabs(currentIndex, pages),
+                        : _embeddedOrTabs(currentIndex, visible, pages),
                   ),
                 ],
               ),

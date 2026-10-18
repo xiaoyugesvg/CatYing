@@ -19,6 +19,7 @@ Future<void> openPlaylist(
   String title, {
   SongSource source = SongSource.netease,
   bool isTopList = false,
+  String? coverUrl,
 }) {
   return Navigator.of(context).push(
     MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
@@ -27,6 +28,7 @@ Future<void> openPlaylist(
         title: title,
         source: source,
         isTopList: isTopList,
+        coverUrl: coverUrl,
       ),
     ),
   );
@@ -39,11 +41,18 @@ class PlaylistDetailPage extends StatefulWidget {
     required this.title,
     this.source = SongSource.netease,
     this.isTopList = false,
+    this.coverUrl,
   });
 
   final int id;
   final String title;
   final SongSource source;
+
+  /// 列表页带过来的封面。
+  ///
+  /// 榜单（`isTopList`）没有歌单信息接口，详情页只能拿歌名/封面；
+  /// 不传的话头部只能是灰占位（用户截图里的"音符占位"）。
+  final String? coverUrl;
 
   /// 这个 id 是**榜单**还是**歌单**？
   ///
@@ -87,7 +96,10 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         _pl = Playlist(
           id: widget.id,
           name: widget.title,
-          coverUrl: r.list.isNotEmpty ? r.list.first.coverUrl : null,
+          // 优先用列表页带来的封面（榜单列表本来就有封面）；
+          // 兜底才取第一首歌的封面 —— 前者才是用户点的那张图。
+          coverUrl: widget.coverUrl ??
+              (r.list.isNotEmpty ? r.list.first.coverUrl : null),
           // ⚠️ `trackCount` 必须给：头部副标题是
           //    `'$trackCount 首 · $creator'`，不填就是 **0 首** ——
           //    而 0 会被当成"没有"，整行副标题**不显示** ✗
@@ -107,7 +119,27 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     final (pl, songs) = await api.playlistDetail(widget.id, source: widget.source);
     if (!mounted) return;
     setState(() {
-      _pl = pl;
+      // 接口没给封面时（部分歌单接口字段缺失），用列表页带来的封面兜底，
+      // 避免详情页只剩一个音符占位（IMG_9021）。
+      _pl = pl ??
+          (songs.isNotEmpty || (widget.coverUrl ?? '').isNotEmpty
+              ? Playlist(
+                  id: widget.id,
+                  name: widget.title,
+                  coverUrl: widget.coverUrl,
+                  trackCount: songs.length,
+                )
+              : null);
+      if (_pl != null && (_pl!.coverUrl ?? '').isEmpty) {
+        _pl = Playlist(
+          id: _pl!.id,
+          name: _pl!.name,
+          coverUrl: widget.coverUrl,
+          trackCount: _pl!.trackCount,
+          description: _pl!.description,
+          creator: _pl!.creator,
+        );
+      }
       _songs = songs;
       _loading = false;
       if (pl == null && songs.isEmpty) {
@@ -133,14 +165,79 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
             : CustomScrollView(
                 slivers: [
                   _header(name),
+                  // ── 错误 / 空态：卡片 + 重试（原来是两行灰字，看着像坏了）──
                   if (_error.isNotEmpty)
                     SliverToBoxAdapter(
                       child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Center(
-                          child: Text(_error,
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                        child: Container(
+                          padding: const EdgeInsets.all(18),
+                          decoration: BoxDecoration(
+                            color: MusicTheme.fill,
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          child: Column(
+                            children: [
+                              Icon(Icons.cloud_off_rounded,
+                                  size: 32, color: MusicTheme.secondary),
+                              const SizedBox(height: 10),
+                              Text(
+                                _error,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                    color: MusicTheme.secondary,
+                                    fontSize: AppTheme.fontSubhead,
+                                    height: 1.5),
+                              ),
+                              const SizedBox(height: 14),
+                              GestureDetector(
+                                onTap: _load,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 20, vertical: 9),
+                                  decoration: BoxDecoration(
+                                    color: MusicTheme.tint,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: const Text(
+                                    '重新加载',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: AppTheme.fontSubhead,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  // ── 歌曲列表标题（有歌时才显示，避免空态下面还挂个标题）──
+                  if (_songs.isNotEmpty)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+                        child: Row(
+                          children: [
+                            Text(
+                              '歌曲',
                               style: TextStyle(
-                                  color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead)),
+                                color: MusicTheme.label,
+                                fontSize: AppTheme.fontSubhead,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              '共 ${_songs.length} 首',
+                              style: TextStyle(
+                                color: MusicTheme.secondary,
+                                fontSize: AppTheme.fontCaption,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -169,6 +266,25 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       expandedHeight: 360,
       backgroundColor: Colors.transparent,
       iconTheme: IconThemeData(color: MusicTheme.label),
+      // ── 返回键：深色半透明圆底 ────────────────────────────────
+      // 封面是任意图片，浅色封面 + 浅色箭头会糊在一起（用户截图反馈过），
+      // 给个圆底让它在任何封面上都清晰可辨。
+      leading: Center(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => Navigator.of(context).maybePop(),
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.30),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.arrow_back_ios_new_rounded,
+                size: 18, color: Colors.white),
+          ),
+        ),
+      ),
       flexibleSpace: FlexibleSpaceBar(
         background: Stack(
           fit: StackFit.expand,
@@ -228,8 +344,26 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  CoverImage(
-                      url: _pl?.coverUrl, size: 128, cornerRadius: 14),
+                  // 封面 + 柔和投影：让它在模糊背景上"立起来"，
+                  // 同时高光描边防止深色封面和深色背景糊成一片。
+                  Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.35),
+                          blurRadius: 24,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.10),
+                        width: 1,
+                      ),
+                    ),
+                    child: CoverImage(
+                        url: _pl?.coverUrl, size: 128, cornerRadius: 15),
+                  ),
                   const SizedBox(height: 12),
                   Text(name,
                       maxLines: 2,
@@ -238,16 +372,40 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                           color: MusicTheme.label,
                           fontSize: AppTheme.fontTitle2,
                           fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 4),
-                  Text(
-                    [
-                      if (_songs.isNotEmpty) '${_songs.length} 首',
-                      if ((_pl?.creator ?? '').isNotEmpty) _pl!.creator!,
-                    ].join(' · '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style:
-                        TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote),
+                  const SizedBox(height: 6),
+                  // 副标题行：首数做成小胶囊，与灰字并列，信息层级更清楚
+                  Row(
+                    children: [
+                      if (_songs.isNotEmpty) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: MusicTheme.fill,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            '${_songs.length} 首',
+                            style: TextStyle(
+                              color: MusicTheme.secondary,
+                              fontSize: AppTheme.fontCaption,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Expanded(
+                        child: Text(
+                          (_pl?.creator ?? '').trim(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              color: MusicTheme.secondary,
+                              fontSize: AppTheme.fontFootnote),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -283,26 +441,39 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
         decoration: BoxDecoration(
           gradient: outlined
               ? null
               : LinearGradient(colors: MusicTheme.accentGradient),
-          color: outlined ? MusicTheme.fill : null,
+          color: outlined ? Colors.black.withValues(alpha: 0.20) : null,
           borderRadius: BorderRadius.circular(999),
+          border: outlined
+              ? Border.all(
+                  color: Colors.white.withValues(alpha: 0.22), width: 1)
+              : null,
+          boxShadow: outlined
+              ? null
+              : [
+                  BoxShadow(
+                    color: MusicTheme.tint.withValues(alpha: 0.35),
+                    blurRadius: 14,
+                    offset: const Offset(0, 5),
+                  ),
+                ],
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon,
-                size: 17,
-                color: outlined ? MusicTheme.label : Colors.white),
+            // 头部始终压在深色渐变/封面上 → 两个按钮都用白字，
+            // 否则浅色主题下 `MusicTheme.label` 是深色，直接看不见
+            Icon(icon, size: 17, color: Colors.white),
             const SizedBox(width: 5),
             Text(label,
-                style: TextStyle(
+                style: const TextStyle(
                     fontSize: AppTheme.fontSubhead,
                     fontWeight: FontWeight.w600,
-                    color: outlined ? MusicTheme.label : Colors.white)),
+                    color: Colors.white)),
           ],
         ),
       ),

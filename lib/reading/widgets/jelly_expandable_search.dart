@@ -167,16 +167,15 @@ class _JellyExpandableSearchState extends State<JellyExpandableSearch> {
       width: _expanded ? widget.maxWidth : h,
       height: h,
       decoration: BoxDecoration(
-        // ⚠️ 2026-10-14 与影视/小程序的 `HomeSearchBar` **完全对齐**：
-        //   展开态也是**透明底 + 无边框**（整条融入页面背景，不出现色块），
-        //   收起态只有一根 0.5 的发丝描边。
-        //   原来这里是"展开时换卡片底色 + width:1 的粗边" ⇒ 观感比影视那边重，
-        //   用户反馈「阅读的搜索框改不好，小程序的好看」。
-        color: Colors.transparent,
+        // 用户 2026-10-18：「搜索框这个位置不要透明」——
+        // 收起/展开都用**卡片实底**（深色 #2A2A2C / 浅色白），
+        // 不再让搜索框融进背景留一块"空玻璃"。
+        color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
         borderRadius: BorderRadius.circular(h / 2),
-        border: _expanded
-            ? Border.all(color: Colors.transparent, width: 0)
-            : Border.all(color: borderColor, width: 0.5),
+        border: Border.all(
+          color: borderColor.withValues(alpha: _expanded ? 0.16 : 0.30),
+          width: 0.5,
+        ),
       ),
       child: _expanded
           ? Row(

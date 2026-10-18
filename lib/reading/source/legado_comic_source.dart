@@ -44,6 +44,9 @@ class LegadoComicMangaSource extends MangaSource {
       source.bookSourceName.trim().isEmpty ? 'Legado 漫画' : source.bookSourceName;
 
   @override
+  String get group => (source.bookSourceGroup ?? '').trim();
+
+  @override
   String get lang => 'zh';
 
   @override

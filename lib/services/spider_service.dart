@@ -1057,7 +1057,10 @@ class SpiderService {
     final omniKey = _omniBoxProtocolKey(script);
     if (omniKey != null) {
       engineKey = omniKey;
-    } else if (script.isNotEmpty) {
+    } else if (script.isNotEmpty &&
+        !script.toLowerCase().startsWith('csp_')) {
+      // ⚠️ csp_ 占位源：脚本已随主源驻留引擎，不能当脚本地址去 loadSource
+      //    （会 404 白等一次网络往返），直接用配置 key 调引擎即可。
       final k = await _ensureNodeScript(script, fallback: key, type: type);
       if (k != null) engineKey = k;
       candidates = List<String>.of(_loadedScriptCandidates);

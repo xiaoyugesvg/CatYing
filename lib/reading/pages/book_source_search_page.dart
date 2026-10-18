@@ -12,6 +12,8 @@ import '../widgets/jelly_nav_bar.dart';
 import '../widgets/jelly_filter_sheet.dart';
 import '../widgets/jelly_pull_cord.dart';
 import '../widgets/jelly_expandable_search.dart';
+import '../widgets/source_order_sheet.dart';
+import '../widgets/source_group_tabs.dart';
 import '../widgets/jelly_search_bar.dart';
 import 'book_download_records_page.dart';
 import 'book_source_detail_page.dart';
@@ -864,9 +866,13 @@ JellyIconDeck(
     );
   }
 
-  /// 「聚搜」图标按钮（跨全部书源）—— 只留图标，与漫画页 `_buildAggregateChip` 同款
+  /// 「聚搜」按钮（跨全部书源）
+  ///
+  /// 用户 2026-10-18：改为**图标 + 文字**（∞ + 聚搜）的胶囊，
+  /// 与漫画页 `_buildAggregateChip`、图书页「推荐」保持同一形态。
   Widget _aggregateChip() {
     final selected = _selectedSourceId.isEmpty;
+    final fg = selected ? Colors.white : JellyTheme.primary;
     return GestureDetector(
       onTap: () {
         setState(() => _selectedSourceId = '');
@@ -874,8 +880,8 @@ JellyIconDeck(
         if (_keyword.isNotEmpty) _run(_keyword);
       },
       child: Container(
-        width: 32,
         height: 32,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: selected
@@ -890,10 +896,20 @@ JellyIconDeck(
             ),
           ],
         ),
-        child: Icon(
-          Icons.auto_awesome_rounded,
-          size: 16,
-          color: selected ? Colors.white : JellyTheme.primary,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.all_inclusive_rounded, size: 16, color: fg),
+            const SizedBox(width: 4),
+            Text(
+              '聚搜',
+              style: TextStyle(
+                fontSize: AppTheme.fontCaption + 1,
+                fontWeight: FontWeight.w600,
+                color: fg,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -902,6 +918,9 @@ JellyIconDeck(
   Widget _sourceChip(String name, String id) {
     final selected = id == _selectedSourceId;
     return GestureDetector(
+      // 用户 2026-10-18：长按源标签 → 调整顺序；双击 → 删除确认
+      onLongPress: _reorderBookSources,
+      onDoubleTap: () => _confirmDeleteBookSource(id, name),
       onTap: () {
         setState(() => _selectedSourceId = id);
         _rememberSource(id);
@@ -940,11 +959,74 @@ JellyIconDeck(
     );
   }
 
+  /// 长按源标签：调整书源顺序（写回 customOrder，持久化）
+  Future<void> _reorderBookSources() async {
+    final sources =
+        store.sorted().where((s) => s.enabled && s.enabledExplore).toList();
+    if (sources.length < 2) {
+      _toast('可发现的源不足 2 个，无需排序');
+      return;
+    }
+    final ids = await showSourceOrderSheet(
+      context,
+      title: '调整书源顺序',
+      items: [for (final s in sources) (s.id, s.name)],
+    );
+    if (ids == null || !mounted) return;
+    // 未展示的源接在后面，避免它们的 customOrder 与可见源交错
+    final visible = ids.toSet();
+    final rest = store
+        .sorted()
+        .map((e) => e.id)
+        .where((id) => !visible.contains(id))
+        .toList();
+    await store.reorder([...ids, ...rest]);
+    if (mounted) setState(() {});
+  }
+
+  /// 双击源标签：删除该源（先确认）
+  Future<void> _confirmDeleteBookSource(String id, String name) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除书源'),
+        content: Text(
+          '确定删除「$name」？\n\n删除后书源仓库里也会一并移除。',
+          style: const TextStyle(height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await store.remove(id);
+    if (!mounted) return;
+    setState(() {
+      if (_selectedSourceId == id) _selectedSourceId = '';
+    });
+    _toast('已删除书源：$name');
+  }
+
   /// 快速书源列表弹窗（参考图 IMG_8430：「搜索源」输入框 + 快速书源列表 + 收起）
   Future<void> _showQuickSources() async {
     // ✅ 与源 chips 同一过滤：关闭「发现」的源不在书源页展示（2026-10-11）
     final sources =
         store.all.where((s) => s.enabled && s.enabledExplore).toList();
+    // 分组口径与「书源仓」一致（Legado 的 bookSourceGroup，空 = 未分组）
+    final groups = collectSourceGroups(sources.map((s) => s.group));
+    // 当前书源 chip 的 key：打开弹窗后自动滚到它（源多时定位到当前位置）
+    final currentKey = GlobalKey();
+    var selectedGroup = SourceGroupTabs.all;
+    var positioned = false;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -955,13 +1037,28 @@ JellyIconDeck(
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
             final kw = _sourceFilter.text.trim().toLowerCase();
-            final shown = kw.isEmpty
-                ? sources
-                : sources
-                    .where((s) =>
-                        s.name.toLowerCase().contains(kw) ||
-                        s.group.toLowerCase().contains(kw))
-                    .toList();
+            final shown = sources.where((s) {
+              final g = sourceGroupLabel(s.group);
+              if (selectedGroup != SourceGroupTabs.all && g != selectedGroup) {
+                return false;
+              }
+              if (kw.isEmpty) return true;
+              return s.name.toLowerCase().contains(kw) ||
+                  g.toLowerCase().contains(kw);
+            }).toList();
+            if (!positioned) {
+              positioned = true;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                final c = currentKey.currentContext;
+                if (c == null || !c.mounted) return;
+                Scrollable.ensureVisible(
+                  c,
+                  alignment: 0.35,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOut,
+                );
+              });
+            }
             return SafeArea(
               child: ConstrainedBox(
                 constraints: BoxConstraints(
@@ -970,6 +1067,16 @@ JellyIconDeck(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // 用户 2026-10-18：搜索框上方加可滑动的分类 tab，分组与书源仓一致
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: SourceGroupTabs(
+                        groups: groups,
+                        selected: selectedGroup,
+                        onSelected: (g) =>
+                            setSheetState(() => selectedGroup = g),
+                      ),
+                    ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                       child: JellySearchBar(
@@ -985,31 +1092,38 @@ JellyIconDeck(
                     Flexible(
                       child: SingleChildScrollView(
                         padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (final s in shown)
-                              _quickSourceChip(
-                                name: s.name,
-                                selected: s.id == _selectedSourceId,
-                                onTap: () {
-                                  setSheetState(() {
-                                    _selectedSourceId = s.id;
-                                  });
-                                  _rememberSource(s.id);
-                                  Navigator.pop(ctx);
-                                  setState(() {});
-                                  _toast('已切换到书源：${s.name}');
-                                  if (_keyword.isNotEmpty) {
-                                    _run(_keyword);
-                                  } else {
-                                    _loadExploreIfNeeded();
-                                  }
-                                },
+                        child: shown.isEmpty
+                            ? const QuickSourcesEmpty()
+                            : Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final s in shown)
+                                    KeyedSubtree(
+                                      key: s.id == _selectedSourceId
+                                          ? currentKey
+                                          : null,
+                                      child: _quickSourceChip(
+                                        name: s.name,
+                                        selected: s.id == _selectedSourceId,
+                                        onTap: () {
+                                          setSheetState(() {
+                                            _selectedSourceId = s.id;
+                                          });
+                                          _rememberSource(s.id);
+                                          Navigator.pop(ctx);
+                                          setState(() {});
+                                          _toast('已切换到书源：${s.name}');
+                                          if (_keyword.isNotEmpty) {
+                                            _run(_keyword);
+                                          } else {
+                                            _loadExploreIfNeeded();
+                                          }
+                                        },
+                                      ),
+                                    ),
+                                ],
                               ),
-                          ],
-                        ),
                       ),
                     ),
                   ],

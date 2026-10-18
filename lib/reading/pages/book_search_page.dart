@@ -950,11 +950,12 @@ JellyIconDeck(
         !_categoryMode &&
         _keyword.isEmpty &&
         _result.items.isNotEmpty;
+    final fg = active ? Colors.white : JellyTheme.primary;
     return GestureDetector(
       onTap: _showRecommendations,
       child: Container(
-        width: 32,
         height: 32,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: active
@@ -969,10 +970,21 @@ JellyIconDeck(
             ),
           ],
         ),
-        child: Icon(
-          Icons.local_fire_department_rounded,
-          size: 17,
-          color: active ? Colors.white : JellyTheme.primary,
+        // 与漫画/书源页的「聚搜」同一形态：图标 + 文字
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.local_fire_department_rounded, size: 16, color: fg),
+            const SizedBox(width: 4),
+            Text(
+              '推荐',
+              style: TextStyle(
+                fontSize: AppTheme.fontCaption + 1,
+                fontWeight: FontWeight.w600,
+                color: fg,
+              ),
+            ),
+          ],
         ),
       ),
     );

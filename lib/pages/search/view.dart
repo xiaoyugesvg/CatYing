@@ -454,6 +454,8 @@ class _SearchPageState extends State<SearchPage> {
             final selected =
                 _searchController.selectedSiteKey.value == site.key;
             final count = _searchController.resultCount[site.key] ?? 0;
+            final siteSearching =
+                _searchController.searchingStatus[site.key] == true;
             return Padding(
               padding: const EdgeInsets.only(right: 8),
               child: GestureDetector(
@@ -465,24 +467,38 @@ class _SearchPageState extends State<SearchPage> {
                     vertical: 8,
                   ),
                   decoration: BoxDecoration(
+                    // 与首页分类、RSS/海阔分类同一套：选中实底主题色 + 白字
                     color: selected
-                        ? AppTheme.accentColor.withValues(alpha: 0.22)
+                        ? AppTheme.accentColor
                         : AppTheme.backgroundTertiary,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
                       color: selected
-                          ? AppTheme.accentColor.withValues(alpha: 0.55)
+                          ? AppTheme.accentColor
                           : AppTheme.textTertiary.withValues(alpha: 0.22),
                     ),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      // 该源还在搜：名字前小转圈，用户知道它没卡死
+                      if (siteSearching) ...[
+                        SizedBox(
+                          width: 11,
+                          height: 11,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 1.5,
+                            color:
+                                selected ? Colors.white : AppTheme.accentColor,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                      ],
                       Text(
                         site.name,
                         style: TextStyle(
                           color: selected
-                              ? AppTheme.accentColor
+                              ? Colors.white
                               : AppTheme.textSecondary,
                           fontSize: AppTheme.fontSubhead,
                           fontWeight: selected
@@ -499,7 +515,7 @@ class _SearchPageState extends State<SearchPage> {
                           ),
                           decoration: BoxDecoration(
                             color: selected
-                                ? AppTheme.accentColor
+                                ? Colors.white.withValues(alpha: 0.22)
                                 : AppTheme.textTertiary.withValues(alpha: 0.22),
                             borderRadius: BorderRadius.circular(10),
                           ),

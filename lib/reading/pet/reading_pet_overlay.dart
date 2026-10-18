@@ -34,7 +34,6 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
   /// 点一下弹一下（互动反馈）
   bool _bounce = false;
 
-  static const _petSize = 112.0;
   static const _bubbleMaxWidth = 180.0;
 
   @override
@@ -215,8 +214,10 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
         }
         return LayoutBuilder(
           builder: (context, constraints) {
-            final maxX = constraints.maxWidth - _petSize;
-            final maxY = constraints.maxHeight - _petSize;
+            // 尺寸可在「显示设置」里滑动/输入调整（72~160）
+            final petSize = _pet.size;
+            final maxX = (constraints.maxWidth - petSize).clamp(0.0, double.infinity);
+            final maxY = (constraints.maxHeight - petSize).clamp(0.0, double.infinity);
             final left = (_pet.posX * maxX).clamp(0.0, maxX);
             final top = (_pet.posY * maxY).clamp(0.0, maxY);
 
@@ -240,6 +241,15 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                           _pet.setPosition(nx, ny);
                         },
                         onPanEnd: (_) {
+                          // 用户 2026-10-18：「宠物贴边」——
+                          // 松手时离左/右边缘 24px 以内就吸附到屏幕边缘，
+                          // 不再和屏幕之间留一条缝。
+                          final snapX = left <= 24
+                              ? 0.0
+                              : (left >= maxX - 24 ? 1.0 : _pet.posX);
+                          if (snapX != _pet.posX) {
+                            _pet.setPosition(snapX, _pet.posY);
+                          }
                           _pet.persistPosition();
                           setState(() => _dragging = false);
                         },
@@ -251,13 +261,21 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                               scale: _bounce ? 1.12 : 1.0,
                               duration: const Duration(milliseconds: 140),
                               curve: Curves.easeOutBack,
-                              child: PetView(
-                                species: _pet.species,
-                                outfit: _pet.equippedOutfit,
-                                t: _anim.value * 4,
-                                size: _petSize,
-                                mood: _pet.mood,
-                              ),
+                              // 自定义 PNG / GIF 皮肤优先；否则用内置插画 / 矢量
+                              child: _pet.isCustomPet &&
+                                      _pet.customPetPath.isNotEmpty
+                                  ? CustomPetImage(
+                                      path: _pet.customPetPath,
+                                      size: petSize,
+                                      bob: sin(_anim.value * 2 * pi) * 1.6,
+                                    )
+                                  : PetView(
+                                      species: _pet.species,
+                                      outfit: _pet.equippedOutfit,
+                                      t: _anim.value * 4,
+                                      size: petSize,
+                                      mood: _pet.mood,
+                                    ),
                             ),
                           ),
                         ),

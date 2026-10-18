@@ -115,14 +115,20 @@ class _BookSourceSwitchPageState extends State<BookSourceSwitchPage> {
       ),
       body: Column(
         children: [
-          // ── 说明 / 进度区 ──
+          // ── 说明 / 进度区（与漫画聚搜页同一套卡片语言）──
           Container(
             width: double.infinity,
-            color: (_isDark
-                    ? JellyTheme.cardDark
-                    : JellyTheme.cardLight)
-                .withValues(alpha: 0.6),
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            margin: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            decoration: BoxDecoration(
+              color: _isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: (_isDark ? Colors.white : JellyTheme.primary)
+                    .withValues(alpha: 0.06),
+                width: 0.6,
+              ),
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -149,11 +155,15 @@ class _BookSourceSwitchPageState extends State<BookSourceSwitchPage> {
                 ),
                 if (_searching) ...[
                   const SizedBox(height: 8),
-                  LinearProgressIndicator(
-                    value: total == 0 ? 0 : _doneCount / total,
-                    color: JellyTheme.primary,
-                    backgroundColor: Colors.white12,
-                    minHeight: 4,
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(2),
+                    child: LinearProgressIndicator(
+                      value: total == 0 ? 0 : _doneCount / total,
+                      color: JellyTheme.primary,
+                      backgroundColor:
+                          JellyTheme.textSecondary.withValues(alpha: 0.18),
+                      minHeight: 4,
+                    ),
                   ),
                 ],
                 if (!_searching && !_done) ...[
@@ -164,6 +174,9 @@ class _BookSourceSwitchPageState extends State<BookSourceSwitchPage> {
                       style: FilledButton.styleFrom(
                         backgroundColor: JellyTheme.primary,
                         padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                       onPressed: total == 0 ? null : _startSearch,
                       icon: const Icon(Icons.search_rounded, size: 18),
@@ -178,12 +191,11 @@ class _BookSourceSwitchPageState extends State<BookSourceSwitchPage> {
               ],
             ),
           ),
-          const Divider(height: 1),
           Expanded(
             child: _results.isEmpty
                 ? _empty()
                 : ListView.builder(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 20),
                     itemCount: _results.length,
                     itemBuilder: (c, i) => _resultTile(_results[i]),
                   ),
@@ -232,67 +244,164 @@ class _BookSourceSwitchPageState extends State<BookSourceSwitchPage> {
 
   Widget _resultTile(BookSourceResult r) {
     final isCurrent = r.source.id == widget.currentSource.id;
-    return ListTile(
-      leading: ClipRRect(
-        borderRadius: BorderRadius.circular(6),
-        child: SizedBox(
-          width: 40,
-          height: 54,
-          // `coverUrl` 本身是**非空** String ✓ —— analyze 的三条 warning 都在说这件事：
-          // `?? ''` 是 dead code ✗、`.isEmpty` 的"左操作数不可能是 null" ✓、
-          // `:248` 的 `!` 不起作用 ✗ → 去掉多余的 `?? ''` 与 `!` ✓
-          child: r.coverUrl.isEmpty
-              ? Container(
-                  color: JellyTheme.primary.withValues(alpha: 0.1),
-                  child: Icon(Icons.menu_book_rounded,
-                      size: 20, color: JellyTheme.primary),
-                )
-              : CachedNetworkImage(
-                  imageUrl: r.coverUrl,
-                  fit: BoxFit.cover,
-                  errorWidget: (_, __, ___) => Container(
-                    color: JellyTheme.primary.withValues(alpha: 0.1),
-                    child: Icon(Icons.menu_book_rounded,
-                        size: 20, color: JellyTheme.primary),
+    final isDark = _isDark;
+    final cardColor = isDark ? JellyTheme.cardDark : JellyTheme.cardLight;
+    final secondary = JellyTheme.textSecondary;
+    final meta = <String>[
+      if (r.author.isNotEmpty) r.author,
+      if (r.lastChapter.isNotEmpty) '最新：${r.lastChapter}',
+    ].join(' · ');
+    final intro = r.intro.trim();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(20),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () => Navigator.pop(context, r),
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Row(
+              children: [
+                // 封面：与漫画列表卡同一比例（3:4），无图时书图标兜底
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: SizedBox(
+                    width: 72,
+                    height: 96,
+                    child: r.coverUrl.isEmpty
+                        ? Container(
+                            color: JellyTheme.primary.withValues(alpha: 0.1),
+                            child: Icon(Icons.menu_book_rounded,
+                                size: 26, color: JellyTheme.primary),
+                          )
+                        : CachedNetworkImage(
+                            imageUrl: r.coverUrl,
+                            fit: BoxFit.cover,
+                            memCacheWidth: 200,
+                            placeholder: (_, __) => Container(
+                              color: JellyTheme.primary.withValues(alpha: 0.06),
+                            ),
+                            errorWidget: (_, __, ___) => Container(
+                              color:
+                                  JellyTheme.primary.withValues(alpha: 0.1),
+                              child: Icon(Icons.menu_book_rounded,
+                                  size: 26, color: JellyTheme.primary),
+                            ),
+                          ),
                   ),
                 ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              r.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: AppTheme.fontSubhead + 1,
+                                  fontWeight: FontWeight.w700,
+                                  color: _titleColor),
+                            ),
+                          ),
+                          if (isCurrent)
+                            Container(
+                              margin: const EdgeInsets.only(left: 6),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: JellyTheme.primary
+                                    .withValues(alpha: 0.14),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text('当前',
+                                  style: TextStyle(
+                                      fontSize: AppTheme.fontCaption,
+                                      color: JellyTheme.primary,
+                                      fontWeight: FontWeight.w600)),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      // 来源 / 分类胶囊：与漫画列表的「作者胶囊」同一套观感
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: [
+                          _metaChip(r.source.name, JellyTheme.primary),
+                          if (r.kind.trim().isNotEmpty)
+                            _metaChip(r.kind.trim(), secondary),
+                        ],
+                      ),
+                      if (meta.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          meta,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: AppTheme.fontCaption,
+                              color: secondary),
+                        ),
+                      ] else if (intro.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          intro,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: AppTheme.fontCaption,
+                              color: secondary),
+                        ),
+                      ],
+                      if (r.wordCount.trim().isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          r.wordCount.trim(),
+                          style: TextStyle(
+                              fontSize: AppTheme.fontCaption,
+                              color: secondary.withValues(alpha: 0.8)),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(Icons.chevron_right_rounded,
+                    size: 20, color: secondary.withValues(alpha: 0.7)),
+              ],
+            ),
+          ),
         ),
       ),
-      title: Row(
-        children: [
-          Expanded(
-            child: Text(r.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: AppTheme.fontBody,
-                    fontWeight: FontWeight.w600,
-                    color: _titleColor)),
-          ),
-          if (isCurrent)
-            Container(
-              margin: const EdgeInsets.only(left: 6),
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: JellyTheme.primary.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text('当前',
-                  style: TextStyle(
-                      fontSize: AppTheme.fontCaption,
-                      color: JellyTheme.primary,
-                      fontWeight: FontWeight.w600)),
-            ),
-        ],
+    );
+  }
+
+  /// 小胶囊（来源 / 分类）
+  Widget _metaChip(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(10),
       ),
-      subtitle: Text(
-        '${r.author.isEmpty ? '' : '${r.author} · '}${r.source.name}',
+      child: Text(
+        text,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
-            fontSize: AppTheme.fontFootnote, color: JellyTheme.textSecondary),
+          fontSize: AppTheme.fontCaption,
+          color: color,
+          fontWeight: FontWeight.w500,
+        ),
       ),
-      onTap: () => Navigator.pop(context, r),
     );
   }
 }

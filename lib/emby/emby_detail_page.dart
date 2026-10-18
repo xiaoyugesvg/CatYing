@@ -90,23 +90,39 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(AppTheme.radiusMD),
-                      child: SizedBox(
-                        width: 112,
-                        height: 168,
-                        child: CachedNetworkImage(
-                          imageUrl:
-                              _api.imageUrl(_item.id, tag: _item.imageTag),
-                          httpHeaders: _api.imageHeaders,
-                          fit: BoxFit.cover,
-                          placeholder: (_, _) =>
-                              ColoredBox(color: AppTheme.backgroundSecondary),
-                          errorWidget: (_, _, _) => ColoredBox(
-                            color: AppTheme.backgroundSecondary,
-                            child: Icon(
-                              Icons.movie_outlined,
-                              color: AppTheme.textTertiary,
+                    Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(14),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.28),
+                            blurRadius: 18,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.08),
+                          width: 0.8,
+                        ),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(13),
+                        child: SizedBox(
+                          width: 116,
+                          height: 174,
+                          child: CachedNetworkImage(
+                            imageUrl:
+                                _api.imageUrl(_item.id, tag: _item.imageTag),
+                            httpHeaders: _api.imageHeaders,
+                            fit: BoxFit.cover,
+                            placeholder: (_, _) => ColoredBox(
+                                color: AppTheme.backgroundSecondary),
+                            errorWidget: (_, _, _) => ColoredBox(
+                              color: AppTheme.backgroundSecondary,
+                              child: Icon(
+                                Icons.movie_outlined,
+                                color: AppTheme.textTertiary,
+                              ),
                             ),
                           ),
                         ),
@@ -126,39 +142,50 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                             ),
                           ),
                           const SizedBox(height: 8),
-                          Text(
-                            [
-                              if (_item.year != null) '${_item.year}',
+                          // 元信息统一做成一排小胶囊（年份 / 评分 / 时长 / 类型）
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: [
+                              if (_item.year != null)
+                                _MetaChip(text: '${_item.year}'),
                               if (_item.rating != null && _item.rating! > 0)
-                                '★ ${_item.rating!.toStringAsFixed(1)}',
+                                _MetaChip(
+                                  text: '★ ${_item.rating!.toStringAsFixed(1)}',
+                                  highlighted: true,
+                                ),
                               if (_item.durationText.isNotEmpty)
-                                _item.durationText,
-                            ].join('  ·  '),
-                            style: TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: AppTheme.fontFootnote,
-                            ),
+                                _MetaChip(text: _item.durationText),
+                              if (_item.type.isNotEmpty)
+                                _MetaChip(
+                                  text: _item.type == 'Movie'
+                                      ? '电影'
+                                      : _item.type == 'Series'
+                                          ? '剧集'
+                                          : _item.type,
+                                ),
+                            ],
                           ),
-                          if (_item.type.isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              _item.type == 'Movie'
-                                  ? '电影'
-                                  : _item.type == 'Series'
-                                      ? '剧集'
-                                      : _item.type,
-                              style: TextStyle(
-                                color: AppTheme.textTertiary,
-                                fontSize: AppTheme.fontCaption,
-                              ),
-                            ),
-                          ],
                           if (canPlayDirectly) ...[
                             const SizedBox(height: 14),
                             FilledButton.icon(
                               onPressed: () => _play(_item),
-                              icon: const Icon(Icons.play_arrow_rounded),
+                              icon: const Icon(Icons.play_arrow_rounded,
+                                  size: 20),
                               label: const Text('播放'),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: AppTheme.accentColor,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 22, vertical: 10),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                textStyle: const TextStyle(
+                                  fontSize: AppTheme.fontSubhead,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                             ),
                           ],
                         ],
@@ -237,49 +264,118 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                     )
                   else
                     for (final ep in _episodes)
-                      Card(
-                        margin: const EdgeInsets.only(bottom: 6),
-                        color: AppTheme.backgroundSecondary,
-                        elevation: 0,
-                        child: ListTile(
-                          leading: SizedBox(
-                            width: 48,
-                            child: Text(
-                              ep.episodeLabel.isEmpty
-                                  ? '${ep.indexNumber ?? ''}'
-                                  : ep.episodeLabel,
-                              style: TextStyle(
-                                color: AppTheme.textTertiary,
-                                fontSize: AppTheme.fontCaption,
-                                fontWeight: FontWeight.w600,
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Material(
+                          color: AppTheme.backgroundSecondary,
+                          borderRadius: BorderRadius.circular(12),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(12),
+                            onTap: () => _play(ep),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 10),
+                              child: Row(
+                                children: [
+                                  // 集号胶囊
+                                  Container(
+                                    width: 46,
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 4),
+                                    alignment: Alignment.center,
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.accentColor
+                                          .withValues(alpha: 0.14),
+                                      borderRadius:
+                                          BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      ep.episodeLabel.isEmpty
+                                          ? '${ep.indexNumber ?? ''}'
+                                          : ep.episodeLabel,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: AppTheme.accentColor,
+                                        fontSize: AppTheme.fontCaption,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          ep.name,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: AppTheme.textPrimary,
+                                            fontSize: AppTheme.fontSubhead,
+                                          ),
+                                        ),
+                                        if (ep.durationText.isNotEmpty) ...[
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            ep.durationText,
+                                            style: TextStyle(
+                                              color: AppTheme.textTertiary,
+                                              fontSize: AppTheme.fontCaption,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  Icon(
+                                    Icons.play_circle_fill_rounded,
+                                    size: 22,
+                                    color: AppTheme.accentColor
+                                        .withValues(alpha: 0.85),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
-                          title: Text(
-                            ep.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: AppTheme.fontSubhead,
-                            ),
-                          ),
-                          subtitle: ep.durationText.isEmpty
-                              ? null
-                              : Text(
-                                  ep.durationText,
-                                  style: TextStyle(
-                                    color: AppTheme.textTertiary,
-                                    fontSize: AppTheme.fontCaption,
-                                  ),
-                                ),
-                          trailing: const Icon(Icons.play_circle_outline),
-                          onTap: () => _play(ep),
                         ),
                       ),
                 ],
               ],
             ),
+    );
+  }
+}
+
+/// 详情页元信息小胶囊（年份 / 评分 / 时长 / 类型）
+class _MetaChip extends StatelessWidget {
+  const _MetaChip({required this.text, this.highlighted = false});
+
+  final String text;
+  final bool highlighted;
+
+  @override
+  Widget build(BuildContext context) {
+    final base = highlighted ? AppTheme.accentColor : AppTheme.textSecondary;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: base.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: highlighted ? AppTheme.accentColor : AppTheme.textSecondary,
+          fontSize: AppTheme.fontCaption,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 }

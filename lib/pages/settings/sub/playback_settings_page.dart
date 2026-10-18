@@ -403,11 +403,14 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
   // ============================================================
 
   Future<void> _pickEngine() async {
+    // ⚠️ 以 PlayerPrefs 为准，不用 controller 里那份缓存：
+    // 播放器内切内核时只写 PlayerPrefs，而本页控制器是设置 tab 启动时创建的，
+    // 那份 Rx 可能还是旧值 → 选中态会勾在**另一个内核**上。
     final e = await SettingsDialogs.pick<PlayerEngine>(
       context: context,
       title: '点播播放器',
       options: PlayerEngine.availableEngines,
-      selected: controller.vodPlayerEngine.value,
+      selected: PlayerPrefs.instance.vodEngine.value,
       labelBuilder: (x) => x.title,
     );
     if (e != null) await controller.setVodPlayerEngine(e);

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../../common/theme.dart';
+import '../../emby/emby_accounts_page.dart';
 import '../../widgets/common_widgets.dart';
 import '../../widgets/glass.dart';
 import '../../miniapp/pages/mini_app_list_page.dart';
@@ -13,7 +14,6 @@ import 'sub/danmu_settings_page.dart';
 import 'sub/data_source_settings_page.dart';
 import 'sub/general_settings_page.dart';
 import 'sub/home_pages_settings_page.dart';
-import 'sub/emby_settings_page.dart';
 import 'sub/metadata_settings_page.dart';
 import 'sub/playback_settings_page.dart';
 
@@ -148,7 +148,7 @@ class _SettingsPageState extends State<SettingsPage> {
               _categoryTile(
                 icon: Icons.video_settings_outlined,
                 title: 'Emby管理',
-                onTap: () => Get.to(() => const EmbySettingsPage()),
+                onTap: () => Get.to(() => const EmbyAccountsPage()),
               ),
               const SizedBox(height: AppTheme.spacingMD),
 

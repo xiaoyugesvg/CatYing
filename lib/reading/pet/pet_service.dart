@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -22,20 +23,42 @@ class PetService extends ChangeNotifier {
 
   static const _key = 'reading_pet_v1';
 
-  String speciesId = PetSpecies.cat.id;
+  /// 默认桌宠：**阿汪**（有用户提供的插画）。
+  ///
+  /// ⚠️ 之前默认是「喵酱」(cat)：它是**唯一没有插画**的初始物种，
+  /// 悬浮桌宠只能用矢量团子绘制，用户 2026-10-18 明确嫌丑
+  /// （「这个宠物太他么丑了」）⇒ 默认改为有插画的阿汪。
+  String speciesId = PetSpecies.dog.id;
   int level = 1;
   int exp = 0;
   int coins = 0;
   double mood = 80;
   double hunger = 80;
 
-  final Set<String> unlockedSpecies = {PetSpecies.cat.id, PetSpecies.dog.id};
+  final Set<String> unlockedSpecies = {PetSpecies.dog.id};
   final Set<String> ownedOutfits = {PetOutfits.none.id};
   String equippedOutfit = PetOutfits.none.id;
 
   bool enabled = true;
-  double posX = 0.86;
+  /// 悬浮桌宠位置（0~1 相对坐标）。
+  ///
+  /// 用户 2026-10-18：「宠物能不能贴边？」⇒ 默认直接贴右边，
+  /// 拖到靠近左右边缘时也会吸附成 0 / 1（见 [ReadingPetOverlay] 的拖拽结束处理）。
+  double posX = 1.0;
   double posY = 0.55;
+
+  /// 悬浮桌宠尺寸（px）。用户 2026-10-18：可在「显示设置」里滑动或输入调整。
+  static const double minSize = 72;
+  static const double maxSize = 160;
+  double size = 112;
+
+  /// 自定义桌宠图片（PNG / GIF）的本机绝对路径；空 = 没用自定义皮肤。
+  ///
+  /// 用户 2026-10-18：「能自定义增加 PNG 或 GIF 图片」。
+  String customPetPath = '';
+
+  /// 当前是否使用自定义图片皮肤。
+  bool get isCustomPet => speciesId == PetSpecies.custom.id;
 
   int lastTickMs = 0;
   String lastReadingDate = '';
@@ -53,6 +76,7 @@ class PetService extends ChangeNotifier {
 
   Future<void> load() async {
     if (isLoaded) return;
+    var needPersist = false;
     try {
       final sp = await SharedPreferences.getInstance();
       final raw = sp.getString(_key);
@@ -68,6 +92,10 @@ class PetService extends ChangeNotifier {
           enabled = j['enabled'] != false;
           posX = (j['posX'] as num?)?.toDouble() ?? posX;
           posY = (j['posY'] as num?)?.toDouble() ?? posY;
+          size = ((j['size'] as num?)?.toDouble() ?? size)
+              .clamp(minSize, maxSize)
+              .toDouble();
+          customPetPath = '${j['customPet'] ?? ''}';
           lastTickMs = (j['lastTickMs'] as num?)?.toInt() ?? 0;
           lastReadingDate = '${j['lastReadingDate'] ?? ''}';
           lastReadingMinutes = (j['lastReadingMinutes'] as num?)?.toInt() ?? 0;
@@ -78,7 +106,7 @@ class PetService extends ChangeNotifier {
             unlockedSpecies
               ..clear()
               ..addAll(us.map((e) => '$e'))
-              ..addAll([PetSpecies.cat.id, PetSpecies.dog.id]);
+              ..add(PetSpecies.dog.id);
           }
           final of = j['outfits'];
           if (of is List) {
@@ -91,11 +119,40 @@ class PetService extends ChangeNotifier {
           if (!ownedOutfits.contains(equippedOutfit)) {
             equippedOutfit = PetOutfits.none.id;
           }
+          // 自定义皮肤文件丢了（换机 / 清理缓存）→ 回退到阿汪，避免空白桌宠
+          if (speciesId == PetSpecies.custom.id) {
+            final ok = customPetPath.isNotEmpty &&
+                File(customPetPath).existsSync();
+            if (!ok) {
+              speciesId = PetSpecies.dog.id;
+              customPetPath = '';
+              needPersist = true;
+            }
+          }
+          // 用户 2026-10-18：「宠物贴边」—— 老存档里靠近左右边缘的位置
+          // 直接吸附到真正的屏幕边缘（0 / 1），不再留一条缝。
+          if (posX >= 0.75) {
+            posX = 1.0;
+            needPersist = true;
+          } else if (posX <= 0.25) {
+            posX = 0.0;
+            needPersist = true;
+          }
+          // 2026-10-18：老用户沿用的默认「喵酱」(cat) 没有插画，
+          // 悬浮桌宠会退化成矢量团子（用户嫌丑）⇒ 一次性迁到有插画的阿汪。
+          if (speciesId == PetSpecies.cat.id) {
+            speciesId = PetSpecies.dog.id;
+            unlockedSpecies
+              ..remove(PetSpecies.cat.id)
+              ..add(PetSpecies.dog.id);
+            needPersist = true;
+          }
         }
       }
       isLoaded = true;
       _decay();
       await syncReading();
+      if (needPersist) await _persist();
     } catch (e) {
       isLoaded = true;
       debugPrint('[Pet] 加载失败: $e');
@@ -118,6 +175,8 @@ class PetService extends ChangeNotifier {
           'enabled': enabled,
           'posX': posX,
           'posY': posY,
+          'size': size,
+          'customPet': customPetPath,
           'lastTickMs': lastTickMs,
           'lastReadingDate': lastReadingDate,
           'lastReadingMinutes': lastReadingMinutes,
@@ -208,6 +267,38 @@ class PetService extends ChangeNotifier {
   }
 
   Future<void> persistPosition() => _persist();
+
+  /// 调整桌宠尺寸（72~160px），立即生效并落盘。
+  Future<void> setSize(double v) async {
+    final next = v.clamp(minSize, maxSize).toDouble();
+    if (next == size) return;
+    size = next;
+    notifyListeners();
+    await _persist();
+  }
+
+  /// 切到自定义图片皮肤（PNG / GIF）。
+  Future<void> setCustomPet(String path) async {
+    customPetPath = path;
+    speciesId = PetSpecies.custom.id;
+    notifyListeners();
+    await _persist();
+  }
+
+  /// 移除自定义皮肤：删文件 + 回到阿汪。
+  Future<void> clearCustomPet() async {
+    final old = customPetPath;
+    customPetPath = '';
+    if (speciesId == PetSpecies.custom.id) speciesId = PetSpecies.dog.id;
+    notifyListeners();
+    await _persist();
+    if (old.isNotEmpty) {
+      try {
+        final f = File(old);
+        if (f.existsSync()) f.deleteSync();
+      } catch (_) {}
+    }
+  }
 
   Future<bool> feed() async {
     if (coins < 10) return false;

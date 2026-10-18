@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../models/comic.dart';
+import '../models/book_source.dart';
 import '../models/search_result.dart';
 import '../source/adapter.dart';
 import '../source/config_manga_source.dart';
@@ -24,6 +25,8 @@ import '../widgets/jelly_comic_list_tile.dart';
 import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_search_bar.dart';
 import '../widgets/jelly_icon_deck.dart';
+import '../widgets/source_group_tabs.dart';
+import '../widgets/source_order_sheet.dart';
 import '../widgets/staggered_entrance.dart';
 import 'browse_history_page.dart';
 import 'comic_detail_page.dart';
@@ -162,6 +165,14 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     //   ℹ️ 条件与 `:252` 保持一致 ✓（无关键词 + 该源支持分类 ✓）⇒ 有历史关键词/不支持分类时**行为不变** ✓
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      // 当前源是纯搜索源（漫画首页无内容）→ 自动切到第一个可浏览源，
+      // 否则首页会是一片空白且没有任何 chip 高亮（用户 2026-10-18）。
+      if (!SourceManager().current.supportsCategories) {
+        final browsable = SourceManager().browsableSources;
+        if (browsable.isNotEmpty) {
+          SourceManager().setCurrent(browsable.first);
+        }
+      }
       final src = SourceManager().current;
       if (_keyword.isEmpty && src.supportsCategories) {
         _autoLoadCategoryContent();
@@ -815,7 +826,9 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   /// 左滑（前进）：下一源；已是末源则切视图并回首源；列表末源到头无操作。
   /// 线性序列：网格A -> 网格B -> … -> 列表A -> 列表B
   void _swipeNext() {
-    final sources = SourceManager().sources;
+    // 与 chip 行一致：只在「可浏览源」之间滑动（纯搜索源不出现在漫画首页）
+    final sources = SourceManager().browsableSources;
+    if (sources.isEmpty) return;
     final idx = sources.indexWhere((s) => s.id == SourceManager().current.id);
     if (idx >= 0 && idx < sources.length - 1) {
       _switchSource(sources[idx + 1]);
@@ -829,7 +842,8 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
 
   /// 右滑（后退）：上一源；已是首源则切视图并回末源；网格首源到头无操作。
   void _swipePrev() {
-    final sources = SourceManager().sources;
+    final sources = SourceManager().browsableSources;
+    if (sources.isEmpty) return;
     final idx = sources.indexWhere((s) => s.id == SourceManager().current.id);
     if (idx > 0) {
       _switchSource(sources[idx - 1]);
@@ -886,7 +900,10 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   }
 
   Widget _buildSourceChips(bool isDark) {
-    final sources = SourceManager().enabledSources;
+    // 用户 2026-10-18：「只是搜索的源不要再漫画页显示」——
+    // 漫画首页只列**有分类/发现**的源；纯搜索源仍可在右侧
+    // 「搜索源」弹窗里选（那里用的是全部启用源）。
+    final sources = SourceManager().browsableSources;
     final currentId = SourceManager().current.id;
     final chips = <Widget>[];
     for (var i = 0; i < sources.length; i++) {
@@ -940,10 +957,63 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     );
   }
 
+  /// 长按源标签：调整漫画源顺序（拖动后持久化）
+  Future<void> _reorderComicSources() async {
+    final sources = SourceManager().browsableSources;
+    if (sources.length < 2) {
+      _log('可浏览源不足 2 个，无需排序');
+      return;
+    }
+    final ids = await showSourceOrderSheet(
+      context,
+      title: '调整漫画源顺序',
+      items: [for (final s in sources) (s.id, s.name)],
+    );
+    if (ids == null || !mounted) return;
+    SourceManager().reorder(ids);
+    setState(() {});
+  }
+
+  /// 双击源标签：删除该源（先确认）
+  Future<void> _confirmDeleteComicSource(MangaSource src) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除源'),
+        content: Text(
+          '确定删除「${src.name}」？\n\n'
+          '删除后会从漫画页移除；Legado 漫画源会同时从书源仓库里删掉。',
+          style: const TextStyle(height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    if (src.id.startsWith('legado:')) {
+      await BookSourceStore.instance
+          .remove(src.id.substring('legado:'.length));
+    } else {
+      // 配置源 / 内置源没有"删除定义"的落盘 API ⇒ 退化为禁用（不再出现在漫画页）
+      await SourceManager().setEnabled(src.id, false);
+    }
+    SourceManager().dropSource(src.id);
+    if (mounted) setState(() {});
+  }
+
   /// 「聚搜」chip：跨所有启用漫画源并发聚合搜索
   ///
-  /// ✅ 用户 2026-10-07：按钮**只留图标**（去掉"聚搜"文字），
-  ///   与书源页的聚搜按钮同款；尺寸对齐同排的 32 圆钮。
+  /// 用户 2026-10-18：改为**图标 + 文字**（∞ + 聚搜）的胶囊，
+  /// 与图书「推荐」、书源「聚搜」保持同一形态（原来只有 32 圆图标）。
   Widget _buildAggregateChip(bool isDark) {
     return GestureDetector(
       onTap: () => Navigator.push(
@@ -951,8 +1021,8 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
         MaterialPageRoute(builder: (_) => const ComicAggregateSearchPage()),
       ),
       child: Container(
-        width: 32,
         height: 32,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
@@ -965,10 +1035,24 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             ),
           ],
         ),
-        child: Icon(
-          Icons.auto_awesome_rounded,
-          size: 16,
-          color: JellyTheme.primary,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.all_inclusive_rounded,
+              size: 16,
+              color: JellyTheme.primary,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              '聚搜',
+              style: TextStyle(
+                fontSize: AppTheme.fontCaption + 1,
+                fontWeight: FontWeight.w600,
+                color: JellyTheme.primary,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -978,9 +1062,16 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   /// 入口：源 chip 排最右侧的 view_list 按钮（用户 2026-10-06 反馈"少个搜索源"）
   Future<void> _showQuickSourceSheet() async {
     final sources = SourceManager().enabledSources;
+    final currentId = SourceManager().current.id;
+    // 分组口径与「漫画仓」一致（Legado 的 bookSourceGroup，空 = 未分组）
+    final groups = collectSourceGroups(sources.map((s) => s.group));
     final isDark =
         Theme.of(context).brightness == Brightness.dark;
     final filter = TextEditingController();
+    // 当前源 chip 的 key：打开弹窗后自动滚到它（源多时定位到当前位置）
+    final currentKey = GlobalKey();
+    var selectedGroup = SourceGroupTabs.all;
+    var positioned = false;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -990,11 +1081,28 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
             final kw = filter.text.trim().toLowerCase();
-            final shown = kw.isEmpty
-                ? sources
-                : sources
-                    .where((s) => s.name.toLowerCase().contains(kw))
-                    .toList();
+            final shown = sources.where((s) {
+              final g = sourceGroupLabel(s.group);
+              if (selectedGroup != SourceGroupTabs.all && g != selectedGroup) {
+                return false;
+              }
+              if (kw.isEmpty) return true;
+              return s.name.toLowerCase().contains(kw) ||
+                  g.toLowerCase().contains(kw);
+            }).toList();
+            if (!positioned) {
+              positioned = true;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                final c = currentKey.currentContext;
+                if (c == null || !c.mounted) return;
+                Scrollable.ensureVisible(
+                  c,
+                  alignment: 0.35,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOut,
+                );
+              });
+            }
             return SafeArea(
               child: ConstrainedBox(
                 constraints: BoxConstraints(
@@ -1003,6 +1111,16 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // 用户 2026-10-18：搜索框上方加可滑动的分类 tab，分组与漫画仓一致
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: SourceGroupTabs(
+                        groups: groups,
+                        selected: selectedGroup,
+                        onSelected: (g) =>
+                            setSheetState(() => selectedGroup = g),
+                      ),
+                    ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                       child: JellySearchBar(
@@ -1019,23 +1137,28 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                     Flexible(
                       child: SingleChildScrollView(
                         padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (final s in shown)
-                              _quickSourceChip(
-                                name: s.name,
-                                selected: s.id == SourceManager().current.id,
-                                onTap: () {
-                                  Navigator.pop(ctx);
-                                  if (s.id != SourceManager().current.id) {
-                                    _switchSource(s);
-                                  }
-                                },
+                        child: shown.isEmpty
+                            ? const QuickSourcesEmpty()
+                            : Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final s in shown)
+                                    KeyedSubtree(
+                                      key: s.id == currentId ? currentKey : null,
+                                      child: _quickSourceChip(
+                                        name: s.name,
+                                        selected: s.id == currentId,
+                                        onTap: () {
+                                          Navigator.pop(ctx);
+                                          if (s.id != currentId) {
+                                            _switchSource(s);
+                                          }
+                                        },
+                                      ),
+                                    ),
+                                ],
                               ),
-                          ],
-                        ),
                       ),
                     ),
                   ],
@@ -1067,6 +1190,9 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     );
     return GestureDetector(
       onTap: () => _switchSource(src),
+      // 用户 2026-10-18：长按源标签 → 调整顺序；双击 → 删除确认
+      onLongPress: _reorderComicSources,
+      onDoubleTap: () => _confirmDeleteComicSource(src),
       child: Container(
         key: key,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),

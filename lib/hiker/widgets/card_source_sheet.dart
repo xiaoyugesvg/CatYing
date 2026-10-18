@@ -107,9 +107,29 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
   final TextEditingController _searchController = TextEditingController();
   String _keyword = '';
 
+  /// 当前选中源的 key —— 弹窗打开时自动滚到它（用户 2026-10-18「加个定位」）
+  final GlobalKey _selectedKey = GlobalKey();
+
   /// 当前分类（'' = 全部）。tab 口径与「海阔源管理」页一致：用源自己的
   /// `groupLabel`，排序后平铺成胶囊；没有分类（或只有一个）时不显示 tab 行。
   String _group = '';
+
+  @override
+  void initState() {
+    super.initState();
+    // 用户 2026-10-18：「源切换弹窗还是加个定位」——
+    // 首次打开自动滚到当前源，几十个源时不用手动翻找。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _selectedKey.currentContext;
+      if (ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.35,
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOut,
+      );
+    });
+  }
 
   @override
   void dispose() {
@@ -273,8 +293,11 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
                               childAspectRatio: hasSub ? 2.9 : 3.4,
                             ),
                             itemCount: list.length,
-                            itemBuilder: (_, i) =>
-                                _CardTile(item: list[i]),
+                            itemBuilder: (_, i) => _CardTile(
+                              // 选中项挂 key：弹窗打开时 Scrollable.ensureVisible 用它定位
+                              key: list[i].selected ? _selectedKey : null,
+                              item: list[i],
+                            ),
                           ),
                         ],
                       ),
@@ -316,7 +339,7 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
 class _CardTile extends StatelessWidget {
   final CardSourceItem item;
 
-  const _CardTile({required this.item});
+  const _CardTile({super.key, required this.item});
 
   @override
   Widget build(BuildContext context) {

@@ -130,6 +130,16 @@ class LiveService extends GetxService {
   final error = RxnString();
   final selectedGroup = 0.obs;
 
+  /// 载入序号：切换直播源/地址时自增，**只有最后一次载入允许写 channels/groups**。
+  ///
+  /// 为什么需要：多源快速连点会并发发起多次拉取，没有守卫时
+  /// "后点的先回来、先点的后回来" → 列表被先点那个源覆盖，
+  /// 而标题/选中态还停在最后一个源上（看起来就是"切源串台/不生效"）。
+  int _loadSeq = 0;
+
+  /// [seq] 是否已被更新的载入请求取代
+  bool _stale(int seq) => seq != _loadSeq;
+
   /// 原始 lives 配置缓存（loadSource 切源时重解析）
   List<Map<String, dynamic>>? _rawLives;
 
@@ -144,6 +154,7 @@ class LiveService extends GetxService {
 
   /// 从 tvbox JSON 的 lives 数组加载（多源：默认只加载第一个源）
   Future<void> loadFromLivesJson(List<dynamic> lives) async {
+    final seq = ++_loadSeq;
     isLoading.value = true;
     error.value = null;
     try {
@@ -180,7 +191,8 @@ class LiveService extends GetxService {
       _notifySources(built);
       await _persistLives();
       if (_rawLives!.isNotEmpty) {
-        await _loadSourceLocked(0);
+        await _loadSourceLocked(0, seq: seq);
+        if (_stale(seq)) return;
         selectedSourceIndex.value = 0;
       } else {
         channels.value = [];
@@ -188,21 +200,30 @@ class LiveService extends GetxService {
         selectedSourceIndex.value = 0;
       }
     } finally {
-      isLoading.value = false;
+      // 已被更新的载入取代时不要收掉 loading（那个请求还在跑）
+      if (!_stale(seq)) isLoading.value = false;
     }
   }
 
   /// 切换直播源（索引对应 sources）
   Future<void> loadSource(int index) async {
     if (_rawLives == null || index < 0 || index >= _rawLives!.length) return;
+    final seq = ++_loadSeq;
+    final prevIndex = selectedSourceIndex.value;
     isLoading.value = true;
     error.value = null;
+    // 选中态**立刻**切到目标源：标题/高亮马上给出反馈，
+    // 不用等整份列表拉完（用户会以为"点了没反应"）。
+    selectedSourceIndex.value = index;
     try {
-      await _loadSourceLocked(index);
+      await _loadSourceLocked(index, seq: seq);
+      // 被更新的切换取代：不写"最近更新/选中态"，避免串台
+      if (_stale(seq)) return;
       // 加载成功 → 该源视为「刚刚更新」并持久化
       final nowMs = DateTime.now().millisecondsSinceEpoch;
       _rawLives![index]['updatedAt'] = nowMs;
       await _persistLives();
+      if (_stale(seq)) return;
       // 名称以 _rawLives 为准，避免改名后仍显示旧 sources[i].name
       final next = <LiveSource>[];
       for (var i = 0; i < _rawLives!.length; i++) {
@@ -216,22 +237,26 @@ class LiveService extends GetxService {
       }
       _notifySources(next);
       selectedSourceIndex.value = index;
+    } catch (e) {
+      // 失败时把选中态退回原来源，避免"标题是 B、列表还是 A"
+      if (!_stale(seq)) selectedSourceIndex.value = prevIndex;
+      rethrow;
     } finally {
-      isLoading.value = false;
+      if (!_stale(seq)) isLoading.value = false;
     }
   }
 
   /// 按源索引解析并替换当前频道/分组
-  Future<void> _loadSourceLocked(int index) async {
+  Future<void> _loadSourceLocked(int index, {int? seq}) async {
     final map = _rawLives![index];
     // Xtream 账号源：走 player_api，不当 m3u 拉取
     if (map['type'] == 'xtream') {
-      await _loadXtreamSourceLocked(index, map);
+      await _loadXtreamSourceLocked(index, map, seq: seq);
       return;
     }
     // 麦优订阅源：json.txt 分类接口 + 分类文件频道列表
     if (map['type'] == 'maiyou') {
-      await _loadMaiyouSourceLocked(index, map);
+      await _loadMaiyouSourceLocked(index, map, seq: seq);
       return;
     }
     final all = <LiveChannel>[];
@@ -252,6 +277,7 @@ class LiveService extends GetxService {
     // 先出缓存，列表立刻可见，不阻塞在网络
     final cacheId = 'src_$index:${map['url'] ?? map['name'] ?? index}';
     final cached = await _readChannelCache(cacheId);
+    if (seq != null && _stale(seq)) return;
     if (cached != null && cached.isNotEmpty) {
       channels.value = [...all, ...cached];
       _rebuildGroups();
@@ -274,6 +300,7 @@ class LiveService extends GetxService {
         }
       }
     }
+    if (seq != null && _stale(seq)) return;
     channels.value = all;
     _rebuildGroups();
   }
@@ -281,8 +308,9 @@ class LiveService extends GetxService {
   /// 加载 Xtream 账号源：拉分类+频道，顺带记录到期时间。
   Future<void> _loadXtreamSourceLocked(
     int index,
-    Map<String, dynamic> map,
-  ) async {
+    Map<String, dynamic> map, {
+    int? seq,
+  }) async {
     final account = XtreamService.instance.accountFromStored(map);
     if (account == null) {
       error.value = 'Xtream 账号信息不完整（缺少地址或用户名/密码）。';
@@ -291,6 +319,7 @@ class LiveService extends GetxService {
     // 缓存优先：先出列表再走网络
     final cacheId = 'xtream:${account.user}@${account.base}';
     final cached = await _readChannelCache(cacheId);
+    if (seq != null && _stale(seq)) return;
     if (cached != null && cached.isNotEmpty) {
       channels.value = cached;
       _rebuildGroups();
@@ -303,9 +332,11 @@ class LiveService extends GetxService {
         .catchError((_) => null);
     try {
       final list = await XtreamService.instance.fetchChannels(account);
+      if (seq != null && _stale(seq)) return;
       if (list.isNotEmpty) {
         await _saveChannelCache(cacheId, list);
       }
+      if (seq != null && _stale(seq)) return;
       channels.value = list;
       _rebuildGroups();
     } catch (e) {
@@ -349,8 +380,9 @@ class LiveService extends GetxService {
 
   Future<void> _loadMaiyouSourceLocked(
     int index,
-    Map<String, dynamic> map,
-  ) async {
+    Map<String, dynamic> map, {
+    int? seq,
+  }) async {
     final subUrl = map['url']?.toString() ?? '';
     if (subUrl.isEmpty) {
       error.value = '麦优订阅地址为空';
@@ -365,6 +397,7 @@ class LiveService extends GetxService {
     // 缓存优先：先出列表再走网络
     final cacheId = 'maiyou:$subUrl';
     final cached = await _readChannelCache(cacheId);
+    if (seq != null && _stale(seq)) return;
     if (cached != null && cached.isNotEmpty) {
       channels.value = cached;
       _rebuildGroups();
@@ -430,6 +463,7 @@ class LiveService extends GetxService {
       if (all.isNotEmpty) {
         await _saveChannelCache(cacheId, all);
       }
+      if (seq != null && _stale(seq)) return;
       channels.value = all;
       _rebuildGroups();
       if (all.isEmpty && (cached == null || cached.isEmpty)) {
@@ -509,11 +543,13 @@ class LiveService extends GetxService {
 
   /// 直接从 m3u/txt URL 加载
   Future<void> loadFromUrl(String url) async {
+    final seq = ++_loadSeq;
     isLoading.value = true;
     error.value = null;
     try {
       // 缓存优先：立刻恢复上次频道，避免长时间空白
       final cached = await _readChannelCache('url:$url');
+      if (_stale(seq)) return;
       if (cached != null && cached.isNotEmpty) {
         channels.value = cached;
         _rebuildGroups();
@@ -528,10 +564,12 @@ class LiveService extends GetxService {
         selectedSourceIndex.value = 0;
       }
       final body = await _fetch(url);
+      if (_stale(seq)) return;
       final list = parseM3uOrTxt(body);
       if (list.isNotEmpty) {
         await _saveChannelCache('url:$url', list);
       }
+      if (_stale(seq)) return;
       channels.value = list;
       _rebuildGroups();
       _rawLives = null;
@@ -549,9 +587,9 @@ class LiveService extends GetxService {
         await _persistUrl(url);
       }
     } catch (e) {
-      error.value = '加载失败：$e';
+      if (!_stale(seq)) error.value = '加载失败：$e';
     } finally {
-      isLoading.value = false;
+      if (!_stale(seq)) isLoading.value = false;
     }
   }
 
@@ -1160,6 +1198,8 @@ class LiveService extends GetxService {
 
   /// 清空全部直播数据（删除直播源）
   Future<void> clearAll() async {
+    // 清空后任何在途的载入都不许再写回列表
+    _loadSeq++;
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('live_url');

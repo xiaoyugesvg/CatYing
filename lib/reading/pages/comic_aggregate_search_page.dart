@@ -353,10 +353,11 @@ class _ComicAggregateSearchPageState extends State<ComicAggregateSearchPage> {
         }
       },
       child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+        // 与书源换源页同一套间距，两个「换源/聚搜」页面观感一致
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 20),
         physics: const AlwaysScrollableScrollPhysics(),
         itemCount: entries.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 4),
+        separatorBuilder: (_, __) => const SizedBox(height: 8),
         itemBuilder: (context, index) {
         final e = entries[index];
         // 展示首选条目（同书多源时选第一个，详情页可换源）

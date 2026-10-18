@@ -2,7 +2,7 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../common/theme.dart';
-import '../pages/settings/sub/emby_settings_page.dart';
+import 'emby_accounts_page.dart';
 import 'emby_api.dart';
 import 'emby_detail_page.dart';
 import 'emby_models.dart';
@@ -27,6 +27,10 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
   List<EmbyItem> _resume = const [];
   final Map<String, List<EmbyItem>> _latest = {};
 
+  /// 当前列表属于哪台服务器：切服务器时先清空旧内容，
+  /// 避免"标题已是新服务器、列表还是旧服务器"的串台。
+  String? _loadedServerId;
+
   @override
   void initState() {
     super.initState();
@@ -48,6 +52,7 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
       setState(() {
         _loading = false;
         _error = null;
+        _loadedServerId = null;
         _views = const [];
         _resume = const [];
         _latest.clear();
@@ -57,6 +62,12 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
     setState(() {
       _loading = true;
       _error = null;
+      // 切了服务器：先清空旧服务器的列表，避免加载期间新旧混排
+      if (_loadedServerId != null && _loadedServerId != server.id) {
+        _views = const [];
+        _resume = const [];
+        _latest.clear();
+      }
     });
     final api = EmbyApi(server);
     try {
@@ -84,6 +95,7 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
         _latest
           ..clear()
           ..addAll(latest);
+        _loadedServerId = server.id;
         _loading = false;
       });
     } on EmbyApiException catch (e) {
@@ -104,7 +116,7 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
   Future<void> _openSettings() async {
     await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const EmbySettingsPage()),
+      MaterialPageRoute(builder: (_) => const EmbyAccountsPage()),
     );
     if (!mounted) return;
     // 设置页可能新增/切换了服务器 → 重新加载

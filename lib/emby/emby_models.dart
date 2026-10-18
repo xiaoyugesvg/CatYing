@@ -8,6 +8,7 @@ class EmbyServer {
     required this.baseUrl,
     required this.username,
     required this.password,
+    this.type = 'emby',
     this.accessToken,
     this.userId,
     this.deviceId = '',
@@ -15,6 +16,9 @@ class EmbyServer {
 
   final String id;
   String name;
+
+  /// 服务器类型：autoDetect / emby / jellyfin / plex
+  String type;
 
   /// 用户填的地址（保存原样，读取时用 [normalizedUrl]）
   String baseUrl;
@@ -49,6 +53,7 @@ class EmbyServer {
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
+        'type': type,
         'baseUrl': baseUrl,
         'username': username,
         'password': password,
@@ -60,6 +65,7 @@ class EmbyServer {
   factory EmbyServer.fromJson(Map<String, dynamic> j) => EmbyServer(
         id: '${j['id'] ?? ''}',
         name: '${j['name'] ?? 'Emby'}',
+        type: '${j['type'] ?? 'emby'}',
         baseUrl: '${j['baseUrl'] ?? ''}',
         username: '${j['username'] ?? ''}',
         password: '${j['password'] ?? ''}',

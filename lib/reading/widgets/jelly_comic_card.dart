@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/comic.dart';
+import '../services/settings_service.dart';
 import '../source/source_manager.dart';
 import '../theme/jelly_theme.dart';
 import 'jelly_favorite_button.dart';
@@ -99,7 +100,12 @@ class _JellyComicCardState extends State<JellyComicCard>
         ? null
         : SourceManager().getSource(widget.comic.sourceId!)?.name;
 
-    return GestureDetector(
+    return ListenableBuilder(
+      listenable: SettingsService(),
+      builder: (context, _) {
+        // 封面圆角跟随「显示设置」，改完返回即生效
+        final radius = SettingsService().coverRadiusPx;
+        return GestureDetector(
       onTapDown: _onTapDown,
       onTapUp: _onTapUp,
       onTapCancel: _onTapCancel,
@@ -128,7 +134,7 @@ class _JellyComicCardState extends State<JellyComicCard>
               duration: const Duration(milliseconds: 200),
               curve: Curves.easeOut,
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(radius),
                 color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
                 boxShadow: _isPressed
                     ? [
@@ -149,7 +155,7 @@ class _JellyComicCardState extends State<JellyComicCard>
                       ],
               ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(radius),
                 // 封面（果冻风渐变遮罩）
                 child: AspectRatio(
                 aspectRatio: 3 / 4,
@@ -392,6 +398,8 @@ class _JellyComicCardState extends State<JellyComicCard>
             ],
           ),
         ),
+        );
+      },
     );
   }
 }

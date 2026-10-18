@@ -60,6 +60,16 @@ class _DiscoverPageState extends State<DiscoverPage>
   // QQ 音乐（公开接口）：热搜关键词
   List<String> _hotKeywords = const [];
 
+  /// 热搜词 → 封面 URL（取该关键词搜索结果的**第一条**歌曲封面）。
+  ///
+  /// key = `'${平台}|$关键词'`。热搜本身只有关键词、没有图，
+  /// 用户 2026-10-18：「QQ音乐热搜没有封面」——这里补一层背景图，
+  /// 没有图时仍退回原来的渐变卡片，不会出现空白块。
+  /// 只补前 6 条（每条一次搜索请求，再多不值当），并跨页面生命周期缓存。
+  final Map<String, String> _hotCovers = {};
+  /// 正在请求封面的 key（防止切平台/刷新时对同一个词重复发请求）
+  final Set<String> _hotCoverInflight = {};
+
   /// QQ 排行榜（免登录可拿，实测 30 个榜单）
   List<TopList> _qqTopLists = const [];
 
@@ -177,6 +187,8 @@ class _DiscoverPageState extends State<DiscoverPage>
     _hotKeywords = h.ok ? h.list : const [];
     // 热搜失败不阻塞页面（搜索/播放仍可用）
     if (!h.ok) _error = h.error;
+    // 后台补封面（不阻塞首屏）
+    _ensureHotCovers(SongSource.qq);
 
     // ── QQ 的免登录发现页数据（排行榜 / 歌单广场 / 分类）─────────
     //
@@ -185,17 +197,16 @@ class _DiscoverPageState extends State<DiscoverPage>
     //    文案上必须说清这个区别，否则用户会以为"既然能看到榜单，
     //    那应该也能播" → 点了播放失败 → 以为 App 坏了。
     try {
-      final results = await Future.wait([
-        api.topLists(source: SongSource.qq),
-        // QQ 的 `playlistSquare(cat:)` 收的是**数字 categoryId**
-        //（Node 侧 `Number(cat) || 10000000`）→ 传 id 字符串就是真·切分类。
-        api.playlistSquare(cat: '$_qqCatId', limit: 20, source: SongSource.qq),
-        api.playlistCatlistQq(),
-      ]);
+      // ⚠️ 歌单广场的 categoryId 依赖分类列表，不能和它真并行
+      //    （否则要先按"全部"拉一次、再按国语拉一次，白多一次请求）。
+      //    这里 topLists 与 catlist 并行，拿到分类后再拉广场。
+      final topF = api.topLists(source: SongSource.qq);
+      final catsF = api.playlistCatlistQq();
+      final tops = await topF;
+      final cats = await catsF;
       if (!mounted) return;
-      _qqTopLists = results[0] as List<TopList>;
-      _qqSquare = results[1] as List<Playlist>;
-      _qqCats = (results[2] as List<({int id, String name})>)
+      _qqTopLists = tops;
+      _qqCats = cats
           // 🔴 去掉「全部」（id 10000000，Node 侧兜底塞的第一个）。
           //    用户 2026-10-14：「QQ 歌单广场去掉那个"全部"分类」——
           //    它不切换任何东西（就是默认的全量列表），一个**选不中任何东西**
@@ -205,6 +216,23 @@ class _DiscoverPageState extends State<DiscoverPage>
           .where((c) => c.id != 10000000 && c.name != '全部')
           .take(24)
           .toList();
+
+      // ── 默认分类：国语（用户 2026-10-18 要求）────────────────────
+      // 首次进入时（仍是"全部"初值）自动选中「国语」；分类里没有国语时
+      // 保持"全部"不动。用户手动切过分类后 `_qqCatId` 已不是初值，不受影响。
+      if (_qqCatId == 10000000) {
+        for (final c in _qqCats) {
+          if (c.name == '国语') {
+            _qqCatId = c.id;
+            break;
+          }
+        }
+      }
+
+      // QQ 的 `playlistSquare(cat:)` 收的是**数字 categoryId**
+      //（Node 侧 `Number(cat) || 10000000`）→ 传 id 字符串就是真·切分类。
+      _qqSquare = await api.playlistSquare(
+          cat: '$_qqCatId', limit: 20, source: SongSource.qq);
     } catch (e) {
       // 免登录接口失败不该阻塞整页（热搜/搜索仍可用）
       AppLog.instance.log('[Discover] QQ 发现页数据加载失败: $e');
@@ -307,6 +335,42 @@ class _DiscoverPageState extends State<DiscoverPage>
     // `_hotKeywords` 还留着 QQ 的热搜词，点下去会用酷狗去搜 QQ 的热搜 ✗
     final hot = await api.hotSearchResult(source: src);
     _hotKeywords = hot.ok ? hot.list : const [];
+    // 后台补封面（不阻塞首屏）
+    _ensureHotCovers(src);
+  }
+
+  /// 给热搜卡补封面：用该关键词**搜索第一条**歌曲的专辑封面当背景。
+  ///
+  /// 为什么是"搜索第一条"：热搜接口只返回关键词，本身没有图；
+  /// 而一次搜索拿到第一条歌就能同时拿到封面，是成本最低的做法。
+  /// 只补前 [count] 条（每条一次请求），结果按 `平台|关键词` 缓存，
+  /// 重新进入页面/切分类都不会重复请求。
+  Future<void> _ensureHotCovers(SongSource source, {int count = 6}) async {
+    final todo = <String>[];
+    for (final kw in _hotKeywords.take(count)) {
+      if (kw.trim().isEmpty) continue;
+      final key = '${source.key}|$kw';
+      if (_hotCovers.containsKey(key) || _hotCoverInflight.contains(key)) {
+        continue;
+      }
+      _hotCoverInflight.add(key);
+      todo.add(kw);
+    }
+    if (todo.isEmpty) return;
+    await Future.wait(todo.map((kw) async {
+      final key = '${source.key}|$kw';
+      try {
+        final r = await api.search(kw, limit: 1, source: source);
+        final cover =
+            r.ok && r.list.isNotEmpty ? (r.list.first.coverUrl ?? '') : '';
+        if (cover.isNotEmpty) _hotCovers[key] = cover;
+      } catch (e) {
+        AppLog.instance.log('[Discover] 热搜封面获取失败($kw): $e');
+      } finally {
+        _hotCoverInflight.remove(key);
+      }
+    }));
+    if (mounted) setState(() {});
   }
 
   Future<void> _switchCat(String cat) async {
@@ -847,7 +911,7 @@ class _DiscoverPageState extends State<DiscoverPage>
       SliverToBoxAdapter(child: SectionTitle(title: title)),
       SliverToBoxAdapter(
         child: SizedBox(
-          height: 116,
+          height: 140,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -856,6 +920,9 @@ class _DiscoverPageState extends State<DiscoverPage>
             itemBuilder: (c, i) {
               final kw = _hotKeywords[i];
               final hot = i < 3;
+              // 补到的封面（关键词搜索第一条歌的专辑封面）；没有就用渐变底
+              final cover = _hotCovers['${source.key}|$kw'];
+              final onCover = cover != null && cover.isNotEmpty;
               return GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: () => showSearch<void>(
@@ -865,43 +932,149 @@ class _DiscoverPageState extends State<DiscoverPage>
                 ),
                 child: Container(
                   width: 132,
-                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                  height: 132,
                   decoration: BoxDecoration(
-                    // 与 `PresetCard` 一致的观感：填充 + 大圆角
-                    color: MusicTheme.fill,
                     borderRadius: BorderRadius.circular(18),
                     border: hot
                         ? Border.all(
-                            color: MusicTheme.tint.withValues(alpha: 0.45),
-                            width: 1)
-                        : null,
+                            color: MusicTheme.tint.withValues(alpha: 0.50),
+                            width: 1.2)
+                        : Border.all(
+                            color: MusicTheme.divider.withValues(alpha: 0.45),
+                            width: 0.8),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      // 大号名次（前三名主题色 + 更重）
-                      Text(
-                        '${i + 1}',
-                        style: TextStyle(
-                          color: hot ? MusicTheme.tint : MusicTheme.secondary,
-                          fontSize: hot ? 30 : 24,
-                          fontWeight: FontWeight.w800,
-                          height: 1.0,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(17),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        // ① 背景：有封面用封面，没有就渐变 + 音符装饰
+                        if (onCover)
+                          CoverImage(
+                              url: cover, size: 132, cornerRadius: 17)
+                        else
+                          Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: hot
+                                    ? [
+                                        MusicTheme.tint.withValues(alpha: 0.22),
+                                        MusicTheme.tint.withValues(alpha: 0.06),
+                                      ]
+                                    : [
+                                        MusicTheme.fill.withValues(alpha: 0.9),
+                                        MusicTheme.fill.withValues(alpha: 0.55),
+                                      ],
+                              ),
+                            ),
+                            child: Stack(
+                              children: [
+                                Positioned(
+                                  right: -4,
+                                  bottom: -4,
+                                  child: Icon(
+                                    Icons.music_note_rounded,
+                                    size: 44,
+                                    color: (hot
+                                            ? MusicTheme.tint
+                                            : MusicTheme.secondary)
+                                        .withValues(alpha: 0.08),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        // ② 压暗渐变：保证白字在任何封面上都可读
+                        if (onCover)
+                          DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.black.withValues(alpha: 0.10),
+                                  Colors.black.withValues(alpha: 0.05),
+                                  Colors.black.withValues(alpha: 0.72),
+                                ],
+                                stops: const [0.0, 0.45, 1.0],
+                              ),
+                            ),
+                          ),
+                        // ③ 名次 + 关键词
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 10, 12, 11),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  Text(
+                                    '${i + 1}',
+                                    style: TextStyle(
+                                      color: onCover
+                                          ? Colors.white
+                                          : (hot
+                                              ? MusicTheme.tint
+                                              : MusicTheme.secondary),
+                                      fontSize: hot ? 30 : 24,
+                                      fontWeight: FontWeight.w900,
+                                      height: 1.0,
+                                      shadows: onCover
+                                          ? const [
+                                              Shadow(
+                                                color: Colors.black45,
+                                                blurRadius: 4,
+                                                offset: Offset(0, 1),
+                                              ),
+                                            ]
+                                          : null,
+                                    ),
+                                  ),
+                                  if (hot) ...[
+                                    const SizedBox(width: 4),
+                                    Container(
+                                      width: 6,
+                                      height: 6,
+                                      decoration: BoxDecoration(
+                                        color: onCover
+                                            ? Colors.white
+                                            : MusicTheme.tint,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              Text(
+                                kw,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: onCover
+                                      ? Colors.white
+                                      : MusicTheme.label,
+                                  fontSize: AppTheme.fontSubhead,
+                                  fontWeight: FontWeight.w500,
+                                  height: 1.3,
+                                  shadows: onCover
+                                      ? const [
+                                          Shadow(
+                                            color: Colors.black54,
+                                            blurRadius: 6,
+                                            offset: Offset(0, 1),
+                                          ),
+                                        ]
+                                      : null,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      Text(
-                        kw,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: MusicTheme.label,
-                          fontSize: AppTheme.fontSubhead,
-                          fontWeight: FontWeight.w500,
-                          height: 1.3,
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               );
@@ -1045,6 +1218,7 @@ class _DiscoverPageState extends State<DiscoverPage>
                 t.name,
                 source: SongSource.qq,
                 isTopList: true,
+                coverUrl: t.coverUrl,
               ),
             );
           },
@@ -1147,8 +1321,8 @@ class _DiscoverPageState extends State<DiscoverPage>
               title: p.name,
               subtitle: p.trackCount > 0 ? '${p.trackCount} 首' : null,
               width: 152,
-              onTap: () =>
-                  openPlaylist(context, p.id, p.name, source: SongSource.qq),
+              onTap: () => openPlaylist(context, p.id, p.name,
+                  source: SongSource.qq, coverUrl: p.coverUrl),
             );
           },
         ),
@@ -1267,7 +1441,8 @@ class _DiscoverPageState extends State<DiscoverPage>
               title: p.name,
               subtitle: p.trackCount > 0 ? '${p.trackCount} 首' : null,
               width: 152,
-              onTap: () => openPlaylist(context, p.id, p.name, source: _source),
+              onTap: () => openPlaylist(context, p.id, p.name,
+                  source: _source, coverUrl: p.coverUrl),
             );
           },
         ),
@@ -1306,6 +1481,7 @@ class _DiscoverPageState extends State<DiscoverPage>
             t.name,
             source: _source,
             isTopList: true,
+            coverUrl: t.coverUrl,
           ),
         ),
       ));
@@ -1324,7 +1500,8 @@ class _DiscoverPageState extends State<DiscoverPage>
         child: PlaylistGrid(
           style: style,
           items: _square,
-          onTap: (p) => openPlaylist(context, p.id, p.name, source: _source),
+          onTap: (p) => openPlaylist(context, p.id, p.name,
+              source: _source, coverUrl: p.coverUrl),
         ),
       ));
     }

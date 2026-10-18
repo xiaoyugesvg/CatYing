@@ -282,6 +282,9 @@ class SettingsService extends ChangeNotifier {
   static const _kReaderBackgroundStyleKey = 'reader_background_style';
   // 漫画阅读器边距（参考 cmbok「边距」tab：页眉左右16/上8、页脚左右16/下8）
   static const _kComicMarginKey = 'comic_reader_margin';
+
+  /// 一次性迁移：2026-10-18 起漫画默认边距改为 0（贴边全屏）。
+  static const _kComicMarginFullscreenKey = 'comic_margin_fullscreen_v1';
   // 端侧 AI 漫画超分（参考 cmbok「AI 超分」面板；仅 UI，不真实推理）
   static const _kUpscaleAutoCleanKey = 'upscale_auto_clean';
   static const _kUpscaleCleanLimitKey = 'upscale_clean_limit_gb';
@@ -506,12 +509,16 @@ class SettingsService extends ChangeNotifier {
   int _readerBackgroundStyle = 3;
 
   /// 漫画阅读器边距（参考 cmbok「边距」tab）
-  double _comicHeaderLeft = 16;
-  double _comicHeaderRight = 16;
-  double _comicHeaderTop = 8;
-  double _comicFooterLeft = 16;
-  double _comicFooterRight = 16;
-  double _comicFooterBottom = 8;
+  ///
+  /// 用户 2026-10-18：「漫画为啥不是全屏那种？感觉只有中间这一段」
+  /// ⇒ **默认边距改为 0**（图片贴屏幕左右边缘）；想留白仍可在
+  /// 「阅读设置 → 边距」里自己调大。
+  double _comicHeaderLeft = 0;
+  double _comicHeaderRight = 0;
+  double _comicHeaderTop = 0;
+  double _comicFooterLeft = 0;
+  double _comicFooterRight = 0;
+  double _comicFooterBottom = 0;
   /// 端侧 AI 漫画超分设置（仅 UI 面板，不做真实推理）
   bool _upscaleAutoClean = false;
   double _upscaleCleanLimitGb = 1.0;
@@ -898,6 +905,9 @@ class SettingsService extends ChangeNotifier {
       _currentSourceId = prefs.getString(_currentSourceKey) ?? '';
       // 禁用漫画源列表
       _disabledSourceIds = prefs.getStringList(_disabledSourceIdsKey) ?? [];
+      // 漫画源自定义顺序（长按源标签拖动后的顺序）
+      _mangaSourceOrder =
+          prefs.getStringList(_mangaSourceOrderKey) ?? const [];
       // 漫画源仓库云端 URL
       _sourceRepoUrl = prefs.getString(_sourceRepoUrlKey) ?? '';
       // 导航栏可见 tab
@@ -967,13 +977,31 @@ class SettingsService extends ChangeNotifier {
     if (marginRaw != null) {
       try {
         final m = jsonDecode(marginRaw) as Map<String, dynamic>;
-        _comicHeaderLeft = asDoubleOrNull(m['hl']) ?? 16;
-        _comicHeaderRight = asDoubleOrNull(m['hr']) ?? 16;
-        _comicHeaderTop = asDoubleOrNull(m['ht']) ?? 8;
-        _comicFooterLeft = asDoubleOrNull(m['fl']) ?? 16;
-        _comicFooterRight = asDoubleOrNull(m['fr']) ?? 16;
-        _comicFooterBottom = asDoubleOrNull(m['fb']) ?? 8;
+        _comicHeaderLeft = asDoubleOrNull(m['hl']) ?? 0;
+        _comicHeaderRight = asDoubleOrNull(m['hr']) ?? 0;
+        _comicHeaderTop = asDoubleOrNull(m['ht']) ?? 0;
+        _comicFooterLeft = asDoubleOrNull(m['fl']) ?? 0;
+        _comicFooterRight = asDoubleOrNull(m['fr']) ?? 0;
+        _comicFooterBottom = asDoubleOrNull(m['fb']) ?? 0;
       } catch (_) {}
+    }
+    // 2026-10-18：老默认边距（16/16/8）一次性改成 0 —— 用户没主动改过时
+    // 图片会一直缩在中间（"感觉只有中间这一段"）。主动改过的自定义值不动。
+    if (prefs.getBool(_kComicMarginFullscreenKey) != true) {
+      if (_comicHeaderLeft == 16 &&
+          _comicHeaderRight == 16 &&
+          _comicHeaderTop == 8 &&
+          _comicFooterLeft == 16 &&
+          _comicFooterRight == 16 &&
+          _comicFooterBottom == 8) {
+        _comicHeaderLeft = 0;
+        _comicHeaderRight = 0;
+        _comicHeaderTop = 0;
+        _comicFooterLeft = 0;
+        _comicFooterRight = 0;
+        _comicFooterBottom = 0;
+      }
+      await prefs.setBool(_kComicMarginFullscreenKey, true);
     }
     _autoAddShelfForManga =
         prefs.getBool(_kAutoAddShelfKey) ?? false;
@@ -2527,6 +2555,22 @@ class SettingsService extends ChangeNotifier {
   static const _disabledSourceIdsKey = 'disabled_source_ids';
   List<String> _disabledSourceIds = []; // 禁用漫画源 id 列表（启用 = 不在此列表）
   List<String> get disabledSourceIds => _disabledSourceIds;
+
+  /// 漫画源自定义顺序（用户 2026-10-18：长按源标签可左右移动）
+  static const _mangaSourceOrderKey = 'manga_source_order_v1';
+  List<String> _mangaSourceOrder = [];
+  List<String> get mangaSourceOrder => List.unmodifiable(_mangaSourceOrder);
+
+  Future<void> setMangaSourceOrder(List<String> value) async {
+    _mangaSourceOrder = List<String>.of(value);
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_mangaSourceOrderKey, _mangaSourceOrder);
+    } catch (e) {
+      _log('保存漫画源顺序失败: $e');
+    }
+  }
 
   /// 设置禁用漫画源 id 列表
   Future<void> setDisabledSourceIds(List<String> value) async {

@@ -3429,56 +3429,63 @@ class _BookshelfPageState extends State<BookshelfPage>
                       )..layout())
                       .height +
                   12;
-              // 管理 / 排序：一枚浅底圆角胶囊里的两枚图标。
-              //
-              // ✅ 用户 2026-10-15：①「中间那个 | 去掉」—— 原来两枚图标之间
-              //    横着一根 1×14 的分隔线，显得碎；②「尺寸高度加大一点，和旁边
-              //    不协调」—— 图标 16→18、每段点击区 23→30，胶囊更饱满，
-              //    视觉重量与右侧书架 chips 拉齐（高度仍与 chips 一致，基线不乱）。
-              final fixedButtons = Container(
-                height: chipBoxHeight,
-                padding: const EdgeInsets.symmetric(horizontal: 2),
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? Colors.white.withValues(alpha: 0.08)
-                      : Colors.black.withValues(alpha: 0.045),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      tooltip: '管理书架',
-                      icon: Icon(Icons.dashboard_customize_rounded,
-                          size: 18, color: iconColor),
-                      padding: EdgeInsets.zero,
-                      constraints:
-                          const BoxConstraints(minWidth: 30, minHeight: 30),
-                      onPressed: _showManageShelves,
+              // 管理 / 排序：**两个独立的圆形按钮**（用户 2026-10-18 给的截图）
+              //   · 左：管理书架（列表/筛选样式的图标）
+              //   · 右：排序方式（上下箭头）
+              //   原来是同一枚胶囊里的两段，用户要求拆开成两个独立面板入口。
+              Widget roundBtn(IconData icon, String tip, VoidCallback onTap) {
+                return Tooltip(
+                  message: tip,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: onTap,
+                    child: Container(
+                      width: chipBoxHeight,
+                      height: chipBoxHeight,
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? Colors.white.withValues(alpha: 0.08)
+                            : Colors.black.withValues(alpha: 0.045),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.06)
+                              : Colors.black.withValues(alpha: 0.05),
+                          width: 0.5,
+                        ),
+                      ),
+                      child: Icon(icon, size: 18, color: iconColor),
                     ),
-                    IconButton(
-                      tooltip: '排序方式',
-                      icon: Icon(Icons.swap_vert_rounded,
-                          size: 18, color: iconColor),
-                      padding: EdgeInsets.zero,
-                      constraints:
-                          const BoxConstraints(minWidth: 30, minHeight: 30),
-                      onPressed: _showSortSheet,
-                    ),
-                  ],
-                ),
+                  ),
+                );
+              }
+
+              final fixedButtons = Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  roundBtn(
+                    Icons.subject_rounded,
+                    '管理书架',
+                    _showManageShelves,
+                  ),
+                  const SizedBox(width: 8),
+                  roundBtn(
+                    Icons.swap_vert_rounded,
+                    '排序方式',
+                    _showSortSheet,
+                  ),
+                ],
               );
 
               // 固定按钮在**左侧**（用户多次点名"管理/排序移到左边"），
               // 标签行占满剩余宽度；内容不足时居中，超出则横向滚动
-              //（胶囊 2+30+30+2 = 64，加 4 间距）
-              const fixedWidth = 68.0;
+              final fixedWidth = chipBoxHeight * 2 + 8;
               return Row(
                 children: [
                   fixedButtons,
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 8),
                   Expanded(
-                    child: totalWidth + 16 + fixedWidth + 4 <=
+                    child: totalWidth + 16 + fixedWidth + 8 <=
                             constraints.maxWidth
                         ? Center(child: scrollView)
                         : scrollView,

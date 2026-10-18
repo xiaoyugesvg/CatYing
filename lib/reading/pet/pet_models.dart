@@ -230,6 +230,19 @@ class PetSpecies {
     price: 1800,
   );
 
+  /// 自定义桌宠（用户 2026-10-18）：PNG / GIF 由用户自己上传。
+  ///
+  /// 不属于图鉴（不在 [all] 里），只作为「当前皮肤」使用；
+  /// 图片路径存在 [PetService.customPetPath]。
+  static const custom = PetSpeciesInfo(
+    id: 'custom',
+    name: '自定义',
+    element: '我的',
+    description: '你自己上传的 PNG / GIF 桌宠。',
+    palette: [Color(0xFF8D6E63), Color(0xFFF5F0E6), Color(0xFF5D4037)],
+    price: 0,
+  );
+
   static const List<PetSpeciesInfo> all = [
     cat,
     dog,
@@ -251,8 +264,9 @@ class PetSpecies {
     fenghuang,
   ];
 
-  static PetSpeciesInfo byId(String id) =>
-      all.firstWhere((e) => e.id == id, orElse: () => cat);
+  static PetSpeciesInfo byId(String id) => id == custom.id
+      ? custom
+      : all.firstWhere((e) => e.id == id, orElse: () => cat);
 }
 
 class PetOutfitInfo {

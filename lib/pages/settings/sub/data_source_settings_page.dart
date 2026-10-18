@@ -30,9 +30,17 @@ class DataSourceSettingsPage extends StatefulWidget {
 }
 
 class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
-  /// 复用主设置页注册的 SettingsController（本页只能从设置页进入，
-  /// 所以它一定已注册）；用 find 而非 put，避免意外新建实例。
-  SettingsController get controller => Get.find<SettingsController>();
+  /// 复用主设置页注册的 SettingsController；**没有就自己注册**。
+  ///
+  /// ⚠️ 不能直接 `Get.find`：本页还有一个入口是启动页的「更换源」
+  /// （`app_loading_view.dart`），那条路径**从未构建过 SettingsPage** →
+  /// `SettingsController` 不存在 → `Get.find` 抛异常 → 整个第二个分组
+  /// 被 ErrorWidget（release 下是一块灰色长板）取代，用户看到的就是
+  /// 「订阅管理页下面一大块灰色空白」。
+  SettingsController get controller =>
+      Get.isRegistered<SettingsController>()
+          ? Get.find<SettingsController>()
+          : Get.put(SettingsController());
 
   @override
   Widget build(BuildContext context) {

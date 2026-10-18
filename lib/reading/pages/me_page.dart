@@ -27,13 +27,11 @@ import 'favorites_page.dart';
 import 'book_notes_page.dart';
 import 'reading_plan_page.dart';
 import 'reading_stats_page.dart';
-import '../pet/pet_center_page.dart';
 import '../pet/pet_models.dart';
 import '../pet/pet_view.dart';
 import 'reading_settings_page.dart';
 import 'search_page.dart';
 import 'book_source_repo_page.dart';
-import 'source_warehouse_page.dart';
 import 'source_repo_page.dart';
 import 'tts_engine_page.dart';
 import 'zlibrary_auth_page.dart';
@@ -303,49 +301,10 @@ class _MePageState extends State<MePage> {
                         ),
                       ),
                     ),
-                    // 6.1 书源仓 / 漫画仓（用户 2026-10-17）：
-                    // 订阅链接记录 + 已导入源分组；订阅一个加载一个、多个全部加载。
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_novel_warehouse'),
-                      index: 7,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.rss_feed_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: '书源仓',
-                          subtitle: '小说订阅 · 分组管理 · 更新',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const SourceWarehousePage(),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_comic_warehouse'),
-                      index: 8,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.collections_bookmark_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: '漫画仓',
-                          subtitle: '漫画订阅 · 分组管理 · 更新',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  const SourceWarehousePage(startComic: true),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
+                    // 6.1 书源仓 / 漫画仓已移到各自仓库页的**右上角图标**
+                    //     （用户 2026-10-18：「不需要单独在我的页面弄」）：
+                    //       · 书源仓 → 书源仓库右上角
+                    //       · 漫画仓 → 漫画源仓库右上角
                     // 7. 下载设置
                     StaggeredEntrance(
                       key: ValueKey('${_session}_2'),
@@ -433,27 +392,8 @@ class _MePageState extends State<MePage> {
                         ),
                       ),
                     ),
-                    // 桌宠：养成 / 图鉴 / 换装（全局悬浮，可在宠物中心关闭）
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_pet'),
-                      index: 10,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.pets_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: '桌宠',
-                          subtitle: '养成 · 图鉴 · 换装',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const PetCenterPage(),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
+                    // 桌宠管理已移到「显示设置」里（用户 2026-10-18），
+                    // 「我的」页不再单独占一格。
                     // AI 听书：多角色配音（easyVoice），音源/引擎管理
                     StaggeredEntrance(
                       key: ValueKey('${_session}_ai_tts'),
@@ -1081,26 +1021,34 @@ class _MePageState extends State<MePage> {
                           Stack(
                             clipBehavior: Clip.none,
                             children: [
-                              Container(
-                                width: 64,
-                                height: 64,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: logged
-                                      ? JellyTheme.primary
-                                      : (isDark
-                                          ? Colors.white.withValues(alpha: 0.10)
-                                          : const Color(0xFFEDEEF0)),
-                                  border:
-                                      Border.all(color: avatarRing, width: 2),
+                              // 🔴 头像本身也可点：用户 2026-10-18 反馈
+                              // 「登录后的头像不能选择切换」—— 原来只有右下角
+                              // 那个 22px 的小相机角标能开面板，点大头像会走
+                              // 外层的「我的账号」，很难发现换头像的入口。
+                              GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: _showAvatarSheet,
+                                child: Container(
+                                  width: 64,
+                                  height: 64,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: logged
+                                        ? JellyTheme.primary
+                                        : (isDark
+                                            ? Colors.white.withValues(alpha: 0.10)
+                                            : const Color(0xFFEDEEF0)),
+                                    border:
+                                        Border.all(color: avatarRing, width: 2),
+                                  ),
+                                  // ⚠️ 必须裁：`shape: BoxShape.circle` 只把**底色/描边**
+                                  //    画成圆，**子级图片不会被裁** ⇒ 方形头像图会直接铺满
+                                  //    方形区域、在圆里露出四个角（用户 2026-10-16 截图）。
+                                  //    子级已被 decoration 按描边宽度内缩 2px，所以裁完
+                                  //    描边仍然可见。
+                                  clipBehavior: Clip.antiAlias,
+                                  child: _avatarImage(60, logged: logged),
                                 ),
-                                // ⚠️ 必须裁：`shape: BoxShape.circle` 只把**底色/描边**
-                                //    画成圆，**子级图片不会被裁** ⇒ 方形头像图会直接铺满
-                                //    方形区域、在圆里露出四个角（用户 2026-10-16 截图）。
-                                //    子级已被 decoration 按描边宽度内缩 2px，所以裁完
-                                //    描边仍然可见。
-                                clipBehavior: Clip.antiAlias,
-                                child: _avatarImage(60, logged: logged),
                               ),
                               // 相机角标（编辑头像入口）—— 点它开「选择头像」面板
                               Positioned(

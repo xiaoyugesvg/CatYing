@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -39,16 +40,24 @@ class PetView extends StatelessWidget {
     if (asset != null && !headOnly) {
       return _buildImagePet(asset);
     }
+    // 用户 2026-10-18：「十二生肖都弄成圆形」——
+    // 没有插画的物种（猫/牛/蛇/麒麟/朱雀/白虎/玄武/凤凰）也不再画
+    // 全身矢量团子，统一裁成**圆形头部**，与有插画的生肖观感一致。
     return SizedBox(
       width: size,
       height: size,
-      child: CustomPaint(
-        painter: _InkPetPainter(
-          species: species,
-          outfit: outfit,
-          t: t,
-          mood: mood,
-          headOnly: headOnly,
+      child: ClipOval(
+        child: ColoredBox(
+          color: const Color(0xFFF7F3EA),
+          child: CustomPaint(
+            painter: _InkPetPainter(
+              species: species,
+              outfit: outfit,
+              t: t,
+              mood: mood,
+              headOnly: true,
+            ),
+          ),
         ),
       ),
     );
@@ -71,7 +80,8 @@ class PetView extends StatelessWidget {
           child: Container(
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(size * 0.16),
+              // 用户 2026-10-18：生肖宠物统一**圆形**（原来是圆角方形贴纸）
+              shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.12),
@@ -93,10 +103,51 @@ class PetView extends StatelessWidget {
                   outfit: outfit,
                   t: t,
                   mood: mood,
+                  headOnly: true,
                 ),
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 用户自定义桌宠图片（PNG / GIF）。
+///
+/// 用户 2026-10-18：「能自定义增加 PNG 或 GIF 图片」。
+/// 直接用 `Image.file`：GIF 自动播放；**不裁圆、不套白底贴纸**，
+/// 保留原图（自定义图常带透明背景，套底反而难看）。
+class CustomPetImage extends StatelessWidget {
+  const CustomPetImage({
+    super.key,
+    required this.path,
+    this.size = 120,
+    this.bob = 0,
+  });
+
+  final String path;
+  final double size;
+
+  /// 上下浮动像素（由动画进度算好传进来）
+  final double bob;
+
+  @override
+  Widget build(BuildContext context) {
+    final f = File(path);
+    if (!f.existsSync()) {
+      return SizedBox(width: size, height: size);
+    }
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Transform.translate(
+        offset: Offset(0, bob),
+        child: Image.file(
+          f,
+          fit: BoxFit.contain,
+          gaplessPlayback: true,
         ),
       ),
     );

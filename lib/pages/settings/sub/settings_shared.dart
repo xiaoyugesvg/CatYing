@@ -16,6 +16,9 @@ class SettingsDialogs {
   /// 底部弹窗式单选（用于外观模式、自动清理、播放内核、画质…）
   ///
   /// 返回选中项；用户取消返回 null。
+  ///
+  /// 版式与直播/详情页的选项弹层统一：拖拽条 + 标题 + 圆角卡片行，
+  /// 选中项为主题色浅底 + 细描边 + ✓（原来是最朴素的 ListTile）。
   static Future<T?> pick<T>({
     required BuildContext context,
     required String title,
@@ -26,25 +29,110 @@ class SettingsDialogs {
     return showModalBottomSheet<T>(
       context: context,
       backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
       builder: (ctx) => kbSheet(SafeArea(
+        top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(title,
-                  style: TextStyle(
-                      color: AppTheme.textPrimary, fontSize: AppTheme.fontHeadline)),
-            ),
-            for (final o in options)
-              ListTile(
-                title: Text(labelBuilder(o),
-                    style: TextStyle(color: AppTheme.textSecondary)),
-                trailing: selected == o
-                    ? Icon(Icons.check, color: AppTheme.accentColor)
-                    : null,
-                onTap: () => Navigator.pop(ctx, o),
+            // 顶部把手
+            Container(
+              margin: const EdgeInsets.only(top: 10, bottom: 6),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppTheme.textTertiary.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(2),
               ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+              child: Row(
+                children: [
+                  Text(title,
+                      style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: AppTheme.fontHeadline,
+                          fontWeight: FontWeight.w700)),
+                  const Spacer(),
+                  Text('${options.length} 项',
+                      style: TextStyle(
+                          color: AppTheme.textTertiary, fontSize: 12)),
+                ],
+              ),
+            ),
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(ctx).size.height * 0.5,
+              ),
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                itemCount: options.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 6),
+                itemBuilder: (c, i) {
+                  final o = options[i];
+                  final on = selected == o;
+                  return Material(
+                    color: on
+                        ? AppTheme.accentColor.withValues(alpha: 0.12)
+                        : AppTheme.backgroundTertiary,
+                    borderRadius: BorderRadius.circular(12),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => Navigator.pop(ctx, o),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 12),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          border: on
+                              ? Border.all(
+                                  color: AppTheme.accentColor
+                                      .withValues(alpha: 0.45),
+                                  width: 0.8,
+                                )
+                              : null,
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                labelBuilder(o),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: on
+                                      ? AppTheme.accentColor
+                                      : AppTheme.textPrimary,
+                                  fontSize: AppTheme.fontBody,
+                                  fontWeight:
+                                      on ? FontWeight.w600 : FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Icon(
+                              on
+                                  ? Icons.check_circle_rounded
+                                  : Icons.circle_outlined,
+                              size: 19,
+                              color: on
+                                  ? AppTheme.accentColor
+                                  : AppTheme.textTertiary
+                                      .withValues(alpha: 0.5),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
           ],
         ),
       )),

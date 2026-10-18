@@ -112,10 +112,11 @@ class _HomePageState extends State<HomePage> {
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () async {
-              final changed = await SourceSwitchSheet.show(context);
-              if (changed && mounted) {
-                _controller.refresh();
-              }
+              // ⚠️ 只负责弹面板；换源后的刷新由 HomeController 监听
+              // `homeSourceBean` 统一触发。这里再调一次 refresh() 会和监听
+              // 里那次并发跑两遍 getSort（脚本源要初始化引擎，代价很高），
+              // 两遍结果还可能一前一后覆盖（看起来"切了源又跳回去"）。
+              await SourceSwitchSheet.show(context);
             },
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -124,16 +125,47 @@ class _HomePageState extends State<HomePage> {
                 const SizedBox(width: 8),
                 ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 130),
-                  child: Obx(() => Text(
-                        ApiConfig.instance.homeSourceBean.value?.name ?? '选择源',
-                        style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: AppTheme.fontHeadline,
-                          fontWeight: FontWeight.bold,
+                  child: Obx(() {
+                    final loading = _controller.isLoading.value;
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            ApiConfig.instance.homeSourceBean.value?.name ??
+                                '选择源',
+                            style: TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: AppTheme.fontHeadline,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      )),
+                        // 正在加载该源的分类/影片时给个小转圈，
+                        // 让"点了换源"有即时反馈（脚本源初始化要几秒）
+                        if (loading) ...[
+                          const SizedBox(width: 6),
+                          SizedBox(
+                            width: 12,
+                            height: 12,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.6,
+                              color: AppTheme.accentColor,
+                            ),
+                          ),
+                        ] else ...[
+                          const SizedBox(width: 2),
+                          Icon(
+                            Icons.arrow_drop_down_rounded,
+                            size: 18,
+                            color: AppTheme.textTertiary,
+                          ),
+                        ],
+                      ],
+                    );
+                  }),
                 ),
               ],
             ),

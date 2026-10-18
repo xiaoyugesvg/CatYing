@@ -17,6 +17,7 @@ import 'book_source_editor_page.dart';
 import 'book_source_health_page.dart';
 import 'book_source_login_page.dart';
 import 'book_source_qr_scan_page.dart';
+import 'source_warehouse_page.dart';
 // cloud_book_source_page 的 import 已移除（云端网页入口迁到书源页）
 // ✅ **补齐缺失的 import** ✗✓（本轮修的 8 条 error 全因它们 ✗）：
 //   · `JellySearchBar` / `JellySlidingActions`(+`JellyAction`)
@@ -300,6 +301,14 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
       ),
       actions: [
         // 普通模式：分享 + 盾牌（体检）两个图标**同时并排显示**，不用滑动切换。
+        if (!_selectMode)
+          // 书源仓（用户 2026-10-18）：从「我的」页移到这里，右上角图标进入
+          _appBarIcon(Icons.inventory_2_outlined, '书源仓', () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const SourceWarehousePage()),
+            );
+          }),
         if (!_selectMode)
           _appBarIcon(Icons.ios_share_rounded, '分享书源', () {
             if (store.isEmpty) return;

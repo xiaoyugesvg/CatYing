@@ -893,17 +893,8 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
             ),
           ],
 
-          if (_candidates.isNotEmpty) ...[
-            const SizedBox(height: 18),
-            Text('解析结果（${_candidates.length}）',
-                style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: AppTheme.fontSubhead,
-                    fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            _candidateArea(),
-          ],
-
+          // 用户 2026-10-18：「把简介放在解析结果前面」——
+          // 先看简介再决定点哪条解析地址，顺序更自然。
           if (it.desc.isNotEmpty) ...[
             const SizedBox(height: 18),
             Text('简介',
@@ -917,6 +908,17 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
                     color: AppTheme.textSecondary,
                     fontSize: AppTheme.fontSubhead,
                     height: 1.6)),
+          ],
+
+          if (_candidates.isNotEmpty) ...[
+            const SizedBox(height: 18),
+            Text('解析结果（${_candidates.length}）',
+                style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontSubhead,
+                    fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            _candidateArea(),
           ],
 
           if (showRaw) ...[

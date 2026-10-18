@@ -100,6 +100,14 @@ class _DetailPageState extends State<DetailPage> {
   String? _lastPlayerUrl;
   String? _lastPlayerHeadersKey;
 
+  /// 当前 _player 实例是按哪个内核创建的。
+  ///
+  /// 用于让 ever(vodEngine) 与播放器内菜单的热切换**互斥**：
+  /// 菜单热切换已按新内核重建并同步本字段，ever 回调随后触发时
+  /// 发现内核一致直接跳过 —— 否则会把刚建好的新实例立刻 dispose，
+  /// 再从过期续播位重建一次（表现为"切换不灵/跳进度/黑屏闪一下"）。
+  PlayerEngine? _playerEngine;
+
   /// 是否已排队 post-frame 重建 Player，防止 build 内重复 schedule
   bool _playerRecreateScheduled = false;
   Worker? _engineWorker;
@@ -201,15 +209,26 @@ class _DetailPageState extends State<DetailPage> {
     }
   }
 
-  /// 设置里切换内核 → 立刻换播放器（丢弃旧实例重建）
+  /// 设置里切换内核 → 立刻换播放器（与播放器内菜单共用热切换路径）。
+  ///
+  /// 与热切换互斥：_playerEngine 已是目标内核说明播放器内菜单刚重建过，
+  /// 本回调（ever 异步触发）直接跳过，避免把新实例又 dispose 重建一次。
   void _onEngineChanged() {
     if (!mounted) return;
-    final old = _player;
-    _player = null;
-    _lastPlayerUrl = '';
-    _lastPlayerHeadersKey = '';
-    old?.dispose();
-    setState(() {});
+    final engine = PlayerPrefs.instance.vodEngine.value;
+    if (engine == PlayerEngine.webview) {
+      // 网页内核不走原生 Player：释放实例即可，build 会自动改挂 WebviewPlayerPage
+      _playerEngine = engine;
+      final old = _player;
+      _player = null;
+      _lastPlayerUrl = '';
+      _lastPlayerHeadersKey = '';
+      old?.dispose();
+      setState(() {});
+      return;
+    }
+    if (_player != null && _playerEngine == engine) return;
+    _onEngineHotSwap(engine);
   }
 
   void _loadDetailIfNeeded() {
@@ -294,43 +313,51 @@ class _DetailPageState extends State<DetailPage> {
     }
     await showModalBottomSheet(
       context: context,
-      backgroundColor: AppTheme.backgroundPrimary,
-      builder: (ctx) => kbSheet(
-        ListView(
-          padding: const EdgeInsets.all(12),
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              '选择刮削结果',
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: AppTheme.fontHeadline,
-                fontWeight: FontWeight.w600,
+            const _SheetGrabber(),
+            _SheetHeader(
+              title: '选择刮削结果',
+              subtitle: '选中的条目会覆盖当前海报/简介/演职员',
+              trailing: '${cands.length} 个',
+            ),
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(ctx).size.height * 0.5,
+              ),
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                itemCount: cands.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 6),
+                itemBuilder: (c, i) {
+                  final it = cands[i].$2;
+                  final name = (it['title'] ?? it['name'] ?? '').toString();
+                  final date =
+                      (it['release_date'] ?? it['first_air_date'] ?? '')
+                          .toString();
+                  final typeLabel = cands[i].$1 == 'movie' ? '电影' : '剧集';
+                  return _SheetOptionTile(
+                    title: name,
+                    subtitle: '$typeLabel · $date',
+                    onTap: () async {
+                      Navigator.pop(ctx);
+                      await tmdb.applyCandidate(info, cands[i].$1, it);
+                      if (!mounted) return;
+                      setState(() {});
+                    },
+                  );
+                },
               ),
             ),
-            const SizedBox(height: 8),
-            ...cands.map((c) {
-              final it = c.$2;
-              final name = (it['title'] ?? it['name'] ?? '').toString();
-              final date = (it['release_date'] ?? it['first_air_date'] ?? '')
-                  .toString();
-              final typeLabel = c.$1 == 'movie' ? '电影' : '剧集';
-              return ListTile(
-                title: Text(
-                  name,
-                  style: TextStyle(color: AppTheme.textPrimary),
-                ),
-                subtitle: Text(
-                  '$typeLabel · $date',
-                  style: TextStyle(color: AppTheme.textTertiary),
-                ),
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  await tmdb.applyCandidate(info, c.$1, it);
-                  if (!mounted) return;
-                  setState(() {});
-                },
-              );
-            }),
+            const SizedBox(height: 10),
           ],
         ),
       ),
@@ -409,52 +436,53 @@ class _DetailPageState extends State<DetailPage> {
     }
     await showModalBottomSheet(
       context: context,
-      backgroundColor: AppTheme.backgroundPrimary,
-      builder: (ctx) => kbSheet(
-        ListView(
-          padding: const EdgeInsets.all(12),
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              '选择正确结果',
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: AppTheme.fontHeadline,
-                fontWeight: FontWeight.w600,
-              ),
+            const _SheetGrabber(),
+            _SheetHeader(
+              title: '换源',
+              subtitle: '当前源里的同名候选，匹配错时可手动选择正确结果',
+              trailing: '${cands.length} 个',
             ),
-            const SizedBox(height: 8),
-            Text(
-              '当前源：${info.name} 的候选（同名剧/不同版本）',
-              style: TextStyle(
-                color: AppTheme.textTertiary,
-                fontSize: AppTheme.fontFootnote,
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(ctx).size.height * 0.5,
               ),
-            ),
-            const SizedBox(height: 4),
-            ...cands.map((c) {
-              final extra = <String>[
-                if (c.year.isNotEmpty) c.year,
-                if (c.note.isNotEmpty) c.note,
-              ].join(' · ');
-              return ListTile(
-                title: Text(
-                  c.name,
-                  style: TextStyle(color: AppTheme.textPrimary),
-                ),
-                subtitle: extra.isNotEmpty
-                    ? Text(
-                        extra,
-                        style: TextStyle(color: AppTheme.textTertiary),
-                      )
-                    : null,
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  await _controller.loadDetail(c);
-                  if (mounted) setState(() {});
-                  _saveHistoryForCurrentEpisode();
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                itemCount: cands.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 6),
+                itemBuilder: (c, i) {
+                  final v = cands[i];
+                  final extra = <String>[
+                    if (v.year.isNotEmpty) v.year,
+                    if (v.note.isNotEmpty) v.note,
+                  ].join(' · ');
+                  final subtitle =
+                      extra.isNotEmpty ? extra : v.actor.replaceAll(',', ' / ');
+                  return _SheetOptionTile(
+                    leading: _CandidatePoster(url: v.pic),
+                    title: v.name,
+                    subtitle: subtitle,
+                    onTap: () async {
+                      Navigator.pop(ctx);
+                      await _controller.loadDetail(v);
+                      if (mounted) setState(() {});
+                      _saveHistoryForCurrentEpisode();
+                    },
+                  );
                 },
-              );
-            }),
+              ),
+            ),
+            const SizedBox(height: 10),
           ],
         ),
       ),
@@ -638,6 +666,7 @@ class _DetailPageState extends State<DetailPage> {
     } else {
       _player = AppPlayer(config: const AppConfig(title: 'TVBox'));
     }
+    _playerEngine = engine;
     _lastPlayerUrl = url;
     _lastPlayerHeadersKey = headersKey;
     _player!.open(AppMedia(url, httpHeaders: headers, start: start));
@@ -649,6 +678,17 @@ class _DetailPageState extends State<DetailPage> {
   /// 按新偏好立刻重建并从原位置续播，不用等下一集。
   /// ObjectKey(_player) 会让 VideoPlayerWidget 整体 remount，状态干净。
   void _onEngineHotSwap(PlayerEngine engine) {
+    if (engine == PlayerEngine.webview) {
+      // 网页内核不走原生 Player
+      _playerEngine = engine;
+      final old = _player;
+      _player = null;
+      _lastPlayerUrl = '';
+      _lastPlayerHeadersKey = '';
+      old?.dispose();
+      setState(() {});
+      return;
+    }
     final url = _controller.playUrl.value ?? '';
     if (url.isEmpty) return;
     final headers = _controller.playHeaders.isNotEmpty
@@ -1082,38 +1122,11 @@ class _DetailPageState extends State<DetailPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 顶部把手
-              Container(
-                margin: const EdgeInsets.only(top: 10, bottom: 6),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppTheme.textTertiary.withValues(alpha: 0.35),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
-                child: Row(
-                  children: [
-                    Text(
-                      '解析线路',
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: AppTheme.fontHeadline,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      '${lines.length} 条',
-                      style: TextStyle(
-                        color: AppTheme.textTertiary,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
+              const _SheetGrabber(),
+              _SheetHeader(
+                title: '解析线路',
+                subtitle: '选中后会用新线路重新解析当前集',
+                trailing: '${lines.length} 条',
               ),
               if (lines.isEmpty)
                 Padding(
@@ -1133,24 +1146,28 @@ class _DetailPageState extends State<DetailPage> {
                   constraints: BoxConstraints(
                     maxHeight: MediaQuery.of(ctx).size.height * 0.5,
                   ),
-                  child: ListView(
+                  child: ListView.separated(
                     shrinkWrap: true,
-                    children: [
-                      _parseLineRow(
-                        ctx,
-                        label: '自动（按顺序尝试）',
-                        sub: '',
-                        selected: active.isEmpty,
-                        value: '',
-                      ),
-                      ...lines.map((b) => _parseLineRow(
-                            ctx,
-                            label: b.name.isEmpty ? b.url : b.name,
-                            sub: b.url,
-                            selected: active == b.url,
-                            value: b.url,
-                          )),
-                    ],
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    itemCount: lines.length + 1,
+                    separatorBuilder: (_, __) => const SizedBox(height: 6),
+                    itemBuilder: (c, i) {
+                      if (i == 0) {
+                        return _SheetOptionTile(
+                          title: '自动（按顺序尝试）',
+                          subtitle: '按线路列表顺序依次尝试，谁先返回用谁',
+                          selected: active.isEmpty,
+                          onTap: () => Navigator.of(ctx).pop(''),
+                        );
+                      }
+                      final b = lines[i - 1];
+                      return _SheetOptionTile(
+                        title: b.name.isEmpty ? b.url : b.name,
+                        subtitle: b.url,
+                        selected: active == b.url,
+                        onTap: () => Navigator.of(ctx).pop(b.url),
+                      );
+                    },
                   ),
                 ),
               const SizedBox(height: 10),
@@ -1161,40 +1178,6 @@ class _DetailPageState extends State<DetailPage> {
     );
     if (picked == null) return; // null = 用户取消；'' = 选了「自动」
     await _controller.selectParseLine(picked);
-  }
-
-  Widget _parseLineRow(
-    BuildContext ctx, {
-    required String label,
-    required String sub,
-    required bool selected,
-    required String value,
-  }) {
-    return ListTile(
-      dense: true,
-      title: Text(
-        label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: selected ? AppTheme.accentColor : AppTheme.textPrimary,
-          fontSize: 14,
-          fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-        ),
-      ),
-      subtitle: sub.isEmpty
-          ? null
-          : Text(
-              sub,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: AppTheme.textTertiary, fontSize: 11),
-            ),
-      trailing: selected
-          ? Icon(Icons.check_circle, color: AppTheme.accentColor, size: 18)
-          : null,
-      onTap: () => Navigator.of(ctx).pop(value),
-    );
   }
 
   /// 判断播放 URL 是否为"网页播放器页"（需 WebView 兜底）而非直链媒体。
@@ -2585,27 +2568,256 @@ class _PillChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 与「换源 / 解析线路」弹层里的选项行保持同一套选中语言：
+    // 主题色浅底 + 细描边 + ✓，未选中为灰底无描边。
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(
-          horizontal: AppTheme.spacingLG,
-          vertical: AppTheme.spacingSM,
+          horizontal: 14,
+          vertical: 8,
         ),
         decoration: BoxDecoration(
           color: isSelected
               ? AppTheme.accentColor.withValues(alpha: 0.12)
               : AppTheme.backgroundTertiary,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(18),
+          border: isSelected
+              ? Border.all(
+                  color: AppTheme.accentColor.withValues(alpha: 0.45),
+                  width: 0.8,
+                )
+              : Border.all(color: AppTheme.borderLight, width: 0.6),
         ),
-        child: Text(
-          title,
-          style: TextStyle(
-            color: isSelected ? AppTheme.accentColor : AppTheme.textSecondary,
-            fontSize: AppTheme.fontFootnote,
-            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (isSelected) ...[
+              Icon(Icons.check_rounded,
+                  size: 13, color: AppTheme.accentColor),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              title,
+              style: TextStyle(
+                color:
+                    isSelected ? AppTheme.accentColor : AppTheme.textSecondary,
+                fontSize: AppTheme.fontFootnote,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 详情页底部弹层的拖拽把手（换源 / 解析线路共用）
+class _SheetGrabber extends StatelessWidget {
+  const _SheetGrabber();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(top: 10, bottom: 6),
+      width: 40,
+      height: 4,
+      decoration: BoxDecoration(
+        color: AppTheme.textTertiary.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(2),
+      ),
+    );
+  }
+}
+
+/// 详情页底部弹层的标题行（换源 / 解析线路共用）
+class _SheetHeader extends StatelessWidget {
+  const _SheetHeader({required this.title, this.subtitle, this.trailing});
+
+  final String title;
+  final String? subtitle;
+  final String? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontHeadline,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              if (trailing != null)
+                Text(
+                  trailing!,
+                  style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: 12,
+                  ),
+                ),
+            ],
+          ),
+          if (subtitle != null && subtitle!.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              subtitle!,
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: AppTheme.fontFootnote,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// 详情页底部弹层的统一选项行（换源候选 / 解析线路共用）
+class _SheetOptionTile extends StatelessWidget {
+  const _SheetOptionTile({
+    required this.title,
+    this.subtitle,
+    this.leading,
+    this.selected = false,
+    required this.onTap,
+  });
+
+  final String title;
+  final String? subtitle;
+  final Widget? leading;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected
+          ? AppTheme.accentColor.withValues(alpha: 0.12)
+          : AppTheme.backgroundTertiary,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: selected
+                ? Border.all(
+                    color: AppTheme.accentColor.withValues(alpha: 0.45),
+                    width: 0.8,
+                  )
+                : null,
+          ),
+          child: Row(
+            children: [
+              if (leading != null) ...[
+                leading!,
+                const SizedBox(width: 10),
+              ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: selected
+                            ? AppTheme.accentColor
+                            : AppTheme.textPrimary,
+                        fontSize: AppTheme.fontBody,
+                        fontWeight:
+                            selected ? FontWeight.w600 : FontWeight.w500,
+                      ),
+                    ),
+                    if (subtitle != null && subtitle!.trim().isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle!.trim(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: AppTheme.textTertiary,
+                          fontSize: AppTheme.fontCaption,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                selected
+                    ? Icons.check_circle_rounded
+                    : Icons.chevron_right_rounded,
+                color: selected
+                    ? AppTheme.accentColor
+                    : AppTheme.textTertiary.withValues(alpha: 0.6),
+                size: 19,
+              ),
+            ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 换源候选的小海报（44×60；无图时回退电影图标）
+class _CandidatePoster extends StatelessWidget {
+  const _CandidatePoster({required this.url});
+
+  final String url;
+
+  @override
+  Widget build(BuildContext context) {
+    final u = url.trim();
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: SizedBox(
+        width: 44,
+        height: 60,
+        child: u.isEmpty
+            ? Container(
+                color: AppTheme.backgroundSecondary,
+                alignment: Alignment.center,
+                child: Icon(
+                  Icons.movie_outlined,
+                  size: 20,
+                  color: AppTheme.textTertiary,
+                ),
+              )
+            : CachedNetworkImage(
+                imageUrl: u,
+                fit: BoxFit.cover,
+                memCacheWidth: 120,
+                placeholder: (_, __) =>
+                    Container(color: AppTheme.backgroundSecondary),
+                errorWidget: (_, __, ___) => Container(
+                  color: AppTheme.backgroundSecondary,
+                  alignment: Alignment.center,
+                  child: Icon(
+                    Icons.broken_image_outlined,
+                    size: 18,
+                    color: AppTheme.textTertiary,
+                  ),
+                ),
+              ),
       ),
     );
   }

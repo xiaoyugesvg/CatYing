@@ -32,6 +32,7 @@ import '../source/source_definition.dart';
 import '../source/source_manager.dart';
 import '../theme/jelly_theme.dart';
 import 'comic_source_edit_page.dart';
+import 'source_warehouse_page.dart';
 import '../../common/theme.dart';
 import '../utils/source_fail_text.dart';
 import '../widgets/jelly_search_bar.dart';
@@ -46,6 +47,9 @@ class SourceRepoPage extends StatefulWidget {
 class _SourceRepoPageState extends State<SourceRepoPage> {
   late final TextEditingController _urlCtrl;
   bool _busy = false;
+
+  /// 源体检进行中（用户 2026-10-18：「复核一哈这些漫画源」）
+  bool _healthChecking = false;
 
   /// 当前是否深色。build 里有同名局部变量（优先用那个），
   /// 但 _clearAll / _shareSelected 等**不接收 BuildContext 的方法**
@@ -87,6 +91,136 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
       );
   }
 
+  // ============================================================
+  // 源体检：逐个源跑一次「分类首页 / 搜索」，找出打不开或没内容的源
+  // ============================================================
+  //
+  // 用户 2026-10-18：「复核一哈这些漫画源，好多加载不出了或者是没有内容」。
+  // 外部源都是用户导入的，代码侧看不到规则；这里给一次性体检，
+  // 失败列表可以直接「禁用失败源」，漫画首页就不再显示它们。
+
+  Future<void> _runHealthCheck() async {
+    if (_healthChecking) return;
+    final sources = SourceManager().enabledSources;
+    if (sources.isEmpty) {
+      _toast('没有可检测的源');
+      return;
+    }
+    setState(() => _healthChecking = true);
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+        content: Row(
+          children: [
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2.5),
+            ),
+            SizedBox(width: 16),
+            Expanded(child: Text('正在体检漫画源（分类 / 搜索）…')),
+          ],
+        ),
+      ),
+    );
+
+    final bad = <MangaSource, String>{};
+    await Future.wait(sources.map((s) async {
+      final err = await _probeSource(s);
+      if (err != null) bad[s] = err;
+    }));
+    if (!mounted) return;
+    Navigator.of(context, rootNavigator: true).pop();
+    setState(() => _healthChecking = false);
+
+    if (bad.isEmpty) {
+      _toast('体检完成：${sources.length} 个源全部可用');
+      return;
+    }
+    final ok = sources.length - bad.length;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('源体检：$ok 可用 / ${bad.length} 失效'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              for (final e in bad.entries)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 5),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(e.key.name,
+                          style: const TextStyle(fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 2),
+                      Text(
+                        _shortErr(e.value),
+                        style: const TextStyle(
+                            fontSize: 12, color: Colors.redAccent),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await SourceManager()
+                  .setEnabledAll(bad.keys.map((e) => e.id), false);
+              if (mounted) _toast('已禁用 ${bad.length} 个失效源');
+            },
+            child: const Text('禁用失败源',
+                style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 单个源探测：
+  ///   · 有分类 → 拉分类 + 第一页内容（漫画首页实际走的就是这条）
+  ///   · 纯搜索源 → 用常见词搜一次
+  /// 返回 null = 正常；否则返回简短失败原因。
+  Future<String?> _probeSource(MangaSource s) async {
+    const t = Duration(seconds: 12);
+    try {
+      if (s.supportsCategories) {
+        final groups = await s.fetchCategories().timeout(t);
+        if (groups.isEmpty) return '分类为空';
+        final g = groups.first;
+        final opt = g.options.firstWhere(
+          (o) => !o.isAll,
+          orElse: () => g.options.first,
+        );
+        final page =
+            await s.getCategoryList([g.copyWith(selected: opt)], page: 0).timeout(t);
+        if (page.items.isEmpty) return '首页无内容';
+        return null;
+      }
+      final page = await s.search('漫画', page: 0).timeout(t);
+      if (page.items.isEmpty) return '搜索无结果';
+      return null;
+    } catch (e) {
+      return _shortErr('$e');
+    }
+  }
+
+  String _shortErr(String raw) {
+    final s = raw.replaceAll('\n', ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+    return s.length > 120 ? '${s.substring(0, 120)}…' : s;
+  }
+
   Future<void> _updateFromCloud() async {
     final url = _urlCtrl.text.trim();
     await SettingsService().setSourceRepoUrl(url);
@@ -122,7 +256,35 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      appBar: AppBar(title: const Text('漫画源仓库')),
+      appBar: AppBar(
+        title: const Text('漫画源仓库'),
+        actions: [
+          // 源体检（用户 2026-10-18）：一键找出打不开/没内容的源
+          IconButton(
+            tooltip: '源体检',
+            icon: _healthChecking
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.health_and_safety_outlined),
+            onPressed: _healthChecking ? null : _runHealthCheck,
+          ),
+          // 漫画仓（用户 2026-10-18）：从「我的」页移到仓库页右上角
+          IconButton(
+            tooltip: '漫画仓',
+            icon: const Icon(Icons.inventory_2_outlined),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const SourceWarehousePage(comic: true),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+        ],
+      ),
       body: ListenableBuilder(
         listenable: SourceManager(),
         builder: (context, _) {

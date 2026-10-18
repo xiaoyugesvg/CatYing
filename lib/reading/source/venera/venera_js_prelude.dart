@@ -710,6 +710,24 @@ const String veneraJsPrelude = r'''
     throw new Error('未知的调用类型: ' + kind);
   };
 
+  // Venera 源常用 `new Map()` 表示章节分组（如 zaimanhua / copy_manga / manhuaren）。
+  // 直接 JSON.stringify(new Map()) 会得到 `{}` ⇒ 章节全丢，这里先递归转成普通对象。
+  globalThis.__veneraStringify = function (v) {
+    return JSON.stringify(v, function (k, value) {
+      if (value instanceof Map) {
+        var o = {};
+        value.forEach(function (val, key) { o[key] = val; });
+        return o;
+      }
+      if (value instanceof Set) {
+        var arr = [];
+        value.forEach(function (val) { arr.push(val); });
+        return arr;
+      }
+      return value;
+    });
+  };
+
   globalThis.__veneraRun = function (kind, args) {
     globalThis.__veneraJobState = 'pending';
     globalThis.__veneraJobValue = null;
