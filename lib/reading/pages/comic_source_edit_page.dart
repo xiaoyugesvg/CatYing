@@ -20,6 +20,7 @@ import '../source/source_definition.dart';
 import '../source/source_manager.dart';
 import '../theme/jelly_theme.dart';
 import '../../common/theme.dart';
+import 'book_source_login_page.dart';
 
 /// 常用可编辑字段分组（config 源）。
 /// label：分组标题；entries：[(键名, 中文说明, 占位提示)]。
@@ -259,6 +260,31 @@ class _ComicSourceEditPageState extends State<ComicSourceEditPage> {
     }
   }
 
+  /// 打开站点登录 / Cloudflare 浏览器验证。
+  ///
+  /// 用户 2026-10-18：「需要登录的，我也能直接进去源编辑里面进行登录」——
+  /// 在编辑页里直接开内置浏览器，验证完再保存，不用退出重进。
+  Future<void> _openLogin() async {
+    final url = _ctrls['url']?.text.trim() ?? '';
+    if (!url.startsWith('http')) {
+      _toast('请先在「基本 → URL」里填好站点地址');
+      return;
+    }
+    final name = _ctrls['name']!.text.trim();
+    await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => WebLoginPage(
+          url: url,
+          title: name.isEmpty ? '站点登录' : name,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    // Cloudflare / 登录 Cookie 留在系统 WebView 里（走 WebView 抓取的源直接用）
+    _toast('浏览器验证已完成；保存配置后回漫画页刷新即可');
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -314,6 +340,11 @@ class _ComicSourceEditPageState extends State<ComicSourceEditPage> {
             ),
           ),
           const SizedBox(height: 14),
+          // 登录 / 浏览器验证入口（配置源：Cloudflare 拦截或需要账号时用）
+          if (!_isApi) ...[
+            _loginCard(isDark),
+            const SizedBox(height: 14),
+          ],
           _section('基本', [
             _field('name', '名称', '源显示名称'),
             if (!_isApi) _field('url', 'URL', '站点根地址（末尾 /）'),
@@ -392,6 +423,57 @@ class _ComicSourceEditPageState extends State<ComicSourceEditPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 「登录 / 浏览器验证」入口卡片
+  Widget _loginCard(bool isDark) {
+    final fg = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    return Material(
+      color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: _openLogin,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
+          child: Row(
+            children: [
+              Icon(Icons.login_rounded, size: 20, color: JellyTheme.primary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '登录 / 浏览器验证',
+                      style: TextStyle(
+                        fontSize: AppTheme.fontBody,
+                        fontWeight: FontWeight.w600,
+                        color: fg,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '遇到 Cloudflare 拦截或需要账号时，用内置浏览器打开站点完成验证',
+                      style: TextStyle(
+                        fontSize: AppTheme.fontCaption,
+                        height: 1.4,
+                        color: JellyTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 20,
+                color: JellyTheme.textSecondary.withValues(alpha: 0.6),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
