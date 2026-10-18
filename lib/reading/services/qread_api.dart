@@ -4,6 +4,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../utils/html_text.dart';
+
 /// qread（轻阅读）服务端接入层。
 ///
 /// 书源规则执行搬到自建 qread 服务端（Kotlin/Spring，Rhino 全量支持
@@ -125,21 +127,26 @@ class QreadSearchResult {
   final int originOrder;
 
   static QreadSearchResult? fromJson(Map<String, dynamic> j) {
-    final name = (j['name'] ?? '').toString().trim();
+    // 服务端返回的仍是源站原文 ⇒ 这里统一清掉站名 / 导航词 / 装饰符号。
+    final name = cleanSourceTitle((j['name'] ?? '').toString().trim());
     final bookUrl = (j['bookUrl'] ?? '').toString().trim();
     if (name.isEmpty || bookUrl.isEmpty) return null;
     return QreadSearchResult(
       bookUrl: bookUrl,
       origin: (j['origin'] ?? '').toString(),
       originName: (j['originName'] ?? '').toString(),
-      type: (j['type'] is num) ? (j['type'] as num).toInt() : int.tryParse(j['type']?.toString() ?? '') ?? 0,
+      type: (j['type'] is num)
+          ? (j['type'] as num).toInt()
+          : int.tryParse(j['type']?.toString() ?? '') ?? 0,
       name: name,
-      author: (j['author'] ?? '').toString().trim(),
+      author: cleanSourceTitle((j['author'] ?? '').toString().trim()),
       kind: (j['kind'] ?? '').toString(),
       coverUrl: (j['coverUrl'] ?? '').toString(),
-      intro: (j['intro'] ?? '').toString(),
+      intro: cleanIntroText((j['intro'] ?? '').toString()),
       wordCount: (j['wordCount'] ?? '').toString(),
-      latestChapterTitle: (j['latestChapterTitle'] ?? '').toString(),
+      latestChapterTitle: cleanChapterTitle(
+        (j['latestChapterTitle'] ?? '').toString(),
+      ),
       tocUrl: (j['tocUrl'] ?? '').toString(),
       originOrder: (j['originOrder'] is num)
           ? (j['originOrder'] as num).toInt()
@@ -149,7 +156,8 @@ class QreadSearchResult {
 }
 
 /// qread 服务端书源条目（列表接口的精简元数据）。
-class QreadSourceInfo {  const QreadSourceInfo({
+class QreadSourceInfo {
+  const QreadSourceInfo({
     required this.name,
     required this.url,
     this.group = '',
@@ -168,14 +176,14 @@ class QreadSourceInfo {  const QreadSourceInfo({
   final String checkKeyWord;
 
   static QreadSourceInfo fromJson(Map<String, dynamic> j) => QreadSourceInfo(
-        name: (j['bookSourceName'] ?? '').toString(),
-        url: (j['bookSourceUrl'] ?? '').toString(),
-        group: (j['bookSourceGroup'] ?? '').toString(),
-        enabled: j['enabled'] != false,
-        enabledExplore: j['enabledExplore'] != false,
-        loginUrl: (j['loginUrl'] ?? '').toString(),
-        checkKeyWord: (j['checkKeyWord'] ?? '').toString(),
-      );
+    name: (j['bookSourceName'] ?? '').toString(),
+    url: (j['bookSourceUrl'] ?? '').toString(),
+    group: (j['bookSourceGroup'] ?? '').toString(),
+    enabled: j['enabled'] != false,
+    enabledExplore: j['enabledExplore'] != false,
+    loginUrl: (j['loginUrl'] ?? '').toString(),
+    checkKeyWord: (j['checkKeyWord'] ?? '').toString(),
+  );
 }
 
 /// qread 服务端返回的一章（BookChapter 精简映射）。
@@ -199,12 +207,14 @@ class QreadApi {
     if (_dio == null || _dio!.options.baseUrl != cfg.normalizedBase) {
       // 重建前先释放旧实例，避免 baseUrl 变更时旧 HttpClient 连接池泄漏
       _dio?.close(force: true);
-      _dio = Dio(BaseOptions(
-        baseUrl: cfg.normalizedBase,
-        connectTimeout: const Duration(seconds: 12),
-        receiveTimeout: const Duration(seconds: 30),
-        sendTimeout: const Duration(seconds: 12),
-      ));
+      _dio = Dio(
+        BaseOptions(
+          baseUrl: cfg.normalizedBase,
+          connectTimeout: const Duration(seconds: 12),
+          receiveTimeout: const Duration(seconds: 30),
+          sendTimeout: const Duration(seconds: 12),
+        ),
+      );
     }
     return _dio!;
   }
@@ -217,7 +227,10 @@ class QreadApi {
     final cfg = QreadServerConfig.instance;
     if (!cfg.isConfigured) throw QreadException('未配置 qread 服务端地址');
     try {
-      final res = await _client.get('/api/$apiVersion$path', queryParameters: query);
+      final res = await _client.get(
+        '/api/$apiVersion$path',
+        queryParameters: query,
+      );
       return _unwrap(res);
     } on QreadException {
       rethrow;
@@ -228,7 +241,11 @@ class QreadApi {
     }
   }
 
-  Future<dynamic> _post(String path, {Map<String, dynamic>? query, Object? body}) async {
+  Future<dynamic> _post(
+    String path, {
+    Map<String, dynamic>? query,
+    Object? body,
+  }) async {
     final cfg = QreadServerConfig.instance;
     if (!cfg.isConfigured) throw QreadException('未配置 qread 服务端地址');
     try {
@@ -299,14 +316,17 @@ class QreadApi {
     if (cfg.username.trim().isEmpty || cfg.password.isEmpty) {
       throw QreadException('请输入服务端账号和密码');
     }
-    final data = await _get('/login', query: {
-      'username': cfg.username.trim(),
-      'password': cfg.password,
-      // 账号来源（bank）：xs.muiu.site 等服务端不认 cmbok，会返回 NOT_BANK；
-      // 实测 model=bank 进入密码校验，为通用可用来源。
-      'model': 'bank',
-      'v': apiVersion,
-    });
+    final data = await _get(
+      '/login',
+      query: {
+        'username': cfg.username.trim(),
+        'password': cfg.password,
+        // 账号来源（bank）：xs.muiu.site 等服务端不认 cmbok，会返回 NOT_BANK；
+        // 实测 model=bank 进入密码校验，为通用可用来源。
+        'model': 'bank',
+        'v': apiVersion,
+      },
+    );
     final token = (data is Map) ? (data['accessToken'] ?? '').toString() : '';
     if (token.isEmpty) throw QreadException('登录失败：未返回 accessToken');
     await cfg.save(accessToken: token);
@@ -322,10 +342,13 @@ class QreadApi {
   /// 拉取全部书源（精简元数据）。自动登录后两段式拉取。
   Future<List<QreadSourceInfo>> getSources({String? st}) async {
     await ensureLogin();
-    final pageRes = await _get('/getBookSourcesPage', query: {
-      'accessToken': _token,
-      if (st != null && st.isNotEmpty) 'st': st,
-    });
+    final pageRes = await _get(
+      '/getBookSourcesPage',
+      query: {
+        'accessToken': _token,
+        if (st != null && st.isNotEmpty) 'st': st,
+      },
+    );
     if (pageRes is! Map) return [];
     final totalPage = (pageRes['page'] is num)
         ? (pageRes['page'] as num).toInt()
@@ -333,14 +356,18 @@ class QreadApi {
     final md5 = (pageRes['md5'] ?? '').toString();
     final out = <QreadSourceInfo>[];
     for (var p = 1; p <= totalPage; p++) {
-      final data = await _get('/getBookSourcesNew', query: {
-        'accessToken': _token,
-        'md5': md5,
-        'page': '$p',
-      });
+      final data = await _get(
+        '/getBookSourcesNew',
+        query: {
+          'accessToken': _token,
+          'md5': md5,
+          'page': '$p',
+        },
+      );
       if (data is List) {
         for (final e in data) {
-          if (e is Map) out.add(QreadSourceInfo.fromJson(e.cast<String, dynamic>()));
+          if (e is Map)
+            out.add(QreadSourceInfo.fromJson(e.cast<String, dynamic>()));
         }
       }
     }
@@ -351,65 +378,107 @@ class QreadApi {
   Future<int> saveSources(List<Map<String, dynamic>> sources) async {
     await ensureLogin();
     if (sources.isEmpty) return 0;
-    final content = sources.length == 1 ? jsonEncode(sources.first) : jsonEncode(sources);
-    final data = await _post('/saveBookSources', query: {'accessToken': _token}, body: content);
-    final n = (data is num) ? data.toInt() : (int.tryParse(data?.toString() ?? '') ?? sources.length);
+    final content = sources.length == 1
+        ? jsonEncode(sources.first)
+        : jsonEncode(sources);
+    final data = await _post(
+      '/saveBookSources',
+      query: {'accessToken': _token},
+      body: content,
+    );
+    final n = (data is num)
+        ? data.toInt()
+        : (int.tryParse(data?.toString() ?? '') ?? sources.length);
     return n;
   }
 
   /// 单条导入/覆盖（内容为完整书源 JSON 字符串）。
   Future<bool> saveSource(String json) async {
     await ensureLogin();
-    final data = await _post('/saveBookSource', query: {'accessToken': _token}, body: json);
+    final data = await _post(
+      '/saveBookSource',
+      query: {'accessToken': _token},
+      body: json,
+    );
     return data == true;
   }
 
   /// 编辑书源（id = bookSourceUrl，json = 完整书源 JSON 字符串）。
   Future<bool> editSource(String id, String json) async {
     await ensureLogin();
-    final data = await _post('/editbookSources', query: {'accessToken': _token}, body: jsonEncode({'id': id, 'json': json}));
+    final data = await _post(
+      '/editbookSources',
+      query: {'accessToken': _token},
+      body: jsonEncode({'id': id, 'json': json}),
+    );
     return data == true;
   }
 
   Future<bool> deleteSource(String id) async {
     await ensureLogin();
-    final data = await _get('/delbookSource', query: {'accessToken': _token, 'id': id});
+    final data = await _get(
+      '/delbookSource',
+      query: {'accessToken': _token, 'id': id},
+    );
     return data == true;
   }
 
   Future<bool> deleteSources(List<String> ids) async {
     await ensureLogin();
     if (ids.isEmpty) return true;
-    final data = await _post('/delbookSources', query: {'accessToken': _token}, body: jsonEncode(ids));
+    final data = await _post(
+      '/delbookSources',
+      query: {'accessToken': _token},
+      body: jsonEncode(ids),
+    );
     return data == true;
   }
 
   /// 批量启用/停用书源。
-  Future<bool> setSourcesEnabled(List<String> ids, {required bool enabled}) async {
+  Future<bool> setSourcesEnabled(
+    List<String> ids, {
+    required bool enabled,
+  }) async {
     await ensureLogin();
     if (ids.isEmpty) return true;
     final path = enabled ? '/startbookSources' : '/stopbookSources';
-    final data = await _post(path, query: {'accessToken': _token}, body: jsonEncode(ids));
+    final data = await _post(
+      path,
+      query: {'accessToken': _token},
+      body: jsonEncode(ids),
+    );
     return data == true;
   }
 
   /// 单个书源停用/启用（st=0 停用 / 1 启用）。
   Future<bool> setSourceEnabled(String id, {required bool enabled}) async {
     await ensureLogin();
-    final data = await _get('/stopbookSource', query: {
-      'accessToken': _token,
-      'id': id,
-      'st': enabled ? '1' : '0',
-    });
+    final data = await _get(
+      '/stopbookSource',
+      query: {
+        'accessToken': _token,
+        'id': id,
+        'st': enabled ? '1' : '0',
+      },
+    );
     return data == true;
   }
 
   /// 批量开关发现（explore）。
-  Future<bool> setExploresEnabled(List<String> ids, {required bool enabled}) async {
+  Future<bool> setExploresEnabled(
+    List<String> ids, {
+    required bool enabled,
+  }) async {
     await ensureLogin();
     if (ids.isEmpty) return true;
-    final path = enabled ? '/startbookSourceExplores' : '/stopbookSourceExplores';
-    final data = await _post(path, query: {'accessToken': _token}, body: jsonEncode(ids));
+    final path = enabled
+        ? '/startbookSourceExplores'
+        : '/stopbookSourceExplores';
+    final data = await _post(
+      path,
+      query: {'accessToken': _token},
+      body: jsonEncode(ids),
+    );
     return data == true;
   }
 
@@ -418,7 +487,11 @@ class QreadApi {
     await ensureLogin();
     if (ids.isEmpty) return true;
     final path = bottom ? '/bottomallSource' : '/topallSource';
-    final data = await _post(path, query: {'accessToken': _token}, body: jsonEncode(ids));
+    final data = await _post(
+      path,
+      query: {'accessToken': _token},
+      body: jsonEncode(ids),
+    );
     return data == true;
   }
 
@@ -447,7 +520,11 @@ class QreadApi {
   /// 导出完整书源 JSON（ids 为空则导出全部）。
   Future<List<Map<String, dynamic>>> exportSources(List<String>? ids) async {
     await ensureLogin();
-    final data = await _post('/getbookSourcejson', query: {'accessToken': _token}, body: jsonEncode(ids ?? []));
+    final data = await _post(
+      '/getbookSourcejson',
+      query: {'accessToken': _token},
+      body: jsonEncode(ids ?? []),
+    );
     if (data is! List) return [];
     final out = <Map<String, dynamic>>[];
     for (final e in data) {
@@ -459,7 +536,10 @@ class QreadApi {
   /// 拉单个书源完整 JSON。
   Future<Map<String, dynamic>?> getSource(String id) async {
     await ensureLogin();
-    final data = await _get('/getbookSources', query: {'accessToken': _token, 'id': id});
+    final data = await _get(
+      '/getbookSources',
+      query: {'accessToken': _token, 'id': id},
+    );
     if (data is Map) return data.cast<String, dynamic>();
     return null;
   }
@@ -467,46 +547,69 @@ class QreadApi {
   // ── 搜索 / 探索（书源页壳） ───────────────────────────────
 
   /// 单源搜索（qread 服务端执行规则）。
-  Future<List<QreadSearchResult>> searchBook(String sourceUrl, String key, {int page = 1}) async {
+  Future<List<QreadSearchResult>> searchBook(
+    String sourceUrl,
+    String key, {
+    int page = 1,
+  }) async {
     await ensureLogin();
-    final data = await _get('/searchBook', query: {
-      'accessToken': _token,
-      'bookSourceUrl': sourceUrl,
-      'page': '$page',
-      'key': key,
-    });
+    final data = await _get(
+      '/searchBook',
+      query: {
+        'accessToken': _token,
+        'bookSourceUrl': sourceUrl,
+        'page': '$page',
+        'key': key,
+      },
+    );
     return _toResults(data);
   }
 
   /// 探索/分类（qread 服务端执行规则）。
-  Future<List<QreadSearchResult>> exploreBook(String sourceUrl, String ruleFindUrl, {int page = 1}) async {
+  Future<List<QreadSearchResult>> exploreBook(
+    String sourceUrl,
+    String ruleFindUrl, {
+    int page = 1,
+  }) async {
     await ensureLogin();
-    final data = await _get('/exploreBook', query: {
-      'accessToken': _token,
-      'bookSourceUrl': sourceUrl,
-      'page': '$page',
-      'ruleFindUrl': ruleFindUrl,
-    });
+    final data = await _get(
+      '/exploreBook',
+      query: {
+        'accessToken': _token,
+        'bookSourceUrl': sourceUrl,
+        'page': '$page',
+        'ruleFindUrl': ruleFindUrl,
+      },
+    );
     return _toResults(data);
   }
 
   /// 源探索 URL 列表（每个启用了探索的源 → exploreUrl）。
   Future<List<Map<String, dynamic>>> getExploreUrls() async {
     await ensureLogin();
-    final data = await _get('/getBookSourcesExploreUrl', query: {'accessToken': _token});
+    final data = await _get(
+      '/getBookSourcesExploreUrl',
+      query: {'accessToken': _token},
+    );
     if (data is! List) return [];
     return data.whereType<Map>().map((e) => e.cast<String, dynamic>()).toList();
   }
 
   /// 源探索 URL/分类列表（服务端解析 exploreKinds）。
   /// 返回 `{found: [{title,url},...], checkKeyWord, loginUrl, loginUi}`。
-  Future<Map<String, dynamic>> getExploreKinds(String sourceUrl, {bool need = false}) async {
+  Future<Map<String, dynamic>> getExploreKinds(
+    String sourceUrl, {
+    bool need = false,
+  }) async {
     await ensureLogin();
-    final data = await _get('/getBookSourcesExploreUrl', query: {
-      'accessToken': _token,
-      'bookSourceUrl': sourceUrl,
-      'need': need ? '1' : '0',
-    });
+    final data = await _get(
+      '/getBookSourcesExploreUrl',
+      query: {
+        'accessToken': _token,
+        'bookSourceUrl': sourceUrl,
+        'need': need ? '1' : '0',
+      },
+    );
     if (data is! Map) return <String, dynamic>{};
     return data.cast<String, dynamic>();
   }
@@ -516,29 +619,38 @@ class QreadApi {
   /// 详情：qread 服务端执行 ruleBookInfo，返回 Legado Book 的 JSON Map。
   Future<Map<String, dynamic>> getBookInfo2(String bookUrl) async {
     await ensureLogin();
-    final data = await _get('/getBookinfo2', query: {
-      'accessToken': _token,
-      'url': bookUrl,
-    });
+    final data = await _get(
+      '/getBookinfo2',
+      query: {
+        'accessToken': _token,
+        'url': bookUrl,
+      },
+    );
     if (data is! Map) return <String, dynamic>{};
     return data.cast<String, dynamic>();
   }
 
   /// 目录：服务端执行 ruleToc，返回章节列表（BookChapter 的 url/title）。
-  Future<List<QreadChapter>> getChapterList(String sourceUrl, String tocUrl) async {
+  Future<List<QreadChapter>> getChapterList(
+    String sourceUrl,
+    String tocUrl,
+  ) async {
     await ensureLogin();
-    final data = await _get('/getChapterList', query: {
-      'accessToken': _token,
-      'bookSourceUrl': sourceUrl,
-      'url': tocUrl,
-    });
+    final data = await _get(
+      '/getChapterList',
+      query: {
+        'accessToken': _token,
+        'bookSourceUrl': sourceUrl,
+        'url': tocUrl,
+      },
+    );
     final out = <QreadChapter>[];
     if (data is List) {
       for (final e in data) {
         if (e is! Map) continue;
         final m = e.cast<String, dynamic>();
         final url = (m['url'] ?? '').toString().trim();
-        final title = (m['title'] ?? '').toString().trim();
+        final title = cleanChapterTitle((m['title'] ?? '').toString().trim());
         if (url.isEmpty || title.isEmpty) continue;
         out.add(QreadChapter(url: url, title: title));
       }
@@ -549,11 +661,14 @@ class QreadApi {
   /// 正文：服务端执行 ruleContent（含翻页聚合、净化），返回纯文本。
   Future<String> getBookContent(String sourceUrl, String chapterUrl) async {
     await ensureLogin();
-    final data = await _get('/getBookContent', query: {
-      'accessToken': _token,
-      'bookSourceUrl': sourceUrl,
-      'url': chapterUrl,
-    });
+    final data = await _get(
+      '/getBookContent',
+      query: {
+        'accessToken': _token,
+        'bookSourceUrl': sourceUrl,
+        'url': chapterUrl,
+      },
+    );
     return (data ?? '').toString();
   }
 

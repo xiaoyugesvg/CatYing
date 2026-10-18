@@ -5,6 +5,7 @@ import '../model/book_source.dart';
 import '../model/xiaoshuo_book.dart';
 import '../analyze/analyze_rule.dart';
 import '../../../services/app_log.dart';
+import '../../utils/html_text.dart';
 
 class BookInfo {
   static void analyzeBookInfo({
@@ -32,8 +33,9 @@ class BookInfo {
         }
         if (initContent != null) {
           analyzeRule.setContent(initContent);
-          AppLog.instance
-              .d('[书源详情] init规则命中: ${initContent.toString().length}字符');
+          AppLog.instance.d(
+            '[书源详情] init规则命中: ${initContent.toString().length}字符',
+          );
         } else {
           AppLog.instance.w('[书源详情] init规则未命中: ${bookInfoRule.init}');
         }
@@ -61,7 +63,9 @@ class BookInfo {
 
     if (bookInfoRule.author != null && bookInfoRule.author!.isNotEmpty) {
       try {
-        final author = _formatBookAuthor(analyzeRule.getString(bookInfoRule.author!));
+        final author = _formatBookAuthor(
+          analyzeRule.getString(bookInfoRule.author!),
+        );
         if (author.isNotEmpty && (canReNameFlag || book.author.isEmpty)) {
           book.author = author;
         }
@@ -73,12 +77,14 @@ class BookInfo {
         final kinds = analyzeRule.getStringList(bookInfoRule.kind!);
         if (kinds.isNotEmpty) {
           book.kind = kinds.join(',');
-          if (book.kind!.length > 1000) book.kind = book.kind!.substring(0, 1000);
+          if (book.kind!.length > 1000)
+            book.kind = book.kind!.substring(0, 1000);
         }
       } catch (_) {}
     }
 
-    if (bookInfoRule.lastChapter != null && bookInfoRule.lastChapter!.isNotEmpty) {
+    if (bookInfoRule.lastChapter != null &&
+        bookInfoRule.lastChapter!.isNotEmpty) {
       try {
         final lastChapter = analyzeRule.getString(bookInfoRule.lastChapter!);
         if (lastChapter.isNotEmpty) {
@@ -95,13 +101,15 @@ class BookInfo {
           //    `intro = "class.nrjj@class.e@text"` 抓到的原文含 `\n　`，
           //    直接显示出来就是"…妖魔横行！\n林长青一朝穿越…" ✗
           //    —— 详情页那个 `intro.contains('\n')` 判断本就假设有真换行 ✓）
-          final clean = unescapeLineBreaks(intro);
+          // 再清一遍导航 / 广告 / 站点名行（用户 2026-10-18）。
+          final clean = cleanIntroText(unescapeLineBreaks(intro));
           book.intro = clean.length > 5000 ? clean.substring(0, 5000) : clean;
         }
       } catch (_) {}
     }
 
-    if (bookInfoRule.bookStatus != null && bookInfoRule.bookStatus!.isNotEmpty) {
+    if (bookInfoRule.bookStatus != null &&
+        bookInfoRule.bookStatus!.isNotEmpty) {
       try {
         final bookStatus = analyzeRule.getString(bookInfoRule.bookStatus!);
         if (bookStatus.isNotEmpty) {
@@ -110,7 +118,8 @@ class BookInfo {
       } catch (_) {}
     }
 
-    if (bookInfoRule.updateTime != null && bookInfoRule.updateTime!.isNotEmpty) {
+    if (bookInfoRule.updateTime != null &&
+        bookInfoRule.updateTime!.isNotEmpty) {
       try {
         final updateTime = analyzeRule.getString(bookInfoRule.updateTime!);
         if (updateTime.isNotEmpty) {
@@ -131,8 +140,9 @@ class BookInfo {
     if (bookInfoRule.recommendations != null &&
         bookInfoRule.recommendations!.isNotEmpty) {
       try {
-        final recommendations =
-            analyzeRule.getStringList(bookInfoRule.recommendations!);
+        final recommendations = analyzeRule.getStringList(
+          bookInfoRule.recommendations!,
+        );
         if (recommendations.isNotEmpty) {
           book.recommendations = recommendations
               .where((s) => s.trim().isNotEmpty)
@@ -144,7 +154,10 @@ class BookInfo {
 
     if (bookInfoRule.coverUrl != null && bookInfoRule.coverUrl!.isNotEmpty) {
       try {
-        final coverUrl = analyzeRule.getString(bookInfoRule.coverUrl!, isUrl: true);
+        final coverUrl = analyzeRule.getString(
+          bookInfoRule.coverUrl!,
+          isUrl: true,
+        );
         if (coverUrl.isNotEmpty) {
           book.coverUrl = coverUrl;
         }
@@ -166,32 +179,37 @@ class BookInfo {
 
     // 汇总日志：书名/作者/简介/封面/目录URL 最终结果（便于真机排查
     // 「详情页解析不全」——哪一项为空一目了然）。
-    AppLog.instance.d('[书源详情] 源=${bookSource.bookSourceName} '
-        '书名=${book.name.isEmpty ? '(空)' : book.name} '
-        '作者=${book.author.isEmpty ? '(空)' : book.author} '
-        '简介=${(book.intro ?? '').length}字符 '
-        '封面=${(book.coverUrl ?? '').isEmpty ? '(空)' : book.coverUrl} '
-        'toc=${(book.tocUrl ?? '').isEmpty ? '(空)' : book.tocUrl}');
+    AppLog.instance.d(
+      '[书源详情] 源=${bookSource.bookSourceName} '
+      '书名=${book.name.isEmpty ? '(空)' : book.name} '
+      '作者=${book.author.isEmpty ? '(空)' : book.author} '
+      '简介=${(book.intro ?? '').length}字符 '
+      '封面=${(book.coverUrl ?? '').isEmpty ? '(空)' : book.coverUrl} '
+      'toc=${(book.tocUrl ?? '').isEmpty ? '(空)' : book.tocUrl}',
+    );
   }
 
   static String _formatBookName(String name) {
     if (name.isEmpty) return name;
-    return name
+    final stripped = name
         .replaceAll(RegExp(r'[【［【\[\(（]([^【［【\[\(（]*?)[】］】\]\)）]'), '')
         .replaceAll(RegExp(r'^\s*[\-_—–]+'), '')
         .replaceAll(RegExp(r'[\-_—–]+\s*$'), '')
         .trim();
+    // 再清站名 / 导航词 / 装饰符号（用户 2026-10-18）。
+    return cleanSourceTitle(stripped);
   }
 
   static String _formatBookAuthor(String author) {
     if (author.isEmpty) return author;
-    return author
+    final stripped = author
         // 去除 "作者:" / "作者：" 前缀（与 book_list.formatBookAuthor 一致，
         // 用字面序列匹配而非字符类 [作者：]，后者只删首字"作"）
         .replaceAll(RegExp(r'^\s*作\s*者\s*[:：]\s*'), '')
         .replaceAll(RegExp(r'^\s*[\-_—–]+'), '')
         .replaceAll(RegExp(r'[\-_—–]+\s*$'), '')
         .trim();
+    return cleanSourceTitle(stripped);
   }
 }
 

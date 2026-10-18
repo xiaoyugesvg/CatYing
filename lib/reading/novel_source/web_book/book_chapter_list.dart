@@ -9,6 +9,7 @@ import '../analyze/analyze_rule.dart';
 import '../model/book_source.dart';
 import '../model/xiaoshuo_book.dart';
 import '../model/xiaoshuo_book_chapter.dart';
+import '../../utils/html_text.dart';
 
 class BookChapterList {
   // 复用进程级共享 QuickJS 运行时（见 JsEngine.shared 说明），
@@ -44,17 +45,23 @@ class BookChapterList {
     }
 
     if (listRule.isEmpty) {
-      AppLog.instance.w('[书源目录] chapterList 规则为空: 源=${bookSource.bookSourceName}');
+      AppLog.instance.w(
+        '[书源目录] chapterList 规则为空: 源=${bookSource.bookSourceName}',
+      );
       return chapters;
     }
 
     try {
       var elements = analyzeRule.getElements(listRule);
-      AppLog.instance.d('[书源目录] 源=${bookSource.bookSourceName} '
-          '规则=$listRule → ${elements.length}个元素');
+      AppLog.instance.d(
+        '[书源目录] 源=${bookSource.bookSourceName} '
+        '规则=$listRule → ${elements.length}个元素',
+      );
 
       if (elements.isEmpty) {
-        AppLog.instance.w('[书源目录] 规则未命中任何元素: $listRule 源=${bookSource.bookSourceName}');
+        AppLog.instance.w(
+          '[书源目录] 规则未命中任何元素: $listRule 源=${bookSource.bookSourceName}',
+        );
         return chapters;
       }
 
@@ -92,7 +99,9 @@ class BookChapterList {
       final ruleIsVolume = analyzeRule.splitSourceRule(tocRule.isVolume ?? '');
       final ruleIsVip = analyzeRule.splitSourceRule(tocRule.isVip ?? '');
       final ruleIsPay = analyzeRule.splitSourceRule(tocRule.isPay ?? '');
-      final ruleUpdateTime = analyzeRule.splitSourceRule(tocRule.updateTime ?? '');
+      final ruleUpdateTime = analyzeRule.splitSourceRule(
+        tocRule.updateTime ?? '',
+      );
 
       for (int i = 0; i < elements.length; i++) {
         try {
@@ -120,7 +129,10 @@ class BookChapterList {
 
         try {
           if (ruleUrl.isNotEmpty) {
-            bookChapter.url = analyzeRule.getStringFromRules(ruleUrl, isUrl: true);
+            bookChapter.url = analyzeRule.getStringFromRules(
+              ruleUrl,
+              isUrl: true,
+            );
           }
           // 规则提取失败或返回空时，尝试用 @href 作为后备
           if (bookChapter.url.isEmpty) {
@@ -201,6 +213,9 @@ class BookChapterList {
         } catch (_) {}
 
         if (bookChapter.title.isNotEmpty) {
+          // 去掉站名 / 导航词 / 装饰符号后再做垃圾条目判定
+          // （用户 2026-10-18：章节名不要出现「手机阅读 / 返回 …」）。
+          bookChapter.title = cleanChapterTitle(bookChapter.title);
           if (!_isJunkChapterTitle(bookChapter.title) &&
               seenUrls.add(bookChapter.url)) {
             chapters.add(bookChapter);
@@ -211,8 +226,10 @@ class BookChapterList {
       // ⚠️ 2026-10-14：原来是空 `catch (_) {}` —— 万一还有异常从这里冒出来，
       //   原本是**完全静默**的（用户与日志都看不出"目录被截断了"）。只补日志，
       //   不改变控制流。
-      AppLog.instance.w('[书源目录] 解析中断（已解析 ${chapters.length} 章）: '
-          '源=${bookSource.bookSourceName} 规则=$listRule 错误=$e');
+      AppLog.instance.w(
+        '[书源目录] 解析中断（已解析 ${chapters.length} 章）: '
+        '源=${bookSource.bookSourceName} 规则=$listRule 错误=$e',
+      );
     }
 
     if (reverse) {
@@ -224,15 +241,19 @@ class BookChapterList {
     // 汇总日志：解析出的章节数与首章信息（目录为空时据此判断是
     // 「规则未命中」还是「命中但被过滤/URL为空」）。
     if (chapters.isEmpty) {
-      AppLog.instance.w('[书源目录] 解析出 0 章: 源=${bookSource.bookSourceName} '
-          '规则=$listRule（元素存在但章节为空，多为 chapterUrl 规则未命中）');
+      AppLog.instance.w(
+        '[书源目录] 解析出 0 章: 源=${bookSource.bookSourceName} '
+        '规则=$listRule（元素存在但章节为空，多为 chapterUrl 规则未命中）',
+      );
     } else {
       final first = chapters.first;
       final firstUrl = first.url.length > 60
           ? '${first.url.substring(0, 60)}…'
           : first.url;
-      AppLog.instance.d('[书源目录] 源=${bookSource.bookSourceName} '
-          '共${chapters.length}章 首章=[${first.title}] url=$firstUrl');
+      AppLog.instance.d(
+        '[书源目录] 源=${bookSource.bookSourceName} '
+        '共${chapters.length}章 首章=[${first.title}] url=$firstUrl',
+      );
     }
 
     for (int i = 0; i < chapters.length; i++) {
@@ -297,16 +318,20 @@ class BookChapterList {
     try {
       // 用 legado 章节对象字段名（name/url/tag/isVolume/...）构造输入，
       // 与 legado 脚本里访问的字段一致；bookUrl 单独保留源书籍地址。
-      final input = chapters.map((c) => <String, dynamic>{
-        'name': c.title,
-        'url': c.url,
-        'tag': c.tag,
-        'isVolume': c.isVolume,
-        'isVip': c.isVip,
-        'isPay': c.isPay,
-        'bookUrl': c.bookUrl,
-        'variableMap': c.variableMap,
-      }).toList();
+      final input = chapters
+          .map(
+            (c) => <String, dynamic>{
+              'name': c.title,
+              'url': c.url,
+              'tag': c.tag,
+              'isVolume': c.isVolume,
+              'isVip': c.isVip,
+              'isPay': c.isPay,
+              'bookUrl': c.bookUrl,
+              'variableMap': c.variableMap,
+            },
+          )
+          .toList();
       // 末尾追加 JSON.stringify(result) 取出对象（而非字符串化的最后表达式），
       // 与 legado `result` 变量返回约定一致；脚本即便只就地修改也能量化回读。
       final out = _jsEngine.eval(
@@ -367,14 +392,18 @@ class BookChapterList {
     if (t.isEmpty) return true;
 
     // 翻页 / 导航
-    if (t == '下一页' || t == '上一页' || t == '首页' || t == '目录' ||
-        t == '书架' || t == '返回' || t == '返回书页') {
+    if (t == '下一页' ||
+        t == '上一页' ||
+        t == '首页' ||
+        t == '目录' ||
+        t == '书架' ||
+        t == '返回' ||
+        t == '返回书页') {
       return true;
     }
 
     // 公告 / 非章节内容
-    if (t == '新书已发' || t.contains('新番外发布') ||
-        t.contains('通知') || t == '更多') {
+    if (t == '新书已发' || t.contains('新番外发布') || t.contains('通知') || t == '更多') {
       return true;
     }
 
@@ -388,8 +417,7 @@ class BookChapterList {
     if (RegExp(r'^第\d+页$').hasMatch(t)) return true;
 
     // 过短且不含中文章节特征（如 "第X章"/"第X卷"/"序章"）
-    if (t.length <= 3 &&
-        !RegExp(r'^第[一二三四五六七八九十百千0-9]+[章卷集部篇话]').hasMatch(t)) {
+    if (t.length <= 3 && !RegExp(r'^第[一二三四五六七八九十百千0-9]+[章卷集部篇话]').hasMatch(t)) {
       return true;
     }
 

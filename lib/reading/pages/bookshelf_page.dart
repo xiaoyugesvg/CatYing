@@ -484,8 +484,7 @@ class _BookshelfPageState extends State<BookshelfPage>
         builder: (ctx, setSheet) => Container(
           decoration: BoxDecoration(
             color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-            borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(24)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: SafeArea(
             top: false,
@@ -506,12 +505,14 @@ class _BookshelfPageState extends State<BookshelfPage>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('书架设置',
-                          style: TextStyle(
-                            fontSize: AppTheme.fontTitle3,
-                            fontWeight: FontWeight.w700,
-                            color: label,
-                          )),
+                      Text(
+                        '书架设置',
+                        style: TextStyle(
+                          fontSize: AppTheme.fontTitle3,
+                          fontWeight: FontWeight.w700,
+                          color: label,
+                        ),
+                      ),
                       const SizedBox(height: 16),
                       Row(
                         children: [
@@ -519,9 +520,13 @@ class _BookshelfPageState extends State<BookshelfPage>
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('移除同时删除本地文件',
-                                    style: TextStyle(
-                                        fontSize: AppTheme.fontHeadline, color: label)),
+                                Text(
+                                  '移除同时删除本地文件',
+                                  style: TextStyle(
+                                    fontSize: AppTheme.fontHeadline,
+                                    color: label,
+                                  ),
+                                ),
                                 const SizedBox(height: 5),
                                 Text(
                                   '从书架移除后，若该书不在其他书架，'
@@ -539,8 +544,9 @@ class _BookshelfPageState extends State<BookshelfPage>
                           Switch(
                             value: SettingsService().shelfRemoveDeletesFile,
                             onChanged: (v) async {
-                              await SettingsService()
-                                  .setShelfRemoveDeletesFile(v);
+                              await SettingsService().setShelfRemoveDeletesFile(
+                                v,
+                              );
                               setSheet(() {});
                             },
                           ),
@@ -573,16 +579,18 @@ class _BookshelfPageState extends State<BookshelfPage>
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) {
           // 只有**自建**书架可删（预设是流程的一环，删了会出问题）
-          final shelves =
-              BookshelfService().bookshelves.where((s) => !s.isPreset).toList();
+          final shelves = BookshelfService().bookshelves
+              .where((s) => !s.isPreset)
+              .toList();
           return Container(
             constraints: BoxConstraints(
               maxHeight: MediaQuery.of(ctx).size.height * 0.75,
             ),
             decoration: BoxDecoration(
               color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(24)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
+              ),
             ),
             child: SafeArea(
               top: false,
@@ -602,21 +610,30 @@ class _BookshelfPageState extends State<BookshelfPage>
                     padding: const EdgeInsets.fromLTRB(20, 10, 8, 6),
                     child: Row(
                       children: [
-                        Text('管理书架',
-                            style: TextStyle(
-                              fontSize: AppTheme.fontTitle3,
-                              fontWeight: FontWeight.w700,
-                              color: label,
-                            )),
+                        Text(
+                          '管理书架',
+                          style: TextStyle(
+                            fontSize: AppTheme.fontTitle3,
+                            fontWeight: FontWeight.w700,
+                            color: label,
+                          ),
+                        ),
                         const Spacer(),
                         // 截图里这一态是红色「✕ 取消」
                         TextButton.icon(
                           onPressed: () => Navigator.pop(ctx),
-                          icon: const Icon(Icons.close_rounded,
-                              size: 20, color: Colors.redAccent),
-                          label: const Text('取消',
-                              style: TextStyle(
-                                  fontSize: AppTheme.fontBody, color: Colors.redAccent)),
+                          icon: const Icon(
+                            Icons.close_rounded,
+                            size: 20,
+                            color: Colors.redAccent,
+                          ),
+                          label: const Text(
+                            '取消',
+                            style: TextStyle(
+                              fontSize: AppTheme.fontBody,
+                              color: Colors.redAccent,
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -626,15 +643,17 @@ class _BookshelfPageState extends State<BookshelfPage>
                     child: shelves.isEmpty
                         ? Padding(
                             padding: const EdgeInsets.all(40),
-                            child: Text('没有可删除的书架（预设书架不可删）',
-                                style: TextStyle(
-                                    fontSize: AppTheme.fontSubhead,
-                                    color: JellyTheme.textSecondary)),
+                            child: Text(
+                              '没有可删除的书架（预设书架不可删）',
+                              style: TextStyle(
+                                fontSize: AppTheme.fontSubhead,
+                                color: JellyTheme.textSecondary,
+                              ),
+                            ),
                           )
                         : ListView(
                             shrinkWrap: true,
-                            padding:
-                                const EdgeInsets.symmetric(vertical: 6),
+                            padding: const EdgeInsets.symmetric(vertical: 6),
                             children: [
                               for (final s in shelves)
                                 CheckboxListTile(
@@ -649,7 +668,9 @@ class _BookshelfPageState extends State<BookshelfPage>
                                   title: Text(
                                     _shelfDisplayName(s, _currentTypeFor()),
                                     style: TextStyle(
-                                        fontSize: AppTheme.fontHeadline, color: label),
+                                      fontSize: AppTheme.fontHeadline,
+                                      color: label,
+                                    ),
                                   ),
                                   controlAffinity:
                                       ListTileControlAffinity.leading,
@@ -666,8 +687,9 @@ class _BookshelfPageState extends State<BookshelfPage>
                         Text(
                           '已选 ${picked.length} 个可删除书架',
                           style: TextStyle(
-                              fontSize: AppTheme.fontSubhead,
-                              color: JellyTheme.textSecondary),
+                            fontSize: AppTheme.fontSubhead,
+                            color: JellyTheme.textSecondary,
+                          ),
                         ),
                         const Spacer(),
                         FilledButton(
@@ -675,16 +697,20 @@ class _BookshelfPageState extends State<BookshelfPage>
                               ? null
                               : () async {
                                   for (final id in picked) {
-                                    await BookshelfService()
-                                        .deleteBookshelf(id);
+                                    await BookshelfService().deleteBookshelf(
+                                      id,
+                                    );
                                   }
                                   if (ctx.mounted) Navigator.pop(ctx);
                                 },
                           style: FilledButton.styleFrom(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 22, vertical: 14),
+                              horizontal: 22,
+                              vertical: 14,
+                            ),
                             shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14)),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
                           ),
                           child: Text('删除所选 (${picked.length})'),
                         ),
@@ -702,9 +728,8 @@ class _BookshelfPageState extends State<BookshelfPage>
   }
 
   /// 当前 tab 对应的条目类型（漫画 / 图书）
-  BookshelfItemType _currentTypeFor() => _isComicTab
-      ? BookshelfItemType.comic
-      : BookshelfItemType.book;
+  BookshelfItemType _currentTypeFor() =>
+      _isComicTab ? BookshelfItemType.comic : BookshelfItemType.book;
 
   /// 「管理书架」弹层（按用户截图）。
   ///
@@ -731,8 +756,9 @@ class _BookshelfPageState extends State<BookshelfPage>
             ),
             decoration: BoxDecoration(
               color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(24)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
+              ),
             ),
             child: SafeArea(
               top: false,
@@ -753,12 +779,14 @@ class _BookshelfPageState extends State<BookshelfPage>
                     padding: const EdgeInsets.fromLTRB(20, 10, 8, 6),
                     child: Row(
                       children: [
-                        Text('管理书架',
-                            style: TextStyle(
-                              fontSize: AppTheme.fontTitle3,
-                              fontWeight: FontWeight.w700,
-                              color: label,
-                            )),
+                        Text(
+                          '管理书架',
+                          style: TextStyle(
+                            fontSize: AppTheme.fontTitle3,
+                            fontWeight: FontWeight.w700,
+                            color: label,
+                          ),
+                        ),
                         const Spacer(),
                         // 设置 -> 「书架设置」弹层（按截图）
                         IconButton(
@@ -767,8 +795,11 @@ class _BookshelfPageState extends State<BookshelfPage>
                             Navigator.pop(ctx);
                             _showShelfSettings();
                           },
-                          icon: Icon(Icons.settings_outlined,
-                              size: 21, color: label),
+                          icon: Icon(
+                            Icons.settings_outlined,
+                            size: 21,
+                            color: label,
+                          ),
                         ),
                         // 新建
                         IconButton(
@@ -778,8 +809,11 @@ class _BookshelfPageState extends State<BookshelfPage>
                             await _createShelf();
                             if (mounted) setState(() {});
                           },
-                          icon: Icon(Icons.create_new_folder_outlined,
-                              size: 21, color: label),
+                          icon: Icon(
+                            Icons.create_new_folder_outlined,
+                            size: 21,
+                            color: label,
+                          ),
                         ),
                         // 批量删除
                         TextButton.icon(
@@ -787,10 +821,18 @@ class _BookshelfPageState extends State<BookshelfPage>
                             Navigator.pop(ctx);
                             _showBatchDeleteShelves();
                           },
-                          icon: Icon(Icons.delete_sweep_outlined,
-                              size: 20, color: label),
-                          label: Text('批量删除',
-                              style: TextStyle(fontSize: AppTheme.fontBody, color: label)),
+                          icon: Icon(
+                            Icons.delete_sweep_outlined,
+                            size: 20,
+                            color: label,
+                          ),
+                          label: Text(
+                            '批量删除',
+                            style: TextStyle(
+                              fontSize: AppTheme.fontBody,
+                              color: label,
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -807,8 +849,9 @@ class _BookshelfPageState extends State<BookshelfPage>
                         // Flutter 的约定：newIndex 是"插入到该位置之前"，
                         // 向下拖时要减 1 —— 不减会导致拖到相邻位就弹回去。
                         if (newIndex > oldIndex) newIndex -= 1;
-                        final ids =
-                            shelves.map((s) => s.id).toList(growable: true);
+                        final ids = shelves
+                            .map((s) => s.id)
+                            .toList(growable: true);
                         final moved = ids.removeAt(oldIndex);
                         ids.insert(newIndex, moved);
                         await BookshelfService().reorderShelves(ids);
@@ -821,35 +864,44 @@ class _BookshelfPageState extends State<BookshelfPage>
                         final type = _isComicTab
                             ? BookshelfItemType.comic
                             : BookshelfItemType.book;
-                        final count =
-                            BookshelfService().countInShelf(s.id, type);
+                        final count = BookshelfService().countInShelf(
+                          s.id,
+                          type,
+                        );
                         final hidden = SettingsService().isShelfHidden(s.id);
                         return Container(
                           key: ValueKey('shelf-manage-${s.id}'),
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 4),
+                            horizontal: 16,
+                            vertical: 4,
+                          ),
                           child: Row(
                             children: [
                               // 拖动把手（截图里是三条横线）
                               ReorderableDragStartListener(
                                 index: i,
-                                child: Icon(Icons.drag_handle_rounded,
-                                    size: 20,
-                                    color: JellyTheme.textSecondary),
+                                child: Icon(
+                                  Icons.drag_handle_rounded,
+                                  size: 20,
+                                  color: JellyTheme.textSecondary,
+                                ),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Text(
                                   _shelfDisplayName(s, type),
                                   style: TextStyle(
-                                      fontSize: AppTheme.fontHeadline, color: label),
+                                    fontSize: AppTheme.fontHeadline,
+                                    color: label,
+                                  ),
                                 ),
                               ),
                               Text(
                                 '$count 本',
                                 style: TextStyle(
-                                    fontSize: AppTheme.fontSubhead,
-                                    color: JellyTheme.textSecondary),
+                                  fontSize: AppTheme.fontSubhead,
+                                  color: JellyTheme.textSecondary,
+                                ),
                               ),
                               const SizedBox(width: 10),
                               // 显隐：眼睛开关。
@@ -861,8 +913,9 @@ class _BookshelfPageState extends State<BookshelfPage>
                               IconButton(
                                 tooltip: hidden ? '当前隐藏，点击显示' : '当前显示，点击隐藏',
                                 onPressed: () async {
-                                  await SettingsService()
-                                      .toggleShelfHidden(s.id);
+                                  await SettingsService().toggleShelfHidden(
+                                    s.id,
+                                  );
                                   setSheet(() {});
                                   if (mounted) setState(() {});
                                 },
@@ -872,8 +925,9 @@ class _BookshelfPageState extends State<BookshelfPage>
                                       : Icons.visibility_outlined,
                                   size: 20,
                                   color: hidden
-                                      ? JellyTheme.textSecondary
-                                          .withValues(alpha: 0.45)
+                                      ? JellyTheme.textSecondary.withValues(
+                                          alpha: 0.45,
+                                        )
                                       : JellyTheme.textSecondary,
                                 ),
                               ),
@@ -1037,8 +1091,7 @@ class _BookshelfPageState extends State<BookshelfPage>
   /// 当前 tab 可见的书架列表：漫画 tab 隐藏"本地图书"书架（其内仅 Book 类型）
   List<Bookshelf> _visibleShelves(NavTab tab) {
     final s = SettingsService();
-    final shelves = BookshelfService()
-        .bookshelves
+    final shelves = BookshelfService().bookshelves
         // 被「管理书架」隐藏的书架不显示（预设书架也能隐藏 —— 见截图）
         .where((x) => !s.isShelfHidden(x.id))
         .toList();
@@ -1165,11 +1218,10 @@ class _BookshelfPageState extends State<BookshelfPage>
                                       animation: _tabController.animation!,
                                       builder: (context, _) =>
                                           JellySegmentedToggle(
-                                            index: _tabController
-                                                .animation!.value,
+                                            index:
+                                                _tabController.animation!.value,
                                             onChanged: (i) {
-                                              if (i >= 0 &&
-                                                  i < tabs.length) {
+                                              if (i >= 0 && i < tabs.length) {
                                                 _switchTab(tabs[i]);
                                               }
                                             },
@@ -1180,8 +1232,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                                                 .map(
                                                   (t) => JellySegmentData(
                                                     icon: t == NavTab.manga
-                                                        ? Icons
-                                                            .palette_rounded
+                                                        ? Icons.palette_rounded
                                                         : Icons.book_rounded,
                                                   ),
                                                 )
@@ -1657,8 +1708,7 @@ class _BookshelfPageState extends State<BookshelfPage>
         builder: (ctx, setSheet) => Container(
           decoration: BoxDecoration(
             color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-            borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(24)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: SafeArea(
             top: false,
@@ -1680,18 +1730,23 @@ class _BookshelfPageState extends State<BookshelfPage>
                   padding: const EdgeInsets.fromLTRB(20, 8, 12, 4),
                   child: Row(
                     children: [
-                      Text('排序方式',
-                          style: TextStyle(
-                            fontSize: AppTheme.fontTitle3,
-                            fontWeight: FontWeight.w700,
-                            color: label,
-                          )),
+                      Text(
+                        '排序方式',
+                        style: TextStyle(
+                          fontSize: AppTheme.fontTitle3,
+                          fontWeight: FontWeight.w700,
+                          color: label,
+                        ),
+                      ),
                       const Spacer(),
                       // 「全局」开关：所有书架共用这套排序
-                      Text('全局',
-                          style: TextStyle(
-                              fontSize: AppTheme.fontSubhead,
-                              color: JellyTheme.textSecondary)),
+                      Text(
+                        '全局',
+                        style: TextStyle(
+                          fontSize: AppTheme.fontSubhead,
+                          color: JellyTheme.textSecondary,
+                        ),
+                      ),
                       const SizedBox(width: 4),
                       Transform.scale(
                         scale: 0.8,
@@ -1706,9 +1761,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                       const SizedBox(width: 2),
                       // 方向：点击在"正序 / 倒序"之间切
                       IconButton(
-                        tooltip: s.shelfSortAsc
-                            ? '当前正序，点击切倒序'
-                            : '当前倒序，点击切正序',
+                        tooltip: s.shelfSortAsc ? '当前正序，点击切倒序' : '当前倒序，点击切正序',
                         onPressed: () async {
                           await s.setShelfSortAsc(!s.shelfSortAsc);
                           setSheet(() {});
@@ -1723,8 +1776,11 @@ class _BookshelfPageState extends State<BookshelfPage>
                       ),
                       IconButton(
                         onPressed: () => Navigator.pop(ctx),
-                        icon: Icon(Icons.close_rounded,
-                            size: 22, color: JellyTheme.textSecondary),
+                        icon: Icon(
+                          Icons.close_rounded,
+                          size: 22,
+                          color: JellyTheme.textSecondary,
+                        ),
                       ),
                     ],
                   ),
@@ -1745,17 +1801,21 @@ class _BookshelfPageState extends State<BookshelfPage>
                             child: Container(
                               width: double.infinity,
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 16, vertical: 15),
+                                horizontal: 16,
+                                vertical: 15,
+                              ),
                               decoration: BoxDecoration(
                                 color: s.shelfSort == e.key
                                     ? (isDark
-                                        ? Colors.white.withValues(alpha: 0.14)
-                                        : Colors.black
-                                            .withValues(alpha: 0.09))
+                                          ? Colors.white.withValues(alpha: 0.14)
+                                          : Colors.black.withValues(
+                                              alpha: 0.09,
+                                            ))
                                     : (isDark
-                                        ? Colors.white.withValues(alpha: 0.06)
-                                        : Colors.black
-                                            .withValues(alpha: 0.035)),
+                                          ? Colors.white.withValues(alpha: 0.06)
+                                          : Colors.black.withValues(
+                                              alpha: 0.035,
+                                            )),
                                 borderRadius: BorderRadius.circular(14),
                               ),
                               child: Text(
@@ -1858,28 +1918,26 @@ class _BookshelfPageState extends State<BookshelfPage>
       builder: (context) {
         final isDark = Theme.of(context).brightness == Brightness.dark;
         final cardColor = isDark ? JellyTheme.cardDark : JellyTheme.cardLight;
-        final titleColor =
-            isDark ? Colors.white : JellyTheme.textPrimaryLight;
-        final subColor =
-            isDark ? Colors.white70 : JellyTheme.textSecondary;
+        final titleColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+        final subColor = isDark ? Colors.white70 : JellyTheme.textSecondary;
         final groupColor = isDark ? Colors.white38 : Colors.black45;
 
         /// 分组小标题（导入 / 传输·备份）
         Widget groupLabel(String text) => Padding(
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  text,
-                  style: TextStyle(
-                    fontSize: AppTheme.fontFootnote,
-                    fontWeight: FontWeight.w700,
-                    color: groupColor,
-                    letterSpacing: 0.5,
-                  ),
-                ),
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: AppTheme.fontFootnote,
+                fontWeight: FontWeight.w700,
+                color: groupColor,
+                letterSpacing: 0.5,
               ),
-            );
+            ),
+          ),
+        );
 
         /// 单项：圆角底色图标容器（primary@12%）+ 标题 + 副标题
         Widget item({
@@ -1891,8 +1949,10 @@ class _BookshelfPageState extends State<BookshelfPage>
         }) {
           final c = accent ?? JellyTheme.primary;
           return ListTile(
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 2,
+            ),
             leading: Container(
               width: 42,
               height: 42,
@@ -1912,11 +1972,15 @@ class _BookshelfPageState extends State<BookshelfPage>
             ),
             subtitle: Text(
               subtitle,
-              style: TextStyle(fontSize: AppTheme.fontFootnote, color: subColor),
+              style: TextStyle(
+                fontSize: AppTheme.fontFootnote,
+                color: subColor,
+              ),
             ),
             onTap: onTap,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
           );
         }
 
@@ -2039,8 +2103,9 @@ class _BookshelfPageState extends State<BookshelfPage>
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => kbSheet(const PeerTransferPage(
-                            mode: PeerTransferMode.send)),
+                        builder: (_) => kbSheet(
+                          const PeerTransferPage(mode: PeerTransferMode.send),
+                        ),
                       ),
                     );
                   },
@@ -2086,8 +2151,9 @@ class _BookshelfPageState extends State<BookshelfPage>
                   child: TextButton(
                     onPressed: () => Navigator.pop(context),
                     style: TextButton.styleFrom(
-                      foregroundColor:
-                          isDark ? Colors.white70 : JellyTheme.textSecondary,
+                      foregroundColor: isDark
+                          ? Colors.white70
+                          : JellyTheme.textSecondary,
                     ),
                     child: const Text('取消'),
                   ),
@@ -2114,11 +2180,13 @@ class _BookshelfPageState extends State<BookshelfPage>
       if (!mounted) return;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(
-          content: Text(msg),
-          duration: const Duration(seconds: 2),
-          behavior: SnackBarBehavior.floating,
-        ));
+        ..showSnackBar(
+          SnackBar(
+            content: Text(msg),
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
     }
 
     await showModalBottomSheet<void>(
@@ -2128,11 +2196,11 @@ class _BookshelfPageState extends State<BookshelfPage>
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) => Container(
           padding: EdgeInsets.only(
-              bottom: MediaQuery.of(ctx).viewInsets.bottom),
+            bottom: MediaQuery.of(ctx).viewInsets.bottom,
+          ),
           decoration: BoxDecoration(
             color: Theme.of(ctx).scaffoldBackgroundColor,
-            borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(22)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
           ),
           child: SafeArea(
             top: false,
@@ -2143,42 +2211,53 @@ class _BookshelfPageState extends State<BookshelfPage>
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('WebDAV 备份同步',
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.w700)),
+                    const Text(
+                      'WebDAV 备份同步',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     const SizedBox(height: 4),
                     Text(
                       '服务器示例：https://dav.example.com/dav/',
                       style: TextStyle(
-                          fontSize: 12,
-                          color: Theme.of(ctx).colorScheme.onSurfaceVariant),
+                        fontSize: 12,
+                        color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                     const SizedBox(height: 14),
                     TextField(
                       controller: urlC,
                       decoration: const InputDecoration(
-                          labelText: 'WebDAV 服务器地址',
-                          border: OutlineInputBorder()),
+                        labelText: 'WebDAV 服务器地址',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                     const SizedBox(height: 10),
                     TextField(
                       controller: userC,
                       decoration: const InputDecoration(
-                          labelText: '用户名', border: OutlineInputBorder()),
+                        labelText: '用户名',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                     const SizedBox(height: 10),
                     TextField(
                       controller: passC,
                       obscureText: true,
                       decoration: const InputDecoration(
-                          labelText: '密码', border: OutlineInputBorder()),
+                        labelText: '密码',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                     const SizedBox(height: 10),
                     TextField(
                       controller: pathC,
                       decoration: const InputDecoration(
-                          labelText: '备份路径（默认 NewTv/bookshelf_backup.json）',
-                          border: OutlineInputBorder()),
+                        labelText: '备份路径（默认 NewTv/bookshelf_backup.json）',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                     const SizedBox(height: 16),
                     Row(
@@ -2189,25 +2268,31 @@ class _BookshelfPageState extends State<BookshelfPage>
                                 ? null
                                 : () async {
                                     setSheet(() => busy = true);
-                                    await SyncService.instance.save(SyncConfig(
-                                      webdavUrl: urlC.text.trim(),
-                                      webdavUser: userC.text.trim(),
-                                      webdavPass: passC.text,
-                                      webdavPath: pathC.text.trim(),
-                                    ));
-                                    final json =
-                                        BookshelfService().exportJson();
+                                    await SyncService.instance.save(
+                                      SyncConfig(
+                                        webdavUrl: urlC.text.trim(),
+                                        webdavUser: userC.text.trim(),
+                                        webdavPass: passC.text,
+                                        webdavPath: pathC.text.trim(),
+                                      ),
+                                    );
+                                    final json = BookshelfService()
+                                        .exportJson();
                                     final r = await SyncService.instance
                                         .backupBookshelf(json);
                                     if (ctx.mounted) {
                                       Navigator.pop(ctx);
                                     }
-                                    toast(r.ok
-                                        ? '备份成功（${json.length ~/ 1024} KB）'
-                                        : '备份失败：${r.error}');
+                                    toast(
+                                      r.ok
+                                          ? '备份成功（${json.length ~/ 1024} KB）'
+                                          : '备份失败：${r.error}',
+                                    );
                                   },
-                            icon: const Icon(Icons.cloud_upload_outlined,
-                                size: 18),
+                            icon: const Icon(
+                              Icons.cloud_upload_outlined,
+                              size: 18,
+                            ),
                             label: busy
                                 ? const Text('备份中…')
                                 : const Text('立即备份'),
@@ -2242,8 +2327,10 @@ class _BookshelfPageState extends State<BookshelfPage>
                                       toast('恢复成功，新增 $n 条记录');
                                     }
                                   },
-                            icon: const Icon(Icons.cloud_download_outlined,
-                                size: 18),
+                            icon: const Icon(
+                              Icons.cloud_download_outlined,
+                              size: 18,
+                            ),
                             label: busy
                                 ? const Text('恢复中…')
                                 : const Text('从云端恢复'),
@@ -2285,11 +2372,13 @@ class _BookshelfPageState extends State<BookshelfPage>
       if (!mounted) return;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(
-          content: Text(msg),
-          duration: const Duration(seconds: 2),
-          behavior: SnackBarBehavior.floating,
-        ));
+        ..showSnackBar(
+          SnackBar(
+            content: Text(msg),
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
     }
 
     await showModalBottomSheet<void>(
@@ -2299,11 +2388,11 @@ class _BookshelfPageState extends State<BookshelfPage>
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) => Container(
           padding: EdgeInsets.only(
-              bottom: MediaQuery.of(ctx).viewInsets.bottom),
+            bottom: MediaQuery.of(ctx).viewInsets.bottom,
+          ),
           decoration: BoxDecoration(
             color: Theme.of(ctx).scaffoldBackgroundColor,
-            borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(22)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
           ),
           child: SafeArea(
             top: false,
@@ -2314,22 +2403,28 @@ class _BookshelfPageState extends State<BookshelfPage>
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Kindle 推送',
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.w700)),
+                    const Text(
+                      'Kindle 推送',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     const SizedBox(height: 4),
                     Text(
                       '用发件邮箱把图书附件发送到你的 Kindle 邮箱',
                       style: TextStyle(
-                          fontSize: 12,
-                          color: Theme.of(ctx).colorScheme.onSurfaceVariant),
+                        fontSize: 12,
+                        color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                     const SizedBox(height: 14),
                     TextField(
                       controller: hostC,
                       decoration: const InputDecoration(
-                          labelText: 'SMTP 服务器（如 smtp.qq.com）',
-                          border: OutlineInputBorder()),
+                        labelText: 'SMTP 服务器（如 smtp.qq.com）',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                     const SizedBox(height: 10),
                     Row(
@@ -2340,8 +2435,9 @@ class _BookshelfPageState extends State<BookshelfPage>
                             controller: portC,
                             keyboardType: TextInputType.number,
                             decoration: const InputDecoration(
-                                labelText: '端口（465 / 587）',
-                                border: OutlineInputBorder()),
+                              labelText: '端口（465 / 587）',
+                              border: OutlineInputBorder(),
+                            ),
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -2349,16 +2445,18 @@ class _BookshelfPageState extends State<BookshelfPage>
                           flex: 3,
                           child: Row(
                             children: [
-                              Text('587 用 STARTTLS',
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      color: Theme.of(ctx)
-                                          .colorScheme
-                                          .onSurfaceVariant)),
+                              Text(
+                                '587 用 STARTTLS',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Theme.of(
+                                    ctx,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
                               Switch(
                                 value: useTls,
-                                onChanged: (v) =>
-                                    setSheet(() => useTls = v),
+                                onChanged: (v) => setSheet(() => useTls = v),
                               ),
                             ],
                           ),
@@ -2369,23 +2467,26 @@ class _BookshelfPageState extends State<BookshelfPage>
                     TextField(
                       controller: userC,
                       decoration: const InputDecoration(
-                          labelText: '发件邮箱账号',
-                          border: OutlineInputBorder()),
+                        labelText: '发件邮箱账号',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                     const SizedBox(height: 10),
                     TextField(
                       controller: passC,
                       obscureText: true,
                       decoration: const InputDecoration(
-                          labelText: '邮箱授权码/密码',
-                          border: OutlineInputBorder()),
+                        labelText: '邮箱授权码/密码',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                     const SizedBox(height: 10),
                     TextField(
                       controller: kindleC,
                       decoration: const InputDecoration(
-                          labelText: 'Kindle 收件邮箱',
-                          border: OutlineInputBorder()),
+                        labelText: 'Kindle 收件邮箱',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                     const SizedBox(height: 16),
                     FilledButton.icon(
@@ -2393,21 +2494,24 @@ class _BookshelfPageState extends State<BookshelfPage>
                           ? null
                           : () async {
                               setSheet(() => busy = true);
-                              await SyncService.instance.save(SyncConfig(
-                                smtpHost: hostC.text.trim(),
-                                smtpPort:
-                                    int.tryParse(portC.text.trim()) ?? 465,
-                                smtpUser: userC.text.trim(),
-                                smtpPass: passC.text,
-                                kindleEmail: kindleC.text.trim(),
-                                useStartTls: useTls,
-                              ));
+                              await SyncService.instance.save(
+                                SyncConfig(
+                                  smtpHost: hostC.text.trim(),
+                                  smtpPort:
+                                      int.tryParse(portC.text.trim()) ?? 465,
+                                  smtpUser: userC.text.trim(),
+                                  smtpPass: passC.text,
+                                  kindleEmail: kindleC.text.trim(),
+                                  useStartTls: useTls,
+                                ),
+                              );
                               // 从书架/下载任务里挑一本有本地文件的图书
-                              final tasks = BookDownloadService()
-                                  .tasks.values
-                                  .where((t) =>
-                                      t.localPath != null &&
-                                      t.localPath!.isNotEmpty)
+                              final tasks = BookDownloadService().tasks.values
+                                  .where(
+                                    (t) =>
+                                        t.localPath != null &&
+                                        t.localPath!.isNotEmpty,
+                                  )
                                   .toList();
                               if (tasks.isEmpty) {
                                 if (ctx.mounted) Navigator.pop(ctx);
@@ -2422,28 +2526,35 @@ class _BookshelfPageState extends State<BookshelfPage>
                                 builder: (c2) => SafeArea(
                                   child: Container(
                                     decoration: BoxDecoration(
-                                      color: Theme.of(c2).scaffoldBackgroundColor,
+                                      color: Theme.of(
+                                        c2,
+                                      ).scaffoldBackgroundColor,
                                       borderRadius: const BorderRadius.vertical(
-                                          top: Radius.circular(22)),
+                                        top: Radius.circular(22),
+                                      ),
                                     ),
                                     child: ListView(
                                       shrinkWrap: true,
                                       children: [
                                         const Padding(
                                           padding: EdgeInsets.all(16),
-                                          child: Text('选择要推送到 Kindle 的书',
-                                              style: TextStyle(
-                                                  fontSize: 16,
-                                                  fontWeight:
-                                                      FontWeight.w700)),
+                                          child: Text(
+                                            '选择要推送到 Kindle 的书',
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
                                         ),
                                         for (final t in tasks)
                                           ListTile(
                                             leading: const Icon(
-                                                Icons.menu_book_outlined),
-                                            title: Text(t.title,
-                                                overflow:
-                                                    TextOverflow.ellipsis),
+                                              Icons.menu_book_outlined,
+                                            ),
+                                            title: Text(
+                                              t.title,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
                                             subtitle: Text(t.localPath ?? ''),
                                             onTap: () =>
                                                 Navigator.pop(c2, t.localPath),
@@ -2458,7 +2569,8 @@ class _BookshelfPageState extends State<BookshelfPage>
                                 return;
                               }
                               final task = tasks.firstWhere(
-                                  (t) => t.localPath == picked);
+                                (t) => t.localPath == picked,
+                              );
                               final bytes = await File(picked).readAsBytes();
                               final r = await SyncService.instance.pushToKindle(
                                 fileName:
@@ -2466,14 +2578,12 @@ class _BookshelfPageState extends State<BookshelfPage>
                                 fileBytes: bytes,
                                 title: task.title,
                               );
-                              toast(r.ok
-                                  ? '已推送到 Kindle 邮箱'
-                                  : '推送失败：${r.error}');
+                              toast(
+                                r.ok ? '已推送到 Kindle 邮箱' : '推送失败：${r.error}',
+                              );
                             },
                       icon: const Icon(Icons.send_rounded, size: 18),
-                      label: busy
-                          ? const Text('发送中…')
-                          : const Text('选择图书推送'),
+                      label: busy ? const Text('发送中…') : const Text('选择图书推送'),
                     ),
                   ],
                 ),
@@ -2565,8 +2675,9 @@ class _BookshelfPageState extends State<BookshelfPage>
       } else if (source == 'folder') {
         folder = await LocalComicImportService.pickFolder();
         if (folder == null || folder.trim().isEmpty) return;
-        final parts =
-            folder.split(RegExp(r'[/\\]')).where((e) => e.trim().isNotEmpty);
+        final parts = folder
+            .split(RegExp(r'[/\\]'))
+            .where((e) => e.trim().isNotEmpty);
         if (parts.isNotEmpty) defaultTitle = parts.last;
       } else {
         archive = await LocalComicImportService.pickArchive();
@@ -2598,8 +2709,8 @@ class _BookshelfPageState extends State<BookshelfPage>
       final r = source == 'images'
           ? await LocalComicImportService.importImages(images, title: title)
           : source == 'folder'
-              ? await LocalComicImportService.importFolder(folder!, title: title)
-              : await LocalComicImportService.importArchive(archive!, title: title);
+          ? await LocalComicImportService.importFolder(folder!, title: title)
+          : await LocalComicImportService.importArchive(archive!, title: title);
       if (!mounted) return;
       rootNav.pop();
       _switchTab(NavTab.manga);
@@ -2643,11 +2754,13 @@ class _BookshelfPageState extends State<BookshelfPage>
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(msg),
-        duration: const Duration(seconds: 3),
-        behavior: SnackBarBehavior.floating,
-      ));
+      ..showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          duration: const Duration(seconds: 3),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
   }
 
   /// 导入本地图书：多选文件 -> 逐本建已完成任务 -> 入"本地图书"书架（Book 类型，固定 id）
@@ -2797,7 +2910,15 @@ class _BookshelfPageState extends State<BookshelfPage>
   // 图书格式 → 复用 BookDownloadService.importLocalFile 入库去重。
   // ════════════════════════════════════════════════════════════
   static const _scanBookExtensions = <String>{
-    'txt', 'epub', 'pdf', 'mobi', 'azw', 'azw3', 'fb2', 'docx', 'rtf',
+    'txt',
+    'epub',
+    'pdf',
+    'mobi',
+    'azw',
+    'azw3',
+    'fb2',
+    'docx',
+    'rtf',
   };
 
   Future<void> _scanLibraryFolder() async {
@@ -2828,7 +2949,9 @@ class _BookshelfPageState extends State<BookshelfPage>
               walk(e);
             } else if (e is File) {
               final dot = e.path.lastIndexOf('.');
-              final ext = dot > 0 ? e.path.substring(dot + 1).toLowerCase() : '';
+              final ext = dot > 0
+                  ? e.path.substring(dot + 1).toLowerCase()
+                  : '';
               if (_scanBookExtensions.contains(ext)) files.add(e);
             }
           }
@@ -2876,9 +2999,9 @@ class _BookshelfPageState extends State<BookshelfPage>
       final shelf = await BookshelfService().ensureLocalBookshelf();
       for (final t in svc.tasks.values) {
         if (!t.isLocalImport) continue;
-        final already = BookshelfService()
-            .items
-            .any((it) => it.bookshelfId == shelf.id && it.itemId == t.bookId);
+        final already = BookshelfService().items.any(
+          (it) => it.bookshelfId == shelf.id && it.itemId == t.bookId,
+        );
         if (already) continue;
         final meta = jsonEncode(
           Book(
@@ -2960,9 +3083,9 @@ class _BookshelfPageState extends State<BookshelfPage>
 
       final books = (data['bookshelf'] is List)
           ? (data['bookshelf'] as List)
-              .whereType<Map>()
-              .map((m) => Map<String, dynamic>.from(m))
-              .toList()
+                .whereType<Map>()
+                .map((m) => Map<String, dynamic>.from(m))
+                .toList()
           : <Map<String, dynamic>>[];
       final progressMap = (data['bookProgress'] is Map)
           ? Map<String, dynamic>.from(data['bookProgress'] as Map)
@@ -3002,8 +3125,7 @@ class _BookshelfPageState extends State<BookshelfPage>
           skipped++;
           continue;
         }
-        final itemId =
-            'legado_${(tocUrl.isNotEmpty ? tocUrl : name).hashCode}';
+        final itemId = 'legado_${(tocUrl.isNotEmpty ? tocUrl : name).hashCode}';
         final meta = jsonEncode(
           Book(
             id: itemId,
@@ -3033,23 +3155,23 @@ class _BookshelfPageState extends State<BookshelfPage>
         final marks = bookmarkMap.entries
             .where((e) => e.value is Map && (e.value as Map)['name'] == name)
             .map((e) {
-          final v = e.value as Map;
-          return {
-            'chapter': (v['chapterName'] ?? v['chapter'] ?? ''),
-            'text': (v['markText'] ?? ''),
-          };
-        }).toList();
+              final v = e.value as Map;
+              return {
+                'chapter': (v['chapterName'] ?? v['chapter'] ?? ''),
+                'text': (v['markText'] ?? ''),
+              };
+            })
+            .toList();
         var dataMap = <String, dynamic>{};
         try {
           dataMap = Map<String, dynamic>.from(
-              jsonDecode(prior) as Map<String, dynamic>);
+            jsonDecode(prior) as Map<String, dynamic>,
+          );
         } catch (_) {}
         dataMap[itemId] = {
           'name': name,
           'tocUrl': tocUrl,
-          'progress': prog is Map
-              ? (prog['chapter'] ?? '')
-              : '',
+          'progress': prog is Map ? (prog['chapter'] ?? '') : '',
           'bookmarks': marks,
         };
         await prefs.setString('legado_backup_data', jsonEncode(dataMap));
@@ -3180,8 +3302,10 @@ class _BookshelfPageState extends State<BookshelfPage>
               //    所以这里用 replace_all 一起修 ✓。
               // 至少先**留痕**让问题可见 ✓；
               // 遗留：真正的修法是解析失败时用 meta 里的书名/封面建**兜底条目** ✓
-              debugPrint('[Bookshelf] 书架条目 meta 解析失败（item ${item.itemId}），'
-                  '该项将被跳过: $e');
+              debugPrint(
+                '[Bookshelf] 书架条目 meta 解析失败（item ${item.itemId}），'
+                '该项将被跳过: $e',
+              );
             }
           }
           if (book == null) continue;
@@ -3360,8 +3484,8 @@ class _BookshelfPageState extends State<BookshelfPage>
               {
                 final allCount = _visibleShelves(_currentTab).fold<int>(
                   0,
-                  (sum, sh) => sum +
-                      BookshelfService().countInShelf(sh.id, currentType),
+                  (sum, sh) =>
+                      sum + BookshelfService().countInShelf(sh.id, currentType),
                 );
                 final allPainter = TextPainter(
                   text: const TextSpan(text: '全部', style: textStyle),
@@ -3372,7 +3496,11 @@ class _BookshelfPageState extends State<BookshelfPage>
                   textDirection: TextDirection.ltr,
                 )..layout();
                 totalWidth +=
-                    chipPadding + allPainter.width + 4 + numPainter.width + spacing;
+                    chipPadding +
+                    allPainter.width +
+                    4 +
+                    numPainter.width +
+                    spacing;
               }
               for (int i = 0; i < shelves.length; i++) {
                 final shelf = shelves[i];
@@ -3416,7 +3544,9 @@ class _BookshelfPageState extends State<BookshelfPage>
               //    `dashboard_customize`；② 这枚胶囊的高度必须和「全部」标签
               //    那道背景框**一样高**（原来固定 28，跟标签框对不齐）；
               //    ③ 宽度再收窄一点，视觉上与标签更接近。
-              final iconColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+              final iconColor = isDark
+                  ? Colors.white
+                  : JellyTheme.textPrimaryLight;
               // 管理 / 排序：**两个独立的圆形按钮**（用户 2026-10-18 给的截图）
               //   · 左：管理书架（列表/筛选样式的图标）
               //   · 右：排序方式（上下箭头）
@@ -3478,8 +3608,8 @@ class _BookshelfPageState extends State<BookshelfPage>
                   fixedButtons,
                   const SizedBox(width: 8),
                   Expanded(
-                    child: totalWidth + 16 + fixedWidth + 8 <=
-                            constraints.maxWidth
+                    child:
+                        totalWidth + 16 + fixedWidth + 8 <= constraints.maxWidth
                         ? Center(child: scrollView)
                         : scrollView,
                   ),
@@ -3497,8 +3627,7 @@ class _BookshelfPageState extends State<BookshelfPage>
     final selected = _currentShelfId == kAllShelfId;
     final count = _visibleShelves(_currentTab).fold<int>(
       0,
-      (sum, sh) =>
-          sum + BookshelfService().countInShelf(sh.id, currentType),
+      (sum, sh) => sum + BookshelfService().countInShelf(sh.id, currentType),
     );
     return Padding(
       key: _shelfChipKey(kAllShelfId),
@@ -3508,7 +3637,7 @@ class _BookshelfPageState extends State<BookshelfPage>
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 4),
           decoration: BoxDecoration(
             color: selected
                 ? JellyTheme.primary
@@ -3572,7 +3701,7 @@ class _BookshelfPageState extends State<BookshelfPage>
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 4),
           decoration: BoxDecoration(
             color: selected
                 ? JellyTheme.primary
@@ -3626,7 +3755,7 @@ class _BookshelfPageState extends State<BookshelfPage>
       child: GestureDetector(
         onTap: _createShelf,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
           decoration: BoxDecoration(
             color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
             borderRadius: BorderRadius.circular(14),
@@ -3690,12 +3819,11 @@ class _SearchComicTile extends StatelessWidget {
           httpHeaders: coverHeaders(comic.sourceId),
           fit: BoxFit.cover,
           placeholder: (_, __) => const SizedBox.shrink(),
-          errorWidget: (_, __, ___) =>
-              Icon(
-                Icons.palette_rounded,
-                size: 20,
-                color: JellyTheme.textSecondary,
-              ),
+          errorWidget: (_, __, ___) => Icon(
+            Icons.palette_rounded,
+            size: 20,
+            color: JellyTheme.textSecondary,
+          ),
         ),
       ),
       title: Text(
@@ -3748,12 +3876,11 @@ class _SearchBookTile extends StatelessWidget {
         child: Image.network(
           book.cover ?? '',
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) =>
-              Icon(
-                Icons.book_rounded,
-                size: 20,
-                color: JellyTheme.textSecondary,
-              ),
+          errorBuilder: (_, __, ___) => Icon(
+            Icons.book_rounded,
+            size: 20,
+            color: JellyTheme.textSecondary,
+          ),
         ),
       ),
       title: Text(
@@ -3881,7 +4008,8 @@ class _ComicShelfTab extends StatelessWidget {
                 sourceLabel: sourceLabel,
                 sourceId: sourceId,
                 updateCount: ShelfUpdateService.instance.newChapters(
-                    ShelfUpdateService.keyForComic(c.pathWord)),
+                  ShelfUpdateService.keyForComic(c.pathWord),
+                ),
               ),
             );
           }
@@ -4238,8 +4366,10 @@ class _BookShelfTab extends StatelessWidget {
               //    所以这里用 replace_all 一起修 ✓。
               // 至少先**留痕**让问题可见 ✓；
               // 遗留：真正的修法是解析失败时用 meta 里的书名/封面建**兜底条目** ✓
-              debugPrint('[Bookshelf] 书架条目 meta 解析失败（item ${item.itemId}），'
-                  '该项将被跳过: $e');
+              debugPrint(
+                '[Bookshelf] 书架条目 meta 解析失败（item ${item.itemId}），'
+                '该项将被跳过: $e',
+              );
             }
           }
           if (book != null) {
@@ -4609,8 +4739,9 @@ class _ShelfCoverState extends State<_ShelfCover> {
               Container(
                 decoration: BoxDecoration(
                   // 圆角跟随「显示设置 → 封面圆角」（用户 2026-10-15）
-                  borderRadius:
-                      BorderRadius.circular(SettingsService().coverRadiusPx),
+                  borderRadius: BorderRadius.circular(
+                    SettingsService().coverRadiusPx,
+                  ),
                   color: isDark
                       ? Colors.white.withValues(alpha: 0.05)
                       : JellyTheme.cardLight,
@@ -4625,8 +4756,9 @@ class _ShelfCoverState extends State<_ShelfCover> {
                   ],
                 ),
                 child: ClipRRect(
-                  borderRadius:
-                      BorderRadius.circular(SettingsService().coverRadiusPx),
+                  borderRadius: BorderRadius.circular(
+                    SettingsService().coverRadiusPx,
+                  ),
                   child: _buildCoverImage(isDark),
                 ),
               ),
@@ -4704,8 +4836,7 @@ class _ShelfCoverState extends State<_ShelfCover> {
                     child: LinearProgressIndicator(
                       value: (widget.progress ?? 0).clamp(0.0, 1.0),
                       minHeight: 3,
-                      backgroundColor:
-                          Colors.white.withValues(alpha: 0.25),
+                      backgroundColor: Colors.white.withValues(alpha: 0.25),
                       color: JellyTheme.primary,
                     ),
                   ),
@@ -4848,133 +4979,136 @@ void _showShelfItemMenu(
   showModalBottomSheet(
     context: context,
     backgroundColor: Colors.transparent,
-    builder: (ctx) => kbSheet(Container(
-      decoration: BoxDecoration(
-        color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      child: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-              child: Text(
-                e.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: AppTheme.fontHeadline,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
-                ),
-              ),
-            ),
-            // ① 多选编辑：进入批量模式并选中本条（跨书架批量操作的入口）
-            if (onEdit != null)
-              ListTile(
-                leading: Icon(
-                  Icons.checklist_rounded,
-                  color: JellyTheme.primary,
-                ),
-                title: const Text('多选编辑'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  onEdit();
-                },
-              ),
-            // ② / ③ 移出 / 移到其他书架（「全部」为汇总视图时不可用）
-            if (shelfId != kAllShelfId) ...[
-              ListTile(
-                leading: Icon(
-                  Icons.remove_circle_outline_rounded,
-                  color: JellyTheme.error,
-                ),
-                title: const Text('移出当前书架'),
-                onTap: () async {
-                  await BookshelfService().removeFromBookshelf(
-                    shelfId,
-                    e.itemId,
-                    e.type,
-                  );
-                  // 🔴 原来**无条件**删本地导入文件 ✗ —— 而「移除同时删除本地文件」
-                  //   是可选项、默认关 ⇒ 与批量移除同口径（见 _removeSelectedFromShelf）
-                  if (e.type == BookshelfItemType.book &&
-                      SettingsService().shelfRemoveDeletesFile) {
-                    await BookDownloadService()
-                        .cleanupOrphanedImport(e.itemId);
-                  }
-                  if (ctx.mounted) Navigator.pop(ctx);
-                },
-              ),
-              ListTile(
-                leading: Icon(
-                  Icons.swap_horiz_rounded,
-                  color: JellyTheme.primary,
-                ),
-                title: const Text('移到其他书架'),
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  await showBookshelfDialog(
-                    context,
-                    itemId: e.itemId,
-                    type: e.type,
-                    title: '移到其他书架',
-                    meta: e.meta,
-                    singleSelect: true,
-                  );
-                },
-              ),
-            ] else
-              const Padding(
-                padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+    builder: (ctx) => kbSheet(
+      Container(
+        decoration: BoxDecoration(
+          color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
                 child: Text(
-                  '「全部」为汇总视图，请进入具体书架后管理',
-                  style: TextStyle(fontSize: AppTheme.fontFootnote),
+                  e.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppTheme.fontHeadline,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+                  ),
                 ),
               ),
-            // ③.5 导出本地文件：与「删除本地文件」同一门槛（确实有文件才出现）
-            if (_hasLocalFiles(e))
-              ListTile(
-                leading: Icon(
-                  Icons.ios_share_rounded,
-                  color: JellyTheme.primary,
+              // ① 多选编辑：进入批量模式并选中本条（跨书架批量操作的入口）
+              if (onEdit != null)
+                ListTile(
+                  leading: Icon(
+                    Icons.checklist_rounded,
+                    color: JellyTheme.primary,
+                  ),
+                  title: const Text('多选编辑'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    onEdit();
+                  },
                 ),
-                title: const Text('导出本地文件'),
-                subtitle: Text(
-                  e.type == BookshelfItemType.comic
-                      ? '整本打包成 ZIP 后分享'
-                      : '用系统分享面板另存',
-                  style: const TextStyle(fontSize: AppTheme.fontCaption),
+              // ② / ③ 移出 / 移到其他书架（「全部」为汇总视图时不可用）
+              if (shelfId != kAllShelfId) ...[
+                ListTile(
+                  leading: Icon(
+                    Icons.remove_circle_outline_rounded,
+                    color: JellyTheme.error,
+                  ),
+                  title: const Text('移出当前书架'),
+                  onTap: () async {
+                    await BookshelfService().removeFromBookshelf(
+                      shelfId,
+                      e.itemId,
+                      e.type,
+                    );
+                    // 🔴 原来**无条件**删本地导入文件 ✗ —— 而「移除同时删除本地文件」
+                    //   是可选项、默认关 ⇒ 与批量移除同口径（见 _removeSelectedFromShelf）
+                    if (e.type == BookshelfItemType.book &&
+                        SettingsService().shelfRemoveDeletesFile) {
+                      await BookDownloadService().cleanupOrphanedImport(
+                        e.itemId,
+                      );
+                    }
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  },
                 ),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _exportLocalFiles(context, e);
-                },
-              ),
-            // ④ 硬删除：删掉本地已下载内容（不可恢复）。
-            //    只在**确实有本地文件**时才出现 ✓（否则点了没反应会让人困惑）
-            //    不依赖当前书架 ⇒ 「全部」视图下也提供 ✓
-            if (_hasLocalFiles(e))
-              ListTile(
-                leading: Icon(
-                  Icons.delete_forever_rounded,
-                  color: JellyTheme.error,
+                ListTile(
+                  leading: Icon(
+                    Icons.swap_horiz_rounded,
+                    color: JellyTheme.primary,
+                  ),
+                  title: const Text('移到其他书架'),
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    await showBookshelfDialog(
+                      context,
+                      itemId: e.itemId,
+                      type: e.type,
+                      title: '移到其他书架',
+                      meta: e.meta,
+                      singleSelect: true,
+                    );
+                  },
                 ),
-                title: Text(
-                  '删除本地文件',
-                  style: TextStyle(color: JellyTheme.error),
+              ] else
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+                  child: Text(
+                    '「全部」为汇总视图，请进入具体书架后管理',
+                    style: TextStyle(fontSize: AppTheme.fontFootnote),
+                  ),
                 ),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _deleteLocalFiles(context, e);
-                },
-              ),
-            const SizedBox(height: 8),
-          ],
+              // ③.5 导出本地文件：与「删除本地文件」同一门槛（确实有文件才出现）
+              if (_hasLocalFiles(e))
+                ListTile(
+                  leading: Icon(
+                    Icons.ios_share_rounded,
+                    color: JellyTheme.primary,
+                  ),
+                  title: const Text('导出本地文件'),
+                  subtitle: Text(
+                    e.type == BookshelfItemType.comic
+                        ? '整本打包成 ZIP 后分享'
+                        : '用系统分享面板另存',
+                    style: const TextStyle(fontSize: AppTheme.fontCaption),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _exportLocalFiles(context, e);
+                  },
+                ),
+              // ④ 硬删除：删掉本地已下载内容（不可恢复）。
+              //    只在**确实有本地文件**时才出现 ✓（否则点了没反应会让人困惑）
+              //    不依赖当前书架 ⇒ 「全部」视图下也提供 ✓
+              if (_hasLocalFiles(e))
+                ListTile(
+                  leading: Icon(
+                    Icons.delete_forever_rounded,
+                    color: JellyTheme.error,
+                  ),
+                  title: Text(
+                    '删除本地文件',
+                    style: TextStyle(color: JellyTheme.error),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _deleteLocalFiles(context, e);
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
-    )),
+    ),
   );
 }
 
@@ -5041,7 +5175,7 @@ Future<void> _deleteLocalFiles(BuildContext context, _ShelfEntry e) async {
       content: Text(
         isComic
             ? '将删除《${e.title}》已下载的全部章节，删除后不可恢复。\n'
-                '书架条目会保留，可重新下载或在线阅读。'
+                  '书架条目会保留，可重新下载或在线阅读。'
             : '将删除《${e.title}》的本地文件与下载记录，删除后不可恢复。',
       ),
       actions: [
@@ -5212,11 +5346,12 @@ void _applyShelfSort(List<BookshelfItem> items, String shelfId) {
             // meta 损坏就当空串，不因此崩掉整个书架
           }
         }
-        keys[it.itemId] =
-            (s.shelfSort == 'title' ? title : author).toLowerCase();
+        keys[it.itemId] = (s.shelfSort == 'title' ? title : author)
+            .toLowerCase();
       }
-      items.sort((a, b) =>
-          dir((keys[a.itemId] ?? '').compareTo(keys[b.itemId] ?? '')));
+      items.sort(
+        (a, b) => dir((keys[a.itemId] ?? '').compareTo(keys[b.itemId] ?? '')),
+      );
       break;
     case 'added':
       items.sort((a, b) => dir(a.addedAt.compareTo(b.addedAt)));

@@ -1,3 +1,17 @@
+import '../utils/html_text.dart';
+
+String? _cleanTitleNullable(String? s) {
+  if (s == null) return null;
+  final v = cleanSourceTitle(s);
+  return v.isEmpty ? null : v;
+}
+
+String? _cleanIntroNullable(String? s) {
+  if (s == null) return null;
+  final v = cleanIntroText(s);
+  return v.isEmpty ? null : v;
+}
+
 /// 漫画模型
 class Comic {
   final String id;
@@ -129,14 +143,19 @@ class Comic {
           safeString(json['pathWord']) ??
           safeString(json['id']) ??
           '',
-      title: safeString(json['name']) ?? safeString(json['title']) ?? '',
+      // 兼容旧存档 / 远端 JSON：把站名、导航词与装饰符号在读取时清掉
+      // （用户 2026-10-18）。
+      title: cleanSourceTitle(
+        safeString(json['name']) ?? safeString(json['title']) ?? '',
+      ),
       cover: safeString(json['cover']) ?? '',
-      author: safeAuthor(json['author']),
-      alias: safeAlias(json['alias']),
-      description:
-          safeString(json['description']) ??
-          safeString(json['synopsis']) ??
-          safeString(json['brief']),
+      author: _cleanTitleNullable(safeAuthor(json['author'])),
+      alias: _cleanTitleNullable(safeAlias(json['alias'])),
+      description: _cleanIntroNullable(
+        safeString(json['description']) ??
+            safeString(json['synopsis']) ??
+            safeString(json['brief']),
+      ),
       status: safeStatus(json['status']),
       tags: safeTags(json['tags']) ?? safeTags(json['theme']),
       rating: safeDouble(json['rating']),
@@ -157,14 +176,17 @@ class Comic {
       // 「更新于 X」在**重启后整行消失** ✓（消费方：jelly_comic_list_tile）
       // 远端(copymanga)仍用下划线键，所以两个都留着、驼峰优先 ✓
       //（与 music/models.dart 里 Song/Playlist 的同类兜底是同一手法 ✓）
-      updateTime: (json['updateTime'] ??
+      updateTime:
+          (json['updateTime'] ??
                   json['update_time'] ??
                   json['datetime_updated']) !=
               null
-          ? DateTime.tryParse((json['updateTime'] ??
-                  json['update_time'] ??
-                  json['datetime_updated'])
-              .toString())
+          ? DateTime.tryParse(
+              (json['updateTime'] ??
+                      json['update_time'] ??
+                      json['datetime_updated'])
+                  .toString(),
+            )
           : null,
     );
   }
@@ -250,7 +272,7 @@ class ComicChapter {
     this.imageUrls,
   });
 
-    // ⚠️ **埋雷警告**（今天核实 ✓，**有意不改结构** ✗）：
+  // ⚠️ **埋雷警告**（今天核实 ✓，**有意不改结构** ✗）：
   //   本类 `toJson`（下面 `:284` 附近 ✓）与 `fromJson` 的**键名不对称** ✗ ——
   //   落盘再读回会**丢** `order` / `groupId` / `groupName` / `createTime`
   //   （`fromJson` 读的是 Legado 侧键名 `ordered` / `group_path_word` /
@@ -278,7 +300,10 @@ class ComicChapter {
 
     return ComicChapter(
       id: (json['uuid'] ?? json['id']).toString(),
-      title: safeString(json['name']) ?? safeString(json['title']) ?? '',
+      // 章节名读取时清掉「返回目录 / 手机阅读 / 装饰符号」等噪声
+      title: cleanChapterTitle(
+        safeString(json['name']) ?? safeString(json['title']) ?? '',
+      ),
       order: safeInt(json['ordered'] ?? json['order'], 0),
       count: safeInt(json['count'], 0),
       groupId:
@@ -337,7 +362,7 @@ class ChapterGroup {
 
     return ChapterGroup(
       id: (json['id'] ?? json['path_word']).toString(),
-      name: safeString(json['name']) ?? '',
+      name: cleanSourceTitle(safeString(json['name']) ?? ''),
       count: safeInt(json['count'], 0),
       chapters: [],
     );

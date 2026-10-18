@@ -25,6 +25,7 @@ import '../novel_source/model/search_book.dart';
 import '../novel_source/model/xiaoshuo_book.dart';
 import '../novel_source/model/xiaoshuo_book_chapter.dart';
 import '../novel_source/web_book/web_book.dart';
+import '../utils/html_text.dart';
 import 'manga_source.dart';
 
 /// 老式「扁平」Legado 规则（`ruleChapterList` / `ruleBookContent` / …）
@@ -47,8 +48,9 @@ Map<String, dynamic> normalizeLegadoComicRules(Map<String, dynamic> raw) {
   void put(String section, String key, String? value) {
     if (value == null || value.isEmpty) return;
     final cur = out[section];
-    final map =
-        cur is Map ? Map<String, dynamic>.from(cur) : <String, dynamic>{};
+    final map = cur is Map
+        ? Map<String, dynamic>.from(cur)
+        : <String, dynamic>{};
     final exist = map[key];
     if (exist is String && exist.trim().isNotEmpty) return;
     map[key] = value;
@@ -73,8 +75,7 @@ Map<String, dynamic> normalizeLegadoComicRules(Map<String, dynamic> raw) {
   // 发现：老版 ruleFindUrl 的 `标题::地址\n…` 与新 exploreUrl 同格式
   final findUrl = str('ruleFindUrl');
   if (findUrl != null &&
-      (out['exploreUrl'] == null ||
-          '${out['exploreUrl']}'.trim().isEmpty)) {
+      (out['exploreUrl'] == null || '${out['exploreUrl']}'.trim().isEmpty)) {
     out['exploreUrl'] = findUrl;
   }
 
@@ -131,8 +132,9 @@ class LegadoComicMangaSource extends MangaSource {
   String get id => 'legado:${source.bookSourceUrl}';
 
   @override
-  String get name =>
-      source.bookSourceName.trim().isEmpty ? 'Legado 漫画' : source.bookSourceName;
+  String get name => source.bookSourceName.trim().isEmpty
+      ? 'Legado 漫画'
+      : source.bookSourceName;
 
   @override
   String get group => (source.bookSourceGroup ?? '').trim();
@@ -148,9 +150,9 @@ class LegadoComicMangaSource extends MangaSource {
 
   @override
   Map<String, String> get imageHeaders => {
-        ..._sourceHeaders(),
-        ..._imageHeaders,
-      };
+    ..._sourceHeaders(),
+    ..._imageHeaders,
+  };
 
   @override
   String? get referer => _imageReferer ?? source.bookSourceUrl;
@@ -204,12 +206,10 @@ class LegadoComicMangaSource extends MangaSource {
   }
 
   @override
-  Future<MangasPage> getPopular({int page = 0}) =>
-      _explore(null, page);
+  Future<MangasPage> getPopular({int page = 0}) => _explore(null, page);
 
   @override
-  Future<MangasPage> getLatestUpdates({int page = 0}) =>
-      _explore(null, page);
+  Future<MangasPage> getLatestUpdates({int page = 0}) => _explore(null, page);
 
   Future<MangasPage> _explore(String? categoryUrl, int page) async {
     final cats = _web.getExploreCategories(source);
@@ -270,9 +270,9 @@ class LegadoComicMangaSource extends MangaSource {
     return CManga(
       id: b.bookUrl,
       sourceId: id,
-      title: b.name,
+      title: cleanSourceTitle(b.name),
       cover: b.coverUrl ?? '',
-      author: b.author,
+      author: cleanSourceTitle(b.author),
       description: b.kind,
       tags: _splitTags(b.kind),
       url: b.bookUrl,
@@ -283,9 +283,9 @@ class LegadoComicMangaSource extends MangaSource {
     return CManga(
       id: b.bookUrl,
       sourceId: id,
-      title: b.name,
+      title: cleanSourceTitle(b.name),
       cover: b.coverUrl ?? '',
-      author: b.author,
+      author: cleanSourceTitle(b.author),
       description: _cleanIntro(b.intro),
       tags: _splitTags(b.kind),
       url: b.bookUrl,
@@ -307,10 +307,12 @@ class LegadoComicMangaSource extends MangaSource {
       // 源里可能是**二次转义**的 HTML（解析一次后仍是标签文本），再剥一层
       text = text.replaceAll(RegExp(r'<[^>]*>'), '');
     }
-    text = text
-        .replaceAll(RegExp(r'^简介\s*[:：]\s*'), '')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
+    // 统一走公共简介清洗：去掉「返回 / 目录 / 站点名 / 纯网址符号」行。
+    text = cleanIntroText(
+      text
+          .replaceAll(RegExp(r'^简介\s*[:：]\s*'), '')
+          .replaceAll(RegExp(r'\s+'), ' '),
+    );
     return text.isEmpty ? null : text;
   }
 
@@ -328,8 +330,9 @@ class LegadoComicMangaSource extends MangaSource {
   // ── 详情 / 章节 ──────────────────────────────────────────
 
   @override
-  Future<({CManga manga, List<CChapter> chapters})>
-      getMangaDetailsAndChapters(CManga manga) async {
+  Future<({CManga manga, List<CChapter> chapters})> getMangaDetailsAndChapters(
+    CManga manga,
+  ) async {
     _bindJs();
     final detailUrl = manga.id.isNotEmpty ? manga.id : (manga.url ?? '');
     final book = await _web.getBookInfo(source: source, bookUrl: detailUrl);
@@ -340,25 +343,32 @@ class LegadoComicMangaSource extends MangaSource {
       final c = chapters[i];
       final url = c.getAbsoluteURL(redirectUrl: detailUrl);
       if (url.isEmpty) continue;
-      list.add(CChapter(
-        id: url,
-        sourceId: id,
-        mangaId: manga.id,
-        name: c.title.trim().isEmpty ? '第${i + 1}话' : c.title.trim(),
-        url: url,
-        order: i,
-      ));
+      final chapterName = cleanChapterTitle(c.title);
+      list.add(
+        CChapter(
+          id: url,
+          sourceId: id,
+          mangaId: manga.id,
+          name: chapterName.isEmpty ? '第${i + 1}话' : chapterName,
+          url: url,
+          order: i,
+        ),
+      );
     }
 
     return (
       manga: manga.copyWith(
         id: manga.id,
         sourceId: id,
-        title: book.name.trim().isEmpty ? manga.title : book.name.trim(),
+        title: cleanSourceTitle(book.name).isEmpty
+            ? manga.title
+            : cleanSourceTitle(book.name),
         cover: (book.coverUrl ?? '').trim().isEmpty
             ? manga.cover
             : book.coverUrl!.trim(),
-        author: book.author.trim().isEmpty ? manga.author : book.author.trim(),
+        author: cleanSourceTitle(book.author).isEmpty
+            ? manga.author
+            : cleanSourceTitle(book.author),
         description: _cleanIntro(book.intro) ?? manga.description,
         status: (book.bookStatus ?? '').trim().isEmpty
             ? manga.status
@@ -408,10 +418,25 @@ class LegadoComicMangaSource extends MangaSource {
       source: source,
       chapter: ch,
     );
-    final body = await analyzeUrl.getStrResponse(
+    var body = await analyzeUrl.getStrResponse(
       headers: ruleHeaders.isEmpty ? null : ruleHeaders,
     );
     if (body.isEmpty) return const [];
+
+    // ruleContent.sourceRegex：与书源引擎同口径，先从整页截出正文片段。
+    // 很多漫画脚本靠它把 `<body>` 缩到图片容器，不处理会一条图都取不到
+    // （症状：同一个脚本在书源能看，漫画源 0 张图）。
+    final srcRe = contentRule.sourceRegex?.trim() ?? '';
+    if (srcRe.isNotEmpty) {
+      try {
+        final m = RegExp(srcRe, dotAll: true).firstMatch(body);
+        if (m != null) {
+          body = m.groupCount >= 1 ? (m.group(1) ?? m.group(0)!) : m.group(0)!;
+        }
+      } catch (_) {
+        // 非法正则忽略，保持原文
+      }
+    }
 
     final rule = AnalyzeRule(book: book, chapter: ch)
       ..setContent(body, chapterUrl)
@@ -514,7 +539,8 @@ class LegadoComicMangaSource extends MangaSource {
         try {
           final doc = html_parser.parse(t);
           for (final img in doc.querySelectorAll('img')) {
-            final u = img.attributes['data-src'] ??
+            final u =
+                img.attributes['data-src'] ??
                 img.attributes['data-original'] ??
                 img.attributes['data-lazy-src'] ??
                 img.attributes['data-url'] ??
@@ -529,9 +555,7 @@ class LegadoComicMangaSource extends MangaSource {
       if (t.contains('\n')) {
         for (final line in t.split('\n')) {
           final s = line.trim();
-          if (s.startsWith('http') ||
-              s.startsWith('//') ||
-              s.startsWith('/')) {
+          if (s.startsWith('http') || s.startsWith('//') || s.startsWith('/')) {
             add(s);
           }
         }
@@ -576,10 +600,13 @@ class LegadoComicMangaSource extends MangaSource {
 
     final inner = raw.substring(start + 1, end);
     final headers = <String, String>{};
-    for (final mm
-        in RegExp(r'([A-Za-z0-9_\-]+)\s*:\s*([^,}]+)').allMatches(inner)) {
-      headers[mm.group(1)!] =
-          mm.group(2)!.trim().replaceAll(RegExp(r'''^['"]|['"]$'''), '');
+    for (final mm in RegExp(
+      r'([A-Za-z0-9_\-]+)\s*:\s*([^,}]+)',
+    ).allMatches(inner)) {
+      headers[mm.group(1)!] = mm
+          .group(2)!
+          .trim()
+          .replaceAll(RegExp(r'''^['"]|['"]$'''), '');
     }
     final cleaned = (raw.substring(0, m.start) + raw.substring(end + 1)).trim();
     return (cleaned, headers);

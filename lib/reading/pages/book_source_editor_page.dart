@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/book_source.dart';
+import '../source/source_manager.dart';
 import '../theme/jelly_theme.dart';
 import '../../common/theme.dart';
 
@@ -60,13 +61,16 @@ class _Toggle {
 
 /// tab 定义
 class _Tab {
-  const _Tab(this.title,
-      {this.toggles = const [],
-      this.fields = const [],
-      this.isVariable = false});
+  const _Tab(
+    this.title, {
+    this.toggles = const [],
+    this.fields = const [],
+    this.isVariable = false,
+  });
   final String title;
   final List<_Toggle> toggles;
   final List<_Field> fields;
+
   /// 「源变量」tab 是特殊布局（单值/键值对 切换 + 变量值框），
   /// 与其它 tab 的"标签+输入框"列表不同，所以单列一个标记。
   final bool isVariable;
@@ -95,9 +99,19 @@ const _tabs = <_Tab>[
     fields: [
       _Field('bookSourceUrl', '源地址（唯一标识）', hint: 'https://www.example.com'),
       _Field('bookSourceName', '源名称', hint: '示例书源'),
+      _Field(
+        'bookSourceType',
+        '书源类型（0 小说 / 1 有声 / 2 漫画 / 3 文件）',
+        hint: '留空 = 自动识别；漫画源请填 2',
+      ),
       _Field('bookSourceGroup', '分组（逗号分隔）', hint: '通常书源,快速书源'),
       _Field('bookSourceComment', '说明', multiline: true),
-      _Field('header', '请求头 (header)', hint: '{ "User-Agent": "..." }', multiline: true),
+      _Field(
+        'header',
+        '请求头 (header)',
+        hint: '{ "User-Agent": "..." }',
+        multiline: true,
+      ),
       _Field('loginUrl', '登录地址'),
       _Field('loginUi', '登录界面 (loginUi)', multiline: true),
       _Field('loginCheckJs', '登录检测 JS', multiline: true),
@@ -109,9 +123,19 @@ const _tabs = <_Tab>[
   _Tab(
     '搜索',
     fields: [
-      _Field('searchUrl', '搜索地址', hint: 'https://…?key={{key}}&page={{page}}', multiline: true),
+      _Field(
+        'searchUrl',
+        '搜索地址',
+        hint: 'https://…?key={{key}}&page={{page}}',
+        multiline: true,
+      ),
       _Field('ruleSearch.checkKeyWord', '校验关键字'),
-      _Field('ruleSearch.bookList', '书籍列表', hint: r'$.data.list 或 js:...', multiline: true),
+      _Field(
+        'ruleSearch.bookList',
+        '书籍列表',
+        hint: r'$.data.list 或 js:...',
+        multiline: true,
+      ),
       _Field('ruleSearch.name', '书名', hint: r'$.title'),
       _Field('ruleSearch.author', '作者', hint: r'$.authorName'),
       _Field('ruleSearch.kind', '分类'),
@@ -126,7 +150,12 @@ const _tabs = <_Tab>[
   _Tab(
     '发现',
     fields: [
-      _Field('exploreUrl', '发现地址', hint: '[{"title":"全部","url":"…"}]', multiline: true),
+      _Field(
+        'exploreUrl',
+        '发现地址',
+        hint: '[{"title":"全部","url":"…"}]',
+        multiline: true,
+      ),
       _Field('ruleExplore.bookList', '书籍列表', multiline: true),
       _Field('ruleExplore.name', '书名'),
       _Field('ruleExplore.author', '作者'),
@@ -162,7 +191,12 @@ const _tabs = <_Tab>[
     '目录',
     fields: [
       _Field('ruleToc.preUpdateJs', '目录预处理 JS', multiline: true),
-      _Field('ruleToc.chapterList', '章节列表', hint: r'$.data 或 id.list@tag.li@tag.a', multiline: true),
+      _Field(
+        'ruleToc.chapterList',
+        '章节列表',
+        hint: r'$.data 或 id.list@tag.li@tag.a',
+        multiline: true,
+      ),
       _Field('ruleToc.chapterName', '章节名称', hint: 'text'),
       _Field('ruleToc.chapterUrl', '章节 URL', hint: 'href', multiline: true),
       _Field('ruleToc.formatJs', '格式化 JS', multiline: true),
@@ -178,7 +212,12 @@ const _tabs = <_Tab>[
   _Tab(
     '正文',
     fields: [
-      _Field('ruleContent.content', '正文', hint: '@css:div.con@textNodes', multiline: true),
+      _Field(
+        'ruleContent.content',
+        '正文',
+        hint: '@css:div.con@textNodes',
+        multiline: true,
+      ),
       _Field('ruleContent.nextContentUrl', '下一页正文 URL', multiline: true),
       _Field('ruleContent.subContent', '子正文规则', multiline: true),
       _Field('ruleContent.replaceRegex', '净化替换', multiline: true),
@@ -246,6 +285,9 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
     });
     _draftBool.forEach((k, v) => values[k] = v);
     await BookSourceStore.instance.updatePaths(_src.id, values);
+    // 书源类型可能从 0 改成 2（或反过来）→ 立即刷新漫画源注册，
+    // 否则要等重启才出现在对应模块。
+    await SourceManager().reload();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('已保存'), duration: Duration(seconds: 1)),
@@ -258,8 +300,9 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final label = isDark ? Colors.white : JellyTheme.textPrimaryLight;
     return Scaffold(
-      backgroundColor:
-          isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
+      backgroundColor: isDark
+          ? JellyTheme.backgroundDark
+          : JellyTheme.backgroundLight,
       appBar: AppBar(
         centerTitle: true,
         title: Text(
@@ -267,12 +310,18 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-              fontSize: AppTheme.fontTitle3, fontWeight: FontWeight.w700, color: label),
+            fontSize: AppTheme.fontTitle3,
+            fontWeight: FontWeight.w700,
+            color: label,
+          ),
         ),
         actions: [
           TextButton(
             onPressed: _save,
-            child: const Text('保存', style: TextStyle(fontSize: AppTheme.fontHeadline)),
+            child: const Text(
+              '保存',
+              style: TextStyle(fontSize: AppTheme.fontHeadline),
+            ),
           ),
         ],
         bottom: TabBar(
@@ -283,8 +332,10 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
           unselectedLabelColor: JellyTheme.textSecondary,
           indicatorColor: label,
           indicatorSize: TabBarIndicatorSize.label,
-          labelStyle:
-              const TextStyle(fontSize: AppTheme.fontBody, fontWeight: FontWeight.w600),
+          labelStyle: const TextStyle(
+            fontSize: AppTheme.fontBody,
+            fontWeight: FontWeight.w600,
+          ),
           unselectedLabelStyle: const TextStyle(fontSize: AppTheme.fontBody),
           tabs: [for (final t in _tabs) Tab(text: t.title)],
         ),
@@ -308,21 +359,31 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
   //   共用一个会让所有输入框显示同一段文字 ✗✗（比泄漏更糟 ✓）
   final _fieldCtrls = <String, TextEditingController>{};
   TextEditingController _ctrlFor(String key) => _fieldCtrls.putIfAbsent(
-        key,
-        () => TextEditingController(text: (_draft[key] ?? '').toString()),
-      );
+    key,
+    () => TextEditingController(text: (_draft[key] ?? '').toString()),
+  );
 
   Widget _buildVariableTab(bool isDark) {
     final label = isDark ? Colors.white : JellyTheme.textPrimaryLight;
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 40),
       children: [
-        Text('源变量可在脚本中通过 source.getVariable() 获取',
-            style: TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
+        Text(
+          '源变量可在脚本中通过 source.getVariable() 获取',
+          style: TextStyle(
+            fontSize: AppTheme.fontSubhead,
+            color: JellyTheme.textSecondary,
+          ),
+        ),
         const SizedBox(height: 4),
         Text(
-          _varKvMode ? '键值对：每行一个 key=value，脚本里按键取值' : '单值：整条串直接保存，适合单个 Token 等裸值',
-          style: TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary),
+          _varKvMode
+              ? '键值对：每行一个 key=value，脚本里按键取值'
+              : '单值：整条串直接保存，适合单个 Token 等裸值',
+          style: TextStyle(
+            fontSize: AppTheme.fontSubhead,
+            color: JellyTheme.textSecondary,
+          ),
         ),
         const SizedBox(height: 14),
         // ── 单值 / 键值对 分段切换（按截图 IMG_8112）────────────
@@ -352,8 +413,8 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
                         // 选中 = 浅灰胶囊（浅色模式比底色略深一点）
                         color: _varKvMode == kv
                             ? (isDark
-                                ? Colors.white.withValues(alpha: 0.14)
-                                : JellyTheme.primary.withValues(alpha: 0.12))
+                                  ? Colors.white.withValues(alpha: 0.14)
+                                  : JellyTheme.primary.withValues(alpha: 0.12))
                             : Colors.transparent,
                         borderRadius: BorderRadius.circular(20),
                       ),
@@ -394,10 +455,14 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
               filled: false,
               hintText: _varKvMode ? 'key1=value1\nkey2=value2' : '变量值',
               hintStyle: TextStyle(
-                  fontSize: AppTheme.fontBody, color: JellyTheme.textSecondary),
+                fontSize: AppTheme.fontBody,
+                color: JellyTheme.textSecondary,
+              ),
               border: InputBorder.none,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 12,
+              ),
             ),
           ),
         ),
@@ -428,15 +493,19 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
                       Expanded(
                         child: Padding(
                           padding: const EdgeInsets.symmetric(vertical: 12),
-                          child: Text(t.toggles[i].label,
-                              style:
-                                  TextStyle(fontSize: AppTheme.fontHeadline, color: label)),
+                          child: Text(
+                            t.toggles[i].label,
+                            style: TextStyle(
+                              fontSize: AppTheme.fontHeadline,
+                              color: label,
+                            ),
+                          ),
                         ),
                       ),
                       Switch(
                         value: _draftBool[t.toggles[i].key] ?? false,
-                        onChanged: (v) => setState(
-                            () => _draftBool[t.toggles[i].key] = v),
+                        onChanged: (v) =>
+                            setState(() => _draftBool[t.toggles[i].key] = v),
                       ),
                     ],
                   ),
@@ -448,11 +517,14 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
         ],
         // 普通字段
         for (final f in t.fields) ...[
-          Text(f.label,
-              style: TextStyle(
-                  fontSize: AppTheme.fontSubhead,
-                  fontWeight: FontWeight.w600,
-                  color: label)),
+          Text(
+            f.label,
+            style: TextStyle(
+              fontSize: AppTheme.fontSubhead,
+              fontWeight: FontWeight.w600,
+              color: label,
+            ),
+          ),
           const SizedBox(height: 6),
           Container(
             decoration: BoxDecoration(
@@ -474,10 +546,14 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
                 filled: false,
                 hintText: f.hint,
                 hintStyle: TextStyle(
-                    fontSize: AppTheme.fontBody, color: JellyTheme.textSecondary),
+                  fontSize: AppTheme.fontBody,
+                  color: JellyTheme.textSecondary,
+                ),
                 border: InputBorder.none,
                 contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 12),
+                  horizontal: 14,
+                  vertical: 12,
+                ),
               ),
             ),
           ),

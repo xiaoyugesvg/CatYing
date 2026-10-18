@@ -1,14 +1,11 @@
-/// 书名展示清洗：去掉外层书名号《》与首尾装饰性标点（！？，。、空格），
-/// 只改显示层，不动原始数据。z-library 返回的书名常带《》或尾部感叹号。
-String cleanBookTitle(String raw) {
-  var s = raw.trim();
-  if (s.startsWith('《') && s.endsWith('》') && s.length > 2) {
-    s = s.substring(1, s.length - 1).trim();
-  }
-  s = s.replaceFirst(RegExp(r'^[！!？?，,。.、\s]+'), '');
-  s = s.replaceFirst(RegExp(r'[！!？?，,。.、\s]+$'), '');
-  return s.trim();
-}
+import '../utils/html_text.dart';
+
+/// 书名展示清洗：去掉外层书名号《》与首尾装饰性标点，
+/// 并清掉源站混进来的站名 / 导航词（`手机阅读`、`返回`、`www.xxx.com` …）。
+///
+/// 只改显示层，不动原始数据；用户 2026-10-18 反馈书名、章节名与简介里
+/// 不该出现这类与内容无关的内容。
+String cleanBookTitle(String raw) => cleanSourceTitle(raw);
 
 /// 图书模型（z-library 搜索结果）
 /// 字段对应 cmbook service/cmbok_service.py _emit_success 精简后的结构，
@@ -32,9 +29,9 @@ class Book {
 
   // ── 书源体系的书（BookSourceDetailPage 收藏/历史）──────────────
   // 用于收藏/历史/书架点开后正确回到书源详情页继续阅读（不是 zlib 详情页）
-  final String? sourceId;   // BookSource.id
+  final String? sourceId; // BookSource.id
   final String? sourceName; // 书源名
-  final String? bookUrl;    // 书源内书籍 URL
+  final String? bookUrl; // 书源内书籍 URL
 
   /// 是否是书源体系的书（非 z-library 图书）
   bool get isBookSource => (bookUrl ?? '').isNotEmpty;
@@ -80,11 +77,18 @@ class Book {
   }
 
   factory Book.fromJson(Map<String, dynamic> json) {
+    final rawTitle = safeString(json['title']) ?? '';
+    final rawAuthor = safeString(json['author']);
+    // 书源体系的旧存档可能带着源站噪声（`_手机阅读`、`www.xxx.com`…）；
+    // z-library 书名保持原样，避免误伤英文书名末尾的标点。
+    final fromSource = (safeString(json['bookUrl']) ?? '').isNotEmpty;
     return Book(
       id: safeString(json['id']) ?? '',
       hash: safeString(json['hash']) ?? '',
-      title: safeString(json['title']) ?? '',
-      author: safeString(json['author']),
+      title: fromSource ? cleanSourceTitle(rawTitle) : rawTitle,
+      author: fromSource && rawAuthor != null
+          ? cleanSourceTitle(rawAuthor)
+          : rawAuthor,
       cover: safeString(json['cover']),
       year: safeString(json['year']),
       language: safeString(json['language']),

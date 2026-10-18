@@ -49,8 +49,7 @@ class BookSourceResult {
   ///
   /// 为什么不用 bookUrl：同一个书在不同源上 URL 必然不同，
   /// 而去重的目的是"让用户看到一本书一次"，所以必须用内容特征。
-  String get identityKey =>
-      '${name.trim()}::${author.trim()}'.toLowerCase();
+  String get identityKey => '${name.trim()}::${author.trim()}'.toLowerCase();
 
   /// 同一本书在不同源上的"同名"判定（换源时用）
   bool sameBookAs(BookSourceResult other) {
@@ -67,22 +66,30 @@ class BookSourceResult {
     // ⇒ 在这里统一剥掉（**唯一收敛点**）：
     //   搜索结果列表、详情页、书架/收藏存的 name/author 全都来自这里。
     // 书名不能带换行（会劈成两行）→ singleLine。
-    final name = stripHtmlText((j['name'] ?? '').toString().trim(),
-        singleLine: true);
+    // 书名 / 作者 / 章节名 / 简介统一在这里清掉源站噪声（站名、导航词、
+    // 「手机阅读」、装饰符号…），见 html_text.dart 的 cleanSourceTitle。
+    final name = cleanSourceTitle((j['name'] ?? '').toString().trim());
     if (name.isEmpty) return null;
     return BookSourceResult(
       source: src,
       name: name,
-      author: stripHtmlText((j['author'] ?? '').toString().trim(),
-          singleLine: true),
+      author: cleanSourceTitle(
+        (j['author'] ?? '')
+            .toString()
+            .replaceFirst(RegExp(r'^\s*作\s*者\s*[:：]\s*'), '')
+            .trim(),
+      ),
       bookUrl: (j['bookUrl'] ?? '').toString().trim(),
       coverUrl: (j['coverUrl'] ?? '').toString().trim(),
-      // 简介保留换行（分段可读），只是去掉标签
-      intro: stripHtmlText((j['intro'] ?? '').toString().trim()),
-      kind: stripHtmlText((j['kind'] ?? '').toString().trim(),
-          singleLine: true),
-      lastChapter: stripHtmlText((j['lastChapter'] ?? '').toString().trim(),
-          singleLine: true),
+      // 简介保留换行（分段可读），逐行丢掉导航 / 广告 / 纯网址
+      intro: cleanIntroText((j['intro'] ?? '').toString().trim()),
+      kind: stripHtmlText(
+        (j['kind'] ?? '').toString().trim(),
+        singleLine: true,
+      ),
+      lastChapter: cleanChapterTitle(
+        (j['lastChapter'] ?? '').toString().trim(),
+      ),
       wordCount: (j['wordCount'] ?? '').toString().trim(),
     );
   }
@@ -110,7 +117,8 @@ class BookSourceChapter {
   final String url;
 
   static BookSourceChapter? fromJson(Map<String, dynamic> j) {
-    final name = (j['name'] ?? '').toString().trim();
+    // 目录项常带「返回目录」「上一章」「手机阅读」等导航文字与装饰符号。
+    final name = cleanChapterTitle((j['name'] ?? '').toString().trim());
     final url = (j['url'] ?? '').toString().trim();
     if (name.isEmpty || url.isEmpty) return null;
     return BookSourceChapter(name: name, url: url);
@@ -148,7 +156,7 @@ class BookSourceService {
   static final BookSourceService instance = BookSourceService._();
 
   /// 壳模式：已连接 qread 服务端时，详情/目录/正文由服务端执行规则。
- 
+
   /// 构造书源服务用的 Dio，并**挂上「网络代理」**（本轮接上 ✓）。
   ///
   /// ⚠️ 本文件**早就 import 了 `global_proxy`** ✓✓（`:13` ✓，因为它自己就有
@@ -158,12 +166,14 @@ class BookSourceService {
   /// ℹ️ 安全依据 ✓（已读源码确认 ✓）：本处**无自定义适配器** ✗✓（只有超时 + 重定向上限 ✓）
   /// · 代理**关闭** ✓ → 返回 false ✓ **一字不改** ✓（与从前完全一致 ✓✓）
   static Dio _createDio() {
-    final dio = Dio(BaseOptions(
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 30),
-      // 书源抓的是任意站点的 HTML，可能很大
-      maxRedirects: 5,
-    ));
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 30),
+        // 书源抓的是任意站点的 HTML，可能很大
+        maxRedirects: 5,
+      ),
+    );
     applyGlobalProxy(dio);
     return dio;
   }
@@ -174,11 +184,13 @@ class BookSourceService {
   /// 代理会被劫持到 HTTPS 端口 ⇒ 返回 Cloudflare 400，表现为"接口 500/节点不可用"）。
   /// [PATCH-24-REVERT] 恢复：Dart 引擎未接管/空结果时回落到 Node 用它。
   static Dio _createLocalDio() {
-    return Dio(BaseOptions(
-      connectTimeout: const Duration(seconds: 5),
-      // 大书源目录/正文经 Node 传 JSON 很慢：实测 QQ阅读 13221 章要 32 秒 ⇒ 120s
-      receiveTimeout: const Duration(seconds: 120),
-    ));
+    return Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 5),
+        // 大书源目录/正文经 Node 传 JSON 很慢：实测 QQ阅读 13221 章要 32 秒 ⇒ 120s
+        receiveTimeout: const Duration(seconds: 120),
+      ),
+    );
   }
 
   final _localDio = _createLocalDio();
@@ -259,9 +271,7 @@ class BookSourceService {
   /// 返回 Cloudflare `400 The plain HTTP request was sent to HTTPS port` ✗ →
   /// App 里表现为「接口 500 / 节点不可用」✗（用户不开代理时正常、开代理就炸 ✓）。
   /// ⇒ 本地回环调用必须**排除代理** ✓（与 NodeJSManager._localHttpDio 同口径 ✓）。
- 
- 
- 
+
   /// 最近一次体检结果缓存（按源 id）。
   ///
   /// 「退出页面不中断」：体检页退出后批量任务继续跑，结果写到这里；
@@ -380,7 +390,6 @@ class BookSourceService {
     }
   }
 
- 
   Map<String, dynamic> _asMap(dynamic raw) =>
       raw is Map ? raw.cast<String, dynamic>() : <String, dynamic>{};
 
@@ -391,7 +400,7 @@ class BookSourceService {
   /// 明文 config 源 → Dart 侧 ConfigBookSource 引擎。
   ///
   /// config 源（type=config）不走 Node/Legado，直接按 CSS 选择器抓取。
- 
+
   /// 这个源能否走 **Dart 引擎** ✓（本轮重构 ✓）
   ///
   /// · `isConfig`（config 明文源 ✓）⇒ 一直可以 ✓
@@ -400,7 +409,7 @@ class BookSourceService {
   ///
   /// 6 个入口（搜索 ✓ 分类列表 ✓ 分类页 ✓ 详情 ✓ 目录 ✓ 正文 ✓）统一用本方法做门槛 ✓
   /// ⇒ 一次改动把**全部链路**对 Legado 源开放 ✓（不再各写一份 ✗）
- 
+
   /// 用**一个**书源搜索。
   Future<({bool ok, String? error, List<BookSourceResult> list})> searchOne(
     BookSource source,
@@ -408,7 +417,7 @@ class BookSourceService {
     int page = 1,
   }) async {
     // ── config 明文源：Dart 侧引擎 ─────────────────────────────
-     // ── ✅ **先走 Dart（含 WebView 兜底）**，失败才回落 Node 引擎 ──────────────
+    // ── ✅ **先走 Dart（含 WebView 兜底）**，失败才回落 Node 引擎 ──────────────
     // 为什么 ✓：Node 的网络栈被不少站点拒 ✗（实测 `HTTP 400` ✓ `read ECONNRESET` ✓
     //   `socket hang up` ✓ `SSL alert 40` ✓ `certificate has expired` ✓）——
     //   这些**不是源失效** ✗（源真死会是 DNS 失败/404 ✓），是**网络栈/防护**问题 ✓。
@@ -417,7 +426,7 @@ class BookSourceService {
     //   ⇒ 与母项目同款网络栈 ✓（这正是"别人 631 基本都能用"的原因 ✓）
     // 安全 ✓：`legadoNeedsNode()` 命中 `@js:` ⇒ 直接用下面的 Node ✓；
     //   抛错/空结果 ⇒ **也回落 Node** ✓（现行为不变 ✓）；Node 引擎代码**一行未动** ✓
-     // ── Legado 源：Node 引擎（回落路径 ✓ 原样保留 ✓）──────────────────
+    // ── Legado 源：Node 引擎（回落路径 ✓ 原样保留 ✓）──────────────────
     final raw = await _call({
       'action': 'bsSearch',
       'source': source.raw,
@@ -437,7 +446,10 @@ class BookSourceService {
     if (items is List) {
       for (final e in items) {
         if (e is Map) {
-          final r = BookSourceResult.fromJson(e.cast<String, dynamic>(), source);
+          final r = BookSourceResult.fromJson(
+            e.cast<String, dynamic>(),
+            source,
+          );
           if (r != null) out.add(r);
         }
       }
@@ -449,7 +461,7 @@ class BookSourceService {
   ///
   /// [source] 未传 categoryUrl → Node 侧解析 exploreUrl 返回分类数组。
   Future<({bool ok, String? error, List<ExploreCategory> categories})>
-      exploreCategories(BookSource source) async {
+  exploreCategories(BookSource source) async {
     // 🔴 **只有 config 明文源真的没有分类浏览** ✓（它的 CSS 配置体里压根没有
     //   explore 这一类字段 ✓）。**Legado 源要走 Node 引擎的 explore** ✓——
     //   Node 侧 `explore()` 支持 `exploreUrl` / `ruleExploreUrl` /
@@ -495,8 +507,10 @@ class BookSourceService {
   }
 
   /// 分类页的书籍列表（ruleExplore 解析，对应分类网格内容）
-  Future<({bool ok, String? error, List<BookSourceResult> list})>
-      exploreBooks(BookSource source, String categoryUrl) async {
+  Future<({bool ok, String? error, List<BookSourceResult> list})> exploreBooks(
+    BookSource source,
+    String categoryUrl,
+  ) async {
     // 同 exploreCategories：只有 config 明文源才真的没有分类浏览 ✓，
     // Legado 源一律交给 Node 引擎（它有完整的 ruleExplore 解析 ✓）。
     if (source.isConfig) {
@@ -524,8 +538,10 @@ class BookSourceService {
     if (raw is List) {
       for (final it in raw) {
         if (it is Map) {
-          final r =
-              BookSourceResult.fromJson(it.cast<String, dynamic>(), source);
+          final r = BookSourceResult.fromJson(
+            it.cast<String, dynamic>(),
+            source,
+          );
           if (r != null) out.add(r);
         }
       }
@@ -535,7 +551,9 @@ class BookSourceService {
 
   /// 书籍详情（详情页用；失败时返回 null 由 UI 退回搜索页已有字段）
   Future<Map<String, dynamic>?> bookInfo(
-      BookSource source, String bookUrl) async {
+    BookSource source,
+    String bookUrl,
+  ) async {
     return (await bookInfoChecked(source, bookUrl)).info;
   }
 
@@ -544,10 +562,12 @@ class BookSourceService {
   /// 普通调用用 [bookInfo]（失败返回 null）；体检需要区分
   /// 「网络不通 / 解析失败」，用本方法拿 error。
   Future<({Map<String, dynamic>? info, String? error})> bookInfoChecked(
-      BookSource source, String bookUrl) async {
+    BookSource source,
+    String bookUrl,
+  ) async {
     // ── 壳模式：qread 服务端执行 ruleBookInfo（解决本地引擎 @js: 垫片/500）──
-     // ── config 明文源：Dart 侧引擎 ─────────────────────────────
-     final raw = await _callCached(
+    // ── config 明文源：Dart 侧引擎 ─────────────────────────────
+    final raw = await _callCached(
       {
         'action': 'bsBookInfo',
         'source': source.raw,
@@ -573,8 +593,8 @@ class BookSourceService {
     String tocUrl,
   ) async {
     // ── 壳模式：qread 服务端执行 ruleToc ─────────────────────
-     // ── config 明文源：Dart 侧引擎 ─────────────────────────────
-     final raw = await _callCached(
+    // ── config 明文源：Dart 侧引擎 ─────────────────────────────
+    final raw = await _callCached(
       {
         'action': 'bsToc',
         'source': source.raw,
@@ -616,19 +636,21 @@ class BookSourceService {
   /// [headers] = 规则自带 `@Header:{...}` 解析出的图片请求头（漫画图床常靠
   /// Referer/UA 过防盗链）；空表示源没配，客户端回退用书源 header。
   Future<
-      ({
-        bool ok,
-        String? error,
-        String content,
-        List<String> images,
-        Map<String, String> headers,
-      })> content(
+    ({
+      bool ok,
+      String? error,
+      String content,
+      List<String> images,
+      Map<String, String> headers,
+    })
+  >
+  content(
     BookSource source,
     String chapterUrl,
   ) async {
     // ── 壳模式：qread 服务端执行 ruleContent（含翻页聚合/净化）──
-     // ── config 明文源：Dart 侧引擎（正文纯文字，无图片）──────
-     final raw = await _call({
+    // ── config 明文源：Dart 侧引擎（正文纯文字，无图片）──────
+    final raw = await _call({
       'action': 'bsContent',
       'source': source.raw,
       'chapterUrl': chapterUrl,
@@ -693,12 +715,12 @@ class BookSourceService {
   /// 为什么单独一个回调：state 里只有条数，UI 要"边搜边显示"就必须拿到结果本身。
   /// [shouldStop] 返回 true 时停止调度剩余源（用户点了返回/换关键词）。
   Future<({List<BookSourceResult> results, List<SourceSearchState> states})>
-      searchAll(
+  searchAll(
     List<BookSource> sources,
     String keyword, {
     void Function(SourceSearchState state)? onSourceDone,
     void Function(SourceSearchState state, List<BookSourceResult> list)?
-        onSourceResults,
+    onSourceResults,
     bool Function()? shouldStop,
     int perSourceLimit = 20,
   }) async {
@@ -833,11 +855,8 @@ class BookSourceService {
       final net = _isNetError(r.error);
       final h = BookSourceHealth(
         source: source,
-        level: net
-            ? BookSourceHealthLevel.dead
-            : BookSourceHealthLevel.partial,
-        detail:
-            '详情${net ? '网络不通' : '解析失败'}：${r.error ?? '规则无效'}',
+        level: net ? BookSourceHealthLevel.dead : BookSourceHealthLevel.partial,
+        detail: '详情${net ? '网络不通' : '解析失败'}：${r.error ?? '规则无效'}',
         elapsed: sw.elapsed,
       );
       return net ? await _retryWithProxy(h, keyword: keyword) : h;
@@ -852,11 +871,8 @@ class BookSourceService {
       final net = _isNetError(t.error);
       final h = BookSourceHealth(
         source: source,
-        level: net
-            ? BookSourceHealthLevel.dead
-            : BookSourceHealthLevel.partial,
-        detail:
-            '目录${net ? '网络不通' : '解析失败'}：${t.error ?? '规则无效'}',
+        level: net ? BookSourceHealthLevel.dead : BookSourceHealthLevel.partial,
+        detail: '目录${net ? '网络不通' : '解析失败'}：${t.error ?? '规则无效'}',
         elapsed: sw.elapsed,
       );
       return net ? await _retryWithProxy(h, keyword: keyword) : h;
@@ -870,11 +886,8 @@ class BookSourceService {
       final net = _isNetError(c.error);
       final h = BookSourceHealth(
         source: source,
-        level: net
-            ? BookSourceHealthLevel.dead
-            : BookSourceHealthLevel.partial,
-        detail:
-            '正文${net ? '网络不通' : '解析失败'}：${c.error ?? '正文为空'}',
+        level: net ? BookSourceHealthLevel.dead : BookSourceHealthLevel.partial,
+        detail: '正文${net ? '网络不通' : '解析失败'}：${c.error ?? '正文为空'}',
         elapsed: sw.elapsed,
       );
       return net ? await _retryWithProxy(h, keyword: keyword) : h;
@@ -969,7 +982,8 @@ class BookSourceService {
   }
 
   /// 导出书源为 JSON（分享用）
-  String exportSources(List<BookSource> sources) => const JsonEncoder.withIndent(
+  String exportSources(List<BookSource> sources) =>
+      const JsonEncoder.withIndent(
         '  ',
       ).convert(sources.map((s) => s.toJson()).toList());
 
@@ -997,7 +1011,11 @@ class BookSourceService {
     });
     final m = _asMap(raw);
     if (m['ok'] != true) {
-      return (ok: false, cookie: null, error: (m['error'] ?? '登录失败').toString());
+      return (
+        ok: false,
+        cookie: null,
+        error: (m['error'] ?? '登录失败').toString(),
+      );
     }
     return (ok: true, cookie: m['cookie']?.toString(), error: null);
   }
@@ -1129,19 +1147,19 @@ class BookSourceHealth {
   final Duration elapsed;
 
   String get levelText => switch (level) {
-        BookSourceHealthLevel.healthy => '可用',
-        BookSourceHealthLevel.partial => '部分可用',
-        BookSourceHealthLevel.suspect => '可疑',
-        BookSourceHealthLevel.dead => '失效',
-      };
+    BookSourceHealthLevel.healthy => '可用',
+    BookSourceHealthLevel.partial => '部分可用',
+    BookSourceHealthLevel.suspect => '可疑',
+    BookSourceHealthLevel.dead => '失效',
+  };
 
   /// 折成 0~1 的分数，供排序（好源排前面）
   double get score => switch (level) {
-        BookSourceHealthLevel.healthy => 1.0,
-        BookSourceHealthLevel.partial => 0.6,
-        BookSourceHealthLevel.suspect => 0.3,
-        BookSourceHealthLevel.dead => 0.0,
-      };
+    BookSourceHealthLevel.healthy => 1.0,
+    BookSourceHealthLevel.partial => 0.6,
+    BookSourceHealthLevel.suspect => 0.3,
+    BookSourceHealthLevel.dead => 0.0,
+  };
 }
 
 /// 书源缓存条目

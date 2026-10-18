@@ -24,6 +24,8 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../models/book_source.dart';
+import '../services/book_source_import_parser.dart';
 import '../services/settings_service.dart';
 import '../source/config_manga_source.dart';
 import '../source/manga_source.dart';
@@ -31,6 +33,7 @@ import '../source/source_config_store.dart';
 import '../source/source_definition.dart';
 import '../source/source_manager.dart';
 import '../theme/jelly_theme.dart';
+import 'book_source_editor_page.dart';
 import 'comic_source_edit_page.dart';
 import 'source_warehouse_page.dart';
 import '../../common/theme.dart';
@@ -55,14 +58,15 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
   /// 但 _clearAll / _shareSelected 等**不接收 BuildContext 的方法**
   /// 也要用它，所以补一个 getter。
   bool get _isDarkNow => Theme.of(context).brightness == Brightness.dark;
-  Color get _cardNow =>
-      _isDarkNow ? JellyTheme.cardDark : JellyTheme.cardLight;
+  Color get _cardNow => _isDarkNow ? JellyTheme.cardDark : JellyTheme.cardLight;
 
   /// 批量选择：勾选的源 id
   final Set<String> _selected = {};
+
   /// 「筛选已注册的漫画源」
   final _filterCtrl = TextEditingController();
   String _filter = '';
+
   /// 拖动排序用的本地顺序（与 SourceManager 同步）
   List<MangaSource> _order = [];
 
@@ -126,10 +130,12 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
     );
 
     final bad = <MangaSource, String>{};
-    await Future.wait(sources.map((s) async {
-      final err = await _probeSource(s);
-      if (err != null) bad[s] = err;
-    }));
+    await Future.wait(
+      sources.map((s) async {
+        final err = await _probeSource(s);
+        if (err != null) bad[s] = err;
+      }),
+    );
     if (!mounted) return;
     Navigator.of(context, rootNavigator: true).pop();
     setState(() => _healthChecking = false);
@@ -154,13 +160,17 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(e.key.name,
-                          style: const TextStyle(fontWeight: FontWeight.w600)),
+                      Text(
+                        e.key.name,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
                       const SizedBox(height: 2),
                       Text(
                         _shortErr(e.value),
                         style: const TextStyle(
-                            fontSize: 12, color: Colors.redAccent),
+                          fontSize: 12,
+                          color: Colors.redAccent,
+                        ),
                       ),
                     ],
                   ),
@@ -176,12 +186,16 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
           TextButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              await SourceManager()
-                  .setEnabledAll(bad.keys.map((e) => e.id), false);
+              await SourceManager().setEnabledAll(
+                bad.keys.map((e) => e.id),
+                false,
+              );
               if (mounted) _toast('已禁用 ${bad.length} 个失效源');
             },
-            child: const Text('禁用失败源',
-                style: TextStyle(color: Colors.redAccent)),
+            child: const Text(
+              '禁用失败源',
+              style: TextStyle(color: Colors.redAccent),
+            ),
           ),
         ],
       ),
@@ -203,8 +217,9 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
           (o) => !o.isAll,
           orElse: () => g.options.first,
         );
-        final page =
-            await s.getCategoryList([g.copyWith(selected: opt)], page: 0).timeout(t);
+        final page = await s
+            .getCategoryList([g.copyWith(selected: opt)], page: 0)
+            .timeout(t);
         if (page.items.isEmpty) return '首页无内容';
         return null;
       }
@@ -239,8 +254,10 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
         // 原来一句「失败或为空」✗ 让用户完全无法判断：该改地址？还是查网络？✓
         // 这里至少把**判断依据**和"地址已保存"说清楚 ✓，用户可据此自查 ✓
         //（要真正区分，需要服务层返回带原因的结果 ✓ —— 已记入待办 ✓）
-        _toast('云端更新未生效：地址已保存，请检查该地址能否访问、'
-            '或它的 sources.json 是否为空');
+        _toast(
+          '云端更新未生效：地址已保存，请检查该地址能否访问、'
+          '或它的 sources.json 是否为空',
+        );
         return;
       }
       await SourceManager().reload();
@@ -291,101 +308,114 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
           final sources = _visibleSources;
           return Column(
             children: [
-            Expanded(
-            child: ReorderableListView.builder(
-            padding: const EdgeInsets.all(16),
-            // 拖动排序：把新顺序交给 SourceManager
-            onReorder: (o, n) {
-              if (n > o) n -= 1; // Flutter 约定：newIndex 是"插入到之前"
-              final ids = _order.map((e) => e.id).toList();
-              final moved = ids.removeAt(o);
-              ids.insert(n, moved);
-              _order = [for (final id in ids) ..._order.where((e) => e.id == id)];
-              SourceManager().reorder(ids);
-              setState(() {});
-            },
-            itemCount: sources.length + 1,
-            itemBuilder: (context, i) {
-              // 前两块固定：云端卡片 + 计数/筛选/清空
-              if (i == 0) {
-                return Column(
-                  key: const ValueKey('head'),
-                  children: [
-                    _buildCloudCard(isDark),
-                    const SizedBox(height: 14),
-                Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Row(
-                  children: [
-                    Text('共 ${SourceManager().sources.length} 个',
-                        style: TextStyle(
-                            fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
-                    const Spacer(),
-                    if (SourceManager().sources.isNotEmpty)
-                      TextButton(
-                        onPressed: _clearAll,
-                        child: const Text('清空',
-                            style: TextStyle(fontSize: AppTheme.fontSubhead)),
-                      ),
-                    // 内置漫画源已移除（用户 2026-10-13）：原来这里在"无源"时显示
-                    // 「恢复内置源」按钮，现在没有内置源可恢复 → 按钮一并去掉。
-                    // 无源时改为提示用户去上面的云端卡片填地址 / 导入 JSON。
-                    if (SourceManager().sources.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: Text('在上方填云端地址或导入 JSON',
-                            style: TextStyle(
-                                fontSize: AppTheme.fontSubhead,
-                                color: JellyTheme.textSecondary)),
-                      ),
-                  ],
+              Expanded(
+                child: ReorderableListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  // 拖动排序：把新顺序交给 SourceManager
+                  onReorder: (o, n) {
+                    if (n > o) n -= 1; // Flutter 约定：newIndex 是"插入到之前"
+                    final ids = _order.map((e) => e.id).toList();
+                    final moved = ids.removeAt(o);
+                    ids.insert(n, moved);
+                    _order = [
+                      for (final id in ids) ..._order.where((e) => e.id == id),
+                    ];
+                    SourceManager().reorder(ids);
+                    setState(() {});
+                  },
+                  itemCount: sources.length + 1,
+                  itemBuilder: (context, i) {
+                    // 前两块固定：云端卡片 + 计数/筛选/清空
+                    if (i == 0) {
+                      return Column(
+                        key: const ValueKey('head'),
+                        children: [
+                          _buildCloudCard(isDark),
+                          const SizedBox(height: 14),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: Row(
+                              children: [
+                                Text(
+                                  '共 ${SourceManager().sources.length} 个',
+                                  style: TextStyle(
+                                    fontSize: AppTheme.fontSubhead,
+                                    color: JellyTheme.textSecondary,
+                                  ),
+                                ),
+                                const Spacer(),
+                                if (SourceManager().sources.isNotEmpty)
+                                  TextButton(
+                                    onPressed: _clearAll,
+                                    child: const Text(
+                                      '清空',
+                                      style: TextStyle(
+                                        fontSize: AppTheme.fontSubhead,
+                                      ),
+                                    ),
+                                  ),
+                                // 内置漫画源已移除（用户 2026-10-13）：原来这里在"无源"时显示
+                                // 「恢复内置源」按钮，现在没有内置源可恢复 → 按钮一并去掉。
+                                // 无源时改为提示用户去上面的云端卡片填地址 / 导入 JSON。
+                                if (SourceManager().sources.isEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 6),
+                                    child: Text(
+                                      '在上方填云端地址或导入 JSON',
+                                      style: TextStyle(
+                                        fontSize: AppTheme.fontSubhead,
+                                        color: JellyTheme.textSecondary,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          // 筛选已注册的漫画源
+                          // ✅ 统一到共用组件 ✓（原为**手写一整套皮** ✗：40 高 / 圆角 20 / 卡片色
+                          //   容器 + 手画 `prefixIcon` 放大镜 + 自己实现的 `suffixIcon` 清空键 ✓）。
+                          //   ⚠️ 它原本是 **40 高 / 圆角 20** ✗，而书源体检那处是 **32 / 16** ✗
+                          //   —— 同模块**两种尺寸** ✓ 正是"排版不统一"的证据 ✓；
+                          //   统一成组件后**两页同款** ✓（这就是本次的目的 ✓）。
+                          // ⚠️ 必须**整段替换** ✓：`JellySearchBar` 自带底色/圆角/放大镜/清空键 ✓，
+                          //   若留下外层 `Container(decoration: …)` 就成"圆角方框套胶囊" ✗。
+                          // 参数对照 ✓：controller `_filterCtrl` ✓ · hintText 同文案 ✓ ·
+                          //   onChanged: setState(_filter = v) ✓（语义不变 ✓）·
+                          //   onCleared: 原为 `_filterCtrl.clear() + setState(_filter = '')` ✓
+                          //   → 这里**两者都保留** ✓（组件内部是否清 controller 我不假设 ✗，多清一次无害 ✓）
+                          JellySearchBar(
+                            controller: _filterCtrl,
+                            hintText: '筛选已注册的漫画源',
+                            onChanged: (v) => setState(() => _filter = v),
+                            onCleared: () {
+                              _filterCtrl.clear();
+                              setState(() => _filter = '');
+                            },
+                          ),
+                          const SizedBox(height: 10),
+                        ],
+                      );
+                    }
+                    // 空态
+                    if (sources.isEmpty) {
+                      return Padding(
+                        key: const ValueKey('empty'),
+                        padding: const EdgeInsets.only(top: 40),
+                        child: _buildEmptyState(isDark),
+                      );
+                    }
+                    final s = sources[i - 1];
+                    return Container(
+                      key: ValueKey('src-${s.id}'),
+                      child: _buildSourceCard(isDark, s),
+                    );
+                  },
                 ),
               ),
-              const SizedBox(height: 6),
-              // 筛选已注册的漫画源
-              // ✅ 统一到共用组件 ✓（原为**手写一整套皮** ✗：40 高 / 圆角 20 / 卡片色
-              //   容器 + 手画 `prefixIcon` 放大镜 + 自己实现的 `suffixIcon` 清空键 ✓）。
-              //   ⚠️ 它原本是 **40 高 / 圆角 20** ✗，而书源体检那处是 **32 / 16** ✗
-              //   —— 同模块**两种尺寸** ✓ 正是"排版不统一"的证据 ✓；
-              //   统一成组件后**两页同款** ✓（这就是本次的目的 ✓）。
-              // ⚠️ 必须**整段替换** ✓：`JellySearchBar` 自带底色/圆角/放大镜/清空键 ✓，
-              //   若留下外层 `Container(decoration: …)` 就成"圆角方框套胶囊" ✗。
-              // 参数对照 ✓：controller `_filterCtrl` ✓ · hintText 同文案 ✓ ·
-              //   onChanged: setState(_filter = v) ✓（语义不变 ✓）·
-              //   onCleared: 原为 `_filterCtrl.clear() + setState(_filter = '')` ✓
-              //   → 这里**两者都保留** ✓（组件内部是否清 controller 我不假设 ✗，多清一次无害 ✓）
-              JellySearchBar(
-                controller: _filterCtrl,
-                hintText: '筛选已注册的漫画源',
-                onChanged: (v) => setState(() => _filter = v),
-                onCleared: () {
-                  _filterCtrl.clear();
-                  setState(() => _filter = '');
-                },
-              ),
-              const SizedBox(height: 10),
-                  ],
-                );
-              }
-              // 空态
-              if (sources.isEmpty) {
-                return Padding(
-                  key: const ValueKey('empty'),
-                  padding: const EdgeInsets.only(top: 40),
-                  child: _buildEmptyState(isDark),
-                );
-              }
-              final s = sources[i - 1];
-              return Container(
-                key: ValueKey('src-${s.id}'),
-                child: _buildSourceCard(isDark, s),
-              );
-            },
-          ),
-          ),
-          // ── 多选底部操作栏（截图 IMG_8050）──────────────────
-          if (_selected.isNotEmpty) _buildSelectBar(isDark),
-          ],
+              // ── 多选底部操作栏（截图 IMG_8050）──────────────────
+              if (_selected.isNotEmpty) _buildSelectBar(isDark),
+            ],
           );
         },
       ),
@@ -402,12 +432,13 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
         content: Text('将删除全部 $n 个漫画源，不可恢复。'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
           TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('清空',
-                  style: TextStyle(color: Colors.redAccent))),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('清空', style: TextStyle(color: Colors.redAccent)),
+          ),
         ],
       ),
     );
@@ -418,6 +449,10 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
     //   导致清空看起来失效。）
     await SourceConfigStore().resetToLocal();
     await SourceConfigStore().markCleared();
+    // Legado 漫画源存在书源仓库里，也要一起清掉，否则"清空"后还会冒出来
+    for (final s in SourceManager().sources) {
+      await _removeLegadoComic(s);
+    }
     await SourceManager().reload();
     if (mounted) setState(() {});
   }
@@ -443,11 +478,14 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
       ),
       child: Row(
         children: [
-          Text('已选 ${_selected.length} 项',
-              style: TextStyle(
-                  fontSize: AppTheme.fontBody,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white : JellyTheme.textPrimaryLight)),
+          Text(
+            '已选 ${_selected.length} 项',
+            style: TextStyle(
+              fontSize: AppTheme.fontBody,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+            ),
+          ),
           const SizedBox(width: 10),
           TextButton(
             onPressed: () => setState(() {
@@ -459,8 +497,10 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
                   ..addAll(all.map((e) => e.id));
               }
             }),
-            child: Text(allPicked ? '取消全选' : '全选',
-                style: const TextStyle(fontSize: AppTheme.fontSubhead)),
+            child: Text(
+              allPicked ? '取消全选' : '全选',
+              style: const TextStyle(fontSize: AppTheme.fontSubhead),
+            ),
           ),
           const Spacer(),
           // 批量启用/停用：若已选的都启用 → 点它全停用，反之全启用
@@ -468,7 +508,9 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
             icon: Icons.toggle_on_outlined,
             tooltip: '启用/停用选中',
             onTap: () async {
-              final anyOff = _selected.any((id) => !SourceManager().isEnabled(id));
+              final anyOff = _selected.any(
+                (id) => !SourceManager().isEnabled(id),
+              );
               await SourceManager().setEnabledAll(_selected, anyOff);
               if (mounted) setState(() {});
             },
@@ -514,14 +556,24 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
   /// 而且书源仓库那边早就用 Clipboard 这套了 ——
   /// **同一件事不要有两种做法**（多一条依赖路径就多一处会坏的地方）。
   Future<void> _shareSelected() async {
-    final picked =
-        SourceManager().sources.where((s) => _selected.contains(s.id)).toList();
+    final picked = SourceManager().sources
+        .where((s) => _selected.contains(s.id))
+        .toList();
     if (picked.isEmpty) return;
-    // ConfigMangaSource 的配置在 `site` 上（不是 rawConfig —— 我先写错了）
+    // ConfigMangaSource 的配置在 `site` 上（不是 rawConfig —— 我先写错了）；
+    // Legado 漫画源直接导书源原始 JSON，别人贴进漫画源仓库即可导入。
     final arr = [
       for (final s in picked)
         if (s is ConfigMangaSource)
           {'type': 'config', 'config': s.site.toJson()}
+        else if (s.id.startsWith('legado:'))
+          () {
+            final url = s.id.substring('legado:'.length);
+            final bs = BookSourceStore.instance.all
+                .where((b) => b.id == s.id || b.url == url)
+                .firstOrNull;
+            return bs?.raw ?? {'type': 'builtin', 'id': s.id};
+          }()
         else
           {'type': 'builtin', 'id': s.id},
     ];
@@ -531,8 +583,10 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('已复制 ${picked.length} 个漫画源',
-            style: const TextStyle(fontSize: AppTheme.fontHeadline)),
+        title: Text(
+          '已复制 ${picked.length} 个漫画源',
+          style: const TextStyle(fontSize: AppTheme.fontHeadline),
+        ),
         content: const Text(
           'JSON 已复制到剪贴板，可直接粘贴分享给别人。\n\n'
           '对方用「导入文件」或粘贴导入即可。',
@@ -559,11 +613,13 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
         content: Text('将删除选中的 $n 个漫画源，不可恢复。'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
           FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('删除')),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除'),
+          ),
         ],
       ),
     );
@@ -573,6 +629,10 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
         .where((d) => !ids.contains(d.id))
         .toList();
     await SourceConfigStore().saveLocal(left);
+    // 同步移除选中的 Legado 漫画源（它们存在书源仓库里）
+    for (final s in SourceManager().sources) {
+      if (ids.contains(s.id)) await _removeLegadoComic(s);
+    }
     _selected.clear();
     await SourceManager().reload();
     if (mounted) setState(() {});
@@ -585,6 +645,30 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
   /// 编辑需要 definition 外壳 + 原始 config）。
   Future<void> _editSource(MangaSource src) async {
     try {
+      // Legado 漫画脚本存在书源仓库里（id = legado:<bookSourceUrl>），
+      // 用书源编辑页改规则；保存后重载 SourceManager 让漫画页立即生效。
+      if (src.id.startsWith('legado:')) {
+        final url = src.id.substring('legado:'.length);
+        final book = BookSourceStore.instance.all
+            .where((s) => s.id == src.id || s.url == url)
+            .firstOrNull;
+        if (book == null) {
+          _toast('找不到该 Legado 源（可能已被删除）');
+          return;
+        }
+        final changed = await Navigator.push<bool>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => BookSourceEditorPage(source: book),
+          ),
+        );
+        if (changed == true) {
+          await SourceManager().reload();
+          if (mounted) setState(() {});
+        }
+        return;
+      }
+
       final defs = await SourceConfigStore().loadLocal();
       SourceDefinition? found;
       for (final d in defs) {
@@ -630,7 +714,13 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
   /// 用户导入一个源不该把他已有的源全冲掉。
   Future<({bool ok, String message})> _importJson(String text) async {
     try {
-      final decoded = jsonDecode(text);
+      dynamic decoded;
+      try {
+        decoded = jsonDecode(text);
+      } catch (_) {
+        // 书源分发文件常带尾随逗号 / 说明文字，交给 Legado 解析器再试一次
+        decoded = null;
+      }
       final defs = <SourceDefinition>[];
 
       void take(dynamic raw) {
@@ -664,11 +754,13 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
         if (m.containsKey('name') && m.containsKey('url')) {
           // 裸 SiteConfig：id 按 SourceDefinition 的约定派生（config:${name}），
           // 与 SourceManager 用 ConfigMangaSource 时的 id 保持一致
-          defs.add(SourceDefinition(
-            id: 'config:${m['name']}',
-            type: 'config',
-            config: m,
-          ));
+          defs.add(
+            SourceDefinition(
+              id: 'config:${m['name']}',
+              type: 'config',
+              config: m,
+            ),
+          );
         }
       }
 
@@ -687,11 +779,40 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
         }
       }
 
-      if (defs.isEmpty) {
+      // ── 2) Legado 漫画书源（bookSourceName / ruleSearch …）────────
+      //
+      // 用户 2026-10-18：「书源那种漫画脚本，漫画源要兼容呀」——
+      // 漫画源仓库此前只认 {type:'config'} 格式，直接把书源脚本贴进来会报
+      // "没解析出漫画源"。这里复用书源仓库同一个解析器，并把漫画脚本
+      // 统一标记为 `bookSourceType: 2` 存进书源仓库（SourceManager 会把它
+      // 注册成漫画源，书源页则按 isComicSource 隐藏）。
+      final legado = <BookSource>[];
+      try {
+        for (final s in BookSourceImportParser.parseSources(text)) {
+          // 裸 SiteConfig（只有 name/url）已经进了 defs，别再当成 Legado 源
+          if (s.raw['bookSourceName'] == null &&
+              s.raw['bookSourceUrl'] == null) {
+            continue;
+          }
+          if (!s.isComicSource) continue;
+          legado.add(
+            BookSource(
+              raw: {...s.raw, 'bookSourceType': 2},
+              id: s.id,
+            ),
+          );
+        }
+      } catch (_) {
+        // 不是 Legado 格式就忽略，按原有配置源流程处理
+      }
+
+      if (defs.isEmpty && legado.isEmpty) {
         return (
           ok: false,
-          message: '没解析出漫画源。需要 {"type":"config","config":{"name":...,"url":...}} '
-              '或 {"sources":[...]}',
+          message:
+              '没解析出漫画源。支持两种格式：\n'
+              '① Web 配置源 {"type":"config","config":{"name":...,"url":...}}\n'
+              '② Legado 书源脚本（含 bookSourceName / bookSourceUrl / ruleContent）',
         );
       }
 
@@ -727,14 +848,38 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
         byId[d.id] = d;
       }
       await store.saveLocal(byId.values.toList());
+
+      // Legado 漫画脚本写入书源仓库，再由 SourceManager 注册为漫画源
+      var bookAdded = 0;
+      var bookUpdated = 0;
+      if (legado.isNotEmpty) {
+        final bsStore = BookSourceStore.instance;
+        if (bsStore.isEmpty) await bsStore.init();
+        final r = await bsStore.addAll(legado);
+        bookAdded = r.added;
+        bookUpdated = r.updated;
+      }
+
       await SourceManager().reload();
 
-      return (
-        ok: true,
-        message: added > 0 && updated > 0
-            ? '新增 $added 个、更新 $updated 个漫画源'
-            : (added > 0 ? '已导入 $added 个漫画源' : '已更新 $updated 个漫画源'),
-      );
+      final parts = <String>[];
+      if (defs.isNotEmpty) {
+        parts.add(
+          added > 0 && updated > 0
+              ? '新增 $added 个、更新 $updated 个漫画源'
+              : (added > 0 ? '已导入 $added 个漫画源' : '已更新 $updated 个漫画源'),
+        );
+      }
+      if (legado.isNotEmpty) {
+        parts.add(
+          bookAdded > 0 && bookUpdated > 0
+              ? 'Legado 漫画源新增 $bookAdded 个、更新 $bookUpdated 个'
+              : (bookAdded > 0
+                    ? '已导入 $bookAdded 个 Legado 漫画源'
+                    : '已更新 $bookUpdated 个 Legado 漫画源'),
+        );
+      }
+      return (ok: true, message: parts.join('；'));
     } catch (e) {
       // ✅ **统一到 `utils/source_fail_text.dart`** ✓（"同一原因同一类" ✓）——
       //   原来这里直接甩「JSON 解析失败：…」✗，与搜索页/体检页/下载侧的**说法不一致** ✗✓
@@ -774,7 +919,10 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
             // 截图原文。这句同时回答了用户两个疑问：
             // "会不会把我已有的源冲掉"（不会）+"多个地址怎么处理"（合并去重）
             '导入按地址合并去重，不会覆盖已有源',
-            style: TextStyle(fontSize: AppTheme.fontFootnote, color: JellyTheme.textSecondary),
+            style: TextStyle(
+              fontSize: AppTheme.fontFootnote,
+              color: JellyTheme.textSecondary,
+            ),
           ),
           const SizedBox(height: 12),
           TextField(
@@ -819,13 +967,17 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
                           : Colors.black.withValues(alpha: 0.16),
                     ),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                    foregroundColor:
-                        isDark ? Colors.white : JellyTheme.textPrimaryLight,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    foregroundColor: isDark
+                        ? Colors.white
+                        : JellyTheme.textPrimaryLight,
                   ),
                   icon: const Icon(Icons.file_upload_outlined, size: 17),
-                  label: const Text('导入文件',
-                      style: TextStyle(fontSize: AppTheme.fontBody)),
+                  label: const Text(
+                    '导入文件',
+                    style: TextStyle(fontSize: AppTheme.fontBody),
+                  ),
                 ),
               ),
               const SizedBox(width: 10),
@@ -835,7 +987,8 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
                   style: FilledButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
                   icon: _busy
                       ? const SizedBox(
@@ -844,8 +997,10 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.cloud_download_rounded, size: 17),
-                  label: const Text('从云端更新',
-                      style: TextStyle(fontSize: AppTheme.fontBody)),
+                  label: const Text(
+                    '从云端更新',
+                    style: TextStyle(fontSize: AppTheme.fontBody),
+                  ),
                 ),
               ),
             ],
@@ -874,7 +1029,8 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
       }
 
       // zip 魔数 PK\x03\x04
-      final isZip = bytes.length > 4 &&
+      final isZip =
+          bytes.length > 4 &&
           bytes[0] == 0x50 &&
           bytes[1] == 0x4B &&
           (bytes[2] == 0x03 || bytes[2] == 0x05 || bytes[2] == 0x07);
@@ -986,8 +1142,11 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
           // ReorderableDragStartListener —— 见 _buildList）
           ReorderableDragStartListener(
             index: _orderedIndex(src),
-            child: Icon(Icons.drag_handle_rounded,
-                size: 20, color: JellyTheme.textSecondary),
+            child: Icon(
+              Icons.drag_handle_rounded,
+              size: 20,
+              color: JellyTheme.textSecondary,
+            ),
           ),
           const SizedBox(width: 2),
           // 复选框（批量选择）
@@ -1032,8 +1191,8 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
                                     fontWeight: FontWeight.w600,
                                     color: enabled
                                         ? (isDark
-                                            ? Colors.white
-                                            : JellyTheme.textPrimaryLight)
+                                              ? Colors.white
+                                              : JellyTheme.textPrimaryLight)
                                         : JellyTheme.textSecondary,
                                   ),
                                 ),
@@ -1079,8 +1238,11 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
           // （批量删除走底部的多选栏）
           IconButton(
             tooltip: '删除这个源',
-            icon: Icon(Icons.delete_outline,
-                size: 19, color: JellyTheme.textSecondary),
+            icon: Icon(
+              Icons.delete_outline,
+              size: 19,
+              color: JellyTheme.textSecondary,
+            ),
             onPressed: () => _confirmRemove(src),
           ),
         ],
@@ -1119,9 +1281,11 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
     final kw = _filter.trim().toLowerCase();
     if (kw.isEmpty) return _order;
     return _order
-        .where((s) =>
-            s.name.toLowerCase().contains(kw) ||
-            s.id.toLowerCase().contains(kw))
+        .where(
+          (s) =>
+              s.name.toLowerCase().contains(kw) ||
+              s.id.toLowerCase().contains(kw),
+        )
         .toList();
   }
 
@@ -1130,6 +1294,19 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
   /// ⚠️ 只删**本地配置**里的这一条。如果它来自云端 sources.json，
   /// 下次"从云端更新"会把它带回来 —— 所以删除确认里要说清这一点，
   /// 免得用户以为删不掉。
+  /// Legado 漫画源存在书源仓库中，删除漫画源时必须同步移除，
+  /// 否则 reload 后会从书源仓库重新注册回来（看起来"删不掉"）。
+  Future<void> _removeLegadoComic(MangaSource src) async {
+    if (!src.id.startsWith('legado:')) return;
+    final url = src.id.substring('legado:'.length);
+    final hits = BookSourceStore.instance.all
+        .where((s) => s.id == src.id || s.url == url)
+        .toList();
+    for (final s in hits) {
+      await BookSourceStore.instance.remove(s.id);
+    }
+  }
+
   Future<void> _confirmRemove(MangaSource src) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -1147,8 +1324,7 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('删除',
-                style: TextStyle(color: Colors.redAccent)),
+            child: const Text('删除', style: TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),
@@ -1159,6 +1335,7 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
       final local = await store.loadLocal();
       final left = local.where((d) => d.id != src.id).toList();
       await store.saveLocal(left);
+      await _removeLegadoComic(src);
       await SourceManager().reload();
       if (!mounted) return;
       setState(() {});

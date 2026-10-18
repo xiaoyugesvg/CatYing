@@ -5,6 +5,27 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:tvbox/reading/models/builtin_book_sources.dart';
 
+/// 漫画源判据（编译一次，避免列表每次重建都重新编译正则）。
+final RegExp _comicHintRe = RegExp(r'漫画|漫畫|comic|manga');
+
+/// 正文规则里"像是在取图片列表"的强信号。
+///
+/// ⚠️ 故意**不含裸 `<img`**：小说正文规则也可能带 `<img>`（插图/净化脚本），
+/// 这正是之前把小说误判成漫画源的来源（用户 2026-10-18）。
+final RegExp _comicRuleStrongRe = RegExp(
+  r'img\s*/?\s*@|//\s*img\s*/?\s*@|@data-original\b|@data-src\b|'
+  r'@data-lazy-src\b|comic|manga|manhua|漫画|漫畫|'
+  r'\.(?:images?|pics?|imgs?|imgList|imageList|chapterImages)\b',
+  caseSensitive: false,
+);
+
+/// 无需再看章节名就能确定是漫画的强信号（懒加载图属性 / JSON 图片数组 / 类名）。
+final RegExp _comicRuleDecisiveRe = RegExp(
+  r'@data-original\b|@data-src\b|@data-lazy-src\b|comic|manga|manhua|漫画|漫畫|'
+  r'\.(?:images?|pics?|imgs?|imgList|imageList|chapterImages)\b',
+  caseSensitive: false,
+);
+
 /// 小说书源模型与存储。
 ///
 /// 支持两种书源形态：
@@ -31,10 +52,9 @@ class BookSource {
   /// 是否明文 config 源（type=config）。
   bool get isConfig => raw['type'] == 'config';
 
-  Map<String, dynamic>? get _configBody =>
-      isConfig && raw['config'] is Map
-          ? (raw['config'] as Map).cast<String, dynamic>()
-          : null;
+  Map<String, dynamic>? get _configBody => isConfig && raw['config'] is Map
+      ? (raw['config'] as Map).cast<String, dynamic>()
+      : null;
 
   // ── 展示/管理用的便捷访问 ──────────────────────────────────
 
@@ -119,6 +139,49 @@ class BookSource {
     }
   }
 
+  /// 是否是漫画源（用于把漫画源从「书源」里彻底分开，用户 2026-10-18）。
+  ///
+  /// ── 判定策略（保守，宁可漏判也不误判）──────────────────────────
+  ///   ① 显式 `bookSourceType: 2` → 漫画；
+  ///   ② 显式 `bookSourceType: 0 / 1 / 3` → **小说/有声/文件，直接尊重作者，
+  ///      不再猜**。这一条专门解决「正文规则带 `<img>` 的小说源被误判成漫画」；
+  ///   ③ 只有**没写类型**的老脚本才做启发式：
+  ///      · 名称 / 分组带「漫画 / comic / manga」→ 漫画；
+  ///      · 正文规则是取图片列表写法（`img@src`、`//img/@src`、
+  ///        `data-original` / `data-src`、JSON `.images[]`、类名带 comic/manhua）；
+  ///      · 其中 `img@src` 这种**也可能只是取插图**的弱信号，还要求目录
+  ///        章节名使用「话 / 話」，否则仍按小说处理。
+  ///
+  /// 裸 `<img` 不再作为判据 —— 小说正文规则/净化脚本里出现它太常见了。
+  bool get isComicSource {
+    if (isConfig) return false;
+
+    final t = type;
+    if (t == '2') return true;
+    // 作者显式声明了小说/有声/文件：不猜，哪怕正文规则里有图片
+    if (t == '0' || t == '1' || t == '3') return false;
+
+    // ── 以下只对「没写 bookSourceType」的源生效 ─────────────────
+    final hint = '$name $group'.toLowerCase();
+    if (_comicHintRe.hasMatch(hint)) return true;
+
+    final contentRule =
+        (readPath('ruleContent.content') ?? raw['ruleBookContent'] ?? '')
+            .toString()
+            .trim();
+    if (contentRule.isEmpty) return false;
+
+    // 不是取图写法（比如 class.content@text / @html）就不是漫画
+    if (!_comicRuleStrongRe.hasMatch(contentRule)) return false;
+
+    // 懒加载图属性 / JSON 图片数组 / 类名带 comic → 直接判漫画
+    if (_comicRuleDecisiveRe.hasMatch(contentRule)) return true;
+
+    // 只剩 `img@src` 这类可能取插图的弱信号：目录用「第X话」才认
+    final tocName = (readPath('ruleToc.chapterName') ?? '').toString();
+    return RegExp(r'[话話]').hasMatch(tocName);
+  }
+
   /// 是否只用于搜索（Legado 的 enabledExplore 之类）
   String get comment {
     final c = _configBody;
@@ -169,7 +232,9 @@ class BookSource {
       final p = parts[i];
       final child = cur[p];
       // 中间层不是 Map（或缺）就换成新 Map —— 否则写下去会抛
-      final copy = child is Map ? Map<String, dynamic>.from(child) : <String, dynamic>{};
+      final copy = child is Map
+          ? Map<String, dynamic>.from(child)
+          : <String, dynamic>{};
       cur[p] = copy;
       cur = copy;
     }
@@ -183,8 +248,9 @@ class BookSource {
     // ⚠️ id 由 bookSourceUrl 派生（见 _decode / id getter），
     // 所以改 url 时必须把 id 一起更新 —— 否则改完 URL 后
     // 这条书源的 id 还是旧的，删除/启用都会找错对象。
-    final newId = (next['bookSourceUrl'] ?? next['url'] ?? next['bookSourceName'] ?? '')
-        .toString();
+    final newId =
+        (next['bookSourceUrl'] ?? next['url'] ?? next['bookSourceName'] ?? '')
+            .toString();
     return BookSource(raw: next, id: newId.isEmpty ? id : newId);
   }
 
@@ -368,7 +434,8 @@ class BookSourceStore {
     if (s.isConfig) return s; // config 源无发现概念
     if (s.raw.containsKey('enabledExplore')) return s; // 显式声明 → 尊重
     final ex = s.raw['exploreUrl'];
-    final hasExplore = (ex is String && ex.trim().isNotEmpty) ||
+    final hasExplore =
+        (ex is String && ex.trim().isNotEmpty) ||
         (ex is Map || ex is List); // 非字符串形态（对象/数组）也视为有
     if (hasExplore == s.enabledExplore) return s; // 判定结果与缺省一致 → 原样
     final m = Map<String, dynamic>.of(s.raw);
@@ -493,6 +560,7 @@ class BookSourceStore {
   }
 
   /// 导出为 Legado 可直接导入的 JSON 数组
-  String exportJson() => const JsonEncoder.withIndent('  ')
-      .convert(_items.map((s) => s.toJson()).toList());
+  String exportJson() => const JsonEncoder.withIndent(
+    '  ',
+  ).convert(_items.map((s) => s.toJson()).toList());
 }

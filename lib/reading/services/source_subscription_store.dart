@@ -54,11 +54,11 @@ class SourceSubscriptionStore extends ChangeNotifier {
         'https://raw.githubusercontent.com/leimao2333/leimao-sources/main/novel.json',
         'https://raw.githubusercontent.com/leimao2333/leimao-sources/main/comic-legado.json',
       };
-      final hadOldSeeds =
-          _items.any((e) => e.builtin && oldSeedUrls.contains(e.url));
+      final hadOldSeeds = _items.any(
+        (e) => e.builtin && oldSeedUrls.contains(e.url),
+      );
       if (hadOldSeeds) {
-        _items.removeWhere(
-            (e) => e.builtin && oldSeedUrls.contains(e.url));
+        _items.removeWhere((e) => e.builtin && oldSeedUrls.contains(e.url));
         if (!_items.any((e) => e.url == _legadoAllUrl)) {
           _items.add(_legadoAllSeed);
         }
@@ -93,16 +93,16 @@ class SourceSubscriptionStore extends ChangeNotifier {
   );
 
   static List<SourceSubscription> get _seeds => [
-        _legadoAllSeed,
-        SourceSubscription(
-          id: 'seed_leimao_venera',
-          name: '雷毛 Venera 漫画源（33）',
-          url:
-              'https://raw.githubusercontent.com/leimao2333/leimao-sources/main/venera/index.json',
-          kind: SourceSubscriptionKind.venera,
-          builtin: true,
-        ),
-      ];
+    _legadoAllSeed,
+    SourceSubscription(
+      id: 'seed_leimao_venera',
+      name: '雷毛 Venera 漫画源（33）',
+      url:
+          'https://raw.githubusercontent.com/leimao2333/leimao-sources/main/venera/index.json',
+      kind: SourceSubscriptionKind.venera,
+      builtin: true,
+    ),
+  ];
 
   Future<SourceSubscription?> add({
     required String name,
@@ -165,35 +165,38 @@ class SourceSubscriptionStore extends ChangeNotifier {
       return (ok: false, message: msg, count: 0);
     }
     try {
-      final dio = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(seconds: 40),
-        responseType: ResponseType.plain,
-        headers: {
-          'User-Agent':
-              'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
-                  'AppleWebKit/605.1.15 (KHTML, like Gecko) '
-                  'Version/17.0 Mobile/15E148 Safari/604.1',
-          'Accept': 'application/json,text/plain,*/*',
-        },
-      ));
+      final dio = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(seconds: 40),
+          responseType: ResponseType.plain,
+          headers: {
+            'User-Agent':
+                'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
+                'AppleWebKit/605.1.15 (KHTML, like Gecko) '
+                'Version/17.0 Mobile/15E148 Safari/604.1',
+            'Accept': 'application/json,text/plain,*/*',
+          },
+        ),
+      );
       applyGlobalProxy(dio);
       final res = await dio.get<String>(sub.url);
       final text = res.data ?? '';
       if (text.trim().isEmpty) throw Exception('订阅返回为空');
       final all = BookSourceImportParser.parseSources(text);
       final wanted = all.where((s) {
-        if (sub.kind == SourceSubscriptionKind.comic) return s.type == '2';
-        if (sub.kind == SourceSubscriptionKind.novel) return s.type == '0';
+        // 统一判据：兼容没写 bookSourceType 的漫画脚本
+        if (sub.kind == SourceSubscriptionKind.comic) return s.isComicSource;
+        if (sub.kind == SourceSubscriptionKind.novel) return !s.isComicSource;
         // legado 综合源：小说 + 漫画都收，更新后两个仓同时有内容
-        return s.type == '0' || s.type == '2';
+        return true;
       }).toList();
       if (wanted.isEmpty) {
         throw Exception('没有解析到${sub.kind.label}（共 ${all.length} 条）');
       }
       final r = await BookSourceStore.instance.addAll(wanted);
       // 含漫画源时刷新漫画模块的源列表（Legado 漫画源从 BookSourceStore 注册）
-      if (wanted.any((s) => s.type == '2')) {
+      if (wanted.any((s) => s.isComicSource)) {
         await SourceManager().reload();
       }
 
@@ -231,18 +234,20 @@ class SourceSubscriptionStore extends ChangeNotifier {
   ) async {
     Dio? client;
     try {
-      final dio = client = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(seconds: 40),
-        responseType: ResponseType.plain,
-        headers: {
-          'User-Agent':
-              'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
-                  'AppleWebKit/605.1.15 (KHTML, like Gecko) '
-                  'Version/17.0 Mobile/15E148 Safari/604.1',
-          'Accept': 'application/json,text/plain,*/*',
-        },
-      ));
+      final dio = client = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(seconds: 40),
+          responseType: ResponseType.plain,
+          headers: {
+            'User-Agent':
+                'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
+                'AppleWebKit/605.1.15 (KHTML, like Gecko) '
+                'Version/17.0 Mobile/15E148 Safari/604.1',
+            'Accept': 'application/json,text/plain,*/*',
+          },
+        ),
+      );
       applyGlobalProxy(dio);
       final res = await dio.get<String>(sub.url);
       final text = res.data ?? '';
@@ -276,19 +281,21 @@ class SourceSubscriptionStore extends ChangeNotifier {
                 .last
                 .replaceAll(RegExp(r'\.js$', caseSensitive: false), '');
             final storageKey = '${e['key'] ?? ''}'.trim();
-            defs.add(SourceDefinition(
-              id: 'venera:$idBase',
-              type: 'venera',
-              engine: 'venera',
-              config: {
-                'id': 'venera:$idBase',
-                'name': '${e['name'] ?? idBase}',
-                'key': storageKey.isEmpty ? idBase : storageKey,
-                'version': '${e['version'] ?? ''}',
-                'scriptUrl': scriptUrl,
-                'script': js,
-              },
-            ));
+            defs.add(
+              SourceDefinition(
+                id: 'venera:$idBase',
+                type: 'venera',
+                engine: 'venera',
+                config: {
+                  'id': 'venera:$idBase',
+                  'name': '${e['name'] ?? idBase}',
+                  'key': storageKey.isEmpty ? idBase : storageKey,
+                  'version': '${e['version'] ?? ''}',
+                  'scriptUrl': scriptUrl,
+                  'script': js,
+                },
+              ),
+            );
           } catch (err) {
             failed++;
             _log('Venera 脚本下载失败 $scriptUrl: $err');
@@ -303,16 +310,17 @@ class SourceSubscriptionStore extends ChangeNotifier {
       }
 
       final existing = await SourceConfigStore().loadLocal();
-      final newUrls =
-          defs.map((d) => '${d.config['scriptUrl'] ?? ''}').toSet();
+      final newUrls = defs.map((d) => '${d.config['scriptUrl'] ?? ''}').toSet();
       // 部分脚本下载失败时保留上一版，避免一次网络抖动把源删掉
       final kept = failed == 0
           ? const <SourceDefinition>[]
           : existing
-              .where((d) =>
-                  d.type == 'venera' &&
-                  !newUrls.contains('${d.config['scriptUrl'] ?? ''}'))
-              .toList();
+                .where(
+                  (d) =>
+                      d.type == 'venera' &&
+                      !newUrls.contains('${d.config['scriptUrl'] ?? ''}'),
+                )
+                .toList();
       final merged = existing.where((d) => d.type != 'venera').toList()
         ..addAll(kept)
         ..addAll(defs);
@@ -372,11 +380,13 @@ class SourceSubscriptionStore extends ChangeNotifier {
       await load();
       final now = DateTime.now().millisecondsSinceEpoch;
       final stale = _items
-          .where((s) =>
-              s.enabled &&
-              s.kind.supported &&
-              (s.lastUpdated == 0 ||
-                  now - s.lastUpdated > autoTtl.inMilliseconds))
+          .where(
+            (s) =>
+                s.enabled &&
+                s.kind.supported &&
+                (s.lastUpdated == 0 ||
+                    now - s.lastUpdated > autoTtl.inMilliseconds),
+          )
           .toList();
       for (final s in stale) {
         // 期间用户可能停用 / 删除，逐条再确认一次

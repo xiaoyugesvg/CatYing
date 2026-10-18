@@ -13,6 +13,7 @@ import '../models/book_source.dart';
 import '../services/book_source_compatibility.dart';
 import '../services/book_source_import_parser.dart';
 import '../services/book_source_service.dart';
+import '../source/source_manager.dart';
 import 'book_source_editor_page.dart';
 import 'book_source_health_page.dart';
 import 'book_source_login_page.dart';
@@ -58,6 +59,7 @@ class BookSourceRepoPage extends StatefulWidget {
 
 class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   final store = BookSourceStore.instance;
+
   /// 顶部导入卡片的地址输入框
   final _urlCtrl = TextEditingController();
   bool _busy = false;
@@ -69,14 +71,17 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   // ── 主列表的筛选与分组 ──────────────────────────────────
   /// 页面内「筛选已导入的书源」输入框（搜索栏已从 AppBar 移到页面内）
   final _filterCtrl = TextEditingController();
+
   /// 分组 chip 当前选中项：null = 「全部」
   String? _pickedGroup;
+
   /// 被「隐藏组」的组名（不显示其书源）
   final Set<String> _hiddenGroups = {};
 
   /// 书源体检结果（id → 健康度）。「体检」按钮跑完填这里，
   /// 卡片上会显示徽标 —— 不用逐个点进去看。
   final Map<String, BookSourceHealth> _health = {};
+
   /// 体检进行中（按钮转圈 + 禁用重复点击）
   bool _healthChecking = false;
 
@@ -110,43 +115,62 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
   Color get _card => _isDark ? JellyTheme.cardDark : JellyTheme.cardLight;
-  Color get _titleColor =>
-      _isDark ? Colors.white : JellyTheme.textPrimaryLight;
+  Color get _titleColor => _isDark ? Colors.white : JellyTheme.textPrimaryLight;
 
   void _toast(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(msg),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-      ));
+      ..showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
   }
 
-  /// 搜索过滤结果
+  /// 导入内容里如果有漫画源，同步刷新漫画源管理器。
+  ///
+  /// 漫画脚本现在不在书源列表展示（见 [_visible]），如果这里不 reload，
+  /// 用户导入后在「漫画源仓库」看不到，会以为导入失败。
+  Future<void> _reloadComicSourcesIfNeeded(List<BookSource> parsed) async {
+    if (!parsed.any((s) => s.isComicSource)) return;
+    await SourceManager().reload();
+  }
+
+  /// 搜索过滤结果。
+  ///
+  /// ⚠️ 漫画源不在这里出现（用户 2026-10-18：「漫画源就是漫画源，
+  /// 不要出现在书源里面」）—— 漫画源统一在「漫画源仓库 / 漫画页」管理，
+  /// 判据与 SourceManager 注册时完全一致（BookSource.isComicSource）。
   List<BookSource> get _visible {
-    final all = store.sorted();
+    final all = store.sorted().where((s) => !s.isComicSource).toList();
     if (_keyword.isEmpty) return all;
     final k = _keyword.toLowerCase();
     return all
-        .where((s) =>
-            s.name.toLowerCase().contains(k) ||
-            s.url.toLowerCase().contains(k) ||
-            s.group.toLowerCase().contains(k))
+        .where(
+          (s) =>
+              s.name.toLowerCase().contains(k) ||
+              s.url.toLowerCase().contains(k) ||
+              s.group.toLowerCase().contains(k),
+        )
         .toList();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor:
-          _isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
+      backgroundColor: _isDark
+          ? JellyTheme.backgroundDark
+          : JellyTheme.backgroundLight,
       appBar: _buildAppBar(),
       body: ListenableBuilder(
         listenable: store.revision,
         builder: (context, _) {
           final list = _visible;
+          // 「有没有书源」只看非漫画源，避免只剩漫画源时误显示「无匹配」
+          final noBooks = store.sorted().every((s) => s.isComicSource);
           return Column(
             children: [
               // 导入卡片**常驻页面顶部**（不藏进弹层）。
@@ -154,7 +178,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
               // 用户一眼看到"能怎么导"。
               _importCard(),
               Expanded(
-                child: store.isEmpty
+                child: noBooks
                     ? _emptyState()
                     : (list.isEmpty ? _noMatchState() : _sourceList(list)),
               ),
@@ -182,16 +206,22 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('导入书源',
-              style: TextStyle(
-                  fontSize: AppTheme.fontHeadline,
-                  fontWeight: FontWeight.w700,
-                  color: _titleColor)),
+          Text(
+            '导入书源',
+            style: TextStyle(
+              fontSize: AppTheme.fontHeadline,
+              fontWeight: FontWeight.w700,
+              color: _titleColor,
+            ),
+          ),
           const SizedBox(height: 3),
           Text(
             // 截图原文。这句很重要：用户最怕"导入会不会把我已有的源冲掉"
             '导入按地址合并去重，不会覆盖已有的源',
-            style: TextStyle(fontSize: AppTheme.fontFootnote, color: JellyTheme.textSecondary),
+            style: TextStyle(
+              fontSize: AppTheme.fontFootnote,
+              color: JellyTheme.textSecondary,
+            ),
           ),
           const SizedBox(height: 12),
           TextField(
@@ -200,8 +230,10 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
             keyboardType: TextInputType.url,
             decoration: InputDecoration(
               hintText: '书源地址 (json / zip / 仓库索引)',
-              hintStyle:
-                  TextStyle(fontSize: AppTheme.fontBody, color: JellyTheme.textSecondary),
+              hintStyle: TextStyle(
+                fontSize: AppTheme.fontBody,
+                color: JellyTheme.textSecondary,
+              ),
               filled: true,
               fillColor: _isDark
                   ? Colors.white.withValues(alpha: 0.05)
@@ -210,8 +242,10 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide.none,
               ),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 13,
+              ),
             ),
           ),
           const SizedBox(height: 12),
@@ -221,7 +255,10 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                 child: OutlinedButton(
                   onPressed: _busy ? null : _importByFile,
                   style: _outlineStyle(),
-                  child: const Text('导入文件', style: TextStyle(fontSize: AppTheme.fontBody)),
+                  child: const Text(
+                    '导入文件',
+                    style: TextStyle(fontSize: AppTheme.fontBody),
+                  ),
                 ),
               ),
               const SizedBox(width: 10),
@@ -229,7 +266,10 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                 child: OutlinedButton(
                   onPressed: _busy ? null : _importByCode,
                   style: _outlineStyle(),
-                  child: const Text('口令导入', style: TextStyle(fontSize: AppTheme.fontBody)),
+                  child: const Text(
+                    '口令导入',
+                    style: TextStyle(fontSize: AppTheme.fontBody),
+                  ),
                 ),
               ),
               const SizedBox(width: 10),
@@ -239,15 +279,19 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                   style: FilledButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
                   child: _busy
                       ? const SizedBox(
                           width: 15,
                           height: 15,
-                          child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text('从地址导入',
-                          style: TextStyle(fontSize: AppTheme.fontBody)),
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text(
+                          '从地址导入',
+                          style: TextStyle(fontSize: AppTheme.fontBody),
+                        ),
                 ),
               ),
             ],
@@ -260,8 +304,10 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
               onPressed: _busy ? null : _importByQrCode,
               style: _outlineStyle(),
               icon: const Icon(Icons.qr_code_scanner_rounded, size: 19),
-              label: const Text('二维码导入',
-                  style: TextStyle(fontSize: AppTheme.fontBody)),
+              label: const Text(
+                '二维码导入',
+                style: TextStyle(fontSize: AppTheme.fontBody),
+              ),
             ),
           ),
         ],
@@ -270,16 +316,15 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   }
 
   ButtonStyle _outlineStyle() => OutlinedButton.styleFrom(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        side: BorderSide(
-          color: _isDark
-              ? Colors.white.withValues(alpha: 0.22)
-              : Colors.black.withValues(alpha: 0.16),
-        ),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        foregroundColor: _titleColor,
-      );
+    padding: const EdgeInsets.symmetric(vertical: 12),
+    side: BorderSide(
+      color: _isDark
+          ? Colors.white.withValues(alpha: 0.22)
+          : Colors.black.withValues(alpha: 0.16),
+    ),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    foregroundColor: _titleColor,
+  );
 
   // ============================================================
   // AppBar：居中标题「书源仓库」+ 右侧分享 + 盾牌体检（并排常显）
@@ -336,15 +381,19 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
 
   /// 分享全部书源：复制 JSON 到剪贴板（并提示可粘贴给他人）
   Future<void> _shareAll() async {
-    final json =
-        BookSourceService.instance.exportSources(store.sorted());
+    // 漫画源归漫画模块管，不混进书源分享
+    final books = store.sorted().where((s) => !s.isComicSource).toList();
+    final json = BookSourceService.instance.exportSources(books);
     await Clipboard.setData(ClipboardData(text: json));
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('已复制书源', style: TextStyle(fontSize: AppTheme.fontHeadline)),
+        title: const Text(
+          '已复制书源',
+          style: TextStyle(fontSize: AppTheme.fontHeadline),
+        ),
         content: Text(
-          '${store.all.length} 个书源的 JSON 已复制到剪贴板，'
+          '${books.length} 个书源的 JSON 已复制到剪贴板，'
           '可直接粘贴分享给别人。\n\n'
           '对方用「口令导入」粘贴即可导入。',
           style: const TextStyle(fontSize: AppTheme.fontSubhead, height: 1.6),
@@ -361,16 +410,19 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
 
   /// 分享选中的书源：只导出多选勾选的源（JSON 到剪贴板）
   Future<void> _shareSelected() async {
-    final selected =
-        store.all.where((s) => _selected.contains(s.id)).toList();
+    final selected = store.all
+        .where((s) => _selected.contains(s.id) && !s.isComicSource)
+        .toList();
     if (selected.isEmpty) return;
     final json = BookSourceService.instance.exportSources(selected);
     await Clipboard.setData(ClipboardData(text: json));
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('已复制书源',
-            style: TextStyle(fontSize: AppTheme.fontHeadline)),
+        title: const Text(
+          '已复制书源',
+          style: TextStyle(fontSize: AppTheme.fontHeadline),
+        ),
         content: Text(
           '已把选中的 ${selected.length} 个书源复制到剪贴板，'
           '可直接分享给别人。\n\n'
@@ -400,6 +452,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
       return;
     }
     final r = await store.addAll(parsed);
+    await _reloadComicSourcesIfNeeded(parsed);
     _toast(r.added > 0 ? '已导入 ${r.added} 个书源' : '已更新 ${r.updated} 个书源');
     await _showCompatReport(parsed);
   }
@@ -414,7 +467,6 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
     await _fetchAndImport(url);
   }
 
-
   // ============================================================
   // 多选模式底部圆角浮动操作栏（替代原 FAB）
   //   已选 N 项 + 全选 + 删除 + 分享 + ×（退出多选）
@@ -422,8 +474,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
 
   Widget _multiSelectBar() {
     final list = _visible;
-    final allSelected =
-        list.isNotEmpty && _selected.length == list.length;
+    final allSelected = list.isNotEmpty && _selected.length == list.length;
     return SafeArea(
       top: false,
       child: Padding(
@@ -448,7 +499,9 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
               Text(
                 '已选 ${_selected.length} 项',
                 style: TextStyle(
-                    fontSize: AppTheme.fontSubhead, color: _titleColor),
+                  fontSize: AppTheme.fontSubhead,
+                  color: _titleColor,
+                ),
               ),
               const Spacer(),
               TextButton(
@@ -461,17 +514,29 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                       ..addAll(list.map((e) => e.id));
                   }
                 }),
-                child: Text(allSelected ? '取消全选' : '全选',
-                    style: const TextStyle(fontSize: AppTheme.fontSubhead)),
+                child: Text(
+                  allSelected ? '取消全选' : '全选',
+                  style: const TextStyle(fontSize: AppTheme.fontSubhead),
+                ),
               ),
-              _barIcon(Icons.delete_outline_rounded, '删除选中',
-                  _selected.isEmpty ? null : _deleteSelected),
-              _barIcon(Icons.ios_share_rounded, '分享选中',
-                  _selected.isEmpty ? null : _shareSelected),
-              _barIcon(Icons.close_rounded, '退出多选', () => setState(() {
-                    _selectMode = false;
-                    _selected.clear();
-                  })),
+              _barIcon(
+                Icons.delete_outline_rounded,
+                '删除选中',
+                _selected.isEmpty ? null : _deleteSelected,
+              ),
+              _barIcon(
+                Icons.ios_share_rounded,
+                '分享选中',
+                _selected.isEmpty ? null : _shareSelected,
+              ),
+              _barIcon(
+                Icons.close_rounded,
+                '退出多选',
+                () => setState(() {
+                  _selectMode = false;
+                  _selected.clear();
+                }),
+              ),
               const SizedBox(width: 4),
             ],
           ),
@@ -495,53 +560,68 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   // ============================================================
 
   Widget _emptyState() => Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 40),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.menu_book_outlined,
-                  size: 48,
-                  color: JellyTheme.textSecondary.withValues(alpha: 0.55)),
-              const SizedBox(height: 20),
-              Text('还没有书源',
-                  style: TextStyle(
-                      fontSize: AppTheme.fontTitle3,
-                      fontWeight: FontWeight.w600,
-                      color: _titleColor)),
-              const SizedBox(height: 8),
-              Text('用上面的地址、口令、二维码或本地文件导入',
-                  textAlign: TextAlign.center,
-                  style:
-                      TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
-              const SizedBox(height: 28),
-              FilledButton.icon(
-                onPressed: _busy ? null : _showImportSheet,
-                icon: const Icon(Icons.add_rounded, size: 20),
-                label: const Text('去导入书源'),
-                style: FilledButton.styleFrom(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
-                ),
-              ),
-            ],
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 40),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.menu_book_outlined,
+            size: 48,
+            color: JellyTheme.textSecondary.withValues(alpha: 0.55),
           ),
-        ),
-      );
+          const SizedBox(height: 20),
+          Text(
+            '还没有书源',
+            style: TextStyle(
+              fontSize: AppTheme.fontTitle3,
+              fontWeight: FontWeight.w600,
+              color: _titleColor,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '用上面的地址、口令、二维码或本地文件导入',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: AppTheme.fontSubhead,
+              color: JellyTheme.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 28),
+          FilledButton.icon(
+            onPressed: _busy ? null : _showImportSheet,
+            icon: const Icon(Icons.add_rounded, size: 20),
+            label: const Text('去导入书源'),
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 
   Widget _noMatchState() => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.search_off_rounded,
-                size: 42,
-                color: JellyTheme.textSecondary.withValues(alpha: 0.5)),
-            const SizedBox(height: 12),
-            Text('没有匹配「$_keyword」的书源',
-                style: TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
-          ],
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          Icons.search_off_rounded,
+          size: 42,
+          color: JellyTheme.textSecondary.withValues(alpha: 0.5),
         ),
-      );
+        const SizedBox(height: 12),
+        Text(
+          '没有匹配「$_keyword」的书源',
+          style: TextStyle(
+            fontSize: AppTheme.fontSubhead,
+            color: JellyTheme.textSecondary,
+          ),
+        ),
+      ],
+    ),
+  );
 
   // ============================================================
   // 列表
@@ -552,9 +632,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   /// （关键词搜索在 `_visible` 里完成，这里只做「隐藏组 / 选中分组」过滤）
   Widget _sourceList(List<BookSource> all) {
     // 1) 按"隐藏组"和"选中分组"过滤
-    var list = all
-        .where((s) => !_hiddenGroups.contains(s.group))
-        .toList();
+    var list = all.where((s) => !_hiddenGroups.contains(s.group)).toList();
     if (_pickedGroup != null) {
       list = list.where((s) => s.group == _pickedGroup).toList();
     }
@@ -573,9 +651,13 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
           padding: const EdgeInsets.fromLTRB(4, 8, 0, 6),
           child: Row(
             children: [
-              Text('共 ${base.length} 个',
-                  style: TextStyle(
-                      fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
+              Text(
+                '共 ${base.length} 个',
+                style: TextStyle(
+                  fontSize: AppTheme.fontSubhead,
+                  color: JellyTheme.textSecondary,
+                ),
+              ),
               const Spacer(),
               TextButton(
                 onPressed: () async {
@@ -586,12 +668,16 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                       content: Text('将删除全部 ${base.length} 个书源，不可恢复。'),
                       actions: [
                         TextButton(
-                            onPressed: () => Navigator.pop(c, false),
-                            child: const Text('取消')),
+                          onPressed: () => Navigator.pop(c, false),
+                          child: const Text('取消'),
+                        ),
                         TextButton(
-                            onPressed: () => Navigator.pop(c, true),
-                            child: const Text('清空',
-                                style: TextStyle(color: Colors.redAccent))),
+                          onPressed: () => Navigator.pop(c, true),
+                          child: const Text(
+                            '清空',
+                            style: TextStyle(color: Colors.redAccent),
+                          ),
+                        ),
                       ],
                     ),
                   );
@@ -603,7 +689,10 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                     }
                   }
                 },
-                child: const Text('清空', style: TextStyle(fontSize: AppTheme.fontSubhead)),
+                child: const Text(
+                  '清空',
+                  style: TextStyle(fontSize: AppTheme.fontSubhead),
+                ),
               ),
             ],
           ),
@@ -644,12 +733,20 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                 const SizedBox(width: 8),
                 _moreBtn(),
                 const SizedBox(width: 8),
-                _groupChip('全部', base.length, _pickedGroup == null,
-                    () => setState(() => _pickedGroup = null)),
+                _groupChip(
+                  '全部',
+                  base.length,
+                  _pickedGroup == null,
+                  () => setState(() => _pickedGroup = null),
+                ),
                 for (final e in counts.entries) ...[
                   const SizedBox(width: 8),
-                  _groupChip(e.key, e.value, _pickedGroup == e.key,
-                      () => setState(() => _pickedGroup = e.key)),
+                  _groupChip(
+                    e.key,
+                    e.value,
+                    _pickedGroup == e.key,
+                    () => setState(() => _pickedGroup = e.key),
+                  ),
                 ],
                 const SizedBox(width: 8),
               ],
@@ -729,8 +826,11 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
               : Colors.black.withValues(alpha: 0.04),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Icon(Icons.more_horiz_rounded,
-            size: 18, color: JellyTheme.textSecondary),
+        child: Icon(
+          Icons.more_horiz_rounded,
+          size: 18,
+          color: JellyTheme.textSecondary,
+        ),
       ),
     );
   }
@@ -786,11 +886,14 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
         children: [
           Icon(icon, size: 14, color: JellyTheme.textSecondary),
           const SizedBox(width: 5),
-          Text('$count',
-              style: TextStyle(
-                  fontSize: AppTheme.fontSubhead,
-                  fontWeight: FontWeight.w600,
-                  color: _titleColor)),
+          Text(
+            '$count',
+            style: TextStyle(
+              fontSize: AppTheme.fontSubhead,
+              fontWeight: FontWeight.w600,
+              color: _titleColor,
+            ),
+          ),
         ],
       ),
     );
@@ -807,8 +910,8 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
           color: on
               ? (_isDark ? Colors.white : JellyTheme.primary)
               : (_isDark
-                  ? Colors.white.withValues(alpha: 0.07)
-                  : Colors.black.withValues(alpha: 0.04)),
+                    ? Colors.white.withValues(alpha: 0.07)
+                    : Colors.black.withValues(alpha: 0.04)),
           borderRadius: BorderRadius.circular(20),
         ),
         child: Row(
@@ -816,11 +919,13 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
           children: [
             // 「全部」前面有个 ∞ 标记（截图如此）
             if (label == '全部') ...[
-              Icon(Icons.all_inclusive_rounded,
-                  size: 14,
-                  color: on
-                      ? (_isDark ? JellyTheme.backgroundDark : Colors.white)
-                      : JellyTheme.textSecondary),
+              Icon(
+                Icons.all_inclusive_rounded,
+                size: 14,
+                color: on
+                    ? (_isDark ? JellyTheme.backgroundDark : Colors.white)
+                    : JellyTheme.textSecondary,
+              ),
               const SizedBox(width: 4),
             ],
             Text(
@@ -846,10 +951,11 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
       context: context,
       builder: (c) => AlertDialog(
         backgroundColor: _card,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20)),
-        title: Text('新建分组',
-            style: TextStyle(fontSize: AppTheme.fontTitle3, color: _titleColor)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          '新建分组',
+          style: TextStyle(fontSize: AppTheme.fontTitle3, color: _titleColor),
+        ),
         content: TextField(
           controller: ctrl,
           autofocus: true,
@@ -867,11 +973,13 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(c),
-              child: const Text('取消')),
+            onPressed: () => Navigator.pop(c),
+            child: const Text('取消'),
+          ),
           TextButton(
-              onPressed: () => Navigator.pop(c, ctrl.text.trim()),
-              child: const Text('确定')),
+            onPressed: () => Navigator.pop(c, ctrl.text.trim()),
+            child: const Text('确定'),
+          ),
         ],
       ),
     );
@@ -896,11 +1004,11 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) => Container(
           constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(ctx).size.height * 0.7),
+            maxHeight: MediaQuery.of(ctx).size.height * 0.7,
+          ),
           decoration: BoxDecoration(
             color: _card,
-            borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(24)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: SafeArea(
             top: false,
@@ -920,11 +1028,14 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                   padding: const EdgeInsets.fromLTRB(20, 6, 8, 6),
                   child: Row(
                     children: [
-                      Text('管理分组',
-                          style: TextStyle(
-                              fontSize: AppTheme.fontTitle3,
-                              fontWeight: FontWeight.w700,
-                              color: _titleColor)),
+                      Text(
+                        '管理分组',
+                        style: TextStyle(
+                          fontSize: AppTheme.fontTitle3,
+                          fontWeight: FontWeight.w700,
+                          color: _titleColor,
+                        ),
+                      ),
                       const Spacer(),
                       IconButton(
                         tooltip: '新建分组',
@@ -932,8 +1043,11 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                           Navigator.pop(ctx);
                           _showNewGroup();
                         },
-                        icon: Icon(Icons.create_new_folder_outlined,
-                            size: 21, color: _titleColor),
+                        icon: Icon(
+                          Icons.create_new_folder_outlined,
+                          size: 21,
+                          color: _titleColor,
+                        ),
                       ),
                     ],
                   ),
@@ -943,29 +1057,37 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                   child: names.isEmpty
                       ? Padding(
                           padding: const EdgeInsets.all(40),
-                          child: Text('还没有分组',
-                              style: TextStyle(
-                                  fontSize: AppTheme.fontSubhead,
-                                  color: JellyTheme.textSecondary)),
+                          child: Text(
+                            '还没有分组',
+                            style: TextStyle(
+                              fontSize: AppTheme.fontSubhead,
+                              color: JellyTheme.textSecondary,
+                            ),
+                          ),
                         )
                       : ListView(
                           shrinkWrap: true,
                           children: [
                             for (final g in names)
                               ListTile(
-                                leading: Icon(Icons.drag_handle_rounded,
-                                    size: 20,
-                                    color: JellyTheme.textSecondary),
+                                leading: Icon(
+                                  Icons.drag_handle_rounded,
+                                  size: 20,
+                                  color: JellyTheme.textSecondary,
+                                ),
                                 title: Text(
                                   g,
                                   style: TextStyle(
-                                      fontSize: AppTheme.fontHeadline, color: _titleColor),
+                                    fontSize: AppTheme.fontHeadline,
+                                    color: _titleColor,
+                                  ),
                                 ),
                                 subtitle: Text(
                                   '${all.where((s) => s.group == g).length} 个源',
                                   style: TextStyle(
-                                      fontSize: AppTheme.fontFootnote,
-                                      color: JellyTheme.textSecondary),
+                                    fontSize: AppTheme.fontFootnote,
+                                    color: JellyTheme.textSecondary,
+                                  ),
                                 ),
                                 // 眼睛 = 该组是否显示在列表里
                                 trailing: IconButton(
@@ -1063,8 +1185,10 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                       : Colors.black.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Text(_groupEmoji(s.group),
-                    style: const TextStyle(fontSize: 20)),
+                child: Text(
+                  _groupEmoji(s.group),
+                  style: const TextStyle(fontSize: 20),
+                ),
               ),
               title: Row(
                 children: [
@@ -1074,9 +1198,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                         ? Icons.check_circle_rounded
                         : Icons.block_rounded,
                     size: 14,
-                    color: s.enabled
-                        ? Colors.green
-                        : JellyTheme.textSecondary,
+                    color: s.enabled ? Colors.green : JellyTheme.textSecondary,
                   ),
                   const SizedBox(width: 4),
                   Expanded(
@@ -1087,8 +1209,9 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                       style: TextStyle(
                         fontSize: AppTheme.fontHeadline,
                         fontWeight: FontWeight.w600,
-                        color:
-                            s.enabled ? _titleColor : JellyTheme.textSecondary,
+                        color: s.enabled
+                            ? _titleColor
+                            : JellyTheme.textSecondary,
                       ),
                     ),
                   ),
@@ -1096,8 +1219,11 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                   // ⓘ 小标：点它打开书源菜单（编辑/置顶/登录/删除/设置分组）
                   GestureDetector(
                     onTap: () => _showSourceMenu(s),
-                    child: Icon(Icons.info_outline_rounded,
-                        size: 15, color: JellyTheme.textSecondary),
+                    child: Icon(
+                      Icons.info_outline_rounded,
+                      size: 15,
+                      color: JellyTheme.textSecondary,
+                    ),
                   ),
                 ],
               ),
@@ -1108,8 +1234,10 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                   // 分组小标签（如「通常书源」）
                   Container(
                     margin: const EdgeInsets.only(top: 3),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 7, vertical: 1.5),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 1.5,
+                    ),
                     decoration: BoxDecoration(
                       color: _isDark
                           ? Colors.white.withValues(alpha: 0.07)
@@ -1121,8 +1249,9 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                          fontSize: AppTheme.fontCaption,
-                          color: JellyTheme.textSecondary),
+                        fontSize: AppTheme.fontCaption,
+                        color: JellyTheme.textSecondary,
+                      ),
                     ),
                   ),
                   if (s.isPythonSource) _pythonBadge(),
@@ -1167,9 +1296,10 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
         'Python',
         maxLines: 1,
         style: TextStyle(
-            fontSize: AppTheme.fontCaption,
-            color: JellyTheme.primary,
-            fontWeight: FontWeight.w600),
+          fontSize: AppTheme.fontCaption,
+          color: JellyTheme.primary,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }
@@ -1210,23 +1340,28 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(s.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  fontSize: AppTheme.fontTitle3,
-                                  fontWeight: FontWeight.w700,
-                                  color: _titleColor)),
+                          Text(
+                            s.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: AppTheme.fontTitle3,
+                              fontWeight: FontWeight.w700,
+                              color: _titleColor,
+                            ),
+                          ),
                           const SizedBox(height: 3),
-                          Text(s.group.isEmpty ? '未分组' : s.group,
-                              style: TextStyle(
-                                  fontSize: AppTheme.fontSubhead,
-                                  color: JellyTheme.textSecondary)),
+                          Text(
+                            s.group.isEmpty ? '未分组' : s.group,
+                            style: TextStyle(
+                              fontSize: AppTheme.fontSubhead,
+                              color: JellyTheme.textSecondary,
+                            ),
+                          ),
                         ],
                       ),
                     ),
-                    _groupActionBtn(Icons.edit_outlined, '编辑',
-                        () async {
+                    _groupActionBtn(Icons.edit_outlined, '编辑', () async {
                       Navigator.pop(ctx);
                       // 🔴 config 型源**不能**走 Legado 的 7-tab 编辑页 ✗：
                       // 那个表单是给 Legado 书源写的（读 `bookSourceName/Url/rule*`
@@ -1241,8 +1376,10 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                       // 所以这里**直接拦住** ✓，比"打开一个会写坏数据的表单"好 ✓；
                       // 真想改 config 源应走它自己的配置编辑页 ✓（待做 ✓）
                       if (s.isConfig) {
-                        _toast('这是 config 型源：请用它的配置编辑方式修改，'
-                            '此编辑页会写坏它的 JSON');
+                        _toast(
+                          '这是 config 型源：请用它的配置编辑方式修改，'
+                          '此编辑页会写坏它的 JSON',
+                        );
                         return;
                       }
                       // 打开 7-tab 完整编辑页（源变量/基础/搜索/发现/详情/目录/正文）
@@ -1255,8 +1392,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                       if (mounted) setState(() {});
                     }),
                     const SizedBox(width: 8),
-                    _groupActionBtn(Icons.vertical_align_top_rounded, '置顶',
-                        () {
+                    _groupActionBtn(Icons.vertical_align_top_rounded, '置顶', () {
                       Navigator.pop(ctx);
                       // 置顶 = 把它排到最前（store 有 order 字段）
                       store.reorder([s.id]);
@@ -1268,54 +1404,76 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                     // 截图里圆钮位置只画了 3 个，但登录是必需功能，
                     // 多一个不影响主流程。
                     _groupActionBtn(
-                        Icons.login_rounded,
-                        '登录',
-                        () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => BookSourceLoginPage(source: s),
-                          ),
-                        )),
+                      Icons.login_rounded,
+                      '登录',
+                      () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => BookSourceLoginPage(source: s),
+                        ),
+                      ),
+                    ),
                     const SizedBox(width: 8),
                     _groupActionBtn(
-                        Icons.delete_outline_rounded, '删除', () async {
-                      Navigator.pop(ctx);
-                      final ok = await showDialog<bool>(
-                        context: context,
-                        builder: (c) => AlertDialog(
-                          title: const Text('删除书源'),
-                          content: Text('删除「${s.name}」？不可恢复。'),
-                          actions: [
-                            TextButton(
+                      Icons.delete_outline_rounded,
+                      '删除',
+                      () async {
+                        Navigator.pop(ctx);
+                        final ok = await showDialog<bool>(
+                          context: context,
+                          builder: (c) => AlertDialog(
+                            title: const Text('删除书源'),
+                            content: Text('删除「${s.name}」？不可恢复。'),
+                            actions: [
+                              TextButton(
                                 onPressed: () => Navigator.pop(c, false),
-                                child: const Text('取消')),
-                            TextButton(
+                                child: const Text('取消'),
+                              ),
+                              TextButton(
                                 onPressed: () => Navigator.pop(c, true),
-                                child: const Text('删除',
-                                    style:
-                                        TextStyle(color: Colors.redAccent))),
-                          ],
-                        ),
-                      );
-                      if (ok == true) {
-                        await store.remove(s.id);
-                      }
-                    }),
+                                child: const Text(
+                                  '删除',
+                                  style: TextStyle(color: Colors.redAccent),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (ok == true) {
+                          await store.remove(s.id);
+                        }
+                      },
+                    ),
                   ],
                 ),
               ),
               const Divider(height: 1),
               // 设置分组
               ListTile(
-                leading:
-                    Icon(Icons.folder_outlined, size: 22, color: _titleColor),
-                title: Text('设置分组',
-                    style: TextStyle(fontSize: AppTheme.fontHeadline, color: _titleColor)),
-                subtitle: Text(s.group.isEmpty ? '未分组' : s.group,
-                    style: TextStyle(
-                        fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
-                trailing: Icon(Icons.chevron_right_rounded,
-                    size: 20, color: JellyTheme.textSecondary),
+                leading: Icon(
+                  Icons.folder_outlined,
+                  size: 22,
+                  color: _titleColor,
+                ),
+                title: Text(
+                  '设置分组',
+                  style: TextStyle(
+                    fontSize: AppTheme.fontHeadline,
+                    color: _titleColor,
+                  ),
+                ),
+                subtitle: Text(
+                  s.group.isEmpty ? '未分组' : s.group,
+                  style: TextStyle(
+                    fontSize: AppTheme.fontSubhead,
+                    color: JellyTheme.textSecondary,
+                  ),
+                ),
+                trailing: Icon(
+                  Icons.chevron_right_rounded,
+                  size: 20,
+                  color: JellyTheme.textSecondary,
+                ),
                 onTap: () {
                   Navigator.pop(ctx);
                   _showSetGroup({s.id});
@@ -1363,8 +1521,9 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
       context: context,
       backgroundColor: Colors.transparent,
       builder: (ctx) => Container(
-        constraints:
-            BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.7),
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(ctx).size.height * 0.7,
+        ),
         decoration: BoxDecoration(
           color: _card,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
@@ -1387,17 +1546,23 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                 padding: const EdgeInsets.fromLTRB(20, 4, 8, 6),
                 child: Row(
                   children: [
-                    Text('设置分组 (${ids.length} 个源)',
-                        style: TextStyle(
-                            fontSize: AppTheme.fontTitle3,
-                            fontWeight: FontWeight.w700,
-                            color: _titleColor)),
+                    Text(
+                      '设置分组 (${ids.length} 个源)',
+                      style: TextStyle(
+                        fontSize: AppTheme.fontTitle3,
+                        fontWeight: FontWeight.w700,
+                        color: _titleColor,
+                      ),
+                    ),
                     const Spacer(),
                     IconButton(
                       tooltip: '关闭',
                       onPressed: () => Navigator.pop(ctx),
-                      icon: Icon(Icons.close_rounded,
-                          size: 20, color: _titleColor),
+                      icon: Icon(
+                        Icons.close_rounded,
+                        size: 20,
+                        color: _titleColor,
+                      ),
                     ),
                   ],
                 ),
@@ -1418,13 +1583,19 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                               ? JellyTheme.primary
                               : JellyTheme.textSecondary,
                         ),
-                        title: Text(g,
-                            style: TextStyle(
-                                fontSize: AppTheme.fontHeadline,
-                                color: _titleColor)),
+                        title: Text(
+                          g,
+                          style: TextStyle(
+                            fontSize: AppTheme.fontHeadline,
+                            color: _titleColor,
+                          ),
+                        ),
                         trailing: g == current
-                            ? Icon(Icons.check_rounded,
-                                size: 20, color: JellyTheme.primary)
+                            ? Icon(
+                                Icons.check_rounded,
+                                size: 20,
+                                color: JellyTheme.primary,
+                              )
                             : null,
                         onTap: () async {
                           Navigator.pop(ctx);
@@ -1471,15 +1642,22 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                 ),
               ),
               const SizedBox(height: 16),
-              Text('导入书源',
-                  style: TextStyle(
-                      fontSize: AppTheme.fontTitle3,
-                      fontWeight: FontWeight.w600,
-                      color: _titleColor)),
+              Text(
+                '导入书源',
+                style: TextStyle(
+                  fontSize: AppTheme.fontTitle3,
+                  fontWeight: FontWeight.w600,
+                  color: _titleColor,
+                ),
+              ),
               const SizedBox(height: 6),
-              Text('用地址、口令、二维码或本地文件导入书源',
-                  style: TextStyle(
-                      fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
+              Text(
+                '用地址、口令、二维码或本地文件导入书源',
+                style: TextStyle(
+                  fontSize: AppTheme.fontSubhead,
+                  color: JellyTheme.textSecondary,
+                ),
+              ),
               const SizedBox(height: 18),
               _importOption(
                 icon: Icons.link_rounded,
@@ -1539,29 +1717,38 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
     required String title,
     required String subtitle,
     required VoidCallback onTap,
-  }) =>
-      ListTile(
-        onTap: onTap,
-        leading: Container(
-          width: 40,
-          height: 40,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: JellyTheme.primary.withValues(alpha: 0.13),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Icon(icon, size: 20, color: JellyTheme.primary),
-        ),
-        title: Text(title,
-            style: TextStyle(
-                fontSize: AppTheme.fontHeadline,
-                fontWeight: FontWeight.w600,
-                color: _titleColor)),
-        subtitle: Text(subtitle,
-            style: TextStyle(fontSize: AppTheme.fontFootnote, color: JellyTheme.textSecondary)),
-        trailing: Icon(Icons.chevron_right_rounded,
-            color: JellyTheme.textSecondary),
-      );
+  }) => ListTile(
+    onTap: onTap,
+    leading: Container(
+      width: 40,
+      height: 40,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: JellyTheme.primary.withValues(alpha: 0.13),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Icon(icon, size: 20, color: JellyTheme.primary),
+    ),
+    title: Text(
+      title,
+      style: TextStyle(
+        fontSize: AppTheme.fontHeadline,
+        fontWeight: FontWeight.w600,
+        color: _titleColor,
+      ),
+    ),
+    subtitle: Text(
+      subtitle,
+      style: TextStyle(
+        fontSize: AppTheme.fontFootnote,
+        color: JellyTheme.textSecondary,
+      ),
+    ),
+    trailing: Icon(
+      Icons.chevron_right_rounded,
+      color: JellyTheme.textSecondary,
+    ),
+  );
 
   /// 地址导入
   Future<void> _importByUrl() async {
@@ -1583,15 +1770,22 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('地址导入',
-                    style: TextStyle(
-                        fontSize: AppTheme.fontHeadline,
-                        fontWeight: FontWeight.w600,
-                        color: _titleColor)),
+                Text(
+                  '地址导入',
+                  style: TextStyle(
+                    fontSize: AppTheme.fontHeadline,
+                    fontWeight: FontWeight.w600,
+                    color: _titleColor,
+                  ),
+                ),
                 const SizedBox(height: 4),
-                Text('支持 http(s) 链接；返回内容为书源 JSON',
-                    style: TextStyle(
-                        fontSize: AppTheme.fontFootnote, color: JellyTheme.textSecondary)),
+                Text(
+                  '支持 http(s) 链接；返回内容为书源 JSON',
+                  style: TextStyle(
+                    fontSize: AppTheme.fontFootnote,
+                    color: JellyTheme.textSecondary,
+                  ),
+                ),
                 const SizedBox(height: 10),
                 TextField(
                   controller: ctrl,
@@ -1600,11 +1794,16 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                   decoration: InputDecoration(
                     hintText: 'https://example.com/booksource.json',
                     hintStyle: TextStyle(
-                        fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary),
+                      fontSize: AppTheme.fontSubhead,
+                      color: JellyTheme.textSecondary,
+                    ),
                     border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                     contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 12),
+                      horizontal: 12,
+                      vertical: 12,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 14),
@@ -1646,23 +1845,31 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
         builder: (ctx, setSheet) => SafeArea(
           top: false,
           child: Padding(
-            padding:
-                EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(ctx).bottom),
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.viewInsetsOf(ctx).bottom,
+            ),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('口令导入',
-                      style: TextStyle(
-                          fontSize: AppTheme.fontHeadline,
-                          fontWeight: FontWeight.w600,
-                          color: _titleColor)),
+                  Text(
+                    '口令导入',
+                    style: TextStyle(
+                      fontSize: AppTheme.fontHeadline,
+                      fontWeight: FontWeight.w600,
+                      color: _titleColor,
+                    ),
+                  ),
                   const SizedBox(height: 4),
-                  Text('粘贴分享口令或书源 JSON（单个 / 数组 / {"sources":[…]} 都行）',
-                      style: TextStyle(
-                          fontSize: AppTheme.fontFootnote, color: JellyTheme.textSecondary)),
+                  Text(
+                    '粘贴分享口令或书源 JSON（单个 / 数组 / {"sources":[…]} 都行）',
+                    style: TextStyle(
+                      fontSize: AppTheme.fontFootnote,
+                      color: JellyTheme.textSecondary,
+                    ),
+                  ),
                   const SizedBox(height: 10),
                   TextField(
                     controller: ctrl,
@@ -1672,7 +1879,9 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                     decoration: InputDecoration(
                       hintText: '在此粘贴…',
                       hintStyle: TextStyle(
-                          fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary),
+                        fontSize: AppTheme.fontSubhead,
+                        color: JellyTheme.textSecondary,
+                      ),
                       filled: true,
                       fillColor: _isDark
                           ? Colors.white.withValues(alpha: 0.05)
@@ -1685,9 +1894,13 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                   ),
                   if (error.isNotEmpty) ...[
                     const SizedBox(height: 8),
-                    Text(error,
-                        style: const TextStyle(
-                            fontSize: AppTheme.fontFootnote, color: Colors.redAccent)),
+                    Text(
+                      error,
+                      style: const TextStyle(
+                        fontSize: AppTheme.fontFootnote,
+                        color: Colors.redAccent,
+                      ),
+                    ),
                   ],
                   const SizedBox(height: 12),
                   Row(
@@ -1701,8 +1914,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                             setSheet(() => error = '');
                           }
                         },
-                        icon:
-                            const Icon(Icons.content_paste_rounded, size: 17),
+                        icon: const Icon(Icons.content_paste_rounded, size: 17),
                         label: const Text('读剪贴板'),
                       ),
                       const Spacer(),
@@ -1715,16 +1927,21 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                           }
                           final parsed = _parseSources(text);
                           if (parsed.isEmpty) {
-                            setSheet(() => error =
-                                '没解析出书源。Legado 书源需含 bookSourceName / bookSourceUrl');
+                            setSheet(
+                              () => error =
+                                  '没解析出书源。Legado 书源需含 bookSourceName / bookSourceUrl',
+                            );
                             return;
                           }
                           final r = await store.addAll(parsed);
+                          await _reloadComicSourcesIfNeeded(parsed);
                           if (!ctx.mounted) return;
                           Navigator.pop(ctx);
-                          _toast(r.added > 0
-                              ? '已导入 ${r.added} 个书源'
-                              : '已更新 ${r.updated} 个书源');
+                          _toast(
+                            r.added > 0
+                                ? '已导入 ${r.added} 个书源'
+                                : '已更新 ${r.updated} 个书源',
+                          );
                         },
                         child: const Text('导入'),
                       ),
@@ -1748,7 +1965,8 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   /// 而且完全看不出原因是"这是个压缩包"。
   Future<void> _importBytes(Uint8List bytes) async {
     // zip 魔数 PK\x03\x04（空 zip 是 PK\x05\x06，跨卷是 PK\x07\x08）
-    final isZip = bytes.length > 4 &&
+    final isZip =
+        bytes.length > 4 &&
         bytes[0] == 0x50 &&
         bytes[1] == 0x4B &&
         (bytes[2] == 0x03 || bytes[2] == 0x05 || bytes[2] == 0x07);
@@ -1805,6 +2023,8 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
       _toast('压缩包里的 $tried 个文件都没解析出书源');
       return;
     }
+    // 包里有漫画脚本 → 让漫画源管理器立刻注册（书源列表已隐藏它们）
+    await _reloadComicSourcesIfNeeded(allParsed);
     _toast(
       '已从压缩包导入：新增 $totalAdded 个'
       '${totalUpdated > 0 ? '、更新 $totalUpdated 个' : ''}'
@@ -1894,8 +2114,11 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
       }
       setState(() => _busy = true);
       // 1. 写文件 + 注册进引擎
-      final installed = await PythonSourcesService.instance
-          .installSource('book', key, code);
+      final installed = await PythonSourcesService.instance.installSource(
+        'book',
+        key,
+        code,
+      );
       if (!installed.ok) {
         _toast('Python 源注册失败：${installed.message ?? '未知错误'}');
         return;
@@ -1915,9 +2138,11 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
         id: 'python:$key',
       );
       final r = await store.addAll([src]);
-      _toast('已导入 Python 源「$key」'
-          '${(r.added > 0 || r.updated > 0) ? '' : '（已存在，已更新）'}'
-          '${!PythonManager.instance.isIOS ? '；注意：Python 引擎需 iOS 真机' : ''}');
+      _toast(
+        '已导入 Python 源「$key」'
+        '${(r.added > 0 || r.updated > 0) ? '' : '（已存在，已更新）'}'
+        '${!PythonManager.instance.isIOS ? '；注意：Python 引擎需 iOS 真机' : ''}',
+      );
       // 刷新列表（store 有监听时无需手动重载，保守起见触发一次）
       if (mounted) setState(() {});
     } catch (e) {
@@ -1956,8 +2181,8 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
           headers: const {
             'User-Agent':
                 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
-                    'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 '
-                    'Mobile/15E148 Safari/604.1',
+                'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 '
+                'Mobile/15E148 Safari/604.1',
             'Accept': 'application/json,text/plain,*/*',
           },
           receiveTimeout: const Duration(seconds: 30),
@@ -1983,9 +2208,19 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
       return;
     }
     final r = await store.addAll(parsed);
-    _toast(r.added > 0 && r.updated > 0
-        ? '新增 ${r.added} 个、更新 ${r.updated} 个书源'
-        : (r.added > 0 ? '已导入 ${r.added} 个书源' : '已更新 ${r.updated} 个书源'));
+    await _reloadComicSourcesIfNeeded(parsed);
+    final comics = parsed.where((s) => s.isComicSource).length;
+    _toast(
+      comics > 0
+          // 漫画源不显示在本页（用户 2026-10-18：书源/漫画源分开）→
+          // 必须明确告诉用户去哪里找，否则会以为"导入失败"。
+          ? '已导入 $comics 个漫画源（书源列表不显示，请到「漫画源仓库」查看）'
+          : (r.added > 0 && r.updated > 0
+                ? '新增 ${r.added} 个、更新 ${r.updated} 个书源'
+                : (r.added > 0
+                      ? '已导入 ${r.added} 个书源'
+                      : '已更新 ${r.updated} 个书源')),
+    );
     await _showCompatReport(parsed);
   }
 
@@ -2023,8 +2258,9 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                   itemCount: problems.length > 30 ? 30 : problems.length,
                   itemBuilder: (_, i) {
                     final r = problems[i];
-                    final color =
-                        r.usable ? Colors.orangeAccent : Colors.redAccent;
+                    final color = r.usable
+                        ? Colors.orangeAccent
+                        : Colors.redAccent;
                     final detail = r.issues
                         .take(3)
                         .map((e) => e.message)
@@ -2059,7 +2295,9 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                 Text(
                   '仅显示前 30 个，其余可在书源管理里逐条查看。',
                   style: TextStyle(
-                      fontSize: 11, color: Theme.of(ctx).disabledColor),
+                    fontSize: 11,
+                    color: Theme.of(ctx).disabledColor,
+                  ),
                 ),
               ],
             ],
@@ -2100,7 +2338,10 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   /// 体检标记：小圆点 + 文字（可用/部分可用/可疑/失效）
   Widget _healthBadge(BookSourceHealth h) {
     final (color, icon) = switch (h.level) {
-      BookSourceHealthLevel.healthy => (Colors.green, Icons.check_circle_rounded),
+      BookSourceHealthLevel.healthy => (
+        Colors.green,
+        Icons.check_circle_rounded,
+      ),
       BookSourceHealthLevel.partial => (Colors.orange, Icons.error_rounded),
       BookSourceHealthLevel.suspect => (Colors.amber, Icons.help_rounded),
       BookSourceHealthLevel.dead => (Colors.redAccent, Icons.cancel_rounded),
@@ -2141,16 +2382,19 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('删除书源', style: TextStyle(fontSize: AppTheme.fontHeadline)),
+        title: const Text(
+          '删除书源',
+          style: TextStyle(fontSize: AppTheme.fontHeadline),
+        ),
         content: Text('确定删除选中的 $n 个书源？'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child:
-                const Text('删除', style: TextStyle(color: Colors.redAccent)),
+            child: const Text('删除', style: TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),

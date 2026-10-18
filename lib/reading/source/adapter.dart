@@ -1,5 +1,6 @@
 import '../models/comic.dart';
 import '../models/search_result.dart';
+import '../utils/html_text.dart';
 import 'models.dart';
 
 /// CManga ↔ Comic / CChapter ↔ ComicChapter / MangasPage ↔ SearchResult 适配层。
@@ -11,11 +12,13 @@ import 'models.dart';
 CManga comicToCManga(Comic c, String sourceId) => CManga(
   id: c.pathWord,
   sourceId: sourceId,
-  title: c.title,
+  // 源站字段可能混入「_手机阅读」「返回目录」「www.xxx.com」等噪声，
+  // 统一在适配层清洗（用户 2026-10-18）。
+  title: cleanSourceTitle(c.title),
   cover: c.cover,
-  author: c.author,
-  alias: c.alias,
-  description: c.description,
+  author: c.author == null ? null : cleanSourceTitle(c.author!),
+  alias: c.alias == null ? null : cleanSourceTitle(c.alias!),
+  description: c.description == null ? null : cleanIntroText(c.description!),
   status: c.status,
   tags: c.tags,
   rating: c.rating,
@@ -32,11 +35,12 @@ CManga comicToCManga(Comic c, String sourceId) => CManga(
 /// DownloadTask 的复合 key sourceId/mangaId 使用，不依赖 pathWord 跨源唯一）。
 Comic cmangaToComic(CManga m) => Comic(
   id: m.id,
-  title: m.title,
+  // 搜索 / 详情 / 分类三条链路最终都经过这里 ⇒ 漫画名与简介的唯一清洗点。
+  title: cleanSourceTitle(m.title),
   cover: m.cover,
-  author: m.author,
-  alias: m.alias,
-  description: m.description,
+  author: m.author == null ? null : cleanSourceTitle(m.author!),
+  alias: m.alias == null ? null : cleanSourceTitle(m.alias!),
+  description: m.description == null ? null : cleanIntroText(m.description!),
   status: m.status,
   tags: m.tags,
   rating: m.rating,
@@ -56,7 +60,7 @@ CChapter comicChapterToCChapter(
   id: c.id,
   sourceId: sourceId,
   mangaId: mangaId,
-  name: c.title,
+  name: cleanChapterTitle(c.title),
   order: c.order,
   count: c.count,
   groupId: c.groupId,
@@ -67,7 +71,8 @@ CChapter comicChapterToCChapter(
 /// CChapter -> ComicChapter
 ComicChapter cchapterToComicChapter(CChapter c) => ComicChapter(
   id: c.id,
-  title: c.name,
+  // 章节名唯一清洗点（详情目录 / 下载 / 阅读器都从这里取）。
+  title: cleanChapterTitle(c.name),
   order: c.order,
   count: c.count ?? 0,
   groupId: c.groupId ?? 'default',
@@ -89,9 +94,10 @@ List<ChapterGroup> cchaptersToGroups(List<CChapter> chapters) {
   }
   return groupOrder.map((gid) {
     final list = groupMap[gid]!;
+    final rawGroupName = list.first.groupName ?? '默认';
     return ChapterGroup(
       id: gid,
-      name: list.first.groupName ?? '默认',
+      name: cleanSourceTitle(rawGroupName),
       count: list.length,
       chapters: list.map(cchapterToComicChapter).toList(),
     );
@@ -110,11 +116,11 @@ List<CChapter> groupsToCChapters(
           id: c.id,
           sourceId: sourceId,
           mangaId: mangaId,
-          name: c.title,
+          name: cleanChapterTitle(c.title),
           order: c.order,
           count: c.count,
           groupId: g.id,
-          groupName: g.name,
+          groupName: cleanSourceTitle(g.name),
           createTime: c.createTime,
         ),
       ),

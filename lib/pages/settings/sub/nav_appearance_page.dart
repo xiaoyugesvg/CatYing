@@ -46,13 +46,15 @@ class _NavAppearancePageState extends State<NavAppearancePage> {
   @override
   Widget build(BuildContext context) {
     final s = SettingsService();
-    final style = FloatingNavStyle.fromId(s.navStyle);
     return SettingsSubPage(
       title: '底栏风格与图标',
       children: [
         ListenableBuilder(
           listenable: s,
           builder: (context, _) {
+            // ⚠️ 必须在这里读 navStyle：放到 build 顶层会导致
+            //   ListenableBuilder 重建时用的还是旧值，点其它风格"像是选不了"。
+            final style = FloatingNavStyle.fromId(s.navStyle);
             return SettingsGroup(
               title: '底栏风格',
               hint: '主菜单与阅读菜单共用同一种风格，切换后立即生效。',
@@ -91,14 +93,32 @@ class _NavAppearancePageState extends State<NavAppearancePage> {
           builder: (context, _) {
             return SettingsGroup(
               title: '自定义图标',
-              hint: '建议上传 96×96 以上的透明 PNG；未选中时会自动降低透明度。',
+              hint: '点图标上传图片；右上角 × 恢复默认。建议 96×96 以上透明 PNG。',
               children: [
-                for (final t in _tabs)
-                  _iconRow(
-                    label: t.label,
-                    icon: t.icon,
-                    customPath: s.navIconFor(t.label),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                  child: LayoutBuilder(
+                    builder: (context, box) {
+                      const gap = 10.0;
+                      final w = (box.maxWidth - gap * 3) / 4;
+                      return Wrap(
+                        spacing: gap,
+                        runSpacing: 14,
+                        children: [
+                          for (final t in _tabs)
+                            SizedBox(
+                              width: w,
+                              child: _iconTile(
+                                label: t.label,
+                                icon: t.icon,
+                                customPath: s.navIconFor(t.label),
+                              ),
+                            ),
+                        ],
+                      );
+                    },
                   ),
+                ),
               ],
             );
           },
@@ -228,67 +248,98 @@ class _NavAppearancePageState extends State<NavAppearancePage> {
     );
   }
 
-  // ── 图标行 ──────────────────────────────────────────────────
+  // ── 图标块（一行 4 个）──────────────────────────────────────
 
-  Widget _iconRow({
+  Widget _iconTile({
     required String label,
     required IconData icon,
     required String? customPath,
   }) {
     final hasCustom = customPath != null && customPath.isNotEmpty;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
-      child: Row(
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _pickIcon(label),
+      child: Column(
         children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: AppTheme.backgroundTertiary,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: hasCustom
-                ? Padding(
-                    padding: const EdgeInsets.all(6),
-                    child: Image.file(
-                      File(customPath),
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, _, _) =>
-                          Icon(icon, size: 20, color: AppTheme.textSecondary),
+          SizedBox(
+            width: 54,
+            height: 54,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  width: 54,
+                  height: 54,
+                  decoration: BoxDecoration(
+                    color: AppTheme.backgroundTertiary,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: hasCustom
+                          ? AppTheme.accentColor.withValues(alpha: 0.45)
+                          : Colors.transparent,
+                      width: 1,
                     ),
-                  )
-                : Icon(icon, size: 20, color: AppTheme.textSecondary),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: AppTheme.fontSubhead,
-                fontWeight: FontWeight.w500,
-              ),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: hasCustom
+                      ? Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: Image.file(
+                            File(customPath),
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, _, _) => Icon(
+                              icon,
+                              size: 24,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        )
+                      : Icon(icon, size: 24, color: AppTheme.textSecondary),
+                ),
+                if (hasCustom)
+                  Positioned(
+                    top: -5,
+                    right: -5,
+                    child: GestureDetector(
+                      onTap: () async {
+                        await SettingsService().clearNavCustomIcon(label);
+                        if (mounted) setState(() {});
+                      },
+                      child: Container(
+                        width: 18,
+                        height: 18,
+                        decoration: const BoxDecoration(
+                          color: Colors.black54,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.close_rounded,
+                          size: 12,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
-          if (hasCustom)
-            IconButton(
-              tooltip: '恢复默认',
-              icon: Icon(Icons.restart_alt_rounded,
-                  size: 20, color: AppTheme.textTertiary),
-              onPressed: () async {
-                await SettingsService().clearNavCustomIcon(label);
-                if (mounted) setState(() {});
-              },
+          const SizedBox(height: 6),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w500,
             ),
-          IconButton(
-            tooltip: '上传图片',
-            icon: Icon(Icons.upload_file_outlined,
-                size: 20,
-                color: hasCustom
-                    ? AppTheme.accentOnSurface
-                    : AppTheme.textSecondary),
-            onPressed: () => _pickIcon(label),
+          ),
+          Text(
+            hasCustom ? '已替换' : '点按上传',
+            style: TextStyle(
+              color: AppTheme.textTertiary,
+              fontSize: 9.5,
+            ),
           ),
         ],
       ),

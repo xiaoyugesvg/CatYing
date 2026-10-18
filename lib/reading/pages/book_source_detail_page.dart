@@ -73,25 +73,27 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
     super.initState();
     // ✅ 进详情即记浏览历史（足迹页 Book tab 可见）✓ —— 与漫画/图书搜索页
     //   进详情 `recordComic/recordBook` 的口径一致 ✓；服务本身去重置顶 ✓
-    BrowseHistoryService().recordBook(Book.fromJson({
-      'id': 'book-${widget.result.bookUrl}',
-      'hash': '',
-      'title': widget.result.name,
-      'author': widget.result.author,
-      'cover': widget.result.coverUrl,
-      'sourceId': widget.result.source.id,
-      'sourceName': widget.result.source.name,
-      'bookUrl': widget.result.bookUrl,
-    }));
+    BrowseHistoryService().recordBook(
+      Book.fromJson({
+        'id': 'book-${widget.result.bookUrl}',
+        'hash': '',
+        'title': widget.result.name,
+        'author': widget.result.author,
+        'cover': widget.result.coverUrl,
+        'sourceId': widget.result.source.id,
+        'sourceName': widget.result.source.name,
+        'bookUrl': widget.result.bookUrl,
+      }),
+    );
     // 进页先查一次收藏状态（收藏服务在 main.dart 启动时已 init）
-    _isFavorite =
-        BookFavoritesService().isFavorite('book-${widget.result.bookUrl}');
+    _isFavorite = BookFavoritesService().isFavorite(
+      'book-${widget.result.bookUrl}',
+    );
     _load();
   }
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
-  Color get _titleColor =>
-      _isDark ? Colors.white : JellyTheme.textPrimaryLight;
+  Color get _titleColor => _isDark ? Colors.white : JellyTheme.textPrimaryLight;
 
   /// 卡片底色（简介 / 目录两项共用）
   Color get _cardColor => _isDark ? JellyTheme.cardDark : JellyTheme.cardLight;
@@ -105,11 +107,13 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(msg),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-      ));
+      ..showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
   }
 
   Future<void> _load() async {
@@ -120,15 +124,20 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
     final r = _result;
     try {
       // 1) 详情：补全封面/简介/作者，并拿到 tocUrl
-      final info = await BookSourceService.instance.bookInfo(r.source, r.bookUrl);
+      final info = await BookSourceService.instance.bookInfo(
+        r.source,
+        r.bookUrl,
+      );
       if (!mounted) return;
       if (info != null) _info = info;
       _infoLoadedAt = DateTime.now();
 
       // 2) 目录：详情里带的 tocUrl 优先（有些站详情页和目录页不同）
       final tocUrl = (_info['tocUrl'] ?? '').toString().trim();
-      final t = await BookSourceService.instance
-          .toc(r.source, tocUrl.isEmpty ? r.bookUrl : tocUrl);
+      final t = await BookSourceService.instance.toc(
+        r.source,
+        tocUrl.isEmpty ? r.bookUrl : tocUrl,
+      );
       if (!mounted) return;
       if (!t.ok) {
         setState(() {
@@ -163,16 +172,22 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
     return stripHtmlText(s, singleLine: singleLine);
   }
 
-  String get _name => _pick('name', _result.name, singleLine: true);
-  String get _author => _pick('author', _result.author, singleLine: true);
+  // 详情接口的原始字段同样要清掉站名 / 导航词 / 装饰符号（用户 2026-10-18）。
+  String get _name => cleanSourceTitle(
+    _pick('name', _result.name, singleLine: true),
+  );
+  String get _author => cleanSourceTitle(
+    _pick('author', _result.author, singleLine: true),
+  );
   String get _cover => _pick('coverUrl', _result.coverUrl);
-  String get _intro => _pick('intro', _result.intro);
+  String get _intro => cleanIntroText(_pick('intro', _result.intro));
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor:
-          _isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
+      backgroundColor: _isDark
+          ? JellyTheme.backgroundDark
+          : JellyTheme.backgroundLight,
       // ✅ 透明 AppBar + 主题动态背景；标题居中：默认「书籍详情」，
       //   已收藏时居中显示可点的收藏胶囊（点=取消收藏）
       appBar: AppBar(
@@ -183,9 +198,13 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
         centerTitle: true,
         title: _isFavorite
             ? _favPill()
-            : Text('书籍详情',
+            : Text(
+                '书籍详情',
                 style: TextStyle(
-                    fontSize: AppTheme.fontTitle3, color: _titleColor)),
+                  fontSize: AppTheme.fontTitle3,
+                  color: _titleColor,
+                ),
+              ),
         actions: [
           IconButton(
             tooltip: '换源',
@@ -232,27 +251,36 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(_name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: AppTheme.fontTitle2,
-                            fontWeight: FontWeight.w700,
-                            color: _titleColor)),
+                    Text(
+                      _name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: AppTheme.fontTitle2,
+                        fontWeight: FontWeight.w700,
+                        color: _titleColor,
+                      ),
+                    ),
                     if (_author.isNotEmpty) ...[
                       const SizedBox(height: 6),
                       Row(
                         children: [
-                          Icon(Icons.person_outline_rounded,
-                              size: 14, color: JellyTheme.textSecondary),
+                          Icon(
+                            Icons.person_outline_rounded,
+                            size: 14,
+                            color: JellyTheme.textSecondary,
+                          ),
                           const SizedBox(width: 4),
                           Expanded(
-                            child: Text('$_author 著',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                    fontSize: AppTheme.fontSubhead,
-                                    color: JellyTheme.textSecondary)),
+                            child: Text(
+                              '$_author 著',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: AppTheme.fontSubhead,
+                                color: JellyTheme.textSecondary,
+                              ),
+                            ),
                           ),
                         ],
                       ),
@@ -260,16 +288,22 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                     const SizedBox(height: 6),
                     Row(
                       children: [
-                        Icon(Icons.schedule_rounded,
-                            size: 14, color: JellyTheme.textSecondary),
+                        Icon(
+                          Icons.schedule_rounded,
+                          size: 14,
+                          color: JellyTheme.textSecondary,
+                        ),
                         const SizedBox(width: 4),
                         Expanded(
-                          child: Text('来源：${_result.source.name}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  fontSize: AppTheme.fontSubhead,
-                                  color: JellyTheme.textSecondary)),
+                          child: Text(
+                            '来源：${_result.source.name}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: AppTheme.fontSubhead,
+                              color: JellyTheme.textSecondary,
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -307,10 +341,13 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                     ],
                     if (_wordCountText.isNotEmpty) ...[
                       const SizedBox(height: 6),
-                      Text(_wordCountText,
-                          style: TextStyle(
-                              fontSize: AppTheme.fontSubhead,
-                              color: JellyTheme.textSecondary)),
+                      Text(
+                        _wordCountText,
+                        style: TextStyle(
+                          fontSize: AppTheme.fontSubhead,
+                          color: JellyTheme.textSecondary,
+                        ),
+                      ),
                     ],
                   ],
                 ),
@@ -342,7 +379,9 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                   builder: (context, _) {
                     final inShelf = BookshelfService()
                         .getBookshelvesForItem(
-                            'book-${_result.bookUrl}', BookshelfItemType.book)
+                          'book-${_result.bookUrl}',
+                          BookshelfItemType.book,
+                        )
                         .isNotEmpty;
                     return _actionItem(
                       inShelf
@@ -355,11 +394,17 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                   },
                 ),
                 _actionDivider(),
-                _actionItem(Icons.menu_book_rounded, '阅读',
-                    _chapters.isEmpty ? null : () => _openReader(0)),
+                _actionItem(
+                  Icons.menu_book_rounded,
+                  '阅读',
+                  _chapters.isEmpty ? null : () => _openReader(0),
+                ),
                 _actionDivider(),
-                _actionItem(Icons.download_for_offline_rounded, '下载',
-                    _chapters.isEmpty ? null : _downloadBook),
+                _actionItem(
+                  Icons.download_for_offline_rounded,
+                  '下载',
+                  _chapters.isEmpty ? null : _downloadBook,
+                ),
               ],
             ),
           ),
@@ -390,11 +435,14 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
           children: [
             Icon(Icons.favorite, size: 15, color: Colors.pinkAccent),
             SizedBox(width: 5),
-            Text('已收藏',
-                style: TextStyle(
-                    fontSize: AppTheme.fontSubhead,
-                    color: Colors.pinkAccent,
-                    fontWeight: FontWeight.w600)),
+            Text(
+              '已收藏',
+              style: TextStyle(
+                fontSize: AppTheme.fontSubhead,
+                color: Colors.pinkAccent,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
             SizedBox(width: 5),
             Icon(Icons.close_rounded, size: 14, color: Colors.pinkAccent),
           ],
@@ -407,8 +455,10 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
   /// 取不到再回退到已拉取的目录最后一章（都是真实数据，不编造）。
   String get _latestChapterName {
     // 章节名也可能被源站塞进 HTML 片段 → 同样过一遍清洗（单行）
-    final fromInfo = stripHtmlText((_info['lastChapter'] ?? '').toString().trim(),
-        singleLine: true);
+    final fromInfo = stripHtmlText(
+      (_info['lastChapter'] ?? '').toString().trim(),
+      singleLine: true,
+    );
     if (fromInfo.isNotEmpty) return fromInfo;
     if (_chapters.isNotEmpty) {
       return stripHtmlText(_chapters.last.name, singleLine: true);
@@ -471,28 +521,38 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
             : Colors.black.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Text(text,
-          style: TextStyle(
-              fontSize: AppTheme.fontCaption,
-              color: JellyTheme.textSecondary)),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: AppTheme.fontCaption,
+          color: JellyTheme.textSecondary,
+        ),
+      ),
     );
   }
 
   /// 头部信息列里的一行元信息（图标 + 「标签：值」），与「来源」行同款；
   /// 用于把「最新章节 / 更新时间」并进信息列（不再单独占一行）。
-  Widget _metaLine(IconData icon, String label, String value,
-      {VoidCallback? onTap}) {
+  Widget _metaLine(
+    IconData icon,
+    String label,
+    String value, {
+    VoidCallback? onTap,
+  }) {
     final row = Row(
       children: [
         Icon(icon, size: 14, color: JellyTheme.textSecondary),
         const SizedBox(width: 4),
         Expanded(
-          child: Text('$label$value',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  fontSize: AppTheme.fontSubhead,
-                  color: JellyTheme.textSecondary)),
+          child: Text(
+            '$label$value',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: AppTheme.fontSubhead,
+              color: JellyTheme.textSecondary,
+            ),
+          ),
         ),
       ],
     );
@@ -516,8 +576,12 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
   }
 
   /// 动作行之一：图标在上、文字在下，垂直居中，等宽（无胶囊底色）。
-  Widget _actionItem(IconData icon, String label, VoidCallback? onTap,
-      {Color? color}) {
+  Widget _actionItem(
+    IconData icon,
+    String label,
+    VoidCallback? onTap, {
+    Color? color,
+  }) {
     final enabled = onTap != null;
     final c = enabled
         ? (color ?? _titleColor).withValues(alpha: 0.9)
@@ -533,11 +597,14 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
             children: [
               Icon(icon, size: 22, color: c),
               const SizedBox(height: 6),
-              Text(label,
-                  style: TextStyle(
-                      fontSize: AppTheme.fontCaption,
-                      color: c,
-                      fontWeight: FontWeight.w500)),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: AppTheme.fontCaption,
+                  color: c,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
             ],
           ),
         ),
@@ -556,26 +623,34 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
   Widget _introSection(String intro) {
     final long = intro.length > 90 || intro.contains('\n');
     final subtitleStyle = TextStyle(
-        fontSize: AppTheme.fontSubhead,
-        fontWeight: FontWeight.w600,
-        color: _titleColor.withValues(alpha: 0.72));
+      fontSize: AppTheme.fontSubhead,
+      fontWeight: FontWeight.w600,
+      color: _titleColor.withValues(alpha: 0.72),
+    );
     final valueStyle = TextStyle(
-        fontSize: AppTheme.fontFootnote,
-        height: 1.55,
-        color: JellyTheme.textSecondary);
+      fontSize: AppTheme.fontFootnote,
+      height: 1.55,
+      color: JellyTheme.textSecondary,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Icon(Icons.article_outlined,
-                size: 16, color: JellyTheme.textSecondary),
+            Icon(
+              Icons.article_outlined,
+              size: 16,
+              color: JellyTheme.textSecondary,
+            ),
             const SizedBox(width: 6),
-            Text('简介',
-                style: TextStyle(
-                    fontSize: AppTheme.fontBody,
-                    fontWeight: FontWeight.w700,
-                    color: _titleColor)),
+            Text(
+              '简介',
+              style: TextStyle(
+                fontSize: AppTheme.fontBody,
+                fontWeight: FontWeight.w700,
+                color: _titleColor,
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 8),
@@ -601,18 +676,18 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                 Align(
                   alignment: Alignment.centerRight,
                   child: GestureDetector(
-                    onTap: () =>
-                        setState(() => _descExpanded = !_descExpanded),
+                    onTap: () => setState(() => _descExpanded = !_descExpanded),
                     child: Padding(
                       padding: const EdgeInsets.only(top: 6),
                       child: Text(
                         _descExpanded ? '收起' : '展开全部',
                         style: TextStyle(
-                            fontSize: AppTheme.fontSubhead,
-                            color: JellyTheme.primary,
-                            fontWeight: FontWeight.w600,
-                            decoration: TextDecoration.underline,
-                            decorationColor: JellyTheme.primary),
+                          fontSize: AppTheme.fontSubhead,
+                          color: JellyTheme.primary,
+                          fontWeight: FontWeight.w600,
+                          decoration: TextDecoration.underline,
+                          decorationColor: JellyTheme.primary,
+                        ),
                       ),
                     ),
                   ),
@@ -649,16 +724,22 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
         child: _cover.isEmpty
             ? Container(
                 color: JellyTheme.primary.withValues(alpha: 0.1),
-                child: Icon(Icons.menu_book_rounded,
-                    size: 40, color: JellyTheme.primary),
+                child: Icon(
+                  Icons.menu_book_rounded,
+                  size: 40,
+                  color: JellyTheme.primary,
+                ),
               )
             : CachedNetworkImage(
                 imageUrl: _cover,
                 fit: BoxFit.cover,
                 errorWidget: (_, __, ___) => Container(
                   color: JellyTheme.primary.withValues(alpha: 0.1),
-                  child: Icon(Icons.menu_book_rounded,
-                      size: 40, color: JellyTheme.primary),
+                  child: Icon(
+                    Icons.menu_book_rounded,
+                    size: 40,
+                    color: JellyTheme.primary,
+                  ),
                 ),
               ),
       ),
@@ -686,16 +767,18 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
     // ✅ 完整快照：封面 / 源 id / 源名 / 书内 URL 一起存 ✓ ——
     //   收藏页 / 历史页 / 书架点开这本书时据此回到**书源详情页**继续阅读 ✓
     //   （之前只存 id/title/author，点开落到 zlib 详情页 → "收藏了看不了" ✗✓）
-    svc.toggle(Book.fromJson({
-      'id': id,
-      'hash': '',
-      'title': _name,
-      'author': _author,
-      'cover': _cover,
-      'sourceId': _result.source.id,
-      'sourceName': _result.source.name,
-      'bookUrl': _result.bookUrl,
-    }));
+    svc.toggle(
+      Book.fromJson({
+        'id': id,
+        'hash': '',
+        'title': _name,
+        'author': _author,
+        'cover': _cover,
+        'sourceId': _result.source.id,
+        'sourceName': _result.source.name,
+        'bookUrl': _result.bookUrl,
+      }),
+    );
     setState(() {
       _isFavorite = svc.isFavorite(id);
     });
@@ -743,18 +826,24 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('下载全书',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      fontSize: AppTheme.fontHeadline,
-                      fontWeight: FontWeight.w700,
-                      color: _titleColor)),
+              Text(
+                '下载全书',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: AppTheme.fontHeadline,
+                  fontWeight: FontWeight.w700,
+                  color: _titleColor,
+                ),
+              ),
               const SizedBox(height: 6),
-              Text('共 $total 章，保存为本地 TXT，可离线阅读',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      fontSize: AppTheme.fontFootnote,
-                      color: JellyTheme.textSecondary)),
+              Text(
+                '共 $total 章，保存为本地 TXT，可离线阅读',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: AppTheme.fontFootnote,
+                  color: JellyTheme.textSecondary,
+                ),
+              ),
               const SizedBox(height: 14),
               for (final (n, label) in [
                 (100, '前 100 章'),
@@ -768,10 +857,13 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
                     onPressed: () => Navigator.pop(ctx, n),
-                    child: Text(label,
-                        style: const TextStyle(
-                            fontSize: AppTheme.fontBody,
-                            color: Colors.white)),
+                    child: Text(
+                      label,
+                      style: const TextStyle(
+                        fontSize: AppTheme.fontBody,
+                        color: Colors.white,
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 10),
                 ],
@@ -800,11 +892,14 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('正在下载《$_name》',
-                  style: TextStyle(
-                      fontSize: AppTheme.fontBody,
-                      fontWeight: FontWeight.w600,
-                      color: _titleColor)),
+              Text(
+                '正在下载《$_name》',
+                style: TextStyle(
+                  fontSize: AppTheme.fontBody,
+                  fontWeight: FontWeight.w600,
+                  color: _titleColor,
+                ),
+              ),
               const SizedBox(height: 10),
               LinearProgressIndicator(
                 value: count == 0 ? 0 : done / count,
@@ -813,10 +908,13 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                 minHeight: 6,
               ),
               const SizedBox(height: 8),
-              Text('$done / $count 章',
-                  style: TextStyle(
-                      fontSize: AppTheme.fontFootnote,
-                      color: JellyTheme.textSecondary)),
+              Text(
+                '$done / $count 章',
+                style: TextStyle(
+                  fontSize: AppTheme.fontFootnote,
+                  color: JellyTheme.textSecondary,
+                ),
+              ),
               const SizedBox(height: 4),
               TextButton(
                 onPressed: () {
@@ -842,21 +940,23 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
       if (cancel || !mounted) break;
       try {
         final ch = _chapters[i];
-        final r = await BookSourceService.instance
-            .content(_result.source, ch.url);
+        final r = await BookSourceService.instance.content(
+          _result.source,
+          ch.url,
+        );
         if (r.ok) {
           final file = File('${dir.path}/${_safeFileName(ch.name)}.txt');
-          await file.writeAsString(
-              '${ch.name}\n\n${r.content}',
-              flush: true);
+          await file.writeAsString('${ch.name}\n\n${r.content}', flush: true);
         } else {
           // 🔴 `r.ok == false`（服务端返回失败/限流/源站报错）时**既不写文件、
           // 也不算失败** ✗ —— 原来这里**没有 else** ✓ → 这类章同样被 `done++`
           // 计入"已下载" ✓，与上面 catch 路径是同一个病 ✓。
           // 现在一并计入 `failedCount` ✓，提示里会如实说明失败章数 ✓
           failedCount++;
-          debugPrint('[BookSourceDetail] 章节返回失败（第 ${i + 1} 章，'
-              '未写入文件）');
+          debugPrint(
+            '[BookSourceDetail] 章节返回失败（第 ${i + 1} 章，'
+            '未写入文件）',
+          );
         }
       } catch (e) {
         // 🔴 原来是 `catch (_) {}` ✗ —— **失败被完全吞掉** ✓，而紧跟的 `done++`
@@ -874,10 +974,12 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
       _toast('已取消，已下载 $done 章');
     } else {
       // ✅ 失败章数**如实报出来** ✓（原来无论失败多少都只说"下载完成 N/N"✗）
-      _toast(failedCount == 0
-          ? '下载完成：$done / $count 章，保存于 ${dir.path}'
-          : '下载完成：$done / $count 章（其中 $failedCount 章失败），'
-              '保存于 ${dir.path}');
+      _toast(
+        failedCount == 0
+            ? '下载完成：$done / $count 章，保存于 ${dir.path}'
+            : '下载完成：$done / $count 章（其中 $failedCount 章失败），'
+                  '保存于 ${dir.path}',
+      );
       // ✅ 写入书源下载索引（下载记录页「书源下载」区块可见）✓
       await BookSourceDownloadService.instance.add(
         BookSourceDownloadRecord(
@@ -921,10 +1023,13 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
               children: [
                 CircularProgressIndicator(color: JellyTheme.primary),
                 const SizedBox(height: 14),
-                Text('正在获取目录...',
-                    style: TextStyle(
-                        fontSize: AppTheme.fontSubhead,
-                        color: JellyTheme.textSecondary)),
+                Text(
+                  '正在获取目录...',
+                  style: TextStyle(
+                    fontSize: AppTheme.fontSubhead,
+                    color: JellyTheme.textSecondary,
+                  ),
+                ),
               ],
             ),
           ),
@@ -941,14 +1046,20 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.error_outline_rounded,
-                      size: 48, color: Colors.orangeAccent),
+                  const Icon(
+                    Icons.error_outline_rounded,
+                    size: 48,
+                    color: Colors.orangeAccent,
+                  ),
                   const SizedBox(height: 14),
-                  Text(_error!,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                          fontSize: AppTheme.fontSubhead,
-                          color: JellyTheme.textSecondary)),
+                  Text(
+                    _error!,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: AppTheme.fontSubhead,
+                      color: JellyTheme.textSecondary,
+                    ),
+                  ),
                   const SizedBox(height: 16),
                   TextButton.icon(
                     onPressed: _load,
@@ -976,57 +1087,71 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
         sliver: SliverToBoxAdapter(
           child: Container(
-          decoration: BoxDecoration(
-            color: _cardColor,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Column(
-            children: [
-              // ── 头部行：章节目录 + 共N章 + 刷新/排序 ──
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
-                child: Row(
-                  children: [
-                    Text('章节目录',
+            decoration: BoxDecoration(
+              color: _cardColor,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                // ── 头部行：章节目录 + 共N章 + 刷新/排序 ──
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+                  child: Row(
+                    children: [
+                      Text(
+                        '章节目录',
                         style: TextStyle(
-                            fontSize: AppTheme.fontBody,
-                            fontWeight: FontWeight.w700,
-                            color: _titleColor)),
-                    const SizedBox(width: 4),
-                    Icon(Icons.chevron_right_rounded,
-                        size: 16, color: JellyTheme.textSecondary),
-                    const SizedBox(width: 6),
-                    Text('共 ${_chapters.length} 章',
+                          fontSize: AppTheme.fontBody,
+                          fontWeight: FontWeight.w700,
+                          color: _titleColor,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        size: 16,
+                        color: JellyTheme.textSecondary,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '共 ${_chapters.length} 章',
                         style: TextStyle(
-                            fontSize: AppTheme.fontCaption,
-                            color: JellyTheme.textSecondary)),
-                    const Spacer(),
-                    _tocIcon(Icons.refresh_rounded, '刷新', _load),
-                    _tocIcon(Icons.swap_vert_rounded,
+                          fontSize: AppTheme.fontCaption,
+                          color: JellyTheme.textSecondary,
+                        ),
+                      ),
+                      const Spacer(),
+                      _tocIcon(Icons.refresh_rounded, '刷新', _load),
+                      _tocIcon(
+                        Icons.swap_vert_rounded,
                         _descending ? '倒序' : '正序',
-                        () => setState(() => _descending = !_descending)),
-                  ],
+                        () => setState(() => _descending = !_descending),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              // ── 章节列表（行间一条极淡的细分隔线）──
-              ...List.generate(visibleCount, (i) {
-                // 倒序时把显示序号映射回 _chapters 的真实下标，保证点哪章开哪章
-                final real = _descending ? _chapters.length - 1 - i : i;
-                final ch = _chapters[real];
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (i != 0)
-                      Divider(height: 1, thickness: 1, color: _hairline),
-                    InkWell(
-                      onTap: () => _openReader(real),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 12),
-                          child: Text(ch.name,
+                // ── 章节列表（行间一条极淡的细分隔线）──
+                ...List.generate(visibleCount, (i) {
+                  // 倒序时把显示序号映射回 _chapters 的真实下标，保证点哪章开哪章
+                  final real = _descending ? _chapters.length - 1 - i : i;
+                  final ch = _chapters[real];
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (i != 0)
+                        Divider(height: 1, thickness: 1, color: _hairline),
+                      InkWell(
+                        onTap: () => _openReader(real),
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 12,
+                            ),
+                            child: Text(
+                              ch.name,
                               // 章节名**左对齐**（与阅读器里的目录弹层一致 ✓）：
                               // 原来这里居中，和阅读器目录两处观感不一致
                               //（用户 2026-10-13：「书源目录不是说这个不居中吗？」）
@@ -1034,35 +1159,40 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                  fontSize: AppTheme.fontBody,
-                                  color: _titleColor)),
+                                fontSize: AppTheme.fontBody,
+                                color: _titleColor,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                }),
+                if (hasMore)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Center(
+                      child: TextButton.icon(
+                        onPressed: () => setState(
+                          () => _showAllChapters = !_showAllChapters,
+                        ),
+                        icon: Icon(
+                          _showAllChapters
+                              ? Icons.expand_less_rounded
+                              : Icons.expand_more_rounded,
+                          size: 18,
+                        ),
+                        label: Text(
+                          _showAllChapters
+                              ? '收起'
+                              : '显示全部（共 ${_chapters.length} 章）',
                         ),
                       ),
                     ),
-                  ],
-                );
-              }),
-              if (hasMore)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Center(
-                    child: TextButton.icon(
-                      onPressed: () => setState(
-                          () => _showAllChapters = !_showAllChapters),
-                      icon: Icon(
-                        _showAllChapters
-                            ? Icons.expand_less_rounded
-                            : Icons.expand_more_rounded,
-                        size: 18,
-                      ),
-                      label: Text(_showAllChapters
-                          ? '收起'
-                          : '显示全部（共 ${_chapters.length} 章）'),
-                    ),
                   ),
-                ),
-            ],
-          ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1095,8 +1225,9 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
     if (name.isEmpty) return;
 
     // 排除当前源（换源的意义就是换到别的源）
+    // 漫画源不参与小说换源（用户 2026-10-18：书源 / 漫画源分开）
     final others = store.enabled
-        .where((s) => s.id != _result.source.id)
+        .where((s) => s.id != _result.source.id && !s.isComicSource)
         .toList();
     if (others.isEmpty) {
       _toast('没有其它已启用的书源可换');
@@ -1148,10 +1279,14 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
             ChapterAlignment.progressKey(picked.source.id, _name),
             a.index,
           );
-        } catch (_) {/* 写进度失败不影响换源本身 */}
-        _toast(a.matchedByTitle
-            ? '已换源并对齐到第 ${a.index + 1} 章'
-            : '已换源，按原进度定位到第 ${a.index + 1} 章');
+        } catch (_) {
+          /* 写进度失败不影响换源本身 */
+        }
+        _toast(
+          a.matchedByTitle
+              ? '已换源并对齐到第 ${a.index + 1} 章'
+              : '已换源，按原进度定位到第 ${a.index + 1} 章',
+        );
       }
     }
   }
@@ -1169,7 +1304,9 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
         final v = p.getInt(ChapterAlignment.progressKey(sourceId, n));
         if (v != null) return v;
       }
-    } catch (_) {/* ignore */}
+    } catch (_) {
+      /* ignore */
+    }
     return null;
   }
 }

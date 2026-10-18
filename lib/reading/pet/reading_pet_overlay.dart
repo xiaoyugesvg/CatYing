@@ -172,10 +172,14 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                 ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.menu_book_rounded,
-                      color: Colors.white70),
-                  title: const Text('宠物中心 / 图鉴 / 换装',
-                      style: TextStyle(color: Colors.white)),
+                  leading: const Icon(
+                    Icons.menu_book_rounded,
+                    color: Colors.white70,
+                  ),
+                  title: const Text(
+                    '宠物中心 / 图鉴 / 换装',
+                    style: TextStyle(color: Colors.white),
+                  ),
                   onTap: () {
                     Get.back();
                     Get.to(() => const PetCenterPage());
@@ -184,12 +188,18 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                 ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.visibility_off_rounded,
-                      color: Colors.white70),
-                  title: const Text('隐藏悬浮桌宠',
-                      style: TextStyle(color: Colors.white)),
-                  subtitle: const Text('可在「我的 → 桌宠」重新打开',
-                      style: TextStyle(color: Colors.white38, fontSize: 11)),
+                  leading: const Icon(
+                    Icons.visibility_off_rounded,
+                    color: Colors.white70,
+                  ),
+                  title: const Text(
+                    '隐藏悬浮桌宠',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                  subtitle: const Text(
+                    '可在「我的 → 桌宠」重新打开',
+                    style: TextStyle(color: Colors.white38, fontSize: 11),
+                  ),
                   onTap: () {
                     Get.back();
                     s.setEnabled(false);
@@ -216,8 +226,14 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
           builder: (context, constraints) {
             // 尺寸可在「显示设置」里滑动/输入调整（72~160）
             final petSize = _pet.size;
-            final maxX = (constraints.maxWidth - petSize).clamp(0.0, double.infinity);
-            final maxY = (constraints.maxHeight - petSize).clamp(0.0, double.infinity);
+            final maxX = (constraints.maxWidth - petSize).clamp(
+              0.0,
+              double.infinity,
+            );
+            final maxY = (constraints.maxHeight - petSize).clamp(
+              0.0,
+              double.infinity,
+            );
             final left = (_pet.posX * maxX).clamp(0.0, maxX);
             final top = (_pet.posY * maxY).clamp(0.0, maxY);
             // 贴边状态：posX 吸附到 0 / 1 时，宠物「扒」在屏幕边缘
@@ -235,8 +251,9 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                   onLongPress: _openMenu,
                   onPanStart: (_) => setState(() => _dragging = true),
                   onPanUpdate: (d) {
-                    final nx = (left + d.delta.dx) / maxX;
-                    final ny = (top + d.delta.dy) / maxY;
+                    // maxX / maxY 在极窄屏（或分屏）可能为 0 ⇒ 别除零
+                    final nx = maxX <= 0 ? 0.0 : (left + d.delta.dx) / maxX;
+                    final ny = maxY <= 0 ? 0.0 : (top + d.delta.dy) / maxY;
                     _pet.setPosition(nx, ny);
                   },
                   onPanEnd: (_) {
@@ -261,16 +278,17 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                         duration: const Duration(milliseconds: 140),
                         curve: Curves.easeOutBack,
                         // 自定义 PNG / GIF 皮肤优先；否则用内置插画 / 矢量
-                        child: _pet.isCustomPet &&
-                                _pet.customPetPath.isNotEmpty
+                        child: _pet.hasCustomPet
                             ? CustomPetImage(
                                 path: _pet.customPetPath,
                                 size: petSize,
                                 bob: sin(_anim.value * 2 * pi) * 1.6,
+                                outfits: _pet.equippedSlots,
                               )
                             : PetView(
                                 species: _pet.species,
                                 outfit: _pet.equippedOutfit,
+                                outfits: _pet.equippedOutfitsByName,
                                 t: _anim.value * 4,
                                 size: petSize,
                                 mood: _pet.mood,
@@ -283,8 +301,10 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                 Transform.translate(
                   offset: const Offset(0, -6),
                   child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.55),
                       borderRadius: BorderRadius.circular(10),
@@ -308,8 +328,9 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                 offset: Offset(dockLeft ? -petSize * 0.14 : petSize * 0.14, 0),
                 child: Transform.rotate(
                   angle: dockLeft ? 0.10 : -0.10,
-                  alignment:
-                      dockLeft ? Alignment.centerLeft : Alignment.centerRight,
+                  alignment: dockLeft
+                      ? Alignment.centerLeft
+                      : Alignment.centerRight,
                   child: petBody,
                 ),
               );

@@ -84,7 +84,8 @@ class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
   Future<void> _bootstrap() async {
     await _store.load();
     if (!mounted) return;
-    final id = widget.initialSubscriptionId ??
+    final id =
+        widget.initialSubscriptionId ??
         (_store.items.isNotEmpty ? _store.items.first.id : null);
     setState(() => _selectedId = id);
     if (id != null) await _loadFor(id);
@@ -113,9 +114,7 @@ class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
       setState(() {
         _loading = false;
         _cache[sub.url] = list ?? const [];
-        _error = (list == null || list.isEmpty)
-            ? '这个地址不是有效的小程序市场清单'
-            : null;
+        _error = (list == null || list.isEmpty) ? '这个地址不是有效的小程序市场清单' : null;
       });
     } catch (e) {
       if (!mounted || seq != _loadSeq) return;
@@ -252,18 +251,17 @@ class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
   }
 
   InputDecoration _inputDeco(String hint) => InputDecoration(
-        hintText: hint,
-        hintStyle: TextStyle(color: AppTheme.textTertiary, fontSize: 12.5),
-        isDense: true,
-        filled: true,
-        fillColor: AppTheme.backgroundTertiary,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-      );
+    hintText: hint,
+    hintStyle: TextStyle(color: AppTheme.textTertiary, fontSize: 12.5),
+    isDense: true,
+    filled: true,
+    fillColor: AppTheme.backgroundTertiary,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide.none,
+    ),
+  );
 
   // ── UI ───────────────────────────────────────────────────────
 
@@ -275,8 +273,11 @@ class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
         backgroundColor: AppTheme.backgroundPrimary,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new,
-              size: 20, color: AppTheme.textPrimary),
+          icon: Icon(
+            Icons.arrow_back_ios_new,
+            size: 20,
+            color: AppTheme.textPrimary,
+          ),
           onPressed: () => Navigator.maybePop(context),
         ),
         centerTitle: true,
@@ -322,9 +323,7 @@ class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
           IconButton(
             tooltip: '刷新',
             icon: Icon(Icons.refresh_rounded, color: AppTheme.textSecondary),
-            onPressed: _selected == null
-                ? null
-                : () => _loadFor(_selected!.id),
+            onPressed: _selected == null ? null : () => _loadFor(_selected!.id),
           ),
           IconButton(
             tooltip: '添加订阅',
@@ -377,8 +376,11 @@ class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
                 color: AppTheme.accentColor.withValues(alpha: 0.12),
                 shape: BoxShape.circle,
               ),
-              child: Icon(Icons.storefront_rounded,
-                  size: 30, color: AppTheme.accentOnSurface),
+              child: Icon(
+                Icons.storefront_rounded,
+                size: 30,
+                color: AppTheme.accentOnSurface,
+              ),
             ),
             const SizedBox(height: 14),
             Text(
@@ -407,8 +409,10 @@ class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
               style: FilledButton.styleFrom(
                 backgroundColor: AppTheme.accentColor,
                 foregroundColor: Colors.white,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 22,
+                  vertical: 12,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
                 ),
@@ -433,8 +437,10 @@ class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
             return GestureDetector(
               onTap: () => _showSubscriptionDialog(),
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: AppTheme.backgroundTertiary,
                   borderRadius: BorderRadius.circular(999),
@@ -443,8 +449,11 @@ class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.add_rounded,
-                        size: 16, color: AppTheme.textSecondary),
+                    Icon(
+                      Icons.add_rounded,
+                      size: 16,
+                      color: AppTheme.textSecondary,
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       '订阅',
@@ -466,17 +475,14 @@ class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
             onLongPress: () => _showSubscriptionDialog(existing: sub),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 180),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
                 color: selected
                     ? AppTheme.accentColor
                     : AppTheme.backgroundTertiary,
                 borderRadius: BorderRadius.circular(999),
                 border: Border.all(
-                  color: selected
-                      ? Colors.transparent
-                      : AppTheme.borderLight,
+                  color: selected ? Colors.transparent : AppTheme.borderLight,
                   width: 0.6,
                 ),
               ),
@@ -494,8 +500,7 @@ class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
                     style: TextStyle(
                       color: selected ? Colors.white : AppTheme.textSecondary,
                       fontSize: 12.5,
-                      fontWeight:
-                          selected ? FontWeight.w700 : FontWeight.w600,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
                     ),
                   ),
                 ],
@@ -517,8 +522,11 @@ class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.cloud_off_rounded,
-                  size: 40, color: AppTheme.textTertiary),
+              Icon(
+                Icons.cloud_off_rounded,
+                size: 40,
+                color: AppTheme.textTertiary,
+              ),
               const SizedBox(height: 10),
               Text(
                 err,
@@ -558,16 +566,20 @@ class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
   }
 
   IconData _viewIcon(_MarketView v) => switch (v) {
-        _MarketView.list => Icons.view_list_rounded,
-        _MarketView.two => Icons.grid_view_rounded,
-        _MarketView.three => Icons.apps_rounded,
-        _MarketView.four => Icons.grid_on_rounded,
-      };
+    _MarketView.list => Icons.view_list_rounded,
+    _MarketView.two => Icons.grid_view_rounded,
+    _MarketView.three => Icons.apps_rounded,
+    _MarketView.four => Icons.grid_on_rounded,
+  };
 
   Widget _listBody(List<MiniAppMarketEntry> entries) {
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(
-          AppTheme.spacingMD, 4, AppTheme.spacingMD, 40),
+        AppTheme.spacingMD,
+        4,
+        AppTheme.spacingMD,
+        40,
+      ),
       itemCount: entries.length,
       separatorBuilder: (_, _) => const SizedBox(height: 10),
       itemBuilder: (_, i) => _tile(entries[i]),
@@ -578,7 +590,11 @@ class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
     final cols = _view.columns;
     return GridView.builder(
       padding: const EdgeInsets.fromLTRB(
-          AppTheme.spacingMD, 4, AppTheme.spacingMD, 40),
+        AppTheme.spacingMD,
+        4,
+        AppTheme.spacingMD,
+        40,
+      ),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: cols,
         mainAxisSpacing: 10,
@@ -609,7 +625,8 @@ class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
           border: Border.all(color: AppTheme.glassBorderSoft, width: 0.6),
         ),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          // 卡片里图标、名称、版本信息统一居中（用户 2026-10-18）
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Expanded(
               child: Container(
@@ -668,28 +685,36 @@ class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
               ),
             ),
             SizedBox(height: compact ? 5 : 7),
-            Text(
-              e.name,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: compact ? 10.5 : 12,
-                height: 1.2,
-                fontWeight: FontWeight.w600,
+            SizedBox(
+              width: double.infinity,
+              child: Text(
+                e.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: compact ? 10.5 : 12,
+                  height: 1.2,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
             const SizedBox(height: 2),
-            Text(
-              [
-                if (e.version.isNotEmpty) 'v${e.version}',
-                if (e.author.isNotEmpty) e.author,
-              ].join(' · '),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: AppTheme.textTertiary,
-                fontSize: compact ? 9 : 10,
+            SizedBox(
+              width: double.infinity,
+              child: Text(
+                [
+                  if (e.version.isNotEmpty) 'v${e.version}',
+                  if (e.author.isNotEmpty) e.author,
+                ].join(' · '),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: compact ? 9 : 10,
+                ),
               ),
             ),
             SizedBox(height: compact ? 4 : 7),

@@ -123,20 +123,26 @@ class SourceManager extends ChangeNotifier {
       }
     }
 
-    // Legado 漫画源（type=2）：直接复用书源仓库里的规则源，
+    // Legado 漫画源：直接复用书源仓库里的规则源，
     // 让 @js / JSONPath / @Header / ## / Base64-zlib 这套规则引擎对漫画生效。
     // 书源仓库在 main() 里先于本 init 完成加载。
+    //
+    // ⚠️ 不能只认 `bookSourceType == 2`（用户 2026-10-18）：
+    //   很多漫画脚本没写类型，书源阅读器靠正文规则里的图片地址自动识别；
+    //   这里复用同一判据 [BookSource.isComicSource]，保证"书源能看 → 漫画源也有"。
     try {
       for (final bs in BookSourceStore.instance.all) {
-        if (bs.type != '2') continue;
+        if (!bs.isComicSource) continue;
         try {
           _register(LegadoComicMangaSource.fromRaw(bs.raw));
         } catch (e) {
           _log('Legado 漫画源注册失败: ${bs.name} -> $e');
         }
       }
-      _log('已注册 Legado 漫画源: '
-          '${_sources.values.where((s) => s.id.startsWith('legado:')).length}');
+      _log(
+        '已注册 Legado 漫画源: '
+        '${_sources.values.where((s) => s.id.startsWith('legado:')).length}',
+      );
     } catch (e) {
       _log('读取书源仓库失败（Legado 漫画源未注册）: $e');
     }
@@ -247,8 +253,9 @@ class SourceManager extends ChangeNotifier {
     // 名称去重：同名源自动追加（2）（3）…（用户 2026-10-17 要求）
     final existingNames = _sources.values.map((s) => s.name).toSet();
     final unique = uniqueSourceName(source.name, existingNames);
-    _sources[source.id] =
-        unique == source.name ? source : _RenamedSource(source, unique);
+    _sources[source.id] = unique == source.name
+        ? source
+        : _RenamedSource(source, unique);
   }
 
   /// 切换当前源
@@ -447,16 +454,14 @@ class _RenamedSource extends MangaSource {
   Future<MangasPage> getCategoryList(
     List<FilterGroup> groups, {
     int page = 0,
-  }) =>
-      _inner.getCategoryList(groups, page: page);
+  }) => _inner.getCategoryList(groups, page: page);
 
   @override
   Future<MangasPage> search(
     String query, {
     int page = 0,
     FilterList filters = const FilterList(),
-  }) =>
-      _inner.search(query, page: page, filters: filters);
+  }) => _inner.search(query, page: page, filters: filters);
 
   @override
   Future<MangasPage> getPopular({int page = 0}) =>
@@ -470,17 +475,16 @@ class _RenamedSource extends MangaSource {
   FilterList getFilterList() => _inner.getFilterList();
 
   @override
-  Future<CManga> getMangaDetails(CManga manga) =>
-      _inner.getMangaDetails(manga);
+  Future<CManga> getMangaDetails(CManga manga) => _inner.getMangaDetails(manga);
 
   @override
   Future<List<CChapter>> getChapterList(CManga manga) =>
       _inner.getChapterList(manga);
 
   @override
-  Future<({CManga manga, List<CChapter> chapters})>
-      getMangaDetailsAndChapters(CManga manga) =>
-          _inner.getMangaDetailsAndChapters(manga);
+  Future<({CManga manga, List<CChapter> chapters})> getMangaDetailsAndChapters(
+    CManga manga,
+  ) => _inner.getMangaDetailsAndChapters(manga);
 
   @override
   Future<List<String>> getChapterImages(CManga manga, CChapter chapter) =>
@@ -508,4 +512,3 @@ class _RenamedSource extends MangaSource {
   @override
   set needsMagic(bool value) => _inner.needsMagic = value;
 }
-

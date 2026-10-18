@@ -7,6 +7,7 @@ import 'dart:collection';
 import 'package:html/parser.dart' as html_parser;
 
 import '../../../services/app_log.dart';
+import '../../utils/html_text.dart';
 import '../analyze/analyze_rule.dart';
 import '../model/book_source.dart';
 import '../model/search_book.dart';
@@ -141,7 +142,9 @@ class BookList {
       final ruleAuthor = analyzeRule.splitSourceRule(authorRule ?? '');
       final ruleCoverUrl = analyzeRule.splitSourceRule(coverUrlRule ?? '');
       final ruleKind = analyzeRule.splitSourceRule(kindRule ?? '');
-      final ruleLastChapter = analyzeRule.splitSourceRule(lastChapterRule ?? '');
+      final ruleLastChapter = analyzeRule.splitSourceRule(
+        lastChapterRule ?? '',
+      );
 
       for (final element in elements) {
         analyzeRule.setContent(element);
@@ -158,8 +161,9 @@ class BookList {
           final ck = analyzeRule.getString(checkKeyWordRule);
           if (ck.isNotEmpty && !ck.contains(searchKey)) {
             AppLog.instance.d(
-                '[书源] checkKeyWord 过滤：源=${bookSource.bookSourceName} '
-                '「$ck」不含「$searchKey」');
+              '[书源] checkKeyWord 过滤：源=${bookSource.bookSourceName} '
+              '「$ck」不含「$searchKey」',
+            );
             continue;
           }
         }
@@ -247,7 +251,9 @@ class BookList {
 
     try {
       if (ruleLastChapter.isNotEmpty) {
-        lastChapter = analyzeRule.getStringFromRules(ruleLastChapter);
+        lastChapter = cleanChapterTitle(
+          analyzeRule.getStringFromRules(ruleLastChapter),
+        );
       }
     } catch (_) {}
 
@@ -306,7 +312,8 @@ class BookList {
         .trim();
     // 超长防御：正常书名不会超过 50 字，超长多为解析到整段文本。
     if (result.length > 80) result = result.substring(0, 80);
-    return result;
+    // 清站名 / 导航词 / 装饰符号（用户 2026-10-18）。
+    return cleanSourceTitle(result);
   }
 
   /// 书名格式化：过滤分类导航/广告/品牌词，剥离方括号与分隔符。
@@ -337,7 +344,9 @@ class BookList {
     }
 
     // 过滤 URL 格式文本
-    if (name.contains('http://') || name.contains('https://') || name.contains('www.')) {
+    if (name.contains('http://') ||
+        name.contains('https://') ||
+        name.contains('www.')) {
       return '';
     }
 
@@ -415,7 +424,9 @@ class BookList {
 
     // 过滤常见短分类词（如 玄幻、言情、都市 等分类导航标签）
     if (name.length <= 4) {
-      if (RegExp(r'^玄幻$|^奇幻$|^武侠$|^仙侠$|^都市$|^现实$|^历史$|^军事$|^悬疑$|^游戏$|^体育$|^科幻$|^轻小说$|^言情$|^同人$|^短篇$|^漫画$|^动漫$|^绘本$|^读物$|^文学$|^青春$|^校园$|^甜宠$|^古言$|^宫斗$|^穿越$|^重生$|^修真$|^洪荒$|^种田$|^系统$|^快穿$|^耽美$|^百合$|^架空$|^职场$|^娱乐$|^明星$|^影视$|^经典$|^畅销$|^新书$|^热门$|^完结$|^连载$|^全本$|^免费$|^精品$|^精选$').hasMatch(name)) {
+      if (RegExp(
+        r'^玄幻$|^奇幻$|^武侠$|^仙侠$|^都市$|^现实$|^历史$|^军事$|^悬疑$|^游戏$|^体育$|^科幻$|^轻小说$|^言情$|^同人$|^短篇$|^漫画$|^动漫$|^绘本$|^读物$|^文学$|^青春$|^校园$|^甜宠$|^古言$|^宫斗$|^穿越$|^重生$|^修真$|^洪荒$|^种田$|^系统$|^快穿$|^耽美$|^百合$|^架空$|^职场$|^娱乐$|^明星$|^影视$|^经典$|^畅销$|^新书$|^热门$|^完结$|^连载$|^全本$|^免费$|^精品$|^精选$',
+      ).hasMatch(name)) {
         return '';
       }
     }
@@ -439,7 +450,7 @@ class BookList {
       return '';
     }
 
-    return name
+    final cleaned = name
         // 去除各类方括号及其内容：【】、[]、（）()、{}、<>、《》
         .replaceAll(
           RegExp(r'[【\[（\(｛{<《][^】\]）\)｝}>》]*[】\]）\)｝}>》]'),
@@ -449,12 +460,13 @@ class BookList {
         .replaceAll(RegExp(r'^\s*[-_—–|/\\]+\s*'), '')
         .replaceAll(RegExp(r'\s*[-_—–|/\\]+\s*$'), '')
         .trim();
+    return cleanSourceTitle(cleaned);
   }
 
   /// 作者名格式化：剥离"作者："前缀、首尾分隔符。
   static String formatBookAuthor(String author) {
     if (author.isEmpty) return author;
-    return author
+    final cleaned = author
         // 去除 "作者:" / "作者：" 前缀
         .replaceAll(RegExp(r'^\s*作\s*者\s*[:：]\s*'), '')
         // 去除开头可能残留的单个冒号
@@ -463,6 +475,7 @@ class BookList {
         .replaceAll(RegExp(r'^\s*[-_—–|/\\]+\s*'), '')
         .replaceAll(RegExp(r'\s*[-_—–|/\\]+\s*$'), '')
         .trim();
+    return cleanSourceTitle(cleaned);
   }
 
   /// 通用书籍列表解析：当书源规则未配置或失败时，从 HTML <a> 标签提取候选。
@@ -485,9 +498,11 @@ class BookList {
 
       // 2. 过滤 URL 路径为 / 或空的链接（首页链接）
       try {
-        final uri = Uri.parse(href.startsWith('http')
-            ? href
-            : Uri.parse(baseUrl).resolve(href).toString());
+        final uri = Uri.parse(
+          href.startsWith('http')
+              ? href
+              : Uri.parse(baseUrl).resolve(href).toString(),
+        );
         if (uri.path == '/' || uri.path.isEmpty) continue;
       } catch (_) {}
 
@@ -511,8 +526,7 @@ class BookList {
           originalText == '<') {
         continue;
       }
-      if (originalText.contains('下一页') ||
-          originalText.contains('上一页')) {
+      if (originalText.contains('下一页') || originalText.contains('上一页')) {
         continue;
       }
 
@@ -529,7 +543,8 @@ class BookList {
       // 回退：如果 <a> 内没有 img，检查父元素中的 img（img 与 a 为兄弟节点的情况）
       img ??= a.parent?.querySelector('img');
 
-      var cover = img?.attributes['src'] ??
+      var cover =
+          img?.attributes['src'] ??
           img?.attributes['data-src'] ??
           img?.attributes['data-original'] ??
           img?.attributes['lazy-src'] ??
@@ -543,8 +558,13 @@ class BookList {
         final srcset = img?.attributes['srcset'] ?? '';
         if (srcset.isNotEmpty) {
           // 取 srcset 中第一个 URL（格式："url1 1x, url2 2x"）
-          final firstSrc =
-              srcset.split(',').first.trim().split(' ').first.trim();
+          final firstSrc = srcset
+              .split(',')
+              .first
+              .trim()
+              .split(' ')
+              .first
+              .trim();
           if (firstSrc.isNotEmpty) {
             cover = firstSrc;
           }
@@ -565,14 +585,16 @@ class BookList {
         link = _getAbsoluteUrl(link, baseUrl);
       }
 
-      books.add(SearchBook(
-        bookUrl: link,
-        name: text,
-        coverUrl: cover,
-        bookSourceUrl: bookSource.bookSourceUrl,
-        bookSourceName: bookSource.bookSourceName,
-        type: bookSource.bookSourceType,
-      ));
+      books.add(
+        SearchBook(
+          bookUrl: link,
+          name: text,
+          coverUrl: cover,
+          bookSourceUrl: bookSource.bookSourceUrl,
+          bookSourceName: bookSource.bookSourceName,
+          type: bookSource.bookSourceType,
+        ),
+      );
     }
 
     return books;
@@ -673,7 +695,9 @@ class BookList {
 
     // 过滤常见短分类词（如 玄幻、言情、都市 等分类导航标签）
     if (text.length <= 4) {
-      if (RegExp(r'^玄幻$|^奇幻$|^武侠$|^仙侠$|^都市$|^现实$|^历史$|^军事$|^悬疑$|^游戏$|^体育$|^科幻$|^轻小说$|^言情$|^武侠$|^同人$|^短篇$|^漫画$|^动漫$|^绘本$|^读物$|^文学$|^青春$|^校园$|^甜宠$|^古言$|^宫斗$|^穿越$|^重生$|^修真$|^洪荒$|^种田$|^系统$|^快穿$|^耽美$|^百合$|^架空$|^职场$|^娱乐$|^明星$|^影视$|^经典$|^畅销$|^新书$|^热门$|^完结$|^连载$|^全本$|^免费$|^精品$|^精选$').hasMatch(text)) {
+      if (RegExp(
+        r'^玄幻$|^奇幻$|^武侠$|^仙侠$|^都市$|^现实$|^历史$|^军事$|^悬疑$|^游戏$|^体育$|^科幻$|^轻小说$|^言情$|^武侠$|^同人$|^短篇$|^漫画$|^动漫$|^绘本$|^读物$|^文学$|^青春$|^校园$|^甜宠$|^古言$|^宫斗$|^穿越$|^重生$|^修真$|^洪荒$|^种田$|^系统$|^快穿$|^耽美$|^百合$|^架空$|^职场$|^娱乐$|^明星$|^影视$|^经典$|^畅销$|^新书$|^热门$|^完结$|^连载$|^全本$|^免费$|^精品$|^精选$',
+      ).hasMatch(text)) {
         return true;
       }
     }
@@ -721,7 +745,8 @@ class BookList {
     final doc = html_parser.parse(body);
     final title = doc.querySelector('title')?.text ?? '';
     final t = title.toLowerCase();
-    final loginInTitle = t.contains('登录') ||
+    final loginInTitle =
+        t.contains('登录') ||
         t.contains('登陆') ||
         t.contains('log in') ||
         t.contains('sign in') ||
@@ -731,8 +756,9 @@ class BookList {
 
     final hasPassword =
         doc.querySelector('input[type="password"]') != null ||
-            doc.querySelector('input[type=password]') != null;
-    final hasCaptcha = body.contains('验证码') ||
+        doc.querySelector('input[type=password]') != null;
+    final hasCaptcha =
+        body.contains('验证码') ||
         body.toLowerCase().contains('captcha') ||
         doc.querySelector('img[src*=captcha]') != null ||
         doc.querySelector('img[src*=code]') != null;

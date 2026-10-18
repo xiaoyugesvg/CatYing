@@ -37,10 +37,14 @@ class MeAccountQuickEntries extends StatelessWidget {
     required this.onNotes,
     required this.onJourney,
     required this.onPlan,
+    this.onBand = false,
   });
 
   /// 是否深色模式（决定圆底用"主题色 22%"还是"主题色 15%"）。
   final bool isDark;
+
+  /// 是否放在深色头带上（放到灰带上时圆底与图标改用白色系）。
+  final bool onBand;
 
   /// 「我的笔记」→ 笔记与阅读经历页
   final VoidCallback onNotes;
@@ -78,7 +82,10 @@ class MeAccountQuickEntries extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final primary = JellyTheme.primary;
-    final bg = primary.withValues(alpha: isDark ? 0.22 : 0.15);
+    final bg = onBand
+        ? Colors.white.withValues(alpha: 0.14)
+        : primary.withValues(alpha: isDark ? 0.22 : 0.15);
+    final fg = onBand ? Colors.white : primary;
     final callbacks = [onNotes, onJourney, onPlan];
 
     // 量出可用宽度：够 128 就满尺寸，不够就等比缩小（绝不溢出）
@@ -101,7 +108,7 @@ class MeAccountQuickEntries extends StatelessWidget {
                 icon: entries[i].icon,
                 tooltip: entries[i].tooltip,
                 bg: bg,
-                fg: primary,
+                fg: fg,
                 onTap: callbacks[i],
                 size: size,
                 iconSize: iconSize,
@@ -135,7 +142,9 @@ class MeAccountQuickEntries extends StatelessWidget {
           child: SizedBox(
             width: size,
             height: size,
-            child: Center(child: Icon(icon, size: iconSize, color: fg)),
+            child: Center(
+              child: Icon(icon, size: iconSize, color: fg),
+            ),
           ),
         ),
       ),

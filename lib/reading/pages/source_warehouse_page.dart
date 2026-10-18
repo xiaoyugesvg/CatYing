@@ -88,19 +88,20 @@ class _WarehouseTabState extends State<_WarehouseTab>
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
 
   List<SourceSubscription> get _subs => _subStore.items.where((s) {
-        return widget.comic ? s.kind.feedsComic : s.kind.feedsNovel;
-      }).toList();
+    return widget.comic ? s.kind.feedsComic : s.kind.feedsNovel;
+  }).toList();
 
+  // 判据统一用 isComicSource（兼容没写 bookSourceType 的漫画脚本），
+  // 保证「漫画仓」与「书源仓」不混（用户 2026-10-18）。
   List<BookSource> get _sources => _sourceStore.all
-      .where((s) => widget.comic ? s.type == '2' : s.type != '2')
+      .where((s) => widget.comic ? s.isComicSource : !s.isComicSource)
       .toList();
 
   /// Venera JS 源（直接跑 ComicSource 脚本，不进 BookSourceStore）
   List<MangaSource> get _veneraSources => widget.comic
-      ? SourceManager()
-          .sources
-          .where((s) => s.id.startsWith('venera:'))
-          .toList()
+      ? SourceManager().sources
+            .where((s) => s.id.startsWith('venera:'))
+            .toList()
       : const [];
 
   Map<String, List<BookSource>> get _grouped {
@@ -113,7 +114,8 @@ class _WarehouseTabState extends State<_WarehouseTab>
       list.sort((a, b) => a.name.compareTo(b.name));
     }
     return Map.fromEntries(
-        map.entries.toList()..sort((a, b) => a.key.compareTo(b.key)));
+      map.entries.toList()..sort((a, b) => a.key.compareTo(b.key)),
+    );
   }
 
   Future<void> _update(SourceSubscription s) async {
@@ -188,10 +190,12 @@ class _WarehouseTabState extends State<_WarehouseTab>
                     isDense: true,
                   ),
                   items: SourceSubscriptionKind.values
-                      .map((k) => DropdownMenuItem(
-                            value: k,
-                            child: Text(k.label),
-                          ))
+                      .map(
+                        (k) => DropdownMenuItem(
+                          value: k,
+                          child: Text(k.label),
+                        ),
+                      )
                       .toList(),
                   onChanged: (v) => setDlg(() => kind = v ?? kind),
                 ),
@@ -278,11 +282,13 @@ class _WarehouseTabState extends State<_WarehouseTab>
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(msg),
-        duration: const Duration(seconds: 3),
-        behavior: SnackBarBehavior.floating,
-      ));
+      ..showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          duration: const Duration(seconds: 3),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
   }
 
   @override
@@ -413,9 +419,11 @@ class _WarehouseTabState extends State<_WarehouseTab>
         // ── 已导入源（按分组）──────────────────────────────────
         _sectionHeader('已导入源（$totalSources）'),
         if (totalSources == 0)
-          _hint(widget.comic
-              ? '还没有漫画源。更新上面的订阅，或从书源仓库导入。'
-              : '还没有小说源。更新上面的订阅，或从书源仓库导入。')
+          _hint(
+            widget.comic
+                ? '还没有漫画源。更新上面的订阅，或从书源仓库导入。'
+                : '还没有小说源。更新上面的订阅，或从书源仓库导入。',
+          )
         else
           for (final e in grouped.entries) ...[
             Padding(
@@ -436,7 +444,9 @@ class _WarehouseTabState extends State<_WarehouseTab>
                   Text(
                     '${e.value.length}',
                     style: TextStyle(
-                        fontSize: 12, color: JellyTheme.textSecondary),
+                      fontSize: 12,
+                      color: JellyTheme.textSecondary,
+                    ),
                   ),
                 ],
               ),
@@ -454,8 +464,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
                         height: 1,
                         indent: 14,
                         endIndent: 14,
-                        color: JellyTheme.textSecondary
-                            .withValues(alpha: 0.12),
+                        color: JellyTheme.textSecondary.withValues(alpha: 0.12),
                       ),
                     _SourceRow(
                       source: e.value[i],
@@ -490,21 +499,24 @@ class _WarehouseTabState extends State<_WarehouseTab>
                     ),
                   SwitchListTile(
                     dense: true,
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 14),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14),
                     title: Text(
                       _veneraSources[i].name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.w600),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     subtitle: Text(
                       'JS ComicSource · ${_veneraSources[i].id}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                          fontSize: 11, color: JellyTheme.textSecondary),
+                        fontSize: 11,
+                        color: JellyTheme.textSecondary,
+                      ),
                     ),
                     value: SourceManager().isEnabled(_veneraSources[i].id),
                     onChanged: (v) async {
@@ -522,33 +534,32 @@ class _WarehouseTabState extends State<_WarehouseTab>
   }
 
   Widget _sectionHeader(String text, {Widget? action}) => Padding(
-        padding: const EdgeInsets.fromLTRB(4, 8, 0, 8),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                text,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color:
-                      _isDark ? Colors.white : JellyTheme.textPrimaryLight,
-                ),
-              ),
+    padding: const EdgeInsets.fromLTRB(4, 8, 0, 8),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(
+            text,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: _isDark ? Colors.white : JellyTheme.textPrimaryLight,
             ),
-            if (action != null) action,
-          ],
+          ),
         ),
-      );
+        if (action != null) action,
+      ],
+    ),
+  );
 
   Widget _hint(String text) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 8),
-        child: Text(
-          text,
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 13, color: JellyTheme.textSecondary),
-        ),
-      );
+    padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 8),
+    child: Text(
+      text,
+      textAlign: TextAlign.center,
+      style: TextStyle(fontSize: 13, color: JellyTheme.textSecondary),
+    ),
+  );
 }
 
 class _SubCard extends StatelessWidget {
@@ -621,9 +632,10 @@ class _SubCard extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: label),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: label,
+                            ),
                           ),
                         ),
                         if (sub.builtin) _tag('内置', JellyTheme.primary),
@@ -632,10 +644,10 @@ class _SubCard extends StatelessWidget {
                           sub.kind == SourceSubscriptionKind.novel
                               ? '小说'
                               : sub.kind == SourceSubscriptionKind.comic
-                                  ? '漫画'
-                                  : sub.kind == SourceSubscriptionKind.legado
-                                      ? '综合'
-                                      : 'Venera',
+                              ? '漫画'
+                              : sub.kind == SourceSubscriptionKind.legado
+                              ? '综合'
+                              : 'Venera',
                           sub.kind == SourceSubscriptionKind.venera
                               ? Colors.redAccent
                               : Colors.blueAccent,
@@ -682,8 +694,11 @@ class _SubCard extends StatelessWidget {
                 ),
               IconButton(
                 tooltip: '删除',
-                icon: const Icon(Icons.delete_outline_rounded,
-                    size: 20, color: Colors.redAccent),
+                icon: const Icon(
+                  Icons.delete_outline_rounded,
+                  size: 20,
+                  color: Colors.redAccent,
+                ),
                 onPressed: onDelete,
               ),
             ],
@@ -693,8 +708,10 @@ class _SubCard extends StatelessWidget {
               padding: const EdgeInsets.only(left: 46, top: 2),
               child: Text(
                 sub.lastError,
-                style:
-                    const TextStyle(fontSize: 12, color: Colors.orangeAccent),
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Colors.orangeAccent,
+                ),
               ),
             ),
         ],
@@ -703,18 +720,17 @@ class _SubCard extends StatelessWidget {
   }
 
   Widget _tag(String text, Color color) => Container(
-        margin: const EdgeInsets.only(left: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.14),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Text(
-          text,
-          style: TextStyle(
-              fontSize: 10, color: color, fontWeight: FontWeight.w600),
-        ),
-      );
+    margin: const EdgeInsets.only(left: 4),
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.14),
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Text(
+      text,
+      style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600),
+    ),
+  );
 }
 
 class _SourceRow extends StatelessWidget {
@@ -750,8 +766,9 @@ class _SourceRow extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                  fontSize: 13.5,
-                  color: source.enabled ? label : JellyTheme.textSecondary),
+                fontSize: 13.5,
+                color: source.enabled ? label : JellyTheme.textSecondary,
+              ),
             ),
           ),
           Switch(
@@ -760,8 +777,11 @@ class _SourceRow extends StatelessWidget {
           ),
           IconButton(
             tooltip: '删除',
-            icon: const Icon(Icons.delete_outline_rounded,
-                size: 19, color: Colors.redAccent),
+            icon: const Icon(
+              Icons.delete_outline_rounded,
+              size: 19,
+              color: Colors.redAccent,
+            ),
             onPressed: onDelete,
           ),
         ],

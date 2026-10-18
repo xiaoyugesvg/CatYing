@@ -23,23 +23,34 @@ class PetService extends ChangeNotifier {
 
   static const _key = 'reading_pet_v1';
 
-  /// 默认桌宠：**阿汪**（有用户提供的插画）。
+  /// 默认桌宠：**小Q**（QQ 秀风格人形，用户 2026-10-18）。
   ///
-  /// ⚠️ 之前默认是「喵酱」(cat)：它是**唯一没有插画**的初始物种，
-  /// 悬浮桌宠只能用矢量团子绘制，用户 2026-10-18 明确嫌丑
-  /// （「这个宠物太他么丑了」）⇒ 默认改为有插画的阿汪。
-  String speciesId = PetSpecies.dog.id;
+  /// 生肖 / 龙 / 麒麟等旧物种已从桌宠图鉴移除，只保留为登录头像插画；
+  /// 老存档里的物种会在 [load] 里自动迁到小Q。
+  String speciesId = PetSpecies.qqBoy.id;
   int level = 1;
   int exp = 0;
   int coins = 0;
   double mood = 80;
   double hunger = 80;
 
-  final Set<String> unlockedSpecies = {PetSpecies.dog.id};
+  final Set<String> unlockedSpecies = {PetSpecies.qqBoy.id};
   final Set<String> ownedOutfits = {PetOutfits.none.id};
-  String equippedOutfit = PetOutfits.none.id;
+
+  /// 多部位穿搭：部位 → 单品 id（QQ秀式，用户 2026-10-18）
+  final Map<PetOutfitSlot, String> equippedSlots = {};
+
+  /// 兼容旧接口：已穿戴的第一件单品 id（没有则 none）
+  String get equippedOutfit =>
+      equippedSlots.isEmpty ? PetOutfits.none.id : equippedSlots.values.first;
+
+  /// PetView 用：部位名 → 单品 id
+  Map<String, String> get equippedOutfitsByName => {
+    for (final e in equippedSlots.entries) e.key.name: e.value,
+  };
 
   bool enabled = true;
+
   /// 悬浮桌宠位置（0~1 相对坐标）。
   ///
   /// 用户 2026-10-18：「宠物能不能贴边？」⇒ 默认直接贴右边，
@@ -60,6 +71,9 @@ class PetService extends ChangeNotifier {
   /// 当前是否使用自定义图片皮肤。
   bool get isCustomPet => speciesId == PetSpecies.custom.id;
 
+  /// 自定义皮肤是否真的可用（有路径）。文件丢失由 [load] 兜底迁移。
+  bool get hasCustomPet => isCustomPet && customPetPath.isNotEmpty;
+
   int lastTickMs = 0;
   String lastReadingDate = '';
   int lastReadingMinutes = 0;
@@ -68,7 +82,12 @@ class PetService extends ChangeNotifier {
 
   bool isLoaded = false;
 
-  PetSpeciesInfo get species => PetSpecies.byId(speciesId);
+  PetSpeciesInfo get species {
+    // 自定义皮肤路径为空时不要拿「自定义」去画（会落回旧的动物团子），
+    // 直接回退 QQ 小人。
+    if (isCustomPet && customPetPath.isEmpty) return PetSpecies.qqBoy;
+    return PetSpecies.byId(speciesId);
+  }
 
   int get expToNext => 100 + (level - 1) * 60;
 
@@ -106,7 +125,7 @@ class PetService extends ChangeNotifier {
             unlockedSpecies
               ..clear()
               ..addAll(us.map((e) => '$e'))
-              ..add(PetSpecies.dog.id);
+              ..add(PetSpecies.qqBoy.id);
           }
           final of = j['outfits'];
           if (of is List) {
@@ -115,16 +134,34 @@ class PetService extends ChangeNotifier {
               ..addAll(of.map((e) => '$e'))
               ..add(PetOutfits.none.id);
           }
-          equippedOutfit = '${j['equipped'] ?? PetOutfits.none.id}';
-          if (!ownedOutfits.contains(equippedOutfit)) {
-            equippedOutfit = PetOutfits.none.id;
+          // ── 多部位穿搭恢复（兼容旧版单件 equipped）──────────────
+          equippedSlots.clear();
+          final eq = j['equippedSlots'];
+          if (eq is Map) {
+            for (final e in eq.entries) {
+              final slot = PetOutfitSlot.values
+                  .where((s) => s.name == '${e.key}')
+                  .firstOrNull;
+              final item = PetOutfits.byId('${e.value}');
+              if (slot != null &&
+                  item != null &&
+                  item.slot == slot &&
+                  ownedOutfits.contains(item.id)) {
+                equippedSlots[slot] = item.id;
+              }
+            }
+          } else {
+            final legacy = PetOutfits.byId('${j['equipped'] ?? ''}');
+            if (legacy != null && ownedOutfits.contains(legacy.id)) {
+              equippedSlots[legacy.slot] = legacy.id;
+            }
           }
           // 自定义皮肤文件丢了（换机 / 清理缓存）→ 回退到阿汪，避免空白桌宠
           if (speciesId == PetSpecies.custom.id) {
-            final ok = customPetPath.isNotEmpty &&
-                File(customPetPath).existsSync();
+            final ok =
+                customPetPath.isNotEmpty && File(customPetPath).existsSync();
             if (!ok) {
-              speciesId = PetSpecies.dog.id;
+              speciesId = PetSpecies.qqBoy.id;
               customPetPath = '';
               needPersist = true;
             }
@@ -138,13 +175,12 @@ class PetService extends ChangeNotifier {
             posX = 0.0;
             needPersist = true;
           }
-          // 2026-10-18：老用户沿用的默认「喵酱」(cat) 没有插画，
-          // 悬浮桌宠会退化成矢量团子（用户嫌丑）⇒ 一次性迁到有插画的阿汪。
-          if (speciesId == PetSpecies.cat.id) {
-            speciesId = PetSpecies.dog.id;
-            unlockedSpecies
-              ..remove(PetSpecies.cat.id)
-              ..add(PetSpecies.dog.id);
+          // 2026-10-18：生肖 / 龙 / 麒麟等旧宠物全部下线（只留作登录头像）
+          // ⇒ 老存档里的物种自动迁到 QQ 秀小人「小Q」。
+          if (speciesId != PetSpecies.custom.id &&
+              !PetSpecies.pets.any((p) => p.id == speciesId)) {
+            speciesId = PetSpecies.qqBoy.id;
+            unlockedSpecies.add(PetSpecies.qqBoy.id);
             needPersist = true;
           }
         }
@@ -185,6 +221,9 @@ class PetService extends ChangeNotifier {
           'unlocked': unlockedSpecies.toList(),
           'outfits': ownedOutfits.toList(),
           'equipped': equippedOutfit,
+          'equippedSlots': {
+            for (final e in equippedSlots.entries) e.key.name: e.value,
+          },
         }),
       );
     } catch (e) {
@@ -285,11 +324,11 @@ class PetService extends ChangeNotifier {
     await _persist();
   }
 
-  /// 移除自定义皮肤：删文件 + 回到阿汪。
+  /// 移除自定义皮肤：删文件 + 回到小Q。
   Future<void> clearCustomPet() async {
     final old = customPetPath;
     customPetPath = '';
-    if (speciesId == PetSpecies.custom.id) speciesId = PetSpecies.dog.id;
+    if (speciesId == PetSpecies.custom.id) speciesId = PetSpecies.qqBoy.id;
     notifyListeners();
     await _persist();
     if (old.isNotEmpty) {
@@ -343,28 +382,33 @@ class PetService extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool ownsOutfit(PetOutfitInfo o) => ownedOutfits.contains(o.id);
+  bool ownsOutfit(PetOutfitInfo o) =>
+      o.id == PetOutfits.none.id || ownedOutfits.contains(o.id);
 
+  /// 购买（若未拥有）并穿戴到对应部位；[PetOutfits.none] = 清空该部位。
   Future<bool> buyOutfit(PetOutfitInfo o) async {
     if (o.id == PetOutfits.none.id) {
-      equippedOutfit = o.id;
+      equippedSlots.remove(o.slot);
       await _persist();
       notifyListeners();
       return true;
     }
-    if (ownedOutfits.contains(o.id)) {
-      equippedOutfit = o.id;
-      await _persist();
-      notifyListeners();
-      return true;
+    if (!ownedOutfits.contains(o.id)) {
+      if (level < o.unlockLevel || coins < o.price) return false;
+      coins -= o.price;
+      ownedOutfits.add(o.id);
     }
-    if (level < o.unlockLevel || coins < o.price) return false;
-    coins -= o.price;
-    ownedOutfits.add(o.id);
-    equippedOutfit = o.id;
+    equippedSlots[o.slot] = o.id;
     await _persist();
     notifyListeners();
     return true;
+  }
+
+  /// 清空某个部位（不代扣任何费用）
+  Future<void> clearOutfitSlot(PetOutfitSlot slot) async {
+    if (equippedSlots.remove(slot) == null) return;
+    await _persist();
+    notifyListeners();
   }
 
   String get statusLine {

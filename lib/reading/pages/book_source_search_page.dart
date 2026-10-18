@@ -56,6 +56,11 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
   final _ctrl = TextEditingController();
   final store = BookSourceStore.instance;
 
+  /// 只包含**小说书源**：漫画源归漫画模块（用户 2026-10-18 要求彻底分开），
+  /// 不再出现在书源搜索 / 快速源列表 / 换源里。
+  List<BookSource> get _enabledBooks =>
+      store.enabled.where((s) => !s.isComicSource).toList();
+
   /// 「搜索源」筛选框（快速书源列表弹窗用）
   final TextEditingController _sourceFilter = TextEditingController();
 
@@ -142,8 +147,10 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
   Future<void> _autoSelectInitialSource() async {
     // ✅ 自动选中只考虑开启「发现」的源（与源 chips 同一过滤）：
     //   上次选过的源若后来关了发现，也跳过——否则进来就是"没有配置分类浏览"。
-    final enabled =
-        store.sorted().where((s) => s.enabled && s.enabledExplore).toList();
+    final enabled = store
+        .sorted()
+        .where((s) => s.enabled && s.enabledExplore && !s.isComicSource)
+        .toList();
     if (enabled.isEmpty) return;
     String? last;
     try {
@@ -193,18 +200,19 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
   }
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
-  Color get _titleColor =>
-      _isDark ? Colors.white : JellyTheme.textPrimaryLight;
+  Color get _titleColor => _isDark ? Colors.white : JellyTheme.textPrimaryLight;
 
   void _toast(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(msg),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-      ));
+      ..showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
   }
 
   /// 壳模式：已连接 qread 服务端时，搜索/探索由服务端执行规则。
@@ -225,7 +233,11 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
       );
 
   /// 服务端聚合搜索：分批并发调 qread，边搜边显示（与本地引擎同款 UI）。
-  Future<void> _runViaServer(List<BookSource> enabled, String kw, int mySession) async {
+  Future<void> _runViaServer(
+    List<BookSource> enabled,
+    String kw,
+    int mySession,
+  ) async {
     const batch = 4;
     var idx = 0;
     while (idx < enabled.length) {
@@ -293,13 +305,13 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
       _toast('请输入书名或作者');
       return;
     }
-    final allEnabled = store.enabled;
+    final allEnabled = _enabledBooks;
     // 优先级：构造指定源 → 源标签行选中源 → 跨全部源聚搜
     final enabled = widget.initialSourceId != null
         ? allEnabled.where((s) => s.id == widget.initialSourceId).toList()
         : (_selectedSourceId.isEmpty
-            ? allEnabled
-            : allEnabled.where((s) => s.id == _selectedSourceId).toList());
+              ? allEnabled
+              : allEnabled.where((s) => s.id == _selectedSourceId).toList());
     if (enabled.isEmpty) {
       _toast('未找到指定书源，请先在书源仓库确认源已启用');
       setState(() => _searching = false);
@@ -396,7 +408,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
       });
       return;
     }
-    final sources = store.enabled;
+    final sources = _enabledBooks;
     if (sources.isEmpty) return;
     BookSource? source;
     for (final s in sources) {
@@ -439,8 +451,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
         if (cats.isEmpty) {
           setState(() {
             _exploreLoading = false;
-            _exploreError =
-                _friendlyError('该源没有配置分类浏览（exploreKinds 为空）');
+            _exploreError = _friendlyError('该源没有配置分类浏览（exploreKinds 为空）');
           });
           return;
         }
@@ -495,7 +506,9 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
         setState(() {
           _catLoading[cat.url] = false;
           _catError[cat.url] = null;
-          _catBooksCache[cat.url] = list.map((r) => _fromQread(r, source)).toList();
+          _catBooksCache[cat.url] = list
+              .map((r) => _fromQread(r, source))
+              .toList();
         });
       } on QreadException catch (e) {
         if (!mounted || source.id != _selectedSourceId) return;
@@ -527,9 +540,9 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
     final next = _cats[_exploreVisibleSections];
     setState(() => _exploreVisibleSections++);
     if (_catBooksCache[next.url] == null && _catLoading[next.url] != true) {
-      final src = store.enabled.firstWhere(
+      final src = _enabledBooks.firstWhere(
         (s) => s.id == _selectedSourceId,
-        orElse: () => store.enabled.first,
+        orElse: () => _enabledBooks.first,
       );
       if (src.id == _selectedSourceId) unawaited(_loadSection(src, next));
     }
@@ -561,7 +574,9 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
         setState(() {
           _exploreLoading = false;
           _exploreError = null;
-          _catBooksCache[cat.url] = list.map((r) => _fromQread(r, source)).toList();
+          _catBooksCache[cat.url] = list
+              .map((r) => _fromQread(r, source))
+              .toList();
           _exploreList = _catBooksCache[cat.url]!;
         });
       } on QreadException catch (e) {
@@ -649,16 +664,15 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
         map.putIfAbsent(r.source.id, () => r.source.name);
       }
     }
-    return map.entries
-        .map((e) => (id: e.key, name: e.value))
-        .toList();
+    return map.entries.map((e) => (id: e.key, name: e.value)).toList();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor:
-          _isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
+      backgroundColor: _isDark
+          ? JellyTheme.backgroundDark
+          : JellyTheme.backgroundLight,
       appBar: AppBar(
         // 去掉返回箭头：书源页返回靠标题旁的拉绳（maybePop）/ 系统返回
         automaticallyImplyLeading: false,
@@ -677,11 +691,14 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
           padding: const EdgeInsets.only(left: 12),
           child: Row(
             children: [
-              Text('书源',
-                  style: TextStyle(
-                      fontSize: AppTheme.fontTitle2,
-                      fontWeight: FontWeight.w700,
-                      color: _titleColor)),
+              Text(
+                '书源',
+                style: TextStyle(
+                  fontSize: AppTheme.fontTitle2,
+                  fontWeight: FontWeight.w700,
+                  color: _titleColor,
+                ),
+              ),
               // ✅ 2026-10-10 用户："拉绳离字间距大一些"：4 -> 10
               const SizedBox(width: 10),
               JellyPullCord(
@@ -750,51 +767,55 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
           //   · 其余 4 个动作叠在一起、左右滑动轮换 ✓
           //     （原来是 ··· 下拉菜单，现在换成滑动动作栏同款）
           // ⚠️ 用户要求（本轮）：右上角由「并排滑动动作栏」改成**叠图标控件** ——
-//   · 最前的**完整可见**（深色圆底）
-//   · 后面各露出一部分，**左右滑动**循环切换最前
-//   · **长按**竖向展开全部
-//   原来的 `JellySlidingActions` 已整体替换（筛选按钮仍单独保留在它左边）。
-JellyIconDeck(
-  items: [
-      JellyIconDeckItem(
-        icon: Icons.history_rounded,
-        tooltip: '浏览记录',
-        onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const BrowseHistoryPage()),
-      ),
-      ),
-      JellyIconDeckItem(
-        icon: Icons.favorite_rounded,
-        tooltip: '收藏',
-        onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => const FavoritesPage(showBackButton: true),
-        ),
-      ),
-      ),
-      JellyIconDeckItem(
-        icon: Icons.file_download_rounded,
-        tooltip: '下载',
-        onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const BookDownloadRecordsPage()),
-      ),
-      ),
-      JellyIconDeckItem(
-        icon: Icons.manage_search_rounded,
-        tooltip: '书源仓库',
-        onTap: () async {
-        await Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const BookSourceRepoPage()),
-        );
-        if (mounted) setState(() {});
-      },
-      ),
-  ],
-),
+          //   · 最前的**完整可见**（深色圆底）
+          //   · 后面各露出一部分，**左右滑动**循环切换最前
+          //   · **长按**竖向展开全部
+          //   原来的 `JellySlidingActions` 已整体替换（筛选按钮仍单独保留在它左边）。
+          JellyIconDeck(
+            items: [
+              JellyIconDeckItem(
+                icon: Icons.history_rounded,
+                tooltip: '浏览记录',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const BrowseHistoryPage()),
+                ),
+              ),
+              JellyIconDeckItem(
+                icon: Icons.favorite_rounded,
+                tooltip: '收藏',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const FavoritesPage(showBackButton: true),
+                  ),
+                ),
+              ),
+              JellyIconDeckItem(
+                icon: Icons.file_download_rounded,
+                tooltip: '下载',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const BookDownloadRecordsPage(),
+                  ),
+                ),
+              ),
+              JellyIconDeckItem(
+                icon: Icons.manage_search_rounded,
+                tooltip: '书源仓库',
+                onTap: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const BookSourceRepoPage(),
+                    ),
+                  );
+                  if (mounted) setState(() {});
+                },
+              ),
+            ],
+          ),
           const SizedBox(width: 12),
         ],
       ),
@@ -821,8 +842,10 @@ JellyIconDeck(
     // ✅ 过滤掉关闭「发现」的源（用户 2026-10-11）：书源页主体是发现页，
     //   关了发现的源点进去只会报"没有配置分类浏览"，不如不展示。
     //   聚搜/单源搜索不受影响（enabledExplore 只管发现）。
-    final sources =
-        store.sorted().where((s) => s.enabled && s.enabledExplore).toList();
+    final sources = store
+        .sorted()
+        .where((s) => s.enabled && s.enabledExplore && !s.isComicSource)
+        .toList();
     return SizedBox(
       height: 40,
       child: Row(
@@ -840,7 +863,8 @@ JellyIconDeck(
               padding: const EdgeInsets.fromLTRB(0, 4, 4, 4),
               itemCount: sources.length,
               separatorBuilder: (_, _) => const SizedBox(width: 8),
-              itemBuilder: (context, i) => _sourceChip(sources[i].name, sources[i].id),
+              itemBuilder: (context, i) =>
+                  _sourceChip(sources[i].name, sources[i].id),
             ),
           ),
           Padding(
@@ -855,8 +879,11 @@ JellyIconDeck(
                   width: 32,
                   height: 32,
                   // ✅ 用户 2026-10-07：与漫画页统一成**向下箭头**（原来是 view_list ✗）
-                  child: Icon(Icons.keyboard_arrow_down_rounded,
-                      size: 22, color: JellyTheme.textPrimaryLight),
+                  child: Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    size: 22,
+                    color: JellyTheme.textPrimaryLight,
+                  ),
                 ),
               ),
             ),
@@ -941,8 +968,8 @@ JellyIconDeck(
           color: selected
               ? JellyTheme.primary
               : (_isDark
-                  ? JellyTheme.cardDark
-                  : JellyTheme.primary.withValues(alpha: 0.08)),
+                    ? JellyTheme.cardDark
+                    : JellyTheme.primary.withValues(alpha: 0.08)),
           borderRadius: BorderRadius.circular(16),
         ),
         child: Text(
@@ -961,8 +988,10 @@ JellyIconDeck(
 
   /// 长按源标签：调整书源顺序（写回 customOrder，持久化）
   Future<void> _reorderBookSources() async {
-    final sources =
-        store.sorted().where((s) => s.enabled && s.enabledExplore).toList();
+    final sources = store
+        .sorted()
+        .where((s) => s.enabled && s.enabledExplore && !s.isComicSource)
+        .toList();
     if (sources.length < 2) {
       _toast('可发现的源不足 2 个，无需排序');
       return;
@@ -1019,8 +1048,9 @@ JellyIconDeck(
   /// 快速书源列表弹窗（参考图 IMG_8430：「搜索源」输入框 + 快速书源列表 + 收起）
   Future<void> _showQuickSources() async {
     // ✅ 与源 chips 同一过滤：关闭「发现」的源不在书源页展示（2026-10-11）
-    final sources =
-        store.all.where((s) => s.enabled && s.enabledExplore).toList();
+    final sources = store.all
+        .where((s) => s.enabled && s.enabledExplore && !s.isComicSource)
+        .toList();
     // 分组口径与「书源仓」一致（Legado 的 bookSourceGroup，空 = 未分组）
     final groups = collectSourceGroups(sources.map((s) => s.group));
     // 当前书源 chip 的 key：打开弹窗后自动滚到它（源多时定位到当前位置）
@@ -1031,8 +1061,7 @@ JellyIconDeck(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      backgroundColor:
-          _isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+      backgroundColor: _isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
@@ -1187,7 +1216,10 @@ JellyIconDeck(
             '已搜索 $_doneCount/$_totalCount 个源'
             '${ok > 0 ? ' · 成功 $ok' : ''}'
             '${bad > 0 ? ' · 失败 $bad' : ''}',
-            style: TextStyle(fontSize: AppTheme.fontFootnote, color: JellyTheme.textSecondary),
+            style: TextStyle(
+              fontSize: AppTheme.fontFootnote,
+              color: JellyTheme.textSecondary,
+            ),
           ),
         ],
       ),
@@ -1195,15 +1227,19 @@ JellyIconDeck(
   }
 
   Widget _body() {
-    if (store.enabled.isEmpty) return _emptySources();
+    if (_enabledBooks.isEmpty) return _emptySources();
     if (_groups.isNotEmpty) return _resultsBody();
     if (_searching) return const SizedBox.shrink();
-    if (_keyword.isNotEmpty) return _hint('没有搜到「$_keyword」', Icons.search_off_rounded);
+    if (_keyword.isNotEmpty)
+      return _hint('没有搜到「$_keyword」', Icons.search_off_rounded);
     // 未搜索 + 选中单源 → 分类浏览（参考图「必读榜」网格）
     if (_selectedSourceId.isNotEmpty) return _exploreBody();
     // 聚搜空态（参考图 IMG_8427）
-    return _emptyHint('输入关键词，在 ${store.enabled.length} 个书源里一起搜',
-        '下拉切换复搜', Icons.manage_search_rounded);
+    return _emptyHint(
+      '输入关键词，在 ${_enabledBooks.length} 个书源里一起搜',
+      '下拉切换复搜',
+      Icons.manage_search_rounded,
+    );
   }
 
   /// 搜索结果（聚搜/单源）—— 宫格 / 列表可切换（用户 2026-10-07），复搜 chips + 下拉切换
@@ -1283,14 +1319,13 @@ JellyIconDeck(
   Widget _exploreGrid() {
     // 板块流模式（默认）：exploreUrl 全部分类逐板块整页滚动（参考图 IMG_8581/8582）
     if (_exploreHomeMode && _cats.isNotEmpty) {
-      final src = store.enabled.firstWhere(
+      final src = _enabledBooks.firstWhere(
         (s) => s.id == _selectedSourceId,
-        orElse: () => store.enabled.first,
+        orElse: () => _enabledBooks.first,
       );
       return NotificationListener<ScrollNotification>(
         onNotification: (n) {
-          if (n.metrics.pixels >
-              n.metrics.maxScrollExtent - 600) {
+          if (n.metrics.pixels > n.metrics.maxScrollExtent - 600) {
             _loadMoreSections();
           }
           return false;
@@ -1423,10 +1458,13 @@ JellyIconDeck(
                 onTap: () => _loadCatBooks(src, cat),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Text('查看全部',
-                      style: TextStyle(
-                          fontSize: AppTheme.fontFootnote,
-                          color: JellyTheme.primary)),
+                  child: Text(
+                    '查看全部',
+                    style: TextStyle(
+                      fontSize: AppTheme.fontFootnote,
+                      color: JellyTheme.primary,
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -1450,8 +1488,9 @@ JellyIconDeck(
               child: Text(
                 err,
                 style: TextStyle(
-                    fontSize: AppTheme.fontSubhead,
-                    color: JellyTheme.textSecondary),
+                  fontSize: AppTheme.fontSubhead,
+                  color: JellyTheme.textSecondary,
+                ),
               ),
             ),
           )
@@ -1547,16 +1586,22 @@ JellyIconDeck(
                   child: r.coverUrl.isEmpty
                       ? Container(
                           color: JellyTheme.primary.withValues(alpha: 0.1),
-                          child: Icon(Icons.menu_book_rounded,
-                              size: 26, color: JellyTheme.primary),
+                          child: Icon(
+                            Icons.menu_book_rounded,
+                            size: 26,
+                            color: JellyTheme.primary,
+                          ),
                         )
                       : CachedNetworkImage(
                           imageUrl: r.coverUrl,
                           fit: BoxFit.cover,
                           errorWidget: (_, __, ___) => Container(
                             color: JellyTheme.primary.withValues(alpha: 0.1),
-                            child: Icon(Icons.menu_book_rounded,
-                                size: 26, color: JellyTheme.primary),
+                            child: Icon(
+                              Icons.menu_book_rounded,
+                              size: 26,
+                              color: JellyTheme.primary,
+                            ),
                           ),
                         ),
                 ),
@@ -1615,9 +1660,9 @@ JellyIconDeck(
 
   /// 分类弹窗（参考图：「xx·分类」榜单/题材标签云，右上 ×）
   Future<void> _showCategorySheet() async {
-    final src = store.enabled.firstWhere(
+    final src = _enabledBooks.firstWhere(
       (s) => s.id == _selectedSourceId,
-      orElse: () => store.enabled.first,
+      orElse: () => _enabledBooks.first,
     );
     if (_cats.isEmpty) {
       _toast('该源没有可用的分类');
@@ -1721,8 +1766,8 @@ JellyIconDeck(
                 color: selected
                     ? JellyTheme.primary
                     : (_isDark
-                        ? JellyTheme.cardDark
-                        : JellyTheme.primary.withValues(alpha: 0.08)),
+                          ? JellyTheme.cardDark
+                          : JellyTheme.primary.withValues(alpha: 0.08)),
                 borderRadius: BorderRadius.circular(14),
               ),
               child: Text(
@@ -1732,7 +1777,9 @@ JellyIconDeck(
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                   color: selected
                       ? Colors.white
-                      : (_isDark ? Colors.white70 : JellyTheme.textPrimaryLight),
+                      : (_isDark
+                            ? Colors.white70
+                            : JellyTheme.textPrimaryLight),
                 ),
               ),
             ),
@@ -1744,27 +1791,35 @@ JellyIconDeck(
 
   /// 两行提示（主文案 + 副文案，参考图）
   Widget _emptyHint(String main, String sub, IconData icon) => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon,
-                size: 48,
-                color: JellyTheme.textSecondary.withValues(alpha: 0.5)),
-            const SizedBox(height: 14),
-            Text(main,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    fontSize: AppTheme.fontSubhead,
-                    fontWeight: FontWeight.w600,
-                    color: _titleColor)),
-            const SizedBox(height: 8),
-            Text(sub,
-                style: TextStyle(
-                    fontSize: AppTheme.fontFootnote,
-                    color: JellyTheme.textSecondary)),
-          ],
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          icon,
+          size: 48,
+          color: JellyTheme.textSecondary.withValues(alpha: 0.5),
         ),
-      );
+        const SizedBox(height: 14),
+        Text(
+          main,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: AppTheme.fontSubhead,
+            fontWeight: FontWeight.w600,
+            color: _titleColor,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          sub,
+          style: TextStyle(
+            fontSize: AppTheme.fontFootnote,
+            color: JellyTheme.textSecondary,
+          ),
+        ),
+      ],
+    ),
+  );
 
   Widget _emptySources() {
     return Center(
@@ -1773,27 +1828,35 @@ JellyIconDeck(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.menu_book_outlined,
-                size: 48,
-                color: JellyTheme.textSecondary.withValues(alpha: 0.55)),
+            Icon(
+              Icons.menu_book_outlined,
+              size: 48,
+              color: JellyTheme.textSecondary.withValues(alpha: 0.55),
+            ),
             const SizedBox(height: 20),
-            Text('还没有书源',
-                style: TextStyle(
-                    fontSize: AppTheme.fontTitle3,
-                    fontWeight: FontWeight.w600,
-                    color: _titleColor)),
+            Text(
+              '还没有书源',
+              style: TextStyle(
+                fontSize: AppTheme.fontTitle3,
+                fontWeight: FontWeight.w600,
+                color: _titleColor,
+              ),
+            ),
             const SizedBox(height: 8),
-            Text('用地址、口令或本地文件导入书源',
-                textAlign: TextAlign.center,
-                style:
-                    TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
+            Text(
+              '用地址、口令或本地文件导入书源',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: AppTheme.fontSubhead,
+                color: JellyTheme.textSecondary,
+              ),
+            ),
             const SizedBox(height: 28),
             FilledButton.icon(
               onPressed: () async {
                 await Navigator.push(
                   context,
-                  MaterialPageRoute(
-                      builder: (_) => const BookSourceRepoPage()),
+                  MaterialPageRoute(builder: (_) => const BookSourceRepoPage()),
                 );
                 if (mounted) setState(() {});
               },
@@ -1815,16 +1878,22 @@ JellyIconDeck(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.auto_stories_outlined,
-              size: 48, color: JellyTheme.textSecondary.withValues(alpha: 0.5)),
+          Icon(
+            Icons.auto_stories_outlined,
+            size: 48,
+            color: JellyTheme.textSecondary.withValues(alpha: 0.5),
+          ),
           const SizedBox(height: 14),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 40),
-            child: Text(error,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    fontSize: AppTheme.fontSubhead,
-                    color: JellyTheme.textSecondary)),
+            child: Text(
+              error,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: AppTheme.fontSubhead,
+                color: JellyTheme.textSecondary,
+              ),
+            ),
           ),
           if (siteUrl.isNotEmpty) ...[
             const SizedBox(height: 18),
@@ -1848,23 +1917,29 @@ JellyIconDeck(
   }
 
   Widget _hint(String text, IconData icon) => Center(
-          child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon,
-                size: 48,
-                color: JellyTheme.textSecondary.withValues(alpha: 0.5)),
-            const SizedBox(height: 14),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 40),
-              child: Text(text,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
-            ),
-          ],
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          icon,
+          size: 48,
+          color: JellyTheme.textSecondary.withValues(alpha: 0.5),
         ),
-      );
+        const SizedBox(height: 14),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 40),
+          child: Text(
+            text,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: AppTheme.fontSubhead,
+              color: JellyTheme.textSecondary,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 
   /// 搜索结果卡片 —— **与漫画列表项（JellyComicListTile）同款视觉**：
   /// 大封面（84×112，3:4）+ 书名 + 作者/分类 + 来源标签 + 右下元信息。
@@ -1948,34 +2023,47 @@ JellyIconDeck(
                         spacing: 6,
                         runSpacing: 4,
                         children: [
-                          ...g.items.take(3).map((r) => Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 7, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color:
-                                      JellyTheme.primary.withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Text(
-                                  r.source.name,
-                                  style: TextStyle(
+                          ...g.items
+                              .take(3)
+                              .map(
+                                (r) => Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: JellyTheme.primary.withValues(
+                                      alpha: 0.12,
+                                    ),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    r.source.name,
+                                    style: TextStyle(
                                       fontSize: AppTheme.fontCaption,
-                                      color: JellyTheme.primary),
+                                      color: JellyTheme.primary,
+                                    ),
+                                  ),
                                 ),
-                              )),
+                              ),
                           if (g.items.length > 3)
                             Container(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 7, vertical: 2),
+                                horizontal: 7,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
-                                color: JellyTheme.primary.withValues(alpha: 0.08),
+                                color: JellyTheme.primary.withValues(
+                                  alpha: 0.08,
+                                ),
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Text(
                                 '+${g.items.length - 3}',
                                 style: TextStyle(
-                                    fontSize: AppTheme.fontCaption,
-                                    color: JellyTheme.primary),
+                                  fontSize: AppTheme.fontCaption,
+                                  color: JellyTheme.primary,
+                                ),
                               ),
                             ),
                         ],
@@ -2018,8 +2106,11 @@ JellyIconDeck(
   Widget _bookCoverPlaceholder() {
     return Container(
       color: _isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-      child: Icon(Icons.menu_book_rounded,
-          size: 30, color: JellyTheme.textSecondary),
+      child: Icon(
+        Icons.menu_book_rounded,
+        size: 30,
+        color: JellyTheme.textSecondary,
+      ),
     );
   }
 
@@ -2049,7 +2140,8 @@ JellyIconDeck(
                           errorWidget: (_, __, ___) => _bookCoverPlaceholder(),
                         ),
                   // 左上角作者角标：透明灰底（用户 2026-10-12）
-                  if (first.author.trim().isNotEmpty) _authorBadge(first.author),
+                  if (first.author.trim().isNotEmpty)
+                    _authorBadge(first.author),
                   // 多源角标（>1 个来源才显示，提示可换源）
                   if (g.items.length > 1)
                     Positioned(
@@ -2057,7 +2149,9 @@ JellyIconDeck(
                       right: 4,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 5, vertical: 2),
+                          horizontal: 5,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
                           color: JellyTheme.primary.withValues(alpha: 0.9),
                           borderRadius: BorderRadius.circular(10),
@@ -2103,8 +2197,7 @@ JellyIconDeck(
     if (g.items.length > 1) {
       final picked = await showModalBottomSheet<BookSourceResult>(
         context: context,
-        backgroundColor:
-            _isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+        backgroundColor: _isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
@@ -2114,40 +2207,50 @@ JellyIconDeck(
             mainAxisSize: MainAxisSize.min,
             children: [
               const SizedBox(height: 14),
-              Text('选择书源（${g.items.length} 个）',
-                  style: TextStyle(
-                      fontSize: AppTheme.fontHeadline,
-                      fontWeight: FontWeight.w600,
-                      color: _titleColor)),
+              Text(
+                '选择书源（${g.items.length} 个）',
+                style: TextStyle(
+                  fontSize: AppTheme.fontHeadline,
+                  fontWeight: FontWeight.w600,
+                  color: _titleColor,
+                ),
+              ),
               const SizedBox(height: 8),
               Flexible(
                 child: ListView(
                   shrinkWrap: true,
                   children: g.items
-                      .map((r) => ListTile(
-                            title: Text(r.source.name,
-                                style:
-                                    TextStyle(fontSize: AppTheme.fontBody, color: _titleColor)),
-                            subtitle: Text(
-                              // 同名不同作者的书会合并到一张卡里，
-                              // 选择面板必须显示作者才能区分
-                              [
-                                if (r.author.isNotEmpty) r.author,
-                                if (r.lastChapter.isNotEmpty)
-                                  r.lastChapter
-                                else if (r.wordCount.isNotEmpty)
-                                  r.wordCount
-                                else
-                                  r.bookUrl,
-                              ].join(' · '),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  fontSize: AppTheme.fontFootnote,
-                                  color: JellyTheme.textSecondary),
+                      .map(
+                        (r) => ListTile(
+                          title: Text(
+                            r.source.name,
+                            style: TextStyle(
+                              fontSize: AppTheme.fontBody,
+                              color: _titleColor,
                             ),
-                            onTap: () => Navigator.pop(ctx, r),
-                          ))
+                          ),
+                          subtitle: Text(
+                            // 同名不同作者的书会合并到一张卡里，
+                            // 选择面板必须显示作者才能区分
+                            [
+                              if (r.author.isNotEmpty) r.author,
+                              if (r.lastChapter.isNotEmpty)
+                                r.lastChapter
+                              else if (r.wordCount.isNotEmpty)
+                                r.wordCount
+                              else
+                                r.bookUrl,
+                            ].join(' · '),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: AppTheme.fontFootnote,
+                              color: JellyTheme.textSecondary,
+                            ),
+                          ),
+                          onTap: () => Navigator.pop(ctx, r),
+                        ),
+                      )
                       .toList(),
                 ),
               ),

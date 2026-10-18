@@ -64,32 +64,38 @@ class _PetCenterPageState extends State<PetCenterPage>
       ),
       body: ListenableBuilder(
         listenable: _pet,
-        builder: (context, _) => ListView(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
-          children: [
-            _headerCard(),
-            const SizedBox(height: 14),
-            _customPetCard(),
-            const SizedBox(height: 14),
-            _actionsCard(),
-            const SizedBox(height: 18),
-            _sectionTitle('换装'),
-            _outfits(),
-            const SizedBox(height: 18),
-            _sectionTitle('图鉴（${_pet.unlockedSpecies.length}/${PetSpecies.all.length}）'),
-            _collection(),
-            const SizedBox(height: 16),
-            Text(
-              '阅读时长会自动转化为经验：每读 1 分钟 +2 经验、每 10 分钟 +1 书币；'
-              '每日打卡额外 +20 书币。',
-              style: TextStyle(
-                fontSize: AppTheme.fontCaption,
-                height: 1.5,
-                color: JellyTheme.textSecondary,
+        builder: (context, _) {
+          // 图鉴只统计 QQ 秀宠物；旧存档里的生肖解锁记录不计入
+          final ownedPets = _pet.unlockedSpecies
+              .where((id) => PetSpecies.pets.any((p) => p.id == id))
+              .length;
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
+            children: [
+              _headerCard(),
+              const SizedBox(height: 14),
+              _customPetCard(),
+              const SizedBox(height: 14),
+              _actionsCard(),
+              const SizedBox(height: 18),
+              _sectionTitle('换装'),
+              _outfits(),
+              const SizedBox(height: 18),
+              _sectionTitle('图鉴（$ownedPets/${PetSpecies.pets.length}）'),
+              _collection(),
+              const SizedBox(height: 16),
+              Text(
+                '阅读时长会自动转化为经验：每读 1 分钟 +2 经验、每 10 分钟 +1 书币；'
+                '每日打卡额外 +20 书币。',
+                style: TextStyle(
+                  fontSize: AppTheme.fontCaption,
+                  height: 1.5,
+                  color: JellyTheme.textSecondary,
+                ),
               ),
-            ),
-          ],
-        ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -107,16 +113,17 @@ class _PetCenterPageState extends State<PetCenterPage>
         children: [
           AnimatedBuilder(
             animation: _anim,
-            builder: (context, _) => _pet.isCustomPet &&
-                    _pet.customPetPath.isNotEmpty
+            builder: (context, _) => _pet.hasCustomPet
                 ? CustomPetImage(
                     path: _pet.customPetPath,
                     size: 118,
                     bob: 0,
+                    outfits: _pet.equippedSlots,
                   )
                 : PetView(
                     species: s,
                     outfit: _pet.equippedOutfit,
+                    outfits: _pet.equippedOutfitsByName,
                     t: _anim.value * 4,
                     size: 118,
                     mood: _pet.mood,
@@ -134,8 +141,9 @@ class _PetCenterPageState extends State<PetCenterPage>
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
-                        color:
-                            _isDark ? Colors.white : JellyTheme.textPrimaryLight,
+                        color: _isDark
+                            ? Colors.white
+                            : JellyTheme.textPrimaryLight,
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -151,14 +159,26 @@ class _PetCenterPageState extends State<PetCenterPage>
                   ),
                 ),
                 const SizedBox(height: 8),
-                _bar('经验', _pet.expRatio, JellyTheme.primary,
-                    '${_pet.exp}/${_pet.expToNext}'),
+                _bar(
+                  '经验',
+                  _pet.expRatio,
+                  JellyTheme.primary,
+                  '${_pet.exp}/${_pet.expToNext}',
+                ),
                 const SizedBox(height: 5),
-                _bar('饱食', _pet.hunger / 100, const Color(0xFFFFB74D),
-                    '${_pet.hunger.round()}'),
+                _bar(
+                  '饱食',
+                  _pet.hunger / 100,
+                  const Color(0xFFFFB74D),
+                  '${_pet.hunger.round()}',
+                ),
                 const SizedBox(height: 5),
-                _bar('心情', _pet.mood / 100, const Color(0xFFF06292),
-                    '${_pet.mood.round()}'),
+                _bar(
+                  '心情',
+                  _pet.mood / 100,
+                  const Color(0xFFF06292),
+                  '${_pet.mood.round()}',
+                ),
                 const SizedBox(height: 6),
                 Text(
                   _pet.statusLine,
@@ -177,8 +197,8 @@ class _PetCenterPageState extends State<PetCenterPage>
 
   /// 自定义桌宠（PNG / GIF）—— 用户 2026-10-18
   Widget _customPetCard() {
-    final has = _pet.customPetPath.isNotEmpty &&
-        File(_pet.customPetPath).existsSync();
+    final has =
+        _pet.customPetPath.isNotEmpty && File(_pet.customPetPath).existsSync();
     final label = _isDark ? Colors.white : JellyTheme.textPrimaryLight;
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
@@ -206,8 +226,10 @@ class _PetCenterPageState extends State<PetCenterPage>
                 clipBehavior: Clip.antiAlias,
                 child: has
                     ? Image.file(File(_pet.customPetPath), fit: BoxFit.cover)
-                    : Icon(Icons.add_photo_alternate_outlined,
-                        color: JellyTheme.primary),
+                    : Icon(
+                        Icons.add_photo_alternate_outlined,
+                        color: JellyTheme.primary,
+                      ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -242,7 +264,9 @@ class _PetCenterPageState extends State<PetCenterPage>
                 child: OutlinedButton.icon(
                   onPressed: _pickCustomPet,
                   icon: Icon(
-                    has ? Icons.swap_horiz_rounded : Icons.photo_library_outlined,
+                    has
+                        ? Icons.swap_horiz_rounded
+                        : Icons.photo_library_outlined,
                     size: 18,
                   ),
                   label: Text(has ? '更换图片' : '选择图片'),
@@ -270,8 +294,7 @@ class _PetCenterPageState extends State<PetCenterPage>
                 if (!_pet.isCustomPet) ...[
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: () =>
-                          _pet.setCustomPet(_pet.customPetPath),
+                      onPressed: () => _pet.setCustomPet(_pet.customPetPath),
                       child: const Text('使用这张'),
                     ),
                   ),
@@ -298,8 +321,7 @@ class _PetCenterPageState extends State<PetCenterPage>
         type: FileType.custom,
         allowedExtensions: const ['png', 'gif', 'jpg', 'jpeg', 'webp'],
       );
-      final srcPath =
-          (r == null || r.isEmpty) ? null : r.first.path;
+      final srcPath = r.isEmpty ? null : r.first.path;
       if (srcPath == null) return;
       final src = File(srcPath);
       final ext = srcPath.contains('.')
@@ -401,14 +423,13 @@ class _PetCenterPageState extends State<PetCenterPage>
                         ChoiceChip(
                           label: Text(_aiStyles[i].label),
                           selected: styleIndex == i,
-                          onSelected: (_) =>
-                              setLocal(() => styleIndex = i),
+                          onSelected: (_) => setLocal(() => styleIndex = i),
                           labelStyle: TextStyle(
                             fontSize: 12,
                             color: styleIndex == i
                                 ? (_isDark
-                                    ? Colors.white
-                                    : JellyTheme.primaryDark)
+                                      ? Colors.white
+                                      : JellyTheme.primaryDark)
                                 : JellyTheme.textSecondary,
                           ),
                         ),
@@ -553,75 +574,167 @@ class _PetCenterPageState extends State<PetCenterPage>
           const SizedBox(width: 6),
           Switch(
             value: _pet.enabled,
-            onChanged: (v) => _pet.setEnabled(v),
+            onChanged: _pet.setEnabled,
           ),
         ],
       ),
     );
   }
 
+  /// QQ秀式衣橱：按部位分组（头饰 / 面部 / 颈部 / 上衣 / 手持 / 背景），
+  /// 每个部位横向排「不戴 + 该部位的所有单品」。
   Widget _outfits() {
-    return Wrap(
-      spacing: 10,
-      runSpacing: 10,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final o in PetOutfits.all)
-          GestureDetector(
-            onTap: () async {
-              final ok = await _pet.buyOutfit(o);
-              if (!ok) {
-                _toast('需要 Lv.${o.unlockLevel} / ${o.price} 书币');
-              }
-            },
-            child: Container(
-              width: 104,
-              padding: const EdgeInsets.fromLTRB(6, 8, 6, 8),
-              decoration: BoxDecoration(
-                color: _card,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: _pet.equippedOutfit == o.id
-                      ? JellyTheme.primary
-                      : Colors.transparent,
-                  width: 1.5,
+        for (final slot in PetOutfitSlot.values) _outfitSlotRow(slot),
+      ],
+    );
+  }
+
+  Widget _outfitSlotRow(PetOutfitSlot slot) {
+    final current = _pet.equippedSlots[slot];
+    final items = PetOutfits.forSlot(slot);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                slot.label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: _isDark ? Colors.white : JellyTheme.textPrimaryLight,
                 ),
               ),
-              child: Column(
-                children: [
-                  AnimatedBuilder(
-                    animation: _anim,
-                    builder: (context, _) => PetView(
-                      species: _pet.species,
-                      outfit: o.id,
-                      t: _anim.value * 4,
-                      size: 68,
-                      mood: _pet.mood,
-                    ),
-                  ),
-                  Text(
-                    o.name,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: _isDark
-                          ? Colors.white
-                          : JellyTheme.textPrimaryLight,
-                    ),
-                  ),
-                  Text(
-                    _pet.ownsOutfit(o)
-                        ? (_pet.equippedOutfit == o.id ? '已穿戴' : '点击穿戴')
-                        : 'Lv.${o.unlockLevel} · ${o.price} 币',
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: JellyTheme.textSecondary,
-                    ),
-                  ),
-                ],
+              const SizedBox(width: 6),
+              Text(
+                current == null
+                    ? '未穿戴'
+                    : (PetOutfits.byId(current)?.name ?? ''),
+                style: TextStyle(
+                  fontSize: 10.5,
+                  color: JellyTheme.textSecondary,
+                ),
               ),
+              const Spacer(),
+              if (current != null)
+                GestureDetector(
+                  onTap: () => _pet.clearOutfitSlot(slot),
+                  child: Text(
+                    '摘下',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: JellyTheme.textSecondary,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 96,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: items.length + 1,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (_, i) {
+                if (i == 0) {
+                  return _outfitChip(slot: slot, item: null);
+                }
+                return _outfitChip(slot: slot, item: items[i - 1]);
+              },
             ),
           ),
-      ],
+        ],
+      ),
+    );
+  }
+
+  Widget _outfitChip({required PetOutfitSlot slot, PetOutfitInfo? item}) {
+    final current = _pet.equippedSlots[slot];
+    final selected = item == null ? current == null : current == item.id;
+    final owned = item == null || _pet.ownsOutfit(item);
+    final label = item?.name ?? '不戴';
+    // 自定义图片没有矢量头/身体坐标 ⇒ 用 QQ 小人做换装预览，
+    // 否则会拿「自定义」这个非 QQ 物种去画，落回旧的动物团子。
+    final previewSpecies = _pet.isCustomPet ? PetSpecies.qqBoy : _pet.species;
+    return GestureDetector(
+      onTap: () async {
+        if (item == null) {
+          await _pet.clearOutfitSlot(slot);
+          return;
+        }
+        final ok = await _pet.buyOutfit(item);
+        if (!ok) {
+          _toast('需要 Lv.${item.unlockLevel} / ${item.price} 书币');
+        }
+      },
+      child: Container(
+        width: 78,
+        padding: const EdgeInsets.fromLTRB(5, 6, 5, 6),
+        decoration: BoxDecoration(
+          color: _card,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: selected ? JellyTheme.primary : Colors.transparent,
+            width: 1.5,
+          ),
+        ),
+        child: Column(
+          children: [
+            SizedBox(
+              height: 46,
+              child: item == null
+                  ? Center(
+                      child: Icon(
+                        Icons.block_rounded,
+                        size: 22,
+                        color: JellyTheme.textSecondary,
+                      ),
+                    )
+                  : PetView(
+                      species: previewSpecies,
+                      outfit: PetOutfits.none.id,
+                      // 只预览这一件，方便看清单品本身
+                      outfits: {slot.name: item.id},
+                      t: 0.6,
+                      size: 46,
+                      mood: 80,
+                      // 图片宠物没有矢量头，直接显示全身（能看到配饰戴上的效果）
+                      headOnly:
+                          previewSpecies.imageAsset == null &&
+                          (slot == PetOutfitSlot.hat ||
+                              slot == PetOutfitSlot.face),
+                    ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600,
+                color: _isDark ? Colors.white : JellyTheme.textPrimaryLight,
+              ),
+            ),
+            Text(
+              owned ? (selected ? '已穿戴' : '点击穿戴') : '${item.price} 币',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 9,
+                color: JellyTheme.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -635,9 +748,9 @@ class _PetCenterPageState extends State<PetCenterPage>
         crossAxisSpacing: 10,
         childAspectRatio: 0.78,
       ),
-      itemCount: PetSpecies.all.length,
+      itemCount: PetSpecies.pets.length,
       itemBuilder: (context, i) {
-        final s = PetSpecies.all[i];
+        final s = PetSpecies.pets[i];
         final unlocked = _pet.unlockedSpecies.contains(s.id);
         final current = _pet.speciesId == s.id;
         return GestureDetector(
@@ -659,7 +772,10 @@ class _PetCenterPageState extends State<PetCenterPage>
                   children: [
                     PetView(
                       species: s,
-                      outfit: unlocked ? _pet.equippedOutfit : PetOutfits.none.id,
+                      outfit: unlocked
+                          ? _pet.equippedOutfit
+                          : PetOutfits.none.id,
+                      outfits: unlocked ? _pet.equippedOutfitsByName : const {},
                       t: 0.8,
                       size: 74,
                       mood: unlocked ? 80 : 20,
@@ -672,8 +788,11 @@ class _PetCenterPageState extends State<PetCenterPage>
                           color: Colors.black.withValues(alpha: 0.45),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.lock_rounded,
-                            color: Colors.white70, size: 22),
+                        child: const Icon(
+                          Icons.lock_rounded,
+                          color: Colors.white70,
+                          size: 22,
+                        ),
                       ),
                   ],
                 ),
@@ -723,24 +842,27 @@ class _PetCenterPageState extends State<PetCenterPage>
       _toast('书币不足：需要 ${s.price}，当前 ${_pet.coins}');
       return;
     }
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('解锁「${s.name}」？'),
-        content: Text('${s.description}\n\n将消耗 ${s.price} 书币。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('解锁'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
+    // 免费宠物（小Q / 小秀）直接解锁，不用弹「消耗 0 书币」的框
+    if (s.price > 0) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('解锁「${s.name}」？'),
+          content: Text('${s.description}\n\n将消耗 ${s.price} 书币。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('解锁'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
     final done = await _pet.unlockSpecies(s);
     if (!done) {
       _toast('解锁失败');
@@ -803,25 +925,27 @@ class _PetCenterPageState extends State<PetCenterPage>
   }
 
   Widget _sectionTitle(String text) => Padding(
-        padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
-        child: Text(
-          text,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-            color: JellyTheme.textSecondary,
-          ),
-        ),
-      );
+    padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+    child: Text(
+      text,
+      style: TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w700,
+        color: JellyTheme.textSecondary,
+      ),
+    ),
+  );
 
   void _toast(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(msg),
-        duration: const Duration(seconds: 2),
-        behavior: SnackBarBehavior.floating,
-      ));
+      ..showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
   }
 }

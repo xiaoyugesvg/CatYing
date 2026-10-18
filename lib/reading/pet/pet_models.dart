@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
-/// 桌宠物种元数据（十二生肖 + 猫 / 麒麟 / 凤凰）。
+/// 桌宠物种元数据。
+///
+/// 用户 2026-10-18：
+///   · 桌宠改成 **QQ 秀风格**（小Q / 小秀 / 书呆），不再用生肖、龙、麒麟这些；
+///   · 十二生肖插画**只保留为登录头像**（`avatarOnly`，不出现在宠物图鉴）。
 class PetSpeciesInfo {
   const PetSpeciesInfo({
     required this.id,
@@ -13,6 +17,7 @@ class PetSpeciesInfo {
     this.legendary = false,
     this.unlockLevel = 1,
     this.price = 200,
+    this.qq = false,
   });
 
   final String id;
@@ -24,12 +29,15 @@ class PetSpeciesInfo {
   final List<Color> palette;
 
   /// 用户提供的生肖插画（`assets/avatars_pets/<id>.jpg`）。
-  /// 有图时头像/桌宠优先用图片皮肤；为 null 时回退矢量团子。
+  /// **只用于登录头像**；桌宠不再使用这些图片（用户 2026-10-18）。
   final String? imageAsset;
   final bool rare;
   final bool legendary;
   final int unlockLevel;
   final int price;
+
+  /// QQ 秀风格的人形桌宠（矢量绘制，可换装）。
+  final bool qq;
 
   String get rarity {
     if (legendary) return '传说';
@@ -41,6 +49,39 @@ class PetSpeciesInfo {
 class PetSpecies {
   PetSpecies._();
 
+  // ── QQ 秀风格人形桌宠（内置，用户 2026-10-18）─────────────────
+  static const qqBoy = PetSpeciesInfo(
+    id: 'qq_boy',
+    name: '小Q',
+    element: '风',
+    description: '爱穿卫衣的读书少年，衣柜里永远少一件。',
+    palette: [Color(0xFF5C8DFF), Color(0xFFF2F6FF), Color(0xFF2C3E66)],
+    unlockLevel: 1,
+    price: 0,
+    qq: true,
+  );
+  static const qqGirl = PetSpeciesInfo(
+    id: 'qq_girl',
+    name: '小秀',
+    element: '花',
+    description: '爱搭配衣服的读书少女，今天也要美美地看书。',
+    palette: [Color(0xFFFF8FB1), Color(0xFFFFF3F7), Color(0xFF7A3B52)],
+    unlockLevel: 1,
+    price: 0,
+    qq: true,
+  );
+  static const qqScholar = PetSpeciesInfo(
+    id: 'qq_scholar',
+    name: '书呆',
+    element: '墨',
+    description: '抱着书不撒手的学霸，穿搭也一丝不苟。',
+    palette: [Color(0xFF8D9B6A), Color(0xFFF4F6EC), Color(0xFF3E4A32)],
+    unlockLevel: 3,
+    price: 260,
+    qq: true,
+  );
+
+  // ── 以下只作为**登录头像**候选（十二生肖插画），不进桌宠图鉴 ──
   static const cat = PetSpeciesInfo(
     id: 'cat',
     name: '喵酱',
@@ -174,61 +215,6 @@ class PetSpecies {
     unlockLevel: 2,
     price: 220,
   );
-  static const qilin = PetSpeciesInfo(
-    id: 'qilin',
-    name: '麒麟',
-    element: '土',
-    description: '踏书而来的祥瑞，传说只在读完一本好书时现身。',
-    palette: [Color(0xFFFFD54F), Color(0xFFFFF8E1), Color(0xFF8D6E63)],
-    rare: true,
-    legendary: true,
-    unlockLevel: 9,
-    price: 1500,
-  );
-  static const phoenix = PetSpeciesInfo(
-    id: 'phoenix',
-    name: '朱雀',
-    element: '火',
-    description: '浴火重生的书灵，尾羽像一页页燃起的纸。',
-    palette: [Color(0xFFFF7043), Color(0xFFFFCCBC), Color(0xFFD84315)],
-    rare: true,
-    legendary: true,
-    unlockLevel: 10,
-    price: 1800,
-  );
-  static const whiteTiger = PetSpeciesInfo(
-    id: 'white_tiger',
-    name: '白虎',
-    element: '金',
-    description: '西方守护神兽，看着凶，其实只想趴在你书边打盹。',
-    palette: [Color(0xFFF3F1EC), Color(0xFFFFFFFF), Color(0xFF546E7A)],
-    rare: true,
-    legendary: true,
-    unlockLevel: 8,
-    price: 1400,
-  );
-  static const xuanwu = PetSpeciesInfo(
-    id: 'xuanwu',
-    name: '玄武',
-    element: '水',
-    description: '背着一整座书库的龟，慢，但从不丢页。',
-    palette: [Color(0xFF607D8B), Color(0xFFCFD8DC), Color(0xFF2E3B42)],
-    rare: true,
-    legendary: true,
-    unlockLevel: 9,
-    price: 1500,
-  );
-  static const fenghuang = PetSpeciesInfo(
-    id: 'fenghuang',
-    name: '凤凰',
-    element: '火',
-    description: '百鸟之王，尾羽一展就是一片晚霞。',
-    palette: [Color(0xFFFFB300), Color(0xFFFFF3E0), Color(0xFFE65100)],
-    rare: true,
-    legendary: true,
-    unlockLevel: 10,
-    price: 1800,
-  );
 
   /// 自定义桌宠（用户 2026-10-18）：PNG / GIF 由用户自己上传。
   ///
@@ -243,7 +229,14 @@ class PetSpecies {
     price: 0,
   );
 
+  /// 桌宠图鉴：只有 QQ 秀风格人形宠物（用户 2026-10-18）。
+  static const List<PetSpeciesInfo> pets = [qqBoy, qqGirl, qqScholar];
+
+  /// 全部物种（含**只用于登录头像**的生肖插画），byId 用。
   static const List<PetSpeciesInfo> all = [
+    qqBoy,
+    qqGirl,
+    qqScholar,
     cat,
     dog,
     rat,
@@ -257,28 +250,38 @@ class PetSpecies {
     monkey,
     rooster,
     pig,
-    qilin,
-    phoenix,
-    whiteTiger,
-    xuanwu,
-    fenghuang,
   ];
 
   static PetSpeciesInfo byId(String id) => id == custom.id
       ? custom
-      : all.firstWhere((e) => e.id == id, orElse: () => cat);
+      : all.firstWhere((e) => e.id == id, orElse: () => qqBoy);
+}
+
+/// 换装部位（QQ秀式多部位穿搭，用户 2026-10-18）
+enum PetOutfitSlot {
+  hat('头饰'),
+  face('面部'),
+  neck('颈部'),
+  top('上衣'),
+  hand('手持'),
+  background('背景');
+
+  const PetOutfitSlot(this.label);
+  final String label;
 }
 
 class PetOutfitInfo {
   const PetOutfitInfo({
     required this.id,
     required this.name,
+    required this.slot,
     required this.price,
     this.unlockLevel = 1,
   });
 
   final String id;
   final String name;
+  final PetOutfitSlot slot;
   final int price;
   final int unlockLevel;
 }
@@ -286,17 +289,147 @@ class PetOutfitInfo {
 class PetOutfits {
   PetOutfits._();
 
-  static const none = PetOutfitInfo(id: 'none', name: '不戴', price: 0);
-  static const hat = PetOutfitInfo(id: 'hat', name: '小礼帽', price: 80);
-  static const scarf = PetOutfitInfo(id: 'scarf', name: '围巾', price: 100);
-  static const glasses = PetOutfitInfo(id: 'glasses', name: '圆框眼镜', price: 120);
+  /// 旧版单件穿搭的「不戴」哨兵（保留用于存档迁移）
+  static const none = PetOutfitInfo(
+    id: 'none',
+    name: '不戴',
+    slot: PetOutfitSlot.hat,
+    price: 0,
+  );
+
+  // ── 头饰 ────────────────────────────────────────────────────
+  static const bow = PetOutfitInfo(
+    id: 'bow',
+    name: '蝴蝶结',
+    slot: PetOutfitSlot.hat,
+    price: 60,
+  );
+  static const hat = PetOutfitInfo(
+    id: 'hat',
+    name: '小礼帽',
+    slot: PetOutfitSlot.hat,
+    price: 80,
+  );
+  static const cap = PetOutfitInfo(
+    id: 'cap',
+    name: '鸭舌帽',
+    slot: PetOutfitSlot.hat,
+    price: 120,
+  );
   static const crown = PetOutfitInfo(
     id: 'crown',
     name: '小皇冠',
+    slot: PetOutfitSlot.hat,
     price: 300,
     unlockLevel: 4,
   );
-  static const bow = PetOutfitInfo(id: 'bow', name: '蝴蝶结', price: 60);
 
-  static const List<PetOutfitInfo> all = [none, bow, hat, scarf, glasses, crown];
+  // ── 面部 ────────────────────────────────────────────────────
+  static const glasses = PetOutfitInfo(
+    id: 'glasses',
+    name: '圆框眼镜',
+    slot: PetOutfitSlot.face,
+    price: 120,
+  );
+  static const shades = PetOutfitInfo(
+    id: 'shades',
+    name: '墨镜',
+    slot: PetOutfitSlot.face,
+    price: 180,
+  );
+
+  // ── 颈部 ────────────────────────────────────────────────────
+  static const scarf = PetOutfitInfo(
+    id: 'scarf',
+    name: '围巾',
+    slot: PetOutfitSlot.neck,
+    price: 100,
+  );
+  static const tie = PetOutfitInfo(
+    id: 'tie',
+    name: '小领结',
+    slot: PetOutfitSlot.neck,
+    price: 140,
+  );
+
+  // ── 上衣 ────────────────────────────────────────────────────
+  static const hoodie = PetOutfitInfo(
+    id: 'hoodie',
+    name: '连帽卫衣',
+    slot: PetOutfitSlot.top,
+    price: 260,
+    unlockLevel: 2,
+  );
+  static const vest = PetOutfitInfo(
+    id: 'vest',
+    name: '小马甲',
+    slot: PetOutfitSlot.top,
+    price: 320,
+    unlockLevel: 3,
+  );
+
+  // ── 手持 ────────────────────────────────────────────────────
+  static const book = PetOutfitInfo(
+    id: 'book',
+    name: '一本书',
+    slot: PetOutfitSlot.hand,
+    price: 160,
+  );
+  static const coffee = PetOutfitInfo(
+    id: 'coffee',
+    name: '咖啡杯',
+    slot: PetOutfitSlot.hand,
+    price: 200,
+  );
+  static const balloon = PetOutfitInfo(
+    id: 'balloon',
+    name: '小气球',
+    slot: PetOutfitSlot.hand,
+    price: 220,
+  );
+
+  // ── 背景 ────────────────────────────────────────────────────
+  static const moon = PetOutfitInfo(
+    id: 'moon',
+    name: '月光',
+    slot: PetOutfitSlot.background,
+    price: 240,
+    unlockLevel: 2,
+  );
+  static const stars = PetOutfitInfo(
+    id: 'stars',
+    name: '星芒',
+    slot: PetOutfitSlot.background,
+    price: 280,
+    unlockLevel: 3,
+  );
+
+  static const List<PetOutfitInfo> all = [
+    bow,
+    hat,
+    cap,
+    crown,
+    glasses,
+    shades,
+    scarf,
+    tie,
+    hoodie,
+    vest,
+    book,
+    coffee,
+    balloon,
+    moon,
+    stars,
+  ];
+
+  static PetOutfitInfo? byId(String? id) {
+    if (id == null || id.isEmpty || id == none.id) return null;
+    for (final o in all) {
+      if (o.id == id) return o;
+    }
+    return null;
+  }
+
+  static List<PetOutfitInfo> forSlot(PetOutfitSlot slot) =>
+      all.where((e) => e.slot == slot).toList();
 }

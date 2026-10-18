@@ -113,16 +113,23 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
     return _ItemState.parseFail;
   }
 
-  int get _total => store.all.length;
-  int get _usable => store.all.where((s) => _itemState(s) == _ItemState.healthy).length;
-  int get _networkFail => store.all.where((s) => _itemState(s) == _ItemState.networkFail).length;
-  int get _parseFail => store.all.where((s) => _itemState(s) == _ItemState.parseFail).length;
+  /// 只体检/展示**书源**：漫画源统一归漫画模块（用户 2026-10-18 分离）。
+  List<BookSource> get _bookSources =>
+      store.all.where((s) => !s.isComicSource).toList();
+
+  int get _total => _bookSources.length;
+  int get _usable =>
+      _bookSources.where((s) => _itemState(s) == _ItemState.healthy).length;
+  int get _networkFail =>
+      _bookSources.where((s) => _itemState(s) == _ItemState.networkFail).length;
+  int get _parseFail =>
+      _bookSources.where((s) => _itemState(s) == _ItemState.parseFail).length;
 
   /// 分类分组（对齐原版「通常书源 / 快速书源」）：组名含「快速」→ 快速书源
   bool _isFast(BookSource s) => s.group.contains('快速');
 
   List<BookSource> get _filtered {
-    var list = List<BookSource>.of(store.all);
+    var list = List<BookSource>.of(_bookSources);
     if (_kw.isNotEmpty) {
       final k = _kw.trim().toLowerCase();
       list = list.where((s) => s.name.toLowerCase().contains(k)).toList();
@@ -134,9 +141,13 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
       case 3: // 密钥：无数据维度，等同全部
         break;
       case 4:
-        list = list.where((s) => _itemState(s) == _ItemState.networkFail).toList();
+        list = list
+            .where((s) => _itemState(s) == _ItemState.networkFail)
+            .toList();
       case 5:
-        list = list.where((s) => _itemState(s) == _ItemState.parseFail).toList();
+        list = list
+            .where((s) => _itemState(s) == _ItemState.parseFail)
+            .toList();
       default:
         break;
     }
@@ -151,8 +162,8 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
     return list;
   }
 
-  int get _fastCount => store.all.where((s) => _isFast(s)).length;
-  int get _normalCount => store.all.where((s) => !_isFast(s)).length;
+  int get _fastCount => _bookSources.where((s) => _isFast(s)).length;
+  int get _normalCount => _bookSources.where((s) => !_isFast(s)).length;
 
   // ============================================================
   // 动作
@@ -166,7 +177,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
       service.healthCache.clear();
     });
     await service.healthCheckAll(
-      store.all,
+      _bookSources,
       concurrency: _concurrency,
       // 退出页面不中断：dispose 后 onOne 不再 setState，但结果继续写服务缓存
       onOne: (h) {
@@ -186,14 +197,21 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
   }
 
   Future<void> _optimize() async {
-    final usable = store.all.where((s) => _itemState(s) == _ItemState.healthy).toList();
-    final bad = store.all.where((s) =>
-        _itemState(s) == _ItemState.networkFail ||
-        _itemState(s) == _ItemState.parseFail);
+    final usable = _bookSources
+        .where((s) => _itemState(s) == _ItemState.healthy)
+        .toList();
+    final bad = _bookSources.where(
+      (s) =>
+          _itemState(s) == _ItemState.networkFail ||
+          _itemState(s) == _ItemState.parseFail,
+    );
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('一键优化', style: TextStyle(fontSize: AppTheme.fontHeadline)),
+        title: const Text(
+          '一键优化',
+          style: TextStyle(fontSize: AppTheme.fontHeadline),
+        ),
         content: Text(
           '将把 ${usable.length} 个可用源置顶，其中重新启用 0 个；'
           '停用 ${bad.length} 个网络不通/解析失败的源'
@@ -201,8 +219,14 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
           style: const TextStyle(fontSize: AppTheme.fontSubhead, height: 1.6),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('优化')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('优化'),
+          ),
         ],
       ),
     );
@@ -210,7 +234,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
     // 可用源置顶（按原顺序），其余保持原顺序在后
     final ordered = <String>[
       ...usable.map((s) => s.id),
-      ...store.all.where((s) => !usable.contains(s)).map((s) => s.id),
+      ..._bookSources.where((s) => !usable.contains(s)).map((s) => s.id),
     ];
     await store.reorder(ordered);
     for (final s in bad) {
@@ -228,13 +252,19 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('清理书源', style: TextStyle(fontSize: AppTheme.fontHeadline)),
+        title: const Text(
+          '清理书源',
+          style: TextStyle(fontSize: AppTheme.fontHeadline),
+        ),
         content: Text(
           '将删除 $n 个书源，删除后不可恢复，确定继续？',
           style: const TextStyle(fontSize: AppTheme.fontSubhead, height: 1.6),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             child: Text('删除', style: TextStyle(color: JellyTheme.error)),
@@ -254,11 +284,16 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(msg, style: const TextStyle(fontSize: AppTheme.fontFootnote)),
-        duration: const Duration(seconds: 2),
-        behavior: SnackBarBehavior.floating,
-      ));
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            msg,
+            style: const TextStyle(fontSize: AppTheme.fontFootnote),
+          ),
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
   }
 
   // ============================================================
@@ -268,13 +303,21 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
+      backgroundColor: _isDark
+          ? JellyTheme.backgroundDark
+          : JellyTheme.backgroundLight,
       appBar: AppBar(
-        backgroundColor: _isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
+        backgroundColor: _isDark
+            ? JellyTheme.backgroundDark
+            : JellyTheme.backgroundLight,
         surfaceTintColor: Colors.transparent,
         centerTitle: true,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new_rounded, size: 20, color: _titleColor),
+          icon: Icon(
+            Icons.arrow_back_ios_new_rounded,
+            size: 20,
+            color: _titleColor,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
@@ -345,9 +388,15 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
         child: Wrap(
           spacing: 8,
           alignment: WrapAlignment.center,
-          children: [1, 2, 3, 4, 6, 8, 12]
-              .map((n) => _concurrencyChip(n))
-              .toList(),
+          children: [
+            1,
+            2,
+            3,
+            4,
+            6,
+            8,
+            12,
+          ].map((n) => _concurrencyChip(n)).toList(),
         ),
       ),
       const SizedBox(height: 40),
@@ -419,9 +468,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
         children: [
           Expanded(
             child: Text(
-              running
-                  ? '体检中 $_done/$_total（取书→详情→目录→正文）'
-                  : '体检完成·$doneTime',
+              running ? '体检中 $_done/$_total（取书→详情→目录→正文）' : '体检完成·$doneTime',
               style: TextStyle(
                 fontSize: AppTheme.fontSubhead,
                 fontWeight: FontWeight.w600,
@@ -492,7 +539,10 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
           child: Center(
             child: Text(
               running && _done == 0 ? '暂无可用的源' : '暂无可用的源',
-              style: TextStyle(fontSize: AppTheme.fontSubhead, color: _subColor),
+              style: TextStyle(
+                fontSize: AppTheme.fontSubhead,
+                color: _subColor,
+              ),
             ),
           ),
         )
@@ -607,25 +657,25 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
     final selected = _selected.contains(s.id);
     final (Color color, IconData icon, String sub) = switch (state) {
       _ItemState.healthy => (
-          Colors.green,
-          Icons.check_circle_rounded,
-          '${h!.elapsed.inMilliseconds}ms·${h.detail}',
-        ),
+        Colors.green,
+        Icons.check_circle_rounded,
+        '${h!.elapsed.inMilliseconds}ms·${h.detail}',
+      ),
       _ItemState.networkFail => (
-          Colors.orange,
-          Icons.wifi_off_rounded,
-          h!.detail,
-        ),
+        Colors.orange,
+        Icons.wifi_off_rounded,
+        h!.detail,
+      ),
       _ItemState.parseFail => (
-          JellyTheme.error,
-          Icons.error_rounded,
-          h!.detail,
-        ),
+        JellyTheme.error,
+        Icons.error_rounded,
+        h!.detail,
+      ),
       _ItemState.untested => (
-          _subColor,
-          Icons.radio_button_unchecked_rounded,
-          '尚未体检',
-        ),
+        _subColor,
+        Icons.radio_button_unchecked_rounded,
+        '尚未体检',
+      ),
     };
 
     return GestureDetector(
@@ -651,12 +701,18 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
                     ? JellyTheme.primary
                     : (_isDark ? JellyTheme.cardDark : JellyTheme.cardLight),
                 border: Border.all(
-                  color: selected ? JellyTheme.primary : _subColor.withValues(alpha: 0.4),
+                  color: selected
+                      ? JellyTheme.primary
+                      : _subColor.withValues(alpha: 0.4),
                   width: 1.2,
                 ),
               ),
               child: selected
-                  ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
+                  ? const Icon(
+                      Icons.check_rounded,
+                      size: 14,
+                      color: Colors.white,
+                    )
                   : null,
             ),
             const SizedBox(width: 12),
@@ -684,7 +740,10 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
                           sub,
                           maxLines: 3,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: AppTheme.fontCaption, color: color),
+                          style: TextStyle(
+                            fontSize: AppTheme.fontCaption,
+                            color: color,
+                          ),
                         ),
                       ),
                     ],
@@ -732,7 +791,10 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
               ),
               label: Text(
                 _selectAll ? '取消全选' : '全选',
-                style: TextStyle(fontSize: AppTheme.fontFootnote, color: _titleColor),
+                style: TextStyle(
+                  fontSize: AppTheme.fontFootnote,
+                  color: _titleColor,
+                ),
               ),
             ),
             const Spacer(),
@@ -740,7 +802,11 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
               // 一键优化（盾牌+魔法棒，对齐 8560 底部操作）
               IconButton(
                 tooltip: '一键优化',
-                icon: Icon(Icons.auto_fix_high_rounded, size: 20, color: JellyTheme.primary),
+                icon: Icon(
+                  Icons.auto_fix_high_rounded,
+                  size: 20,
+                  color: JellyTheme.primary,
+                ),
                 onPressed: _usable > 0 ? _optimize : null,
               ),
               const SizedBox(width: 4),
@@ -748,10 +814,17 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
             // 清理（删除选中）
             TextButton.icon(
               onPressed: _selected.isEmpty ? null : _cleanup,
-              icon: Icon(Icons.delete_outline_rounded, size: 18, color: JellyTheme.error),
+              icon: Icon(
+                Icons.delete_outline_rounded,
+                size: 18,
+                color: JellyTheme.error,
+              ),
               label: Text(
                 '清理',
-                style: TextStyle(fontSize: AppTheme.fontFootnote, color: JellyTheme.error),
+                style: TextStyle(
+                  fontSize: AppTheme.fontFootnote,
+                  color: JellyTheme.error,
+                ),
               ),
             ),
           ],

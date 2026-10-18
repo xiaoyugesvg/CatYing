@@ -1,4 +1,3 @@
-
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -558,15 +557,22 @@ class _MePageState extends State<MePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('选择头像',
-                        style: TextStyle(
-                            fontSize: AppTheme.fontTitle3,
-                            fontWeight: FontWeight.w600,
-                            color: fg)),
+                    Text(
+                      '选择头像',
+                      style: TextStyle(
+                        fontSize: AppTheme.fontTitle3,
+                        fontWeight: FontWeight.w600,
+                        color: fg,
+                      ),
+                    ),
                     const SizedBox(height: 4),
-                    Text('共 $_kAvatarCount 款内置生肖插画，可点首张上传自定义头像',
-                        style: TextStyle(
-                            fontSize: AppTheme.fontCaption, color: sub)),
+                    Text(
+                      '共 $_kAvatarCount 款内置生肖插画，可点首张上传自定义头像',
+                      style: TextStyle(
+                        fontSize: AppTheme.fontCaption,
+                        color: sub,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -584,10 +590,10 @@ class _MePageState extends State<MePage> {
                       padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
                       gridDelegate:
                           const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 4,
-                        mainAxisSpacing: 14,
-                        crossAxisSpacing: 14,
-                      ),
+                            crossAxisCount: 4,
+                            mainAxisSpacing: 14,
+                            crossAxisSpacing: 14,
+                          ),
                       itemCount: _kAvatarCount + 1,
                       itemBuilder: (c, i) {
                         if (i == 0) {
@@ -647,8 +653,11 @@ class _MePageState extends State<MePage> {
         padding: const EdgeInsets.all(2),
         child: ClipOval(
           child: isUpload
-              ? Icon(Icons.add_photo_alternate_outlined,
-                  size: 26, color: JellyTheme.textSecondary)
+              ? Icon(
+                  Icons.add_photo_alternate_outlined,
+                  size: 26,
+                  color: JellyTheme.textSecondary,
+                )
               : _avatarImageFor(id, 64),
         ),
       ),
@@ -721,9 +730,10 @@ class _MePageState extends State<MePage> {
                 borderRadius: BorderRadius.circular(24),
                 boxShadow: const [
                   BoxShadow(
-                      color: Colors.black26,
-                      blurRadius: 24,
-                      offset: Offset(0, 8)),
+                    color: Colors.black26,
+                    blurRadius: 24,
+                    offset: Offset(0, 8),
+                  ),
                 ],
               ),
               clipBehavior: Clip.antiAlias,
@@ -732,182 +742,231 @@ class _MePageState extends State<MePage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-              // 头像
-              Container(
-                width: 84,
-                height: 84,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: JellyTheme.primary,
-                ),
-                child: ClipOval(child: _avatarImage(80)),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.w700, color: fg),
-              ),
-              if (email.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(email,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 13, color: sub)),
-              ],
-              const SizedBox(height: 16),
-              // 今日下载额度
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                decoration: BoxDecoration(
-                  color: softBg,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.file_download_outlined, size: 16, color: fg),
-                    const SizedBox(width: 6),
-                    Text('今日下载 $used / $limit 本',
-                        style: TextStyle(
-                            fontSize: AppTheme.fontSubhead,
-                            fontWeight: FontWeight.w600,
-                            color: fg)),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 18),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text('我的账号',
-                    style: TextStyle(fontSize: AppTheme.fontCaption, color: sub)),
-              ),
-              const SizedBox(height: 6),
-              // 当前账号（当前只支持单账号 ⇒ 常驻选中）
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () {},
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Row(
-                    children: [
-                      Icon(Icons.radio_button_checked_rounded,
-                          size: 20, color: fg),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(email.isEmpty ? name : email,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                    // 头像
+                    Container(
+                      width: 84,
+                      height: 84,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: JellyTheme.primary,
+                      ),
+                      child: ClipOval(child: _avatarImage(80)),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: fg,
+                      ),
+                    ),
+                    if (email.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        email,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 13, color: sub),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    // 今日下载额度
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      decoration: BoxDecoration(
+                        color: softBg,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.file_download_outlined,
+                            size: 16,
+                            color: fg,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            '今日下载 $used / $limit 本',
                             style: TextStyle(
-                                fontSize: AppTheme.fontBody, color: fg)),
+                              fontSize: AppTheme.fontSubhead,
+                              fontWeight: FontWeight.w600,
+                              color: fg,
+                            ),
+                          ),
+                        ],
                       ),
-                      GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () async {
-                          Navigator.pop(ctx);
-                          await ZlibraryService().logout();
-                        },
-                        child: Padding(
-                          padding: const EdgeInsets.all(4),
-                          child: Icon(Icons.delete_outline_rounded,
-                              size: 20, color: sub),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 2),
-              // 添加账号 → 登录页
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _push(const ZlibraryAuthPage());
-                },
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  child: Row(
-                    children: [
-                      Icon(Icons.add_circle_outline_rounded,
-                          size: 20, color: fg),
-                      const SizedBox(width: 10),
-                      Text('添加账号',
-                          style: TextStyle(
-                              fontSize: AppTheme.fontBody, color: fg)),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline_rounded, size: 14, color: sub),
-                    const SizedBox(width: 6),
-                    Expanded(
+                    ),
+                    const SizedBox(height: 18),
+                    Align(
+                      alignment: Alignment.centerLeft,
                       child: Text(
-                        '退出后将回退内置账号（${ZlibraryService.builtinDailyLimit} 本/天）',
+                        '我的账号',
                         style: TextStyle(
-                            fontSize: AppTheme.fontCaption, color: sub),
+                          fontSize: AppTheme.fontCaption,
+                          color: sub,
+                        ),
                       ),
+                    ),
+                    const SizedBox(height: 6),
+                    // 当前账号（当前只支持单账号 ⇒ 常驻选中）
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {},
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.radio_button_checked_rounded,
+                              size: 20,
+                              color: fg,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                email.isEmpty ? name : email,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: AppTheme.fontBody,
+                                  color: fg,
+                                ),
+                              ),
+                            ),
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () async {
+                                Navigator.pop(ctx);
+                                await ZlibraryService().logout();
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.all(4),
+                                child: Icon(
+                                  Icons.delete_outline_rounded,
+                                  size: 20,
+                                  color: sub,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    // 添加账号 → 登录页
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _push(const ZlibraryAuthPage());
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.add_circle_outline_rounded,
+                              size: 20,
+                              color: fg,
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              '添加账号',
+                              style: TextStyle(
+                                fontSize: AppTheme.fontBody,
+                                color: fg,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.info_outline_rounded,
+                            size: 14,
+                            color: sub,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              '退出后将回退内置账号（${ZlibraryService.builtinDailyLimit} 本/天）',
+                              style: TextStyle(
+                                fontSize: AppTheme.fontCaption,
+                                color: sub,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => Navigator.pop(ctx),
+                            child: Container(
+                              alignment: Alignment.center,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              child: Text(
+                                '取消',
+                                style: TextStyle(
+                                  fontSize: AppTheme.fontBody,
+                                  color: fg,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () async {
+                              Navigator.pop(ctx);
+                              await ZlibraryService().logout();
+                            },
+                            child: Container(
+                              alignment: Alignment.center,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              decoration: BoxDecoration(
+                                color: isDark
+                                    ? Colors.white
+                                    : const Color(0xFF16181D),
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: Text(
+                                '退出登录',
+                                style: TextStyle(
+                                  fontSize: AppTheme.fontBody,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark
+                                      ? const Color(0xFF16181D)
+                                      : Colors.white,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
-                ),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () => Navigator.pop(ctx),
-                      child: Container(
-                        alignment: Alignment.center,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        child: Text('取消',
-                            style: TextStyle(
-                                fontSize: AppTheme.fontBody, color: fg)),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () async {
-                        Navigator.pop(ctx);
-                        await ZlibraryService().logout();
-                      },
-                      child: Container(
-                        alignment: Alignment.center,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        decoration: BoxDecoration(
-                          color: isDark ? Colors.white : const Color(0xFF16181D),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Text('退出登录',
-                            style: TextStyle(
-                                fontSize: AppTheme.fontBody,
-                                fontWeight: FontWeight.w600,
-                                color: isDark
-                                    ? const Color(0xFF16181D)
-                                    : Colors.white)),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-                  ),
                 ),
               ),
             ),
           ),
+        ),
       ),
       transitionBuilder: (ctx, anim, _, child) => FadeTransition(
         opacity: anim,
@@ -922,17 +981,18 @@ class _MePageState extends State<MePage> {
   }
 
   /// 顶部账号卡（参考目标设计）：
-  ///   左侧：圆形头像（描边 + 右下角相机角标）
+  ///   顶部：一条深灰装饰带，右上角放三个快捷入口（笔记 / 历程 / 计划）
+  ///   左侧：圆形头像（描边 + 右下角相机角标），跨在装饰带下沿
   ///   中间：用户名（加粗）+ 小号灰字「z-library」；下一行邮箱灰字
   ///   右侧：`>` 箭头
-  ///   右下角：灰字小号「今日可下 N/N 本」（取不到限额时隐藏该行）
-  ///   卡片右上角：一条横向快捷条（我的笔记 / 阅读经历 / 阅读计划），
-  ///     与账号卡**同处一张卡片容器内**，右对齐排在卡片顶部。
+  ///   底部：今日下载额度进度条 + 右侧「今日可下 N/N 本」
+  ///     （取不到限额时整行隐藏）
   ///
   /// ── 结构 ────────────────────────────────────────────────────
-  /// 单个 `Material` 卡片内一个 `Column`：先快捷条（卡片内右上角），再账号
-  /// 信息区。账号信息区自带 `InkWell`（点击进登录），快捷条在它外部 ——
-  /// 点图标只跳目标页，不会误触进登录。
+  /// 单个 `Material` 卡片内用 `Stack`：底层 `Column`（灰色装饰带 + 账号信息
+  /// 区），上层 `Positioned` 头像跨在色带下沿。账号信息区自带 `InkWell`
+  /// （点击进登录），快捷入口在色带内、账号区外部 —— 点图标只跳目标页，
+  /// 不会误触进登录。
   ///
   /// ⚠️ 账号字段（用户名 / 邮箱 / 限额）全部取自 [ZlibraryService] 的现有
   ///    状态，**取不到的字段就隐藏或退回状态文案**，绝不编造。
@@ -962,185 +1022,245 @@ class _MePageState extends State<MePage> {
 
         final name = logged
             ? (z.username.isNotEmpty
-                ? z.username
-                : (z.email.isNotEmpty ? z.email : '已登录'))
+                  ? z.username
+                  : (z.email.isNotEmpty ? z.email : '已登录'))
             : '还未登录';
         final secondLine = logged
             ? (z.email.isNotEmpty ? z.email : '点击管理账号')
             : '登录后可下载更多图书';
 
+        // ── 顶部灰色装饰带（用户 2026-10-18 给的截图样式）──
+        const bandHeight = 56.0;
+        // 头像跨在色带下沿：值越大，头像露在色带上的部分越少
+        const avatarOverlap = 32.0;
+        final bandColor = isDark
+            ? const Color(0xFF35373B)
+            : const Color(0xFF5A5D62);
+        // 下载额度进度：已用 / 总额度（0 表示今天还没下过）
+        final progress = showQuota
+            ? (used.clamp(0, limit) / limit).toDouble()
+            : 0.0;
+
+        // 圆形头像（描边 + 右下角相机编辑角标）
+        final avatar = Stack(
+          clipBehavior: Clip.none,
+          children: [
+            // 🔴 头像本身也可点：用户 2026-10-18 反馈
+            // 「登录后的头像不能选择切换」—— 原来只有右下角
+            // 那个 22px 的小相机角标能开面板，点大头像会走
+            // 外层的「我的账号」，很难发现换头像的入口。
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _showAvatarSheet,
+              child: Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: logged
+                      ? JellyTheme.primary
+                      : (isDark
+                            ? Colors.white.withValues(alpha: 0.10)
+                            : const Color(0xFFEDEEF0)),
+                  border: Border.all(color: avatarRing, width: 2),
+                ),
+                // ⚠️ 必须裁：`shape: BoxShape.circle` 只把**底色/描边**
+                //    画成圆，**子级图片不会被裁** ⇒ 方形头像图会直接铺满
+                //    方形区域、在圆里露出四个角（用户 2026-10-16 截图）。
+                //    子级已被 decoration 按描边宽度内缩 2px，所以裁完
+                //    描边仍然可见。
+                clipBehavior: Clip.antiAlias,
+                child: _avatarImage(60, logged: logged),
+              ),
+            ),
+            // 相机角标（编辑头像入口）—— 点它开「选择头像」面板
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _showAvatarSheet,
+                child: Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: JellyTheme.primary,
+                    border: Border.all(color: cardColor, width: 2),
+                  ),
+                  child: const Icon(
+                    Icons.photo_camera_rounded,
+                    size: 12,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+
         final card = Material(
           color: cardColor,
           borderRadius: BorderRadius.circular(20),
           clipBehavior: Clip.antiAlias,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          child: Stack(
             children: [
-              // ── 快捷条：与账号卡同一张卡片内，右对齐排在卡片顶部 ──
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 12, 0),
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: MeAccountQuickEntries(
-                    // 测试用的稳定锚点（`find.byKey`）
-                    key: const ValueKey('me_account_quick_entries'),
-                    isDark: isDark,
-                    // 用户 2026-10-17：三个入口**各自独立**，不再共用同一页
-                    onNotes: () => _push(const BookNotesPage()),
-                    onJourney: () => _push(
-                      const BrowseHistoryPage(showTabs: false),
-                    ),
-                    onPlan: () => _push(const ReadingPlanPage()),
-                  ),
-                ),
-              ),
-              // ── 账号信息区：点击整块进入登录（快捷条在其外部，不误触）──
-              InkWell(
-                // 已登录 → 弹「我的账号」面板（用户 2026-10-15 给的目标样式）；
-                // 未登录 → 直接进登录页。
-                onTap: () {
-                  if (ZlibraryService().isLoggedIn) {
-                    _showAccountSheet();
-                  } else {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const ZlibraryAuthPage(),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // ── 顶部灰色装饰带：快捷入口排在色带右上角 ──
+                  Container(
+                    height: bandHeight,
+                    padding: const EdgeInsets.fromLTRB(16, 0, 12, 0),
+                    decoration: BoxDecoration(
+                      color: bandColor,
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(20),
                       ),
-                    );
-                  }
-                },
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
+                    ),
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: MeAccountQuickEntries(
+                        // 测试用的稳定锚点（`find.byKey`）
+                        key: const ValueKey('me_account_quick_entries'),
+                        isDark: isDark,
+                        // 深色带上用白色系图标
+                        onBand: true,
+                        // 用户 2026-10-17：三个入口**各自独立**，不再共用同一页
+                        onNotes: () => _push(const BookNotesPage()),
+                        onJourney: () => _push(
+                          const BrowseHistoryPage(showTabs: false),
+                        ),
+                        onPlan: () => _push(const ReadingPlanPage()),
+                      ),
+                    ),
+                  ),
+                  // ── 账号信息区：点击整块进入登录（快捷入口在色带内，不误触）──
+                  InkWell(
+                    // 已登录 → 弹「我的账号」面板（用户 2026-10-15 给的目标样式）；
+                    // 未登录 → 直接进登录页。
+                    onTap: () {
+                      if (ZlibraryService().isLoggedIn) {
+                        _showAccountSheet();
+                      } else {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const ZlibraryAuthPage(),
+                          ),
+                        );
+                      }
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // 圆形头像（描边 + 右下角相机编辑角标）
-                          Stack(
-                            clipBehavior: Clip.none,
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // 🔴 头像本身也可点：用户 2026-10-18 反馈
-                              // 「登录后的头像不能选择切换」—— 原来只有右下角
-                              // 那个 22px 的小相机角标能开面板，点大头像会走
-                              // 外层的「我的账号」，很难发现换头像的入口。
-                              GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onTap: _showAvatarSheet,
-                                child: Container(
-                                  width: 64,
-                                  height: 64,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: logged
-                                        ? JellyTheme.primary
-                                        : (isDark
-                                            ? Colors.white.withValues(alpha: 0.10)
-                                            : const Color(0xFFEDEEF0)),
-                                    border:
-                                        Border.all(color: avatarRing, width: 2),
-                                  ),
-                                  // ⚠️ 必须裁：`shape: BoxShape.circle` 只把**底色/描边**
-                                  //    画成圆，**子级图片不会被裁** ⇒ 方形头像图会直接铺满
-                                  //    方形区域、在圆里露出四个角（用户 2026-10-16 截图）。
-                                  //    子级已被 decoration 按描边宽度内缩 2px，所以裁完
-                                  //    描边仍然可见。
-                                  clipBehavior: Clip.antiAlias,
-                                  child: _avatarImage(60, logged: logged),
+                              // 头像用绝对定位跨在色带下沿，这里只占位
+                              const SizedBox(width: 64 + 14),
+                              // 账号信息：用户名 + z-library 标签 / 邮箱
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.baseline,
+                                      textBaseline: TextBaseline.alphabetic,
+                                      children: [
+                                        Flexible(
+                                          child: Text(
+                                            name,
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w700,
+                                              color: fg,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        if (logged) ...[
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            'z-library',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: sub,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      secondLine,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: sub,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
                                 ),
                               ),
-                              // 相机角标（编辑头像入口）—— 点它开「选择头像」面板
-                              Positioned(
-                                right: 0,
-                                bottom: 0,
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: _showAvatarSheet,
-                                  child: Container(
-                                    width: 22,
-                                    height: 22,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: JellyTheme.primary,
-                                      border:
-                                          Border.all(color: cardColor, width: 2),
-                                    ),
-                                    child: const Icon(
-                                      Icons.photo_camera_rounded,
-                                      size: 12,
-                                      color: Colors.white,
-                                    ),
-                                  ),
+                              const SizedBox(width: 8),
+                              Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Icon(
+                                  Icons.chevron_right_rounded,
+                                  color: sub,
+                                  size: 24,
                                 ),
                               ),
                             ],
                           ),
-                          const SizedBox(width: 14),
-                          // 账号信息：用户名 + z-library 标签 / 邮箱
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                          // ── 今日下载额度进度条（用户 2026-10-18 截图样式）──
+                          if (showQuota) ...[
+                            const SizedBox(height: 14),
+                            Row(
                               children: [
-                                Row(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.baseline,
-                                  textBaseline: TextBaseline.alphabetic,
-                                  children: [
-                                    Flexible(
-                                      child: Text(
-                                        name,
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w700,
-                                          color: fg,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
+                                Expanded(
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(99),
+                                    child: LinearProgressIndicator(
+                                      value: progress,
+                                      minHeight: 6,
+                                      backgroundColor: isDark
+                                          ? Colors.white.withValues(alpha: 0.12)
+                                          : const Color(0xFFE9EAEC),
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                        JellyTheme.primary,
                                       ),
                                     ),
-                                    if (logged) ...[
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        'z-library',
-                                        style:
-                                            TextStyle(fontSize: 12, color: sub),
-                                      ),
-                                    ],
-                                  ],
+                                  ),
                                 ),
-                                const SizedBox(height: 4),
+                                const SizedBox(width: 10),
                                 Text(
-                                  secondLine,
-                                  style: TextStyle(fontSize: 13, color: sub),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                                  '今日可下 $remaining/$limit 本',
+                                  style: TextStyle(
+                                    fontSize: AppTheme.fontCaption,
+                                    color: sub,
+                                  ),
                                 ),
                               ],
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          Icon(Icons.chevron_right_rounded,
-                              color: sub, size: 24),
+                          ],
                         ],
                       ),
-                      // ── 右下角：今日可下载量（灰字小号）──
-                      if (showQuota) ...[
-                        const SizedBox(height: 12),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: Text(
-                            '今日可下 $remaining/$limit 本',
-                            style: TextStyle(
-                              fontSize: AppTheme.fontCaption,
-                              color: sub,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
+                    ),
                   ),
-                ),
+                ],
+              ),
+              // 头像：绝对定位，跨在灰色装饰带下沿（截图里的"半出头"效果）
+              Positioned(
+                left: 16,
+                top: bandHeight - avatarOverlap,
+                child: avatar,
               ),
             ],
           ),
@@ -1174,10 +1294,10 @@ class _MePageState extends State<MePage> {
           : JellyTheme.textSecondary,
     );
     Widget link(String label, VoidCallback onTap) => GestureDetector(
-          onTap: onTap,
-          behavior: HitTestBehavior.opaque,
-          child: Text(label, style: style),
-        );
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Text(label, style: style),
+    );
     final dot = Text(' · ', style: style);
     return Padding(
       padding: const EdgeInsets.only(top: 18, bottom: 6),
@@ -1271,10 +1391,7 @@ class _MePageState extends State<MePage> {
 
   // -------------------- 通用 --------------------
 
-
-
   /// 打开 QQ 群名片（带加入按钮）；未安装 QQ 则复制群号
-
 
   Widget _buildMenuItem(
     bool isDark, {
@@ -1434,8 +1551,8 @@ class _MePageState extends State<MePage> {
                             value: SettingsService().themeFollowSystem,
                             onChanged: switching
                                 ? null
-                                : (v) => SettingsService()
-                                    .setThemeFollowSystem(v),
+                                : (v) =>
+                                      SettingsService().setThemeFollowSystem(v),
                           ),
                           _themeSwitchRow(
                             isDark: isDark,
@@ -1446,7 +1563,7 @@ class _MePageState extends State<MePage> {
                             onChanged: switching
                                 ? null
                                 : (v) => SettingsService()
-                                    .setBackgroundAnimation(v),
+                                      .setBackgroundAnimation(v),
                           ),
                           const SizedBox(height: 8),
                           ConstrainedBox(
@@ -1484,7 +1601,9 @@ class _MePageState extends State<MePage> {
                                                   //   NavigatorState + ModalRoute（顺带避开
                                                   //   use_build_context_synchronously ✗），
                                                   //   500ms 后只有弹层仍是栈顶（isCurrent）才收面板 ✓。
-                                                  final sheetNav = Navigator.of(sheetCtx);
+                                                  final sheetNav = Navigator.of(
+                                                    sheetCtx,
+                                                  );
                                                   final sheetRoute =
                                                       ModalRoute.of(sheetCtx);
                                                   await SettingsService()
@@ -1664,7 +1783,8 @@ class _MePageState extends State<MePage> {
   }) {
     final labelColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
     final hintColor = JellyTheme.textSecondary;
-    final canEdit = (editable && onEdit != null) || (deletable && onDelete != null);
+    final canEdit =
+        (editable && onEdit != null) || (deletable && onDelete != null);
 
     Future<void> showActions() async {
       if (!canEdit) return;
@@ -1704,10 +1824,15 @@ class _MePageState extends State<MePage> {
                 ),
               if (deletable && onDelete != null)
                 ListTile(
-                  leading: const Icon(Icons.delete_outline_rounded,
-                      size: 20, color: Colors.redAccent),
-                  title: const Text('删除主题',
-                      style: TextStyle(color: Colors.redAccent)),
+                  leading: const Icon(
+                    Icons.delete_outline_rounded,
+                    size: 20,
+                    color: Colors.redAccent,
+                  ),
+                  title: const Text(
+                    '删除主题',
+                    style: TextStyle(color: Colors.redAccent),
+                  ),
                   onTap: () {
                     Navigator.pop(ctx);
                     onDelete();
@@ -1730,11 +1855,11 @@ class _MePageState extends State<MePage> {
     ];
     final rowBg = selected
         ? (isDark
-            ? Colors.white.withValues(alpha: 0.10)
-            : const Color(0xFFEDEEF0))
+              ? Colors.white.withValues(alpha: 0.10)
+              : const Color(0xFFEDEEF0))
         : (isDark
-            ? Colors.white.withValues(alpha: 0.04)
-            : const Color(0xFFF7F8FA));
+              ? Colors.white.withValues(alpha: 0.04)
+              : const Color(0xFFF7F8FA));
 
     return GestureDetector(
       onTap: onTap,
@@ -1814,14 +1939,19 @@ class _MePageState extends State<MePage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title,
-                    style: TextStyle(
-                        fontSize: AppTheme.fontBody, color: fg)),
+                Text(
+                  title,
+                  style: TextStyle(fontSize: AppTheme.fontBody, color: fg),
+                ),
                 if (subtitle != null) ...[
                   const SizedBox(height: 2),
-                  Text(subtitle,
-                      style: TextStyle(
-                          fontSize: AppTheme.fontCaption, color: sub)),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: AppTheme.fontCaption,
+                      color: sub,
+                    ),
+                  ),
                 ],
               ],
             ),
