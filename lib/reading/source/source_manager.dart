@@ -270,6 +270,15 @@ class SourceManager extends ChangeNotifier {
 
   /// 重新加载源配置（云端更新 / 恢复本地默认后调用）。
   Future<void> reload() async {
+    // 先释放旧源的长驻资源（Venera 的 QuickJS 运行时），否则每次导入/更新
+    // 订阅都会留下一批 JS context，长时间使用会把内存吃满。
+    for (final s in _sources.values) {
+      try {
+        s.dispose();
+      } catch (e) {
+        _log('释放源资源失败: ${s.id} -> $e');
+      }
+    }
     _sources.clear();
     _current = null;
     _initialized = false;
@@ -358,6 +367,12 @@ class SourceManager extends ChangeNotifier {
 
   /// 按 id 取源
   MangaSource? getSource(String id) => _sources[id];
+
+  /// 取未包装的源实例（重名源会被 [_RenamedSource] 包一层，这里解包）。
+  MangaSource? unwrappedSource(String id) {
+    final s = _sources[id];
+    return s is _RenamedSource ? s._inner : s;
+  }
 
   // === 启用/禁用 ===
   Set<String> _disabledIds = {};
@@ -597,4 +612,7 @@ class _RenamedSource extends MangaSource {
 
   @override
   set needsMagic(bool value) => _inner.needsMagic = value;
+
+  @override
+  void dispose() => _inner.dispose();
 }

@@ -100,4 +100,8 @@ abstract class MangaSource {
   /// 固有属性，由 SourceManager 从 SourceDefinition.needsMagic 注入；
   /// 代码源（copymanga 等）默认 false。UI 据此在源标签右上角标魔法图标。
   bool needsMagic = false;
+
+  /// 释放源内部资源（Venera 的 JS 运行时等）。reload/换源时调用；
+  /// 默认源无长驻资源，空实现。
+  void dispose() {}
 }

@@ -534,16 +534,173 @@ const String veneraJsPrelude = r'''
           out[k] = v['default'];
         }
       }
+      // 完整清单（标题/类型/选项）也留一份：copy_manga 的 init() 会把
+      // settings.base_url 直接改成字符串，改完就看不到这一项了。
+      try {
+        globalThis.__veneraSettingsManifest = JSON.parse(JSON.stringify(st));
+      } catch (e) {
+        globalThis.__veneraSettingsManifest = {};
+      }
     }
     globalThis.__veneraSettingDefaults = out;
     return Object.keys(out).length;
   };
 
-  globalThis.APP = { version: '9.9.9', locale: 'zh_CN', isDebug: false };
+  /// 源设置清单：给 Dart 侧渲染设置面板（callback 类型是按钮，跳过）。
+  globalThis.__veneraSettingsInfo = function () {
+    var st = globalThis.__veneraSettingsManifest || {};
+    var out = [];
+    for (var k in st) {
+      var v = st[k];
+      if (!v || typeof v !== 'object') continue;
+      if (v.type === 'callback') continue;
+      var item = {
+        key: k,
+        title: v.title || k,
+        type: v.type || 'input'
+      };
+      if (v.description !== undefined) item.description = v.description;
+      if (v['default'] !== undefined) item['default'] = v['default'];
+      if (v.options && v.options.length) {
+        item.options = [];
+        for (var i = 0; i < v.options.length; i++) {
+          var o = v.options[i];
+          if (o == null) continue;
+          if (typeof o === 'string') {
+            var idx = o.indexOf('-');
+            item.options.push(idx > 0
+              ? { value: o.slice(0, idx), text: o.slice(idx + 1) }
+              : { value: o, text: o });
+          } else {
+            item.options.push({
+              value: o.value !== undefined ? o.value : o.text,
+              text: o.text !== undefined ? o.text : ('' + o.value)
+            });
+          }
+        }
+      }
+      out.push(item);
+    }
+    return out;
+  };
+
+  /// 当前生效值（已保存值 > 默认值）
+  globalThis.__veneraSettingValue = function (k) {
+    var s = globalThis.__veneraSrc;
+    if (!s) return null;
+    var v = s.loadSetting(k);
+    return v === undefined ? null : v;
+  };
+
+  globalThis.APP = {
+    version: '9.9.9',
+    locale: 'zh_CN',
+    platform: 'ios',
+    isDebug: false
+  };
 
   globalThis.log = function (level, title, content) {
     try { console.log('[' + title + '] ' + content); } catch (e) {}
   };
+  // 部分源脚本（如 copy_manga 登录失败分支）直接用全局 error()
+  globalThis.error = function (message) {
+    try { console.log('[error] ' + (message && message.message ? message.message : message)); } catch (e) {}
+  };
+
+  // ───────────── 老版 QuickJS 的 ES2021/2022 方法兜底 ─────────────
+  // 源脚本大量使用 replaceAll / matchAll / Array.at / Object.values /
+  // padStart；引擎版本稍旧时这些方法不存在，脚本会在运行期抛 TypeError，
+  // 表现就是「源导入成功但一打开就报错」。这里补齐（已存在则原样保留）。
+  if (!String.prototype.replaceAll) {
+    String.prototype.replaceAll = function (pattern, replacement) {
+      if (pattern instanceof RegExp) {
+        if (!pattern.global) throw new TypeError('replaceAll 需要全局正则');
+        return this.replace(pattern, replacement);
+      }
+      return this.split(String(pattern)).join(String(replacement));
+    };
+  }
+  if (!String.prototype.matchAll) {
+    String.prototype.matchAll = function (re) {
+      var flags = (re instanceof RegExp) ? re.flags : '';
+      var rx = (re instanceof RegExp)
+        ? new RegExp(re.source, flags.indexOf('g') >= 0 ? flags : flags + 'g')
+        : new RegExp(re, 'g');
+      var out = [];
+      var m;
+      while ((m = rx.exec(this)) !== null) {
+        out.push(m);
+        if (m[0] === '') rx.lastIndex++;
+      }
+      return out;
+    };
+  }
+  if (!String.prototype.padStart) {
+    String.prototype.padStart = function (len, pad) {
+      var s = String(this);
+      pad = pad == null ? ' ' : String(pad);
+      if (s.length >= len || pad.length === 0) return s;
+      var fill = '';
+      while (fill.length < len - s.length) fill += pad;
+      return fill.slice(0, len - s.length) + s;
+    };
+  }
+  if (!String.prototype.padEnd) {
+    String.prototype.padEnd = function (len, pad) {
+      var s = String(this);
+      pad = pad == null ? ' ' : String(pad);
+      if (s.length >= len || pad.length === 0) return s;
+      var fill = '';
+      while (fill.length < len - s.length) fill += pad;
+      return s + fill.slice(0, len - s.length);
+    };
+  }
+  if (!Array.prototype.at) {
+    Array.prototype.at = function (i) {
+      i = Math.trunc(i) || 0;
+      return i < 0 ? this[this.length + i] : this[i];
+    };
+  }
+  if (!Object.values) {
+    Object.values = function (o) {
+      var out = [];
+      for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) out.push(o[k]);
+      return out;
+    };
+  }
+  if (!Object.entries) {
+    Object.entries = function (o) {
+      var out = [];
+      for (var k in o) {
+        if (Object.prototype.hasOwnProperty.call(o, k)) out.push([k, o[k]]);
+      }
+      return out;
+    };
+  }
+  if (!Array.prototype.flat) {
+    Array.prototype.flat = function (depth) {
+      depth = depth === undefined ? 1 : depth;
+      var out = [];
+      (function walk(arr, d) {
+        for (var i = 0; i < arr.length; i++) {
+          if (Array.isArray(arr[i]) && d > 0) walk(arr[i], d - 1);
+          else out.push(arr[i]);
+        }
+      })(this, depth);
+      return out;
+    };
+  }
+  if (!Array.prototype.flatMap) {
+    Array.prototype.flatMap = function (fn, thisArg) {
+      var out = [];
+      for (var i = 0; i < this.length; i++) {
+        var v = fn.call(thisArg, this[i], i, this);
+        if (Array.isArray(v)) out.push.apply(out, v);
+        else out.push(v);
+      }
+      return out;
+    };
+  }
 
   globalThis.UI = {
     showMessage: function (message) {
@@ -591,6 +748,7 @@ const String veneraJsPrelude = r'''
 
   globalThis.setInterval = function (callback, delay) {
     var handle = { on: true };
+    handle.cancel = function () { handle.on = false; };
     function tick() {
       if (!handle.on) return;
       try { callback(); } catch (e) {}
@@ -708,10 +866,16 @@ const String veneraJsPrelude = r'''
       if (typeof fn !== 'function') return {};
       var result = {};
       var chain = Promise.resolve();
+      // ehentai 这类源：onImageLoad 第一次会返回 {url, nl}，后续页必须带上
+      // 上一次的 nl 才能换到正确图床。Dart 侧会把它回传进来。
+      var nl = a.nl === undefined ? null : a.nl;
       urls.forEach(function (u) {
         chain = chain.then(function () {
-          return Promise.resolve(fn(u, a.comicId, a.epId, null)).then(function (cfg) {
-            if (cfg) result[u] = cfg;
+          return Promise.resolve(fn(u, a.comicId, a.epId, nl)).then(function (cfg) {
+            if (cfg) {
+              result[u] = cfg;
+              if (cfg.nl !== undefined && cfg.nl !== null) nl = cfg.nl;
+            }
           }, function () {});
         });
       });

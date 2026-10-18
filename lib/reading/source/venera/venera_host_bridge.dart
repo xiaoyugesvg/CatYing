@@ -68,6 +68,9 @@ class VeneraHostBridge {
 
   // ── HTML 句柄表（LinkedHashMap + 上限淘汰，避免长会话内存膨胀）──
   static const int _maxNodes = 20000;
+  // 文档本身也限量：源脚本每抓一页就 new HtmlDocument，长时间浏览会累积
+  // 整棵 DOM（几十 KB~几 MB），iOS 上会被系统杀。官方实现只留 8 个，这里放宽到 16。
+  static const int _maxDocs = 16;
   final LinkedHashMap<int, dom.Document> _docs = LinkedHashMap();
   final LinkedHashMap<int, dom.Node> _nodes = LinkedHashMap();
   int _seq = 1;
@@ -134,7 +137,8 @@ class VeneraHostBridge {
     final isEncode = m['isEncode'] != false;
 
     if (type == 'utf8') {
-      if (isEncode) return Uint8List.fromList(utf8.encode('${m['value'] ?? ''}'));
+      if (isEncode)
+        return Uint8List.fromList(utf8.encode('${m['value'] ?? ''}'));
       return utf8.decode(_bytesOf(m['value']), allowMalformed: true);
     }
     if (type == 'base64') {
@@ -148,7 +152,8 @@ class VeneraHostBridge {
       return gbk_bytes.decode(_bytesOf(m['value']));
     }
     if (type == 'gzip') {
-      if (isEncode) return Uint8List.fromList(gzip.encode(_bytesOf(m['value'])));
+      if (isEncode)
+        return Uint8List.fromList(gzip.encode(_bytesOf(m['value'])));
       final out = gzip.decode(_bytesOf(m['value']));
       return Uint8List.fromList(out);
     }
@@ -198,7 +203,11 @@ class VeneraHostBridge {
       _ => enc.AESMode.ofb64,
     };
     final padded = mode == enc.AESMode.ecb || mode == enc.AESMode.cbc;
-    final aes = enc.AES(enc.Key(keyBytes), mode: mode, padding: padded ? 'PKCS7' : null);
+    final aes = enc.AES(
+      enc.Key(keyBytes),
+      mode: mode,
+      padding: padded ? 'PKCS7' : null,
+    );
     final encrypter = enc.Encrypter(aes);
     final input = _bytesOf(m['value']);
     final iv = ivBytes == null ? null : enc.IV(ivBytes);
@@ -222,7 +231,9 @@ class VeneraHostBridge {
     if (value is Uint8List) return value;
     if (value is List<int>) return Uint8List.fromList(value);
     if (value is List) {
-      return Uint8List.fromList(value.map((e) => int.tryParse('$e') ?? 0).toList());
+      return Uint8List.fromList(
+        value.map((e) => int.tryParse('$e') ?? 0).toList(),
+      );
     }
     if (value is Map && value['__bytes'] != null) {
       try {
@@ -245,6 +256,9 @@ class VeneraHostBridge {
       final doc = html_parser.parse('${m['data'] ?? ''}');
       final id = _nextId();
       _docs[id] = doc;
+      while (_docs.length > _maxDocs) {
+        _docs.remove(_docs.keys.first);
+      }
       return id;
     }
     if (fn == 'dispose') {
@@ -256,7 +270,9 @@ class VeneraHostBridge {
     switch (fn) {
       case 'querySelector':
         if (doc == null) return null;
-        return _putNode(_queryOne(() => doc.querySelector('${m['query'] ?? ''}')));
+        return _putNode(
+          _queryOne(() => doc.querySelector('${m['query'] ?? ''}')),
+        );
       case 'querySelectorAll':
         if (doc == null) return <int>[];
         return [
@@ -270,7 +286,9 @@ class VeneraHostBridge {
         return _putNode(doc.getElementById('${m['id'] ?? ''}'));
       case 'domQuerySelector':
         final el = _element(key);
-        return _putNode(_queryOne(() => el?.querySelector('${m['query'] ?? ''}')));
+        return _putNode(
+          _queryOne(() => el?.querySelector('${m['query'] ?? ''}')),
+        );
       case 'domQuerySelectorAll':
         final el = _element(key);
         if (el == null) return <int>[];
@@ -460,8 +478,9 @@ class VeneraHostBridge {
         !headers.keys.any((k) => k.toLowerCase() == 'cookie')) {
       final jar = _cookies[host];
       if (jar != null && jar.isNotEmpty) {
-        headers['Cookie'] =
-            jar.entries.map((e) => '${e.key}=${e.value}').join('; ');
+        headers['Cookie'] = jar.entries
+            .map((e) => '${e.key}=${e.value}')
+            .join('; ');
       }
     }
     try {
@@ -527,19 +546,26 @@ class VeneraHostBridge {
     var charset = '';
     for (final e in headers.entries) {
       if (e.key.toLowerCase() == 'content-type') {
-        final m = RegExp(r'charset=([\w-]+)', caseSensitive: false)
-            .firstMatch(e.value);
+        final m = RegExp(
+          r'charset=([\w-]+)',
+          caseSensitive: false,
+        ).firstMatch(e.value);
         if (m != null) charset = m.group(1)!.toLowerCase();
         break;
       }
     }
     if (charset.isEmpty) {
       // 从 HTML 头部 meta 猜编码（只扫前 2KB）
-      final head = ascii.decode(
-        bytes.length > 2048 ? bytes.sublist(0, 2048) : bytes,
-        allowInvalid: true,
-      ).toLowerCase();
-      final m = RegExp(r'charset=["' r"']?([\w-]+)").firstMatch(head);
+      final head = ascii
+          .decode(
+            bytes.length > 2048 ? bytes.sublist(0, 2048) : bytes,
+            allowInvalid: true,
+          )
+          .toLowerCase();
+      final m = RegExp(
+        r'charset=["'
+        r"']?([\w-]+)",
+      ).firstMatch(head);
       if (m != null) charset = m.group(1)!.toLowerCase();
     }
     if (charset.contains('gbk') ||

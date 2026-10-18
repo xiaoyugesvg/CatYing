@@ -50,9 +50,17 @@ class VeneraMangaSource extends MangaSource {
   JavascriptRuntime? _runtime;
   Future<void>? _initFuture;
 
+  /// 是否有 JS 任务正在轮询（dispose 要等它结束再关运行时）。
+  bool _running = false;
+  bool _disposeRequested = false;
+
   /// 章节图请求头（由 `comic.onImageLoad` 返回）。
   Map<String, String> _chapterHeaders = const {};
   String? _chapterReferer;
+
+  /// ehentai 等源的图床令牌（onImageLoad 返回的 nl），后续页必须带上。
+  String? _chapterNl;
+  String? _chapterNlEpId;
 
   /// 封面/列表缩略图请求头（由 `comic.onThumbnailLoad` 返回）。
   Map<String, String> _thumbHeaders = const {};
@@ -77,22 +85,102 @@ class VeneraMangaSource extends MangaSource {
 
   @override
   Map<String, String> get imageHeaders => {
-        'User-Agent':
-            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
-                'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 '
-                'Mobile/15E148 Safari/604.1',
-        ..._thumbHeaders,
-        ..._chapterHeaders,
-      };
+    'User-Agent':
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
+        'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 '
+        'Mobile/15E148 Safari/604.1',
+    ..._thumbHeaders,
+    ..._chapterHeaders,
+  };
 
   @override
   String? get referer => _thumbReferer;
 
   @override
-  String? refererForChapter(CChapter chapter) => _chapterReferer ?? _thumbReferer;
+  String? refererForChapter(CChapter chapter) =>
+      _chapterReferer ?? _thumbReferer;
 
   void _log(String message) {
     if (kDebugMode) debugPrint('[VeneraSource:$sourceKey] $message');
+  }
+
+  @override
+  void dispose() {
+    // 正在跑 JS 任务时不能直接 close（会让轮询 evaluate 落到已释放的 context）。
+    // 打标记，等任务结束后再关。
+    if (_running) {
+      _disposeRequested = true;
+      return;
+    }
+    _closeRuntime();
+  }
+
+  void _closeRuntime() {
+    final rt = _runtime;
+    _runtime = null;
+    _initFuture = null;
+    if (rt is QuickJsRuntime2) {
+      try {
+        rt.close();
+      } catch (e) {
+        _log('关闭 JS 运行时失败: $e');
+      }
+    }
+  }
+
+  // ────────────────────────── 源设置（Venera settings）──────────────────────────
+
+  /// 源声明的可配置项（select / input / switch / text）。
+  Future<List<Map<String, dynamic>>> fetchSettings() async {
+    await _ensureReady();
+    final rt = _runtime;
+    if (rt == null) return const [];
+    final raw = rt
+        .evaluate('JSON.stringify(__veneraSettingsInfo())')
+        .stringResult;
+    if (raw.isEmpty || raw == 'undefined' || raw == 'null') return const [];
+    try {
+      final list = jsonDecode(raw);
+      if (list is! List) return const [];
+      return [
+        for (final e in list.whereType<Map>())
+          e.map((k, v) => MapEntry('$k', v)),
+      ];
+    } catch (e) {
+      _log('读取源设置失败: $e');
+      return const [];
+    }
+  }
+
+  /// 当前生效值（已保存 > 默认）。
+  Future<Object?> readSetting(String key) async {
+    await _ensureReady();
+    final rt = _runtime;
+    if (rt == null) return null;
+    final raw = rt
+        .evaluate('JSON.stringify(__veneraSettingValue(${jsonEncode(key)}))')
+        .stringResult;
+    if (raw.isEmpty || raw == 'undefined' || raw == 'null') return null;
+    try {
+      return jsonDecode(raw);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 保存设置：写入与 `load_setting` 相同的 prefs 键，随后重跑 init()
+  /// （部分源在 init 里按设置选线路/域名）。
+  Future<void> saveSetting(String key, Object? value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      'venera_setting_${sourceKey}_$key',
+      jsonEncode(value),
+    );
+    try {
+      await _run('init', const {});
+    } catch (e) {
+      _log('设置已保存，但重跑 init 失败: $e');
+    }
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -114,7 +202,9 @@ class VeneraMangaSource extends MangaSource {
   Future<void> _init() async {
     final className = _detectClassName(script);
     if (className == null) {
-      throw Exception('不是合法的 Venera ComicSource 脚本（未找到 extends ComicSource 的类）');
+      throw Exception(
+        '不是合法的 Venera ComicSource 脚本（未找到 extends ComicSource 的类）',
+      );
     }
     final prefs = await SharedPreferences.getInstance();
     final runtime = getJavascriptRuntime(
@@ -186,33 +276,49 @@ class VeneraMangaSource extends MangaSource {
   Future<dynamic> _runRaw(String kind, Map<String, dynamic> args) async {
     final rt = _runtime;
     if (rt == null) throw Exception('Venera 运行时未初始化');
-    final kindJson = jsonEncode(kind);
-    final argsJson = jsonEncode(args)
-        .replaceAll('\u2028', '\\u2028')
-        .replaceAll('\u2029', '\\u2029');
-    final started = rt.evaluate('__veneraRun($kindJson, $argsJson);');
-    if (started.isError) {
-      throw Exception('Venera 源调用失败: ${started.stringResult}');
-    }
-    final sw = Stopwatch()..start();
-    while (true) {
-      rt.executePendingJob();
-      final state = rt.evaluate('__veneraJobState').stringResult;
-      if (state == 'ok') {
-        // __veneraStringify：把 JS Map/Set 转成普通对象/数组再序列化
-        // （Venera 源用 Map 表示章节分组，JSON.stringify 直出会是空对象）
-        final raw = rt.evaluate('__veneraStringify(__veneraJobValue)').stringResult;
-        if (raw.isEmpty || raw == 'undefined' || raw == 'null') return null;
-        return jsonDecode(raw);
+    _running = true;
+    try {
+      final kindJson = jsonEncode(kind);
+      final argsJson = jsonEncode(
+        args,
+      ).replaceAll('\u2028', '\\u2028').replaceAll('\u2029', '\\u2029');
+      final started = rt.evaluate('__veneraRun($kindJson, $argsJson);');
+      if (started.isError) {
+        throw Exception('Venera 源调用失败: ${started.stringResult}');
       }
-      if (state == 'err') {
-        final err = rt.evaluate('__veneraJobError').stringResult;
-        throw Exception(err.isEmpty ? 'Venera 源执行失败' : err);
+      final sw = Stopwatch()..start();
+      while (true) {
+        rt.executePendingJob();
+        final state = rt.evaluate('__veneraJobState').stringResult;
+        if (state == 'ok') {
+          // __veneraStringify：把 JS Map/Set 转成普通对象/数组再序列化
+          // （Venera 源用 Map 表示章节分组，JSON.stringify 直出会是空对象）
+          final raw = rt
+              .evaluate('__veneraStringify(__veneraJobValue)')
+              .stringResult;
+          if (raw.isEmpty || raw == 'undefined' || raw == 'null') return null;
+          try {
+            return jsonDecode(raw);
+          } catch (_) {
+            final brief = raw.length > 200 ? '${raw.substring(0, 200)}…' : raw;
+            throw Exception('Venera 源返回了无法解析的数据（$kind）: $brief');
+          }
+        }
+        if (state == 'err') {
+          final err = rt.evaluate('__veneraJobError').stringResult;
+          throw Exception(err.isEmpty ? 'Venera 源执行失败' : err);
+        }
+        if (sw.elapsed > const Duration(seconds: 60)) {
+          throw Exception('Venera 源执行超时（$kind）');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 10));
       }
-      if (sw.elapsed > const Duration(seconds: 60)) {
-        throw Exception('Venera 源执行超时（$kind）');
+    } finally {
+      _running = false;
+      if (_disposeRequested) {
+        _disposeRequested = false;
+        _closeRuntime();
       }
-      await Future<void>.delayed(const Duration(milliseconds: 10));
     }
   }
 
@@ -298,6 +404,11 @@ class VeneraMangaSource extends MangaSource {
       for (final part in r.whereType<Map>()) {
         final comics = part['comics'];
         if (comics is List) flat.addAll(comics.whereType<Map>());
+        final mp = (part['maxPage'] as num?)?.toInt();
+        if (mp != null) {
+          hasPageInfo = true;
+          if (mp > maxPage) maxPage = mp;
+        }
       }
     } else if (r is Map) {
       final comics = r['comics'];
@@ -307,17 +418,25 @@ class VeneraMangaSource extends MangaSource {
         hasPageInfo = true;
       } else {
         for (final v in r.values) {
-          if (v is List) flat.addAll(v.whereType<Map>());
+          if (v is List) {
+            flat.addAll(v.whereType<Map>());
+          } else if (v is Map) {
+            // 少数源返回 {分区名: {title, comics: [...]}} 的嵌套结构
+            final inner = v['comics'];
+            if (inner is List) flat.addAll(inner.whereType<Map>());
+            final mp = (v['maxPage'] as num?)?.toInt();
+            if (mp != null) {
+              hasPageInfo = true;
+              if (mp > maxPage) maxPage = mp;
+            }
+          }
         }
       }
     }
     final list = _mapComics(flat);
-    if (list.isNotEmpty) {
-      // 封面防盗链头要先拿到，否则首屏封面会以默认头请求而 403
-      await _applyThumbnailHeaders(list);
-    }
+    final shown = list.isEmpty ? list : await _applyThumbnailHeaders(list);
     return MangasPage(
-      items: list,
+      items: shown,
       hasNextPage: hasPageInfo && page + 1 < maxPage,
     );
   }
@@ -342,6 +461,7 @@ class VeneraMangaSource extends MangaSource {
       sourceId: id,
       title: '${c['title'] ?? ''}'.trim(),
       cover: cover,
+      author: (c['subtitle'] ?? c['subTitle'])?.toString(),
       description: c['description']?.toString(),
       tags: tags,
       url: c['url']?.toString(),
@@ -359,8 +479,9 @@ class VeneraMangaSource extends MangaSource {
   // ══════════════════════════════════════════════════════════════
 
   @override
-  Future<({CManga manga, List<CChapter> chapters})>
-      getMangaDetailsAndChapters(CManga manga) async {
+  Future<({CManga manga, List<CChapter> chapters})> getMangaDetailsAndChapters(
+    CManga manga,
+  ) async {
     final r = await _run('info', {'id': manga.id});
     if (r is! Map) {
       throw Exception('Venera 源没有返回漫画详情');
@@ -397,24 +518,28 @@ class VeneraMangaSource extends MangaSource {
         if (value is Map) {
           final groupName = '${entry.key}';
           for (final sub in value.entries) {
-            chapters.add(CChapter(
-              id: '${sub.key}',
-              sourceId: id,
-              mangaId: manga.id,
-              name: '${sub.value}',
-              order: order++,
-              groupId: groupName,
-              groupName: groupName,
-            ));
+            chapters.add(
+              CChapter(
+                id: '${sub.key}',
+                sourceId: id,
+                mangaId: manga.id,
+                name: '${sub.value}',
+                order: order++,
+                groupId: groupName,
+                groupName: groupName,
+              ),
+            );
           }
         } else {
-          chapters.add(CChapter(
-            id: '${entry.key}',
-            sourceId: id,
-            mangaId: manga.id,
-            name: '$value',
-            order: order++,
-          ));
+          chapters.add(
+            CChapter(
+              id: '${entry.key}',
+              sourceId: id,
+              mangaId: manga.id,
+              name: '$value',
+              order: order++,
+            ),
+          );
         }
       }
     }
@@ -433,9 +558,10 @@ class VeneraMangaSource extends MangaSource {
       totalChapters: chapters.isEmpty ? manga.totalChapters : chapters.length,
       initialized: true,
     );
-    await _applyThumbnailHeaders([result]);
-    return (manga: result, chapters: chapters);
+    final fixed = (await _applyThumbnailHeaders([result])).first;
+    return (manga: fixed, chapters: chapters);
   }
+
   @override
   Future<CManga> getMangaDetails(CManga manga) async =>
       (await getMangaDetailsAndChapters(manga)).manga;
@@ -474,12 +600,19 @@ class VeneraMangaSource extends MangaSource {
         .toList();
     if (images.isEmpty) return images;
 
+    // nl 只在同一章内有效，换章必须重新取
+    if (_chapterNlEpId != chapter.id) {
+      _chapterNl = null;
+      _chapterNlEpId = chapter.id;
+    }
+
     // onImageLoad 可能给出图床地址/防盗链头（异步、允许返回 null）
     try {
       final cfg = await _run('imageConfigs', {
         'urls': images,
         'comicId': manga.id,
         'epId': chapter.id,
+        'nl': _chapterNl,
       });
       if (cfg is Map) {
         final out = <String>[];
@@ -492,6 +625,8 @@ class VeneraMangaSource extends MangaSource {
           } else if (c is Map) {
             final newUrl = '${c['url'] ?? ''}';
             out.add(newUrl.isEmpty ? url : newUrl);
+            final nl = '${c['nl'] ?? ''}'.trim();
+            if (nl.isNotEmpty) _chapterNl = nl;
             final h = c['headers'];
             if (h is Map) {
               for (final e in h.entries) {
@@ -515,20 +650,32 @@ class VeneraMangaSource extends MangaSource {
     return images;
   }
 
-  Future<void> _applyThumbnailHeaders(List<CManga> list) async {
+  /// 调 `onThumbnailLoad`：拿封面防盗链头，并应用源给出的 URL 改写
+  /// （如 ehentai 把 `s.exhentai.org` 换成 `ehgt.org`，不改写会整片封面 403）。
+  Future<List<CManga>> _applyThumbnailHeaders(List<CManga> list) async {
     final covers = list
         .map((e) => e.cover)
         .where((e) => e.startsWith('http'))
         .toSet()
         .toList();
-    if (covers.isEmpty) return;
+    if (covers.isEmpty) return list;
     try {
       final cfg = await _run('thumbConfigs', {'urls': covers});
-      if (cfg is! Map || cfg.isEmpty) return;
+      if (cfg is! Map || cfg.isEmpty) return list;
       final headers = <String, String>{};
+      final rewrites = <String, String>{};
       String? referer;
-      for (final c in cfg.values) {
+      for (final entry in cfg.entries) {
+        final c = entry.value;
+        if (c is String && c.isNotEmpty) {
+          if (c != entry.key) rewrites['${entry.key}'] = c;
+          continue;
+        }
         if (c is! Map) continue;
+        final newUrl = '${c['url'] ?? ''}';
+        if (newUrl.isNotEmpty && newUrl != '${entry.key}') {
+          rewrites['${entry.key}'] = newUrl;
+        }
         final h = c['headers'];
         if (h is! Map) continue;
         for (final e in h.entries) {
@@ -540,8 +687,14 @@ class VeneraMangaSource extends MangaSource {
       }
       if (headers.isNotEmpty) _thumbHeaders = headers;
       if (referer != null) _thumbReferer = referer;
+      if (rewrites.isEmpty) return list;
+      return [
+        for (final m in list)
+          rewrites[m.cover] == null ? m : m.copyWith(cover: rewrites[m.cover]),
+      ];
     } catch (e) {
       _log('onThumbnailLoad 调用失败（封面按默认头加载）: $e');
+      return list;
     }
   }
 }

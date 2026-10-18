@@ -10,6 +10,7 @@ import '../../services/api_config.dart';
 import '../../models/movie.dart';
 import '../../models/movie_sort.dart';
 import '../../widgets/common_widgets.dart';
+import '../../widgets/engine_load_panel.dart';
 import '../../widgets/source_switch_sheet.dart';
 import '../../widgets/vod_card.dart';
 import '../webview/view.dart';
@@ -105,74 +106,83 @@ class _HomePageState extends State<HomePage> {
   Widget _buildHeaderBar() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-          AppTheme.spacingLG, AppTheme.spacingSM, AppTheme.spacingLG, AppTheme.spacingXS),
+        AppTheme.spacingLG,
+        AppTheme.spacingSM,
+        AppTheme.spacingLG,
+        AppTheme.spacingXS,
+      ),
       child: Row(
         children: [
           // 左：猫爪 Logo + 源名（点击换源）
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () async {
-              // ⚠️ 只负责弹面板；换源后的刷新由 HomeController 监听
-              // `homeSourceBean` 统一触发。这里再调一次 refresh() 会和监听
-              // 里那次并发跑两遍 getSort（脚本源要初始化引擎，代价很高），
-              // 两遍结果还可能一前一后覆盖（看起来"切了源又跳回去"）。
-              await SourceSwitchSheet.show(context);
-            },
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const _CatPawLogo(),
-                const SizedBox(width: 8),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 130),
-                  child: Obx(() {
-                    final loading = _controller.isLoading.value;
-                    return Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Flexible(
-                          child: Text(
-                            ApiConfig.instance.homeSourceBean.value?.name ??
-                                '选择源',
-                            style: TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: AppTheme.fontHeadline,
-                              fontWeight: FontWeight.bold,
+          // 用 Expanded 包住：搜索框展开成胶囊时，源名自动让位（省略号），
+          // 保证右上角「搜索 / 史藏 / 齿轮」三个按钮都在且不溢出。
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () async {
+                // ⚠️ 只负责弹面板；换源后的刷新由 HomeController 监听
+                // `homeSourceBean` 统一触发。这里再调一次 refresh() 会和监听
+                // 里那次并发跑两遍 getSort（脚本源要初始化引擎，代价很高），
+                // 两遍结果还可能一前一后覆盖（看起来"切了源又跳回去"）。
+                await SourceSwitchSheet.show(context);
+              },
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const _CatPawLogo(),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 130),
+                      child: Obx(() {
+                        final loading = _controller.isLoading.value;
+                        return Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                ApiConfig.instance.homeSourceBean.value?.name ??
+                                    '选择源',
+                                style: TextStyle(
+                                  color: AppTheme.textPrimary,
+                                  fontSize: AppTheme.fontHeadline,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        // 正在加载该源的分类/影片时给个小转圈，
-                        // 让"点了换源"有即时反馈（脚本源初始化要几秒）
-                        if (loading) ...[
-                          const SizedBox(width: 6),
-                          SizedBox(
-                            width: 12,
-                            height: 12,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 1.6,
-                              color: AppTheme.accentColor,
-                            ),
-                          ),
-                        ] else ...[
-                          const SizedBox(width: 2),
-                          Icon(
-                            Icons.arrow_drop_down_rounded,
-                            size: 18,
-                            color: AppTheme.textTertiary,
-                          ),
-                        ],
-                      ],
-                    );
-                  }),
-                ),
-              ],
+                            // 正在加载该源的分类/影片时给个小转圈，
+                            // 让"点了换源"有即时反馈（脚本源初始化要几秒）
+                            if (loading) ...[
+                              const SizedBox(width: 6),
+                              SizedBox(
+                                width: 12,
+                                height: 12,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 1.6,
+                                  color: AppTheme.accentColor,
+                                ),
+                              ),
+                            ] else ...[
+                              const SizedBox(width: 2),
+                              Icon(
+                                Icons.arrow_drop_down_rounded,
+                                size: 18,
+                                color: AppTheme.textTertiary,
+                              ),
+                            ],
+                          ],
+                        );
+                      }),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-          // 右：搜索 —— 收起=圆形搜索图标，点击展开成小胶囊（长度约屏宽 36%，
-          // 不撑满整行）。Spacer 把它顶到右上角，展开时向左伸展（iOS 风格）。
-          const Spacer(),
+          // 右：搜索 —— 收起=圆形搜索图标，点击展开成小胶囊（长度约屏宽 36%）。
+          // 左侧 Expanded 已经把三个按钮顶到右上角，展开时源名自动收窄。
           HomeSearchBar(
             hintText: '搜索影片',
             onSubmitted: (v) {
@@ -193,7 +203,7 @@ class _HomePageState extends State<HomePage> {
             },
           ),
           const SizedBox(width: 8),
-          // 史藏按钮：右上角搜索按钮右侧（功能不变，点击进入史藏 tab）
+          // 史藏：进入史藏 tab（保留这个快捷入口）
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () =>
@@ -206,11 +216,33 @@ class _HomePageState extends State<HomePage> {
                     ? AppTheme.palette.cardDark
                     : AppTheme.palette.cardLight,
                 borderRadius: BorderRadius.circular(15),
-                border:
-                    Border.all(color: AppTheme.borderLight, width: 0.5),
+                border: Border.all(color: AppTheme.borderLight, width: 0.5),
               ),
               child: Icon(
                 Icons.schedule_outlined,
+                size: 16,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // 引擎加载：右上角一个齿轮，点开居中弹窗（就是设置里的
+          // Node / Python 两个引擎加载行），免得每次都要进设置里点。
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => showEngineLoadDialog(context),
+            child: Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? AppTheme.palette.cardDark
+                    : AppTheme.palette.cardLight,
+                borderRadius: BorderRadius.circular(15),
+                border: Border.all(color: AppTheme.borderLight, width: 0.5),
+              ),
+              child: Icon(
+                Icons.settings_outlined,
                 size: 16,
                 color: AppTheme.textPrimary,
               ),
@@ -314,9 +346,7 @@ class _HomePageState extends State<HomePage> {
               Icons.tune,
               size: 18,
               color: hasAny
-                  ? (picked > 0
-                      ? AppTheme.accentColor
-                      : AppTheme.textSecondary)
+                  ? (picked > 0 ? AppTheme.accentColor : AppTheme.textSecondary)
                   : AppTheme.textTertiary.withValues(alpha: 0.4),
             ),
           ),
@@ -339,85 +369,87 @@ class _HomePageState extends State<HomePage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (ctx) => kbSheet(SafeArea(
-        top: false,
-        child: StatefulBuilder(
-          builder: (ctx, setSheet) => Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                margin: const EdgeInsets.only(top: 10, bottom: 6),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppTheme.textTertiary.withValues(alpha: 0.35),
-                  borderRadius: BorderRadius.circular(2),
+      builder: (ctx) => kbSheet(
+        SafeArea(
+          top: false,
+          child: StatefulBuilder(
+            builder: (ctx, setSheet) => Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  margin: const EdgeInsets.only(top: 10, bottom: 6),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTheme.textTertiary.withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
-              ),
-              // 菜单项：**一行两个**（用户 2026-10-14：这类菜单别一行一个，太占位置）
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _optionTile(
-                            icon: Icons.tune,
-                            label: '筛选条件',
-                            onTap: () {
-                              Navigator.pop(ctx);
-                              _openFilterSheet();
-                            },
+                // 菜单项：**一行两个**（用户 2026-10-14：这类菜单别一行一个，太占位置）
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _optionTile(
+                              icon: Icons.tune,
+                              label: '筛选条件',
+                              onTap: () {
+                                Navigator.pop(ctx);
+                                _openFilterSheet();
+                              },
+                            ),
                           ),
-                        ),
-                        Expanded(
-                          child: _optionTile(
-                            icon: Icons.block,
-                            label: '分类屏蔽',
-                            onTap: () {
-                              Navigator.pop(ctx);
-                              _openCategoryBlockSheet();
-                            },
+                          Expanded(
+                            child: _optionTile(
+                              icon: Icons.block,
+                              label: '分类屏蔽',
+                              onTap: () {
+                                Navigator.pop(ctx);
+                                _openCategoryBlockSheet();
+                              },
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _optionTile(
-                            icon: Icons.filter_alt_outlined,
-                            label:
-                                prefs.hideFilters.value ? '显示筛选' : '隐藏筛选',
-                            onTap: () async {
-                              Navigator.pop(ctx);
-                              await prefs
-                                  .setHideFilters(!prefs.hideFilters.value);
-                              setSheet(() {});
-                            },
+                        ],
+                      ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _optionTile(
+                              icon: Icons.filter_alt_outlined,
+                              label: prefs.hideFilters.value ? '显示筛选' : '隐藏筛选',
+                              onTap: () async {
+                                Navigator.pop(ctx);
+                                await prefs.setHideFilters(
+                                  !prefs.hideFilters.value,
+                                );
+                                setSheet(() {});
+                              },
+                            ),
                           ),
-                        ),
-                        Expanded(
-                          child: _optionTile(
-                            icon: Icons.grid_view,
-                            label: '切换布局',
-                            onTap: () {
-                              Navigator.pop(ctx);
-                              _openLayoutSheet();
-                            },
+                          Expanded(
+                            child: _optionTile(
+                              icon: Icons.grid_view,
+                              label: '切换布局',
+                              onTap: () {
+                                Navigator.pop(ctx);
+                                _openLayoutSheet();
+                              },
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ],
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
-            ],
+                const SizedBox(height: 8),
+              ],
+            ),
           ),
         ),
-      )),
+      ),
     );
   }
 
@@ -439,12 +471,15 @@ class _HomePageState extends State<HomePage> {
             Icon(icon, size: 20, color: AppTheme.textPrimary),
             const SizedBox(width: 10),
             Flexible(
-              child: Text(label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: AppTheme.fontHeadline)),
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontHeadline,
+                ),
+              ),
             ),
           ],
         ),
@@ -486,51 +521,62 @@ class _HomePageState extends State<HomePage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (ctx) => kbSheet(SafeArea(
-        top: false,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(ctx).size.height * 0.6,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                child: Row(
-                  children: [
-                    Text('分类屏蔽',
+      builder: (ctx) => kbSheet(
+        SafeArea(
+          top: false,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.6,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                  child: Row(
+                    children: [
+                      Text(
+                        '分类屏蔽',
                         style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: AppTheme.fontHeadline,
-                            fontWeight: FontWeight.w600)),
-                    const Spacer(),
-                    Text('勾选的分类将隐藏',
+                          color: AppTheme.textPrimary,
+                          fontSize: AppTheme.fontHeadline,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        '勾选的分类将隐藏',
                         style: TextStyle(
-                            color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption)),
-                  ],
+                          color: AppTheme.textTertiary,
+                          fontSize: AppTheme.fontCaption,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              Flexible(
-                child: Obx(() => SingleChildScrollView(
+                Flexible(
+                  child: Obx(
+                    () => SingleChildScrollView(
                       padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
                       // 一行 3~4 个（分类名可能几十个，一行一个太占位置）
                       child: _chipGrid([
                         for (final s in _controller.sorts)
                           SelectableChip(
                             title: s.name,
-                            isSelected:
-                                prefs.blockedCategories.contains(s.name),
-                            onTap: () =>
-                                prefs.toggleBlockCategory(s.name),
+                            isSelected: prefs.blockedCategories.contains(
+                              s.name,
+                            ),
+                            onTap: () => prefs.toggleBlockCategory(s.name),
                           ),
                       ]),
-                    )),
-              ),
-            ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-      )),
+      ),
     );
   }
 
@@ -546,63 +592,76 @@ class _HomePageState extends State<HomePage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (ctx) => kbSheet(SafeArea(
-        top: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 4),
-              child: Text('切换布局',
+      builder: (ctx) => kbSheet(
+        SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 4),
+                child: Text(
+                  '切换布局',
                   style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: AppTheme.fontHeadline,
-                      fontWeight: FontWeight.w600)),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
-              child: Text('一行显示几列',
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontHeadline,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+                child: Text(
+                  '一行显示几列',
                   style: TextStyle(
-                      color: AppTheme.textTertiary,
-                      fontSize: AppTheme.fontCaption)),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Row(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontCaption,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Obx(
+                              () =>
+                                  _layoutCell(prefs.gridColumns.value, 2, ctx),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Obx(
+                              () =>
+                                  _layoutCell(prefs.gridColumns.value, 3, ctx),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Row(
                       children: [
                         Expanded(
-                          child: Obx(() => _layoutCell(
-                              prefs.gridColumns.value, 2, ctx)),
+                          child: Obx(
+                            () => _layoutCell(prefs.gridColumns.value, 4, ctx),
+                          ),
                         ),
                         const SizedBox(width: 10),
-                        Expanded(
-                          child: Obx(() => _layoutCell(
-                              prefs.gridColumns.value, 3, ctx)),
-                        ),
+                        const Expanded(child: SizedBox.shrink()),
                       ],
                     ),
-                  ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Obx(() => _layoutCell(
-                            prefs.gridColumns.value, 4, ctx)),
-                      ),
-                      const SizedBox(width: 10),
-                      const Expanded(child: SizedBox.shrink()),
-                    ],
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      )),
+      ),
     );
   }
 
@@ -646,14 +705,14 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
             const SizedBox(width: 10),
-            Text('$n 列',
-                style: TextStyle(
-                    color: selected
-                        ? AppTheme.accentColor
-                        : AppTheme.textSecondary,
-                    fontSize: AppTheme.fontSubhead,
-                    fontWeight:
-                        selected ? FontWeight.w600 : FontWeight.normal)),
+            Text(
+              '$n 列',
+              style: TextStyle(
+                color: selected ? AppTheme.accentColor : AppTheme.textSecondary,
+                fontSize: AppTheme.fontSubhead,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
           ],
         ),
       ),
@@ -750,8 +809,9 @@ class _HomePageState extends State<HomePage> {
                   SelectableChip(
                     title: v.n,
                     // 空值项（「全部」）在无有效选中时高亮；其余按选中值高亮
-                    isSelected:
-                        v.v == '' ? !hasValidSelection : selected == v.v,
+                    isSelected: v.v == ''
+                        ? !hasValidSelection
+                        : selected == v.v,
                     onTap: () => _controller.selectFilter(f.key, v.v),
                   ),
                   const SizedBox(width: AppTheme.spacingSM),
@@ -798,11 +858,14 @@ class _HomePageState extends State<HomePage> {
                   padding: const EdgeInsets.fromLTRB(20, 6, 12, 4),
                   child: Row(
                     children: [
-                      Text('筛选',
-                          style: TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: AppTheme.fontHeadline,
-                              fontWeight: FontWeight.w600)),
+                      Text(
+                        '筛选',
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: AppTheme.fontHeadline,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                       const Spacer(),
                       Obx(() {
                         final picked = _controller.selectedFilters.entries
@@ -824,38 +887,42 @@ class _HomePageState extends State<HomePage> {
                 Flexible(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-                    child: Obx(() => Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            for (final f in _controller.currentFilters) ...[
-                              Text(f.name,
-                                  style: TextStyle(
-                                      color: AppTheme.textTertiary,
-                                      // 与行筛选一致：组名字号 11 → 13
-                                      fontSize: AppTheme.fontSubhead,
-                                      fontWeight: FontWeight.w600)),
-                              const SizedBox(height: 8),
-                              // 一行 3~4 个（筛选值可能几十个，一行一个太占位置）
-                              _chipGrid([
-                                // 与行筛选一致：不再追加固定「全部」，
-                                // 源 filters 自带「全部/默认」首项，避免重复一列
-                                for (final v in f.values)
-                                  SelectableChip(
-                                    title: v.n,
-                                    isSelected: v.v == ''
-                                        ? _controller
-                                                .selectedFilters[f.key] ==
+                    child: Obx(
+                      () => Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final f in _controller.currentFilters) ...[
+                            Text(
+                              f.name,
+                              style: TextStyle(
+                                color: AppTheme.textTertiary,
+                                // 与行筛选一致：组名字号 11 → 13
+                                fontSize: AppTheme.fontSubhead,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            // 一行 3~4 个（筛选值可能几十个，一行一个太占位置）
+                            _chipGrid([
+                              // 与行筛选一致：不再追加固定「全部」，
+                              // 源 filters 自带「全部/默认」首项，避免重复一列
+                              for (final v in f.values)
+                                SelectableChip(
+                                  title: v.n,
+                                  isSelected: v.v == ''
+                                      ? _controller.selectedFilters[f.key] ==
                                             null
-                                        : _controller.selectedFilters[f.key] ==
+                                      : _controller.selectedFilters[f.key] ==
                                             v.v,
-                                    onTap: () =>
-                                        _controller.selectFilter(f.key, v.v),
-                                  ),
-                              ]),
-                              const SizedBox(height: 18),
-                            ],
+                                  onTap: () =>
+                                      _controller.selectFilter(f.key, v.v),
+                                ),
+                            ]),
+                            const SizedBox(height: 18),
                           ],
-                        )),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -937,8 +1004,8 @@ class _HomePageState extends State<HomePage> {
             builder: (context, constraints) {
               final cardWidth =
                   (constraints.maxWidth -
-                          AppTheme.cardSpacing * (crossAxisCount - 1)) /
-                      crossAxisCount;
+                      AppTheme.cardSpacing * (crossAxisCount - 1)) /
+                  crossAxisCount;
 
               // 卡片真实高度 = 海报高（宽 × posterHeightRatio）+ 文字区。
               //
@@ -951,116 +1018,120 @@ class _HomePageState extends State<HomePage> {
               final ratio = cardWidth / cardHeight;
 
               return CustomScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              slivers: [
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.only(
-                        top: AppTheme.spacingXS, bottom: 8),
-                    child: homeVideos.isEmpty
-                        // 幻灯片兜底策略见 HomeController._fillBannerFromCategory：
-                        //   · 还在加载 → 占位块（避免顶部高度跳一下）
-                        //   · 加载完仍为空（源连分类列表都没有）→ **整块隐藏**，
-                        //     不再留一块空白占位
-                        ? (isLoading
-                            ? const _BannerPlaceholder()
-                            : const SizedBox.shrink())
-                        : ListenableBuilder(
-                            // 样式变化（设置里切换）时立即重建；
-                            // key 带上 style → 换样式时 State/PageController 一起重建
-                            // （viewportFraction 只能在构造时给，复用旧 controller 会错位）
-                            listenable: SettingsService(),
-                            builder: (context, _) {
-                              final st = SettingsService().homeBannerStyle;
-                              // 取几个**由样式决定**（6~9，见 homeBannerItemCount）：
-                              // 一页 1 张的取 9、标签页取 6、主次三栏取 8 …
-                              final n = homeBannerItemCount(st);
-                              return _RecommendBanner(
-                                // key 用 **name**（不是 index）：index 会随枚举增删漂移
-                                key: ValueKey('banner-${st.name}'),
-                                style: st,
-                                videos: homeVideos.length > n
-                                    ? homeVideos.sublist(0, n)
-                                    : List<Video>.from(homeVideos),
-                              );
-                            },
-                          ),
-                  ),
-                ),
-                if (sorts.isNotEmpty)
+                physics: const AlwaysScrollableScrollPhysics(),
+                slivers: [
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(
-                        AppTheme.spacingLG,
-                        AppTheme.spacingXS,
-                        AppTheme.spacingLG,
-                        AppTheme.spacingXS,
+                      padding: const EdgeInsets.only(
+                        top: AppTheme.spacingXS,
+                        bottom: 8,
                       ),
-                      child: _buildCategoryTabBar(),
+                      child: homeVideos.isEmpty
+                          // 幻灯片兜底策略见 HomeController._fillBannerFromCategory：
+                          //   · 还在加载 → 占位块（避免顶部高度跳一下）
+                          //   · 加载完仍为空（源连分类列表都没有）→ **整块隐藏**，
+                          //     不再留一块空白占位
+                          ? (isLoading
+                                ? const _BannerPlaceholder()
+                                : const SizedBox.shrink())
+                          : ListenableBuilder(
+                              // 样式变化（设置里切换）时立即重建；
+                              // key 带上 style → 换样式时 State/PageController 一起重建
+                              // （viewportFraction 只能在构造时给，复用旧 controller 会错位）
+                              listenable: SettingsService(),
+                              builder: (context, _) {
+                                final st = SettingsService().homeBannerStyle;
+                                // 取几个**由样式决定**（6~9，见 homeBannerItemCount）：
+                                // 一页 1 张的取 9、标签页取 6、主次三栏取 8 …
+                                final n = homeBannerItemCount(st);
+                                return _RecommendBanner(
+                                  // key 用 **name**（不是 index）：index 会随枚举增删漂移
+                                  key: ValueKey('banner-${st.name}'),
+                                  style: st,
+                                  videos: homeVideos.length > n
+                                      ? homeVideos.sublist(0, n)
+                                      : List<Video>.from(homeVideos),
+                                );
+                              },
+                            ),
                     ),
                   ),
-                // 内联筛选芯片行（截图样式）：「筛选 → 隐藏筛选」可关掉它
-                SliverToBoxAdapter(
-                  child: Obx(() {
-                    if (PlayerPrefs.instance.hideFilters.value) {
-                      return const SizedBox.shrink();
-                    }
-                    return _buildInlineFilters();
-                  }),
-                ),
-                SliverPadding(
-                  // 底部 padding 改为 0：内容区下探到底，一屏显示更多卡片
-                  //（用户要求对齐参考图"内容贴底"；原本 80 是给悬浮导航让位，现按用户指示取消）
-                  padding: const EdgeInsets.fromLTRB(
-                    AppTheme.spacingXL,
-                    AppTheme.spacingMD,
-                    AppTheme.spacingXL,
-                    0,
-                  ),
-                  sliver: SliverGrid(
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: crossAxisCount,
-                      childAspectRatio: ratio,
-                      crossAxisSpacing: AppTheme.cardSpacing,
-                      mainAxisSpacing: AppTheme.cardSpacing,
+                  if (sorts.isNotEmpty)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          AppTheme.spacingLG,
+                          AppTheme.spacingXS,
+                          AppTheme.spacingLG,
+                          AppTheme.spacingXS,
+                        ),
+                        child: _buildCategoryTabBar(),
+                      ),
                     ),
-                    delegate: SliverChildBuilderDelegate(
-                      (context, index) {
-                        if (index >= videos.length) {
-                          if (hasMore && selectedSortId != null) {
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              _controller.loadMore();
-                            });
-                            return Center(
-                              child: Padding(
-                                padding: EdgeInsets.all(8.0),
-                                child: SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
+                  // 内联筛选芯片行（截图样式）：「筛选 → 隐藏筛选」可关掉它
+                  SliverToBoxAdapter(
+                    child: Obx(() {
+                      if (PlayerPrefs.instance.hideFilters.value) {
+                        return const SizedBox.shrink();
+                      }
+                      return _buildInlineFilters();
+                    }),
+                  ),
+                  SliverPadding(
+                    // 底部 padding 改为 0：内容区下探到底，一屏显示更多卡片
+                    //（用户要求对齐参考图"内容贴底"；原本 80 是给悬浮导航让位，现按用户指示取消）
+                    padding: const EdgeInsets.fromLTRB(
+                      AppTheme.spacingXL,
+                      AppTheme.spacingMD,
+                      AppTheme.spacingXL,
+                      0,
+                    ),
+                    sliver: SliverGrid(
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: crossAxisCount,
+                        childAspectRatio: ratio,
+                        crossAxisSpacing: AppTheme.cardSpacing,
+                        mainAxisSpacing: AppTheme.cardSpacing,
+                      ),
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          if (index >= videos.length) {
+                            if (hasMore && selectedSortId != null) {
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                _controller.loadMore();
+                              });
+                              return Center(
+                                child: Padding(
+                                  padding: EdgeInsets.all(8.0),
+                                  child: SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
                                       strokeWidth: 2,
-                                      color: AppTheme.accentColor),
+                                      color: AppTheme.accentColor,
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            );
+                              );
+                            }
+                            return const SizedBox.shrink();
                           }
-                          return const SizedBox.shrink();
-                        }
-                        final vid = videos[index];
-                        return VodCard(
-                          video: vid,
-                          // 与上面的 posterRatio 配套（首页卡片高度 ×2）
-                          posterHeightRatio: 1.44,
-                          onTap: () => Get.toNamed('/detail', arguments: vid),
-                        );
-                      },
-                      childCount: videos.length +
-                          ((hasMore && selectedSortId != null) ? 1 : 0),
+                          final vid = videos[index];
+                          return VodCard(
+                            video: vid,
+                            // 与上面的 posterRatio 配套（首页卡片高度 ×2）
+                            posterHeightRatio: 1.44,
+                            onTap: () => Get.toNamed('/detail', arguments: vid),
+                          );
+                        },
+                        childCount:
+                            videos.length +
+                            ((hasMore && selectedSortId != null) ? 1 : 0),
+                      ),
                     ),
                   ),
-                ),
-              ],
-            );
+                ],
+              );
             },
           );
         }),
@@ -1074,7 +1145,9 @@ class _HomePageState extends State<HomePage> {
     if (video.pic.startsWith('http')) {
       openUrl = video.pic;
       // 尝试解码 proxy URL 中的 base64 编码
-      final proxyMatch = RegExp(r'/proxy/([A-Za-z0-9+/=]+)').firstMatch(video.pic);
+      final proxyMatch = RegExp(
+        r'/proxy/([A-Za-z0-9+/=]+)',
+      ).firstMatch(video.pic);
       if (proxyMatch != null) {
         final encoded = proxyMatch.group(1);
         if (encoded != null) {
@@ -1083,7 +1156,9 @@ class _HomePageState extends State<HomePage> {
             if (decoded.startsWith('http')) {
               openUrl = decoded;
             }
-          } catch (e) { /* ignore */ }
+          } catch (e) {
+            /* ignore */
+          }
         }
       }
     }
@@ -1220,8 +1295,9 @@ bool get _kBannerDark => !AppBrightness.isLight.value;
 
 /// 「亮」的那一档强调色 —— 指示器 / 进度条用。
 /// 深色下不能用 `accentColor`（墨灰会被暗底吃掉）。
-Color get _kBannerAccentStrong =>
-    AppBrightness.isLight.value ? AppTheme.accentColor : AppTheme.accentOnSurface;
+Color get _kBannerAccentStrong => AppBrightness.isLight.value
+    ? AppTheme.accentColor
+    : AppTheme.accentOnSurface;
 
 /// 幻灯片卡片的描边色：深色 = 浅色细边，浅色 = 原来的淡描边
 Color get _kBannerBorder => _kBannerDark
@@ -1248,8 +1324,9 @@ BoxDecoration? _bannerOverlayBorder(BorderRadius radius) => _kBannerDark
 
 /// 徽标 / 胶囊这类**实底**小色块的底色 + 上面该用什么字色。
 /// 深色下取反成浅色块 + 深字，否则墨灰块压在暗底上等于没有。
-Color get _kBannerChipFill =>
-    AppBrightness.isLight.value ? AppTheme.accentColor : AppTheme.accentOnSurface;
+Color get _kBannerChipFill => AppBrightness.isLight.value
+    ? AppTheme.accentColor
+    : AppTheme.accentOnSurface;
 Color get _kBannerChipText =>
     _kBannerChipFill.computeLuminance() > 0.5 ? Colors.black : Colors.white;
 
@@ -1275,12 +1352,12 @@ class _RecommendBannerState extends State<_RecommendBanner>
   /// 一页几条：分组样式（主次三栏 / 交错瀑布 / 高低错落）
   /// 一页多条，其余（含走马灯 / 扑克牌 / 标签页）一页一条。
   int get _perPage => switch (widget.style) {
-        HomeBannerStyle.feature => _kBannerFeaturePerPage,
-        HomeBannerStyle.masonry => _kBannerMasonryPerPage,
-        HomeBannerStyle.stair => _kBannerStairPerPage,
-        HomeBannerStyle.spotlight => _kBannerSpotlightPerPage,
-        _ => 1,
-      };
+    HomeBannerStyle.feature => _kBannerFeaturePerPage,
+    HomeBannerStyle.masonry => _kBannerMasonryPerPage,
+    HomeBannerStyle.stair => _kBannerStairPerPage,
+    HomeBannerStyle.spotlight => _kBannerSpotlightPerPage,
+    _ => 1,
+  };
 
   /// 页数：分组样式按"几条一页"分组，其余一条一页。
   int get _pageCount {
@@ -1294,8 +1371,7 @@ class _RecommendBannerState extends State<_RecommendBanner>
   ///
   /// 「标签页」也**不循环** —— 它的上方是一条固定页数的标签条
   /// （`itemCount` 必须有限，且 `onPageChanged` 的下标要能直接当标签下标用）。
-  bool get _loops =>
-      _perPage <= 1 && widget.style != HomeBannerStyle.tabs;
+  bool get _loops => _perPage <= 1 && widget.style != HomeBannerStyle.tabs;
 
   /// 起始绝对页：取页数的整数倍，保证首屏显示的是第 0 页
   int get _loopStart {
@@ -1380,7 +1456,8 @@ class _RecommendBannerState extends State<_RecommendBanner>
   void _centerTab(int i) {
     if (!_tabsCtrl.hasClients) return;
     final vw = _tabsCtrl.position.viewportDimension;
-    final target = i * (_kBannerTabsChipW + _kBannerTabsChipGap) -
+    final target =
+        i * (_kBannerTabsChipW + _kBannerTabsChipGap) -
         (vw - _kBannerTabsChipW) / 2;
     final max = _tabsCtrl.position.maxScrollExtent;
     _tabsCtrl.animateTo(
@@ -1483,8 +1560,7 @@ class _RecommendBannerState extends State<_RecommendBanner>
                     HomeBannerStyle.wide => _wideItem(context, i),
                     // 扑克牌的牌面由 _pokerStage 自绘、标签页走上面那条分支
                     HomeBannerStyle.poker ||
-                    HomeBannerStyle.tabs =>
-                      const SizedBox.shrink(),
+                    HomeBannerStyle.tabs => const SizedBox.shrink(),
                   },
                 ),
         ),
@@ -1524,8 +1600,9 @@ class _RecommendBannerState extends State<_RecommendBanner>
                         child: Stack(
                           children: [
                             ColoredBox(
-                              color: AppTheme.textTertiary
-                                  .withValues(alpha: 0.28),
+                              color: AppTheme.textTertiary.withValues(
+                                alpha: 0.28,
+                              ),
                               child: const SizedBox.expand(),
                             ),
                             if (i == _index)
@@ -1569,8 +1646,8 @@ class _RecommendBannerState extends State<_RecommendBanner>
             color: active
                 ? (onImage ? Colors.white : _kBannerAccentStrong)
                 : (onImage
-                    ? Colors.white.withValues(alpha: 0.45)
-                    : AppTheme.textTertiary.withValues(alpha: 0.4)),
+                      ? Colors.white.withValues(alpha: 0.45)
+                      : AppTheme.textTertiary.withValues(alpha: 0.4)),
             borderRadius: BorderRadius.circular(3),
           ),
         );
@@ -1678,8 +1755,9 @@ class _RecommendBannerState extends State<_RecommendBanner>
                           ConstrainedBox(
                             // 角标最多占这条文字的 42%：再长就省略号，
                             // 不会把片名挤没
-                            constraints:
-                                BoxConstraints(maxWidth: box.maxWidth * 0.42),
+                            constraints: BoxConstraints(
+                              maxWidth: box.maxWidth * 0.42,
+                            ),
                             child: _bannerChip(badge),
                           ),
                         ],
@@ -1747,10 +1825,10 @@ class _RecommendBannerState extends State<_RecommendBanner>
 
   /// 「年份 · 地区 · 类型」（只拼非空项；全空返回空串）
   String _bannerMetaLine(Video v) => [
-        if (v.year.trim().isNotEmpty) v.year.trim(),
-        if (v.area.trim().isNotEmpty) v.area.trim(),
-        if (v.type.trim().isNotEmpty) v.type.trim(),
-      ].join(' · ');
+    if (v.year.trim().isNotEmpty) v.year.trim(),
+    if (v.area.trim().isNotEmpty) v.area.trim(),
+    if (v.type.trim().isNotEmpty) v.type.trim(),
+  ].join(' · ');
 
   /// 沉浸大图（hero）：满宽出血 + 底部重渐变 + 大字标题 + 简介 + 元信息 + 圆形播放钮。
   ///
@@ -1831,7 +1909,9 @@ class _RecommendBannerState extends State<_RecommendBanner>
                       color: Colors.white.withValues(alpha: 0.80),
                       fontSize: AppTheme.fontCaption + 0.5,
                       height: 1.3,
-                      shadows: const [Shadow(blurRadius: 6, color: Colors.black54)],
+                      shadows: const [
+                        Shadow(blurRadius: 6, color: Colors.black54),
+                      ],
                     ),
                   ),
                 ],
@@ -1880,7 +1960,6 @@ class _RecommendBannerState extends State<_RecommendBanner>
       ),
     );
   }
-
 
   /// 一张竖版海报瓦片（**名称压在图上**）—— 「双排海报」与「主次三栏」共用。
   ///
@@ -1950,8 +2029,10 @@ class _RecommendBannerState extends State<_RecommendBanner>
                 left: 6,
                 top: 6,
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.55),
                     borderRadius: BorderRadius.circular(8),
@@ -2006,8 +2087,10 @@ class _RecommendBannerState extends State<_RecommendBanner>
               // 左：竖版封面 —— 宽按 2:3 从卡片高度推（高度是固定常量）
               // → ≈167 宽；再用屏宽 45% 封顶，免得小屏上把文字栏挤没。
               SizedBox(
-                width: (_kBannerSpotlightHeight * 2 / 3)
-                    .clamp(96.0, MediaQuery.of(context).size.width * 0.45),
+                width: (_kBannerSpotlightHeight * 2 / 3).clamp(
+                  96.0,
+                  MediaQuery.of(context).size.width * 0.45,
+                ),
                 child: ColoredBox(
                   color: AppTheme.backgroundTertiary,
                   child: _BannerImage(url: v.pic),
@@ -2071,7 +2154,9 @@ class _RecommendBannerState extends State<_RecommendBanner>
                       // 深色下取反成浅色块 + 深字（墨灰块压在暗底上等于没有）
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 6),
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
                         decoration: BoxDecoration(
                           color: _kBannerChipFill,
                           borderRadius: BorderRadius.circular(20),
@@ -2164,7 +2249,9 @@ class _RecommendBannerState extends State<_RecommendBanner>
             bottom: 0,
             child: Center(
               child: _carouselArrow(
-                  Icons.chevron_left_rounded, () => _step(false)),
+                Icons.chevron_left_rounded,
+                () => _step(false),
+              ),
             ),
           ),
           Positioned(
@@ -2173,10 +2260,17 @@ class _RecommendBannerState extends State<_RecommendBanner>
             bottom: 0,
             child: Center(
               child: _carouselArrow(
-                  Icons.chevron_right_rounded, () => _step(true)),
+                Icons.chevron_right_rounded,
+                () => _step(true),
+              ),
             ),
           ),
-          Positioned(left: 0, right: 0, bottom: 9, child: _dotsRow(onImage: true)),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 9,
+            child: _dotsRow(onImage: true),
+          ),
         ],
       ),
     );
@@ -2407,13 +2501,11 @@ class _RecommendBannerState extends State<_RecommendBanner>
             child: Column(
               children: [
                 Expanded(
-                  child: _tileAt(start + 1,
-                      radius: BorderRadius.circular(14)),
+                  child: _tileAt(start + 1, radius: BorderRadius.circular(14)),
                 ),
                 const SizedBox(height: 8),
                 Expanded(
-                  child: _tileAt(start + 2,
-                      radius: BorderRadius.circular(14)),
+                  child: _tileAt(start + 2, radius: BorderRadius.circular(14)),
                 ),
               ],
             ),
@@ -2480,8 +2572,9 @@ class _RecommendBannerState extends State<_RecommendBanner>
                 color: _kBannerFill,
                 borderRadius: BorderRadius.circular(10),
               ),
-              foregroundDecoration:
-                  _bannerOverlayBorder(BorderRadius.circular(10)),
+              foregroundDecoration: _bannerOverlayBorder(
+                BorderRadius.circular(10),
+              ),
               clipBehavior: Clip.antiAlias,
               child: _BannerImage(url: v.pic),
             ),
@@ -2580,13 +2673,13 @@ class _RecommendBannerState extends State<_RecommendBanner>
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(16),
                   color: _kBannerFill,
-                  border:
-                      Border.all(color: _kBannerBorder, width: 0.6),
+                  border: Border.all(color: _kBannerBorder, width: 0.6),
                   boxShadow: [
                     BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.35),
-                        blurRadius: 16,
-                        offset: const Offset(0, 8)),
+                      color: Colors.black.withValues(alpha: 0.35),
+                      blurRadius: 16,
+                      offset: const Offset(0, 8),
+                    ),
                   ],
                 ),
                 clipBehavior: Clip.antiAlias,
@@ -2627,7 +2720,7 @@ class _RecommendBannerState extends State<_RecommendBanner>
                           fontWeight: FontWeight.w600,
                           height: 1.25,
                           shadows: [
-                            Shadow(blurRadius: 8, color: Colors.black54)
+                            Shadow(blurRadius: 8, color: Colors.black54),
                           ],
                         ),
                       ),
@@ -2638,7 +2731,9 @@ class _RecommendBannerState extends State<_RecommendBanner>
                         top: 8,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3),
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.black.withValues(alpha: 0.55),
                             borderRadius: BorderRadius.circular(10),
@@ -2676,8 +2771,11 @@ class _BannerImage extends StatelessWidget {
       return ColoredBox(
         color: AppTheme.backgroundTertiary,
         child: Center(
-          child: Icon(Icons.movie_filter_outlined,
-              color: AppTheme.textTertiary, size: 40),
+          child: Icon(
+            Icons.movie_filter_outlined,
+            color: AppTheme.textTertiary,
+            size: 40,
+          ),
         ),
       );
     }
@@ -2694,7 +2792,6 @@ class _BannerImage extends StatelessWidget {
     );
   }
 }
-
 
 /// 分类胶囊
 class _CategoryChip extends StatelessWidget {
@@ -2714,9 +2811,7 @@ class _CategoryChip extends StatelessWidget {
         color: selected ? AppTheme.accentColor : AppTheme.backgroundSecondary,
         borderRadius: BorderRadius.circular(999), // 椭圆胶囊
         border: Border.all(
-          color: selected
-              ? AppTheme.accentColor
-              : AppTheme.glassBorderSoft,
+          color: selected ? AppTheme.accentColor : AppTheme.glassBorderSoft,
           width: 0.6,
         ),
       ),
@@ -2731,6 +2826,7 @@ class _CategoryChip extends StatelessWidget {
     );
   }
 }
+
 /// 首页时钟 - 对应 Swift HomeClockView
 class _HomeClockView extends StatefulWidget {
   const _HomeClockView();
@@ -2795,7 +2891,6 @@ class _HomeClockViewState extends State<_HomeClockView> {
   }
 }
 
-
 /// 猫爪 Logo（品牌图标）
 class _CatPawLogo extends StatelessWidget {
   const _CatPawLogo();
@@ -2807,7 +2902,10 @@ class _CatPawLogo extends StatelessWidget {
       height: 34,
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [AppTheme.accentColor.withValues(alpha: 0.65), AppTheme.accentColor],
+          colors: [
+            AppTheme.accentColor.withValues(alpha: 0.65),
+            AppTheme.accentColor,
+          ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -2823,7 +2921,6 @@ class _CatPawLogo extends StatelessWidget {
     );
   }
 }
-
 
 /// 轮播占位：无缓存首启时避免顶部空一块
 class _BannerPlaceholder extends StatelessWidget {
@@ -2841,11 +2938,19 @@ class _BannerPlaceholder extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.movie_filter_outlined,
-                color: AppTheme.textTertiary, size: 36),
+            Icon(
+              Icons.movie_filter_outlined,
+              color: AppTheme.textTertiary,
+              size: 36,
+            ),
             const SizedBox(height: 8),
-            Text('正在加载推荐…',
-                style: TextStyle(color: AppTheme.textTertiary, fontSize: AppTheme.fontSubhead)),
+            Text(
+              '正在加载推荐…',
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: AppTheme.fontSubhead,
+              ),
+            ),
           ],
         ),
       ),

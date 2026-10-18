@@ -2179,21 +2179,25 @@ class _LivePageState extends State<LivePage> {
     );
   }
 
-  /// 直播源弹窗的网格视图（两列 / 三列）
+  /// 直播源弹窗的网格视图（两列 / 三列，卡片式）
   Widget _sourceGrid(
     List<LiveSource> srcs,
     LiveController c,
     int view,
     BuildContext dialogCtx,
   ) {
+    final twoCol = view == 1;
+    final accent = AppTheme.accentColor;
     return GridView.builder(
       shrinkWrap: true,
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: view == 1 ? 2 : 3,
+        crossAxisCount: twoCol ? 2 : 3,
         mainAxisSpacing: 6,
         crossAxisSpacing: 6,
-        childAspectRatio: view == 1 ? 2.5 : 1.15,
+        // 固定卡片高度（而不是按宽高比）：窄屏下按比例算会太矮，
+        // 图标 + 名称 + 状态放不下会溢出。
+        mainAxisExtent: twoCol ? 96 : 100,
       ),
       itemCount: srcs.length,
       itemBuilder: (_, i) {
@@ -2201,83 +2205,114 @@ class _LivePageState extends State<LivePage> {
         final isActive = c.selectedSourceIndex == i;
         return Material(
           color: isActive
-              ? AppTheme.accentColor.withValues(alpha: 0.12)
+              ? accent.withValues(alpha: 0.12)
               : AppTheme.backgroundCard,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           child: InkWell(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(14),
             onTap: () async {
               Navigator.pop(dialogCtx);
               await c.selectSource(i);
               _autoplayCurrent();
             },
             child: Container(
-              padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(14),
                 border: isActive
                     ? Border.all(
-                        color: AppTheme.accentColor.withValues(alpha: 0.45),
+                        color: accent.withValues(alpha: 0.45),
                         width: 0.8,
                       )
                     : null,
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
+              child: Stack(
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 7,
-                        height: 7,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: isActive
-                              ? AppTheme.accentColor
-                              : (src.loaded
-                                    ? const Color(0xFF4CAF50)
-                                    : AppTheme.textTertiary),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          src.name,
-                          maxLines: view == 1 ? 1 : 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: isActive
-                                ? AppTheme.accentColor
-                                : AppTheme.textPrimary,
-                            fontSize: view == 1 ? AppTheme.fontSubhead : 12,
-                            fontWeight: isActive
-                                ? FontWeight.w700
-                                : FontWeight.w600,
-                            height: 1.2,
+                  Positioned.fill(
+                    child: Padding(
+                      padding: EdgeInsets.all(twoCol ? 10 : 8),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          // 卡片顶部图标：让两列/三列一眼看出是卡片而不是行
+                          Container(
+                            width: twoCol ? 34 : 30,
+                            height: twoCol ? 34 : 30,
+                            decoration: BoxDecoration(
+                              color: (isActive ? accent : AppTheme.textTertiary)
+                                  .withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              Icons.live_tv_rounded,
+                              size: twoCol ? 18 : 16,
+                              color: isActive ? accent : AppTheme.textTertiary,
+                            ),
                           ),
-                        ),
+                          SizedBox(height: twoCol ? 6 : 4),
+                          Text(
+                            src.name,
+                            maxLines: twoCol ? 1 : 2,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: isActive ? accent : AppTheme.textPrimary,
+                              fontSize: twoCol ? AppTheme.fontSubhead : 12,
+                              fontWeight: isActive
+                                  ? FontWeight.w700
+                                  : FontWeight.w600,
+                              height: 1.2,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Container(
+                                width: 6,
+                                height: 6,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: isActive
+                                      ? accent
+                                      : (src.loaded
+                                            ? const Color(0xFF4CAF50)
+                                            : AppTheme.textTertiary),
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  isActive ? '当前播放' : src.statusText(),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: isActive
+                                        ? accent.withValues(alpha: 0.75)
+                                        : AppTheme.textTertiary,
+                                    fontSize: AppTheme.fontCaption,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
-                      if (isActive)
-                        Icon(
-                          Icons.check_circle_rounded,
-                          size: 16,
-                          color: AppTheme.accentColor,
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    isActive ? '当前播放' : src.statusText(),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: isActive
-                          ? AppTheme.accentColor.withValues(alpha: 0.75)
-                          : AppTheme.textTertiary,
-                      fontSize: AppTheme.fontCaption,
                     ),
                   ),
+                  // 当前源角标（右上角）
+                  if (isActive)
+                    Positioned(
+                      top: 6,
+                      right: 6,
+                      child: Icon(
+                        Icons.check_circle_rounded,
+                        size: 15,
+                        color: accent,
+                      ),
+                    ),
                 ],
               ),
             ),

@@ -1,12 +1,12 @@
 import 'dart:convert';
 
+import 'package:archive/archive.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../common/theme.dart';
-import '../../services/network_manager.dart';
 import '../../widgets/app_toast.dart';
 import '../models/book_source.dart';
 import '../models/source_subscription.dart';
@@ -16,6 +16,7 @@ import '../source/manga_source.dart';
 import '../source/source_config_store.dart';
 import '../source/source_definition.dart';
 import '../source/source_manager.dart';
+import '../source/venera/venera_manga_source.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/swipe_action_tile.dart';
 import 'book_source_editor_page.dart';
@@ -120,12 +121,9 @@ class _WarehouseTabState extends State<_WarehouseTab>
     _restoreView();
     _subStore.load().then((_) async {
       if (!mounted) return;
-      setState(() {
-        _loading = false;
-        if (_selectedSubId == null && _subs.isNotEmpty) {
-          _selectedSubId = _subs.first.id;
-        }
-      });
+      // 默认停在「全部」：订阅下载失败 / sourceIds 为空时，若默认选中某条订阅，
+      // 列表会一片空白 —— 用户刚导入的源明明在库里却看不到。
+      setState(() => _loading = false);
       // 「订阅一个就加载」：首次进入时把还没成功加载过的启用订阅自动更新一轮。
       // 已经加载过的（count > 0）不重复下载，避免每次进页面都跑网络。
       final sp = await SharedPreferences.getInstance();
@@ -754,7 +752,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
     }
     final def = hit.first;
     if (def.type == 'venera') {
-      _toast('Venera 源通过「更新订阅」维护，不能单独编辑');
+      await _showVeneraInfo(def);
       return;
     }
     if (!mounted) return;
@@ -767,6 +765,379 @@ class _WarehouseTabState extends State<_WarehouseTab>
     if (!mounted) return;
     await SourceManager().reload();
     if (mounted) setState(() {});
+  }
+
+  /// Venera 源是 JS 脚本，不能像配置源那样逐项编辑：
+  /// 这里展示真实入库信息（确认脚本确实在），并提供「重新下载脚本」。
+  Future<void> _showVeneraInfo(SourceDefinition def) async {
+    final script = '${def.config['script'] ?? ''}';
+    final scriptUrl = '${def.config['scriptUrl'] ?? ''}'.trim();
+    final rows = <(String, String)>[
+      ('名称', '${def.config['name'] ?? ''}'),
+      ('标识', '${def.config['key'] ?? ''}'),
+      (
+        '版本',
+        '${def.config['version'] ?? ''}'.isEmpty
+            ? '—'
+            : '${def.config['version']}',
+      ),
+      ('脚本', script.isEmpty ? '缺失（无法运行）' : '${script.length} 字节'),
+      if (scriptUrl.isNotEmpty) ('来源', scriptUrl),
+    ];
+    final refresh = await showDialog<Object?>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _card,
+        title: Text('Venera 源', style: TextStyle(color: _label)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final r in rows)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 48,
+                        child: Text(
+                          r.$1,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: JellyTheme.textSecondary,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          r.$2,
+                          style: TextStyle(fontSize: 12, color: _label),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 8),
+              Text(
+                '脚本由源作者维护；「更新订阅」或「重新下载脚本」即可升级，无需手动编辑。',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  height: 1.45,
+                  color: JellyTheme.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('关闭'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'settings'),
+            child: const Text('源设置'),
+          ),
+          if (scriptUrl.isNotEmpty)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'refresh'),
+              child: const Text('重新下载脚本'),
+            ),
+        ],
+      ),
+    );
+    if (refresh == 'refresh') await _refreshVeneraScript(def, scriptUrl);
+    if (refresh == 'settings') await _openVeneraSettings(def);
+  }
+
+  /// Venera 源设置面板（select / input / switch）。
+  ///
+  /// 这些值对应脚本里的 `settings` 清单（如 copy_manga 的 API 地址 / CDN 线路、
+  /// wnacg 的站点 URL）。默认值不可用时，用户必须能改，否则源就"永远打不开"。
+  Future<void> _openVeneraSettings(SourceDefinition def) async {
+    final src = SourceManager().unwrappedSource(def.id);
+    if (src is! VeneraMangaSource) {
+      _toast('源还没加载好，请稍后再试');
+      return;
+    }
+    List<Map<String, dynamic>> items;
+    try {
+      items = await src.fetchSettings();
+    } catch (e) {
+      _toast('读取设置失败：$e');
+      return;
+    }
+    if (!mounted) return;
+    if (items.isEmpty) {
+      _toast('该源没有可配置项');
+      return;
+    }
+    final values = <String, Object?>{};
+    for (final it in items) {
+      final k = '${it['key'] ?? ''}';
+      if (k.isEmpty) continue;
+      try {
+        values[k] = await src.readSetting(k);
+      } catch (_) {}
+    }
+    if (!mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: _card,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.7,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 16, 12, 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '源设置 · ${src.name}',
+                          style: TextStyle(
+                            fontSize: AppTheme.fontHeadline,
+                            fontWeight: FontWeight.w700,
+                            color: _label,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        icon: Icon(
+                          Icons.close_rounded,
+                          color: JellyTheme.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.fromLTRB(14, 0, 14, 18),
+                    itemCount: items.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (_, i) {
+                      final it = items[i];
+                      final key = '${it['key'] ?? ''}';
+                      final type = '${it['type'] ?? 'input'}';
+                      final title = '${it['title'] ?? key}';
+                      final current = values[key];
+                      return InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () async {
+                          Navigator.pop(ctx);
+                          await _editVeneraSetting(src, it, current);
+                          if (mounted) await _openVeneraSettings(def);
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 11,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _isDark
+                                ? Colors.white.withValues(alpha: 0.05)
+                                : Colors.black.withValues(alpha: 0.03),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      title,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: _label,
+                                      ),
+                                    ),
+                                    if ('${it['description'] ?? ''}'
+                                        .trim()
+                                        .isNotEmpty)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 2),
+                                        child: Text(
+                                          '${it['description']}',
+                                          style: TextStyle(
+                                            fontSize: 10.5,
+                                            color: JellyTheme.textSecondary,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                type == 'switch'
+                                    ? (current == true ? '开' : '关')
+                                    : _veneraOptionText(it, current),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: JellyTheme.primary,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Icon(
+                                Icons.chevron_right_rounded,
+                                size: 18,
+                                color: JellyTheme.textSecondary,
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  String _veneraOptionText(Map<String, dynamic> it, Object? value) {
+    final opts = it['options'];
+    if (opts is List) {
+      for (final o in opts.whereType<Map>()) {
+        if ('${o['value']}' == '$value') return '${o['text'] ?? o['value']}';
+      }
+    }
+    if (value == null) return '${it['default'] ?? ''}';
+    return '$value';
+  }
+
+  Future<void> _editVeneraSetting(
+    VeneraMangaSource src,
+    Map<String, dynamic> item,
+    Object? current,
+  ) async {
+    final key = '${item['key'] ?? ''}';
+    final type = '${item['type'] ?? 'input'}';
+    final title = '${item['title'] ?? key}';
+    Object? next;
+    if (type == 'switch' || type == 'toggle') {
+      next = current != true;
+    } else if (type == 'select' && item['options'] is List) {
+      final opts = (item['options'] as List).whereType<Map>().toList();
+      next = await showDialog<Object?>(
+        context: context,
+        builder: (ctx) => SimpleDialog(
+          backgroundColor: _card,
+          title: Text(title, style: TextStyle(color: _label)),
+          children: [
+            for (final o in opts)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(ctx, o['value']),
+                child: Row(
+                  children: [
+                    Icon(
+                      '${o['value']}' == '$current'
+                          ? Icons.radio_button_checked_rounded
+                          : Icons.radio_button_unchecked_rounded,
+                      size: 18,
+                      color: '${o['value']}' == '$current'
+                          ? JellyTheme.primary
+                          : JellyTheme.textSecondary,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${o['text'] ?? o['value']}',
+                        style: TextStyle(fontSize: 13, color: _label),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      );
+      if (next == null) return;
+    } else {
+      final ctrl = TextEditingController(text: '$current');
+      next = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: _card,
+          title: Text(title, style: TextStyle(color: _label)),
+          content: TextField(
+            controller: ctrl,
+            autofocus: true,
+            style: TextStyle(color: _label),
+            decoration: InputDecoration(hintText: '${item['default'] ?? ''}'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text),
+              child: const Text('保存'),
+            ),
+          ],
+        ),
+      );
+      ctrl.dispose();
+      if (next == null) return;
+    }
+    try {
+      await src.saveSetting(key, next);
+      _toast('已保存：$title');
+    } catch (e) {
+      _toast('保存失败：$e');
+    }
+  }
+
+  Future<void> _refreshVeneraScript(SourceDefinition def, String url) async {
+    try {
+      final js = await fetchComicSourceText(url);
+      if (!js.contains('extends ComicSource')) {
+        _toast('下载到的不是 Venera 脚本（可能被代理拦截）');
+        return;
+      }
+      final defs = await SourceConfigStore().loadLocal();
+      await SourceConfigStore().saveLocal([
+        for (final d in defs)
+          if (d.id == def.id)
+            SourceDefinition(
+              id: d.id,
+              type: d.type,
+              engine: d.engine,
+              needsMagic: d.needsMagic,
+              config: {...d.config, 'script': js},
+            )
+          else
+            d,
+      ]);
+      await SourceManager().reload();
+      if (!mounted) return;
+      setState(() {});
+      _toast('脚本已更新');
+    } catch (e) {
+      _toast('下载失败：$e');
+    }
   }
 
   Future<void> _shareIds(List<String> ids) async {
@@ -1229,7 +1600,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                '支持漫画配置源、Legado 漫画脚本；Venera 源请用「添加订阅」',
+                '支持漫画配置源、Legado 漫画脚本、Venera index.json 或单个 .js 脚本',
                 style: TextStyle(
                   fontSize: 12,
                   color: JellyTheme.textSecondary,
@@ -1351,12 +1722,12 @@ class _WarehouseTabState extends State<_WarehouseTab>
     final u = (url ?? '').trim();
     if (u.isEmpty) return;
     try {
-      final text = await NetworkManager.instance.getString(u);
+      final text = await fetchComicSourceText(u);
       if (text.trim().isEmpty) {
         _toast('下载内容为空');
         return;
       }
-      await _applyComicImport(text);
+      await _applyComicImport(text, baseUrl: u);
     } catch (e) {
       _toast('下载失败：$e');
     }
@@ -1404,16 +1775,68 @@ class _WarehouseTabState extends State<_WarehouseTab>
     try {
       final result = await FilePicker.pickFiles(type: FileType.any);
       if (result.isEmpty) return;
-      final f = result.first;
-      final bytes = await f.readAsBytes();
-      if (bytes.isEmpty) {
-        _toast('文件是空的');
-        return;
+      var ok = 0;
+      final errors = <String>[];
+      for (final f in result) {
+        final bytes = await f.readAsBytes();
+        if (bytes.isEmpty) continue;
+        // zip：解出里面的 .js / .json 逐个导入（漫画源包常用压缩包分发）
+        final isZip =
+            f.name.toLowerCase().endsWith('.zip') ||
+            (bytes.length > 3 &&
+                bytes[0] == 0x50 &&
+                bytes[1] == 0x4B &&
+                bytes[2] == 0x03 &&
+                bytes[3] == 0x04);
+        if (isZip) {
+          final r = await _importComicZip(bytes);
+          ok += r.$1;
+          errors.addAll(r.$2);
+          continue;
+        }
+        final r = await importComicSourcesText(
+          utf8.decode(bytes, allowMalformed: true),
+        );
+        if (r.ok) {
+          ok++;
+        } else {
+          errors.add(r.message);
+        }
       }
-      await _applyComicImport(utf8.decode(bytes, allowMalformed: true));
+      if (!mounted) return;
+      setState(() {});
+      if (ok > 0) {
+        AppToast.message(
+          '已导入 $ok 个文件${errors.isEmpty ? '' : '（${errors.length} 个失败）'}',
+        );
+      } else {
+        AppToast.error(errors.isEmpty ? '文件是空的' : errors.first);
+      }
     } catch (e) {
       _toast('导入失败：$e');
     }
+  }
+
+  Future<(int, List<String>)> _importComicZip(List<int> bytes) async {
+    var ok = 0;
+    final errors = <String>[];
+    final archive = ZipDecoder().decodeBytes(bytes, verify: false);
+    for (final f in archive.files) {
+      if (!f.isFile) continue;
+      final name = f.name.toLowerCase();
+      if (!(name.endsWith('.js') || name.endsWith('.json'))) continue;
+      final data = f.content;
+      if (data is! List) continue;
+      final r = await importComicSourcesText(
+        utf8.decode(List<int>.from(data), allowMalformed: true),
+      );
+      if (r.ok) {
+        ok++;
+      } else {
+        errors.add('${f.name}: ${r.message}');
+      }
+    }
+    return (ok, errors);
   }
 
   Future<void> _importComicFromQr() async {
@@ -1425,8 +1848,23 @@ class _WarehouseTabState extends State<_WarehouseTab>
     await _applyComicImport(text);
   }
 
-  Future<void> _applyComicImport(String text) async {
-    final r = await importComicSourcesText(text);
+  Future<void> _applyComicImport(String text, {String baseUrl = ''}) async {
+    var body = text;
+    var base = baseUrl;
+    // 二维码 / 文本里直接贴了一个源地址：先下载再解析（Venera index.json
+    // 还要用它作 baseUrl 解析脚本相对路径）
+    final maybeUrl = text.trim();
+    if (!maybeUrl.contains('\n') &&
+        (maybeUrl.startsWith('http://') || maybeUrl.startsWith('https://'))) {
+      try {
+        body = await fetchComicSourceText(maybeUrl);
+        base = maybeUrl;
+      } catch (e) {
+        _toast('下载失败：$e');
+        return;
+      }
+    }
+    final r = await importComicSourcesText(body, baseUrl: base);
     if (!mounted) return;
     setState(() {});
     if (r.ok) {

@@ -34,8 +34,7 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
   String? _loadedServerId;
 
   // ── 顶部幻灯片（Backdrop 轮播）──────────────────────────────
-  final PageController _heroController =
-      PageController(viewportFraction: 0.86);
+  final PageController _heroController = PageController(viewportFraction: 0.86);
   Timer? _heroTimer;
   int _heroIndex = 0;
   List<EmbyItem> _heroItems = const [];
@@ -92,11 +91,13 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
     try {
       final views = await api.getViews();
       final visibleViews = views
-          .where((v) =>
-              v.collectionType == null ||
-              v.collectionType == 'movies' ||
-              v.collectionType == 'tvshows' ||
-              v.collectionType == 'mixed')
+          .where(
+            (v) =>
+                v.collectionType == null ||
+                v.collectionType == 'movies' ||
+                v.collectionType == 'tvshows' ||
+                v.collectionType == 'mixed',
+          )
           .toList();
       final resume = await api.getResume();
       final latest = <String, List<EmbyItem>>{};
@@ -260,9 +261,13 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
     );
   }
 
+  /// 顶栏服务器菜单里的「管理服务器…」项
+  static const String _kManageServers = '__manage_servers__';
+
   Widget _header(EmbyServer? server, List<EmbyServer> servers) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 12, 2),
+      // 右侧只留 4：右上角两个圆形按钮要贴近屏幕边（用户 2026-10-18）
+      padding: const EdgeInsets.fromLTRB(16, 12, 4, 2),
       child: Row(
         children: [
           Text(
@@ -275,53 +280,68 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
             ),
           ),
           const SizedBox(width: 10),
-          if (servers.length > 1)
-            Flexible(
-              child: PopupMenuButton<String>(
-                tooltip: '切换服务器',
-                color: AppTheme.backgroundSecondary,
-                shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(AppTheme.glassRadiusCard),
-                ),
-                onSelected: (id) async {
-                  await _store.setActive(id);
-                  if (mounted) setState(() {});
-                  await _refresh();
-                },
-                itemBuilder: (_) => [
-                  for (final s in servers)
-                    PopupMenuItem(
-                      value: s.id,
-                      child: Row(
-                        children: [
-                          Icon(
-                            s.id == _store.activeId
-                                ? Icons.check_circle_rounded
-                                : Icons.circle_outlined,
-                            size: 16,
-                            color: s.id == _store.activeId
-                                ? AppTheme.accentColor
-                                : AppTheme.textTertiary,
-                          ),
-                          const SizedBox(width: 8),
-                          Flexible(child: Text(s.name)),
-                        ],
-                      ),
-                    ),
-                ],
-                child: _serverChip(server?.name ?? '未配置'),
+          // 服务器 = 源：无论几个服务器都做成可点的切换入口
+          // （以前只有 >1 个时才可点，单服务器时"花花"就是个死胶囊）
+          Flexible(
+            child: PopupMenuButton<String>(
+              tooltip: '切换服务器',
+              color: AppTheme.backgroundSecondary,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
               ),
-            )
-          else if (server != null)
-            Flexible(child: _serverChip(server.name)),
+              onSelected: (id) async {
+                if (id == _kManageServers) {
+                  await _openSettings();
+                  return;
+                }
+                await _store.setActive(id);
+                if (mounted) setState(() {});
+                await _refresh();
+              },
+              itemBuilder: (_) => [
+                for (final s in servers)
+                  PopupMenuItem(
+                    value: s.id,
+                    child: Row(
+                      children: [
+                        Icon(
+                          s.id == _store.activeId
+                              ? Icons.check_circle_rounded
+                              : Icons.circle_outlined,
+                          size: 16,
+                          color: s.id == _store.activeId
+                              ? AppTheme.accentColor
+                              : AppTheme.textTertiary,
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(child: Text(s.name)),
+                      ],
+                    ),
+                  ),
+                if (servers.isNotEmpty) const PopupMenuDivider(),
+                const PopupMenuItem(
+                  value: _kManageServers,
+                  child: Row(
+                    children: [
+                      Icon(Icons.settings_outlined, size: 16),
+                      SizedBox(width: 8),
+                      Text('管理服务器'),
+                    ],
+                  ),
+                ),
+              ],
+              child: _serverChip(
+                server?.name ?? (servers.isEmpty ? '添加服务器' : '未选择'),
+              ),
+            ),
+          ),
           const Spacer(),
           _headerAction(
             icon: Icons.refresh_rounded,
             tooltip: '刷新',
             onTap: _refresh,
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
           _headerAction(
             icon: Icons.settings_outlined,
             tooltip: 'Emby 管理',
@@ -357,20 +377,33 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
 
   Widget _serverChip(String name) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: const EdgeInsets.fromLTRB(10, 4, 6, 4),
       decoration: BoxDecoration(
         color: AppTheme.accentColor.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(999),
       ),
-      child: Text(
-        name,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: AppTheme.accentColor,
-          fontSize: AppTheme.fontCaption,
-          fontWeight: FontWeight.w600,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppTheme.accentColor,
+                fontSize: AppTheme.fontCaption,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          // 下拉箭头：明确这是「可点的源切换」，不是静态标签
+          Icon(
+            Icons.arrow_drop_down_rounded,
+            size: 16,
+            color: AppTheme.accentColor,
+          ),
+        ],
       ),
     );
   }
@@ -515,7 +548,9 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
                   const SizedBox(height: 10),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(999),
@@ -523,8 +558,11 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.play_arrow_rounded,
-                            size: 16, color: Colors.black),
+                        const Icon(
+                          Icons.play_arrow_rounded,
+                          size: 16,
+                          color: Colors.black,
+                        ),
                         const SizedBox(width: 2),
                         Text(
                           item.isSeries ? '选集' : '播放',
@@ -580,10 +618,12 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
                               child: LinearProgressIndicator(
                                 value: p,
                                 minHeight: 3,
-                                backgroundColor:
-                                    Colors.white.withValues(alpha: 0.25),
+                                backgroundColor: Colors.white.withValues(
+                                  alpha: 0.25,
+                                ),
                                 valueColor: AlwaysStoppedAnimation(
-                                    AppTheme.accentColor),
+                                  AppTheme.accentColor,
+                                ),
                               ),
                             ),
                         ],
