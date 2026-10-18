@@ -1051,6 +1051,10 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
     final sources = store.all
         .where((s) => s.enabled && s.enabledExplore && !s.isComicSource)
         .toList();
+    // 当前书源是否仍在这个弹窗的可见列表里（停用/关发现后会不在）
+    final hasCurrent =
+        _selectedSourceId.isNotEmpty &&
+        sources.any((s) => s.id == _selectedSourceId);
     // 分组口径与「书源仓」一致（Legado 的 bookSourceGroup，空 = 未分组）
     final groups = collectSourceGroups(sources.map((s) => s.group));
     // 当前书源 chip 的 key：打开弹窗后自动滚到它（源多时定位到当前位置）
@@ -1088,6 +1092,24 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                 );
               });
             }
+            // 右上角「定位」：先清掉分组/关键词过滤，再滚到当前书源
+            void locateCurrent() {
+              setSheetState(() {
+                selectedGroup = SourceGroupTabs.all;
+                _sourceFilter.clear();
+              });
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                final c = currentKey.currentContext;
+                if (c == null || !c.mounted) return;
+                Scrollable.ensureVisible(
+                  c,
+                  alignment: 0.35,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOut,
+                );
+              });
+            }
+
             return SafeArea(
               child: ConstrainedBox(
                 constraints: BoxConstraints(
@@ -1104,6 +1126,8 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                         selected: selectedGroup,
                         onSelected: (g) =>
                             setSheetState(() => selectedGroup = g),
+                        // 聚搜 / 当前源已不在可见列表时，没有可定位目标
+                        onLocate: hasCurrent ? locateCurrent : null,
                       ),
                     ),
                     Padding(

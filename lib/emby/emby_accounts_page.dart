@@ -86,6 +86,65 @@ class _EmbyAccountsPageState extends State<EmbyAccountsPage> {
     if (mounted) setState(() {});
   }
 
+  /// 改名：只改列表里的显示名称，不需要重新登录。
+  Future<void> _rename(EmbyServer s) async {
+    final ctrl = TextEditingController(text: s.name);
+    final saved = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundElevated,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
+        ),
+        title: Text(
+          '服务器名称',
+          style: TextStyle(color: AppTheme.textPrimary),
+        ),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          style: TextStyle(color: AppTheme.textPrimary),
+          textInputAction: TextInputAction.done,
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+          decoration: InputDecoration(
+            hintText: '如 家庭影院、客厅 NAS',
+            hintStyle: TextStyle(color: AppTheme.textTertiary),
+            helperText: '留空则用服务器地址',
+            helperStyle: TextStyle(
+              color: AppTheme.textTertiary,
+              fontSize: AppTheme.fontCaption,
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              '取消',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text),
+            child: Text(
+              '保存',
+              style: TextStyle(color: AppTheme.accentColor),
+            ),
+          ),
+        ],
+      ),
+    );
+    final text = saved?.trim() ?? '';
+    if (saved == null) {
+      ctrl.dispose();
+      return;
+    }
+    final fallback = Uri.tryParse(s.normalizedUrl)?.host ?? 'Emby';
+    await _store.rename(s.id, text.isEmpty ? fallback : text);
+    ctrl.dispose();
+    if (mounted) setState(() {});
+  }
+
   /// 顶部「媒体服务器页签未开启」提示卡
   Widget _buildTabHint() {
     final nav = NavFeatureService.instance;
@@ -238,7 +297,9 @@ class _EmbyAccountsPageState extends State<EmbyAccountsPage> {
                             const SizedBox(width: 6),
                             Container(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
                                 color: AppTheme.accentColor,
                                 borderRadius: BorderRadius.circular(4),
@@ -291,23 +352,47 @@ class _EmbyAccountsPageState extends State<EmbyAccountsPage> {
                   color: AppTheme.backgroundSecondary,
                   elevation: 8,
                   shape: RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.circular(AppTheme.glassRadiusCard),
+                    borderRadius: BorderRadius.circular(
+                      AppTheme.glassRadiusCard,
+                    ),
                   ),
                   onSelected: (v) {
+                    if (v == 'rename') _rename(s);
                     if (v == 'edit') _openEditor(s);
                     if (v == 'delete') _delete(s);
                   },
                   itemBuilder: (ctx) => [
                     PopupMenuItem(
+                      value: 'rename',
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.drive_file_rename_outline,
+                            size: 18,
+                            color: AppTheme.textSecondary,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '重命名',
+                            style: TextStyle(color: AppTheme.textPrimary),
+                          ),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
                       value: 'edit',
                       child: Row(
                         children: [
-                          Icon(Icons.edit_outlined,
-                              size: 18, color: AppTheme.textSecondary),
+                          Icon(
+                            Icons.edit_outlined,
+                            size: 18,
+                            color: AppTheme.textSecondary,
+                          ),
                           const SizedBox(width: 8),
-                          Text('编辑账号',
-                              style: TextStyle(color: AppTheme.textPrimary)),
+                          Text(
+                            '编辑账号',
+                            style: TextStyle(color: AppTheme.textPrimary),
+                          ),
                         ],
                       ),
                     ),
@@ -315,11 +400,13 @@ class _EmbyAccountsPageState extends State<EmbyAccountsPage> {
                       value: 'delete',
                       child: Row(
                         children: [
-                          Icon(Icons.delete_outline,
-                              size: 18, color: Colors.redAccent),
+                          Icon(
+                            Icons.delete_outline,
+                            size: 18,
+                            color: Colors.redAccent,
+                          ),
                           const SizedBox(width: 8),
-                          Text('删除',
-                              style: TextStyle(color: Colors.redAccent)),
+                          Text('删除', style: TextStyle(color: Colors.redAccent)),
                         ],
                       ),
                     ),
@@ -342,8 +429,11 @@ class _EmbyAccountsPageState extends State<EmbyAccountsPage> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new,
-              color: AppTheme.textPrimary, size: 20),
+          icon: Icon(
+            Icons.arrow_back_ios_new,
+            color: AppTheme.textPrimary,
+            size: 20,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
         centerTitle: true,
@@ -358,8 +448,11 @@ class _EmbyAccountsPageState extends State<EmbyAccountsPage> {
         actions: [
           IconButton(
             tooltip: '添加账号',
-            icon: Icon(Icons.person_add_outlined,
-                color: AppTheme.textPrimary, size: 22),
+            icon: Icon(
+              Icons.person_add_outlined,
+              color: AppTheme.textPrimary,
+              size: 22,
+            ),
             onPressed: () => _openEditor(),
           ),
           const SizedBox(width: 4),
@@ -398,10 +491,13 @@ class _EmbyAccountsPageState extends State<EmbyAccountsPage> {
                               backgroundColor: AppTheme.accentColor,
                               foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 24, vertical: 12),
+                                horizontal: 24,
+                                vertical: 12,
+                              ),
                               shape: RoundedRectangleBorder(
-                                borderRadius:
-                                    BorderRadius.circular(AppTheme.radiusMD),
+                                borderRadius: BorderRadius.circular(
+                                  AppTheme.radiusMD,
+                                ),
                               ),
                             ),
                           ),

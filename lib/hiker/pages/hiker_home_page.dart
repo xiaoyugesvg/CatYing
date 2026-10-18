@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../../common/theme.dart';
@@ -204,10 +206,20 @@ class _HikerHomePageState extends State<HikerHomePage> {
     });
     final vars = _store.varsOf(src.id);
     final r = _cate.isEmpty
-        ? await HikerEngine.instance
-            .home(src, page: page, vars: vars, lazyIds: _lazyChain)
-        : await HikerEngine.instance.category(src, _cate,
-            cateName: _cateName, page: page, vars: vars, lazyIds: _lazyChain);
+        ? await HikerEngine.instance.home(
+            src,
+            page: page,
+            vars: vars,
+            lazyIds: _lazyChain,
+          )
+        : await HikerEngine.instance.category(
+            src,
+            _cate,
+            cateName: _cateName,
+            page: page,
+            vars: vars,
+            lazyIds: _lazyChain,
+          );
     // 期间又发起了新的加载（切源 / 切分类 / 加载更多）⇒ 这次结果作废
     if (!mounted || seq != _loadSeq) return;
     // 变量**有变化**才落盘（判据见 HikerStore.saveVarsIfChanged 的注释：
@@ -330,13 +342,20 @@ class _HikerHomePageState extends State<HikerHomePage> {
     return (ids, {String lazyInput = ''}) async {
       final v = vars ?? _store.varsOf(src.id);
       final r = cate.isEmpty
-          ? await HikerEngine.instance.home(src,
-              vars: v, lazyIds: ids, lazyInput: lazyInput)
-          : await HikerEngine.instance.category(src, cate,
+          ? await HikerEngine.instance.home(
+              src,
+              vars: v,
+              lazyIds: ids,
+              lazyInput: lazyInput,
+            )
+          : await HikerEngine.instance.category(
+              src,
+              cate,
               cateName: cateName,
               vars: v,
               lazyIds: ids,
-              lazyInput: lazyInput);
+              lazyInput: lazyInput,
+            );
       if (persistVars) {
         await _store.saveVarsIfChanged(src.id, v, r.vars);
       }
@@ -357,7 +376,9 @@ class _HikerHomePageState extends State<HikerHomePage> {
   }) async {
     var r = await _replayLazyFor(src, persistVars: false, vars: vars)(chain);
     if (r.needRefresh) {
-      final r2 = await _replayLazyFor(src, persistVars: false, vars: r.vars)(const []);
+      final r2 = await _replayLazyFor(src, persistVars: false, vars: r.vars)(
+        const [],
+      );
       if (r2.list.isNotEmpty || r2.playUrl.isNotEmpty) r = r2;
     }
     return r;
@@ -440,7 +461,9 @@ class _HikerHomePageState extends State<HikerHomePage> {
   /// 源里这些条目基本只有一种用途 —— 「收藏 / 历史 / 设置 / ××开关」这类
   /// **就地切页的工具按钮**（`text_1` 是整行内容行，不当工具）。
   static bool _isToolButton(HikerItem it) =>
-      it.colType == 'text_2' || it.colType == 'text_3' || it.colType == 'text_4';
+      it.colType == 'text_2' ||
+      it.colType == 'text_3' ||
+      it.colType == 'text_4';
 
   /// 「工具入口」弹窗：把按钮产出的内容（收藏列表 / 设置项 …）放进底部弹窗。
   ///
@@ -450,7 +473,10 @@ class _HikerHomePageState extends State<HikerHomePage> {
   ///     （见 [_replayLazyFor] 的 `persistVars`）。
   /// 弹窗里的设置项按**一行三个卡片**排（[HikerBlocks.textColumns]）。
   Future<void> _openToolSheet(
-      HikerSource src, HikerItem entry, List<String> chain) async {
+    HikerSource src,
+    HikerItem entry,
+    List<String> chain,
+  ) async {
     HikerResult r;
     try {
       r = await _runToolEntry(src, chain);
@@ -489,7 +515,8 @@ class _HikerHomePageState extends State<HikerHomePage> {
           builder: (ctx, setSheet) => SafeArea(
             child: ConstrainedBox(
               constraints: BoxConstraints(
-                  maxHeight: MediaQuery.of(ctx).size.height * 0.76),
+                maxHeight: MediaQuery.of(ctx).size.height * 0.76,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -573,19 +600,25 @@ class _HikerHomePageState extends State<HikerHomePage> {
       child: Row(
         children: [
           Expanded(
-            child: Text(title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: AppTheme.fontTitle3,
-                    fontWeight: FontWeight.bold)),
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: AppTheme.fontTitle3,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
           IconButton(
             tooltip: '关闭',
             onPressed: () => Navigator.of(ctx).pop(),
-            icon: Icon(Icons.close_rounded,
-                size: 20, color: AppTheme.textSecondary),
+            icon: Icon(
+              Icons.close_rounded,
+              size: 20,
+              color: AppTheme.textSecondary,
+            ),
           ),
         ],
       ),
@@ -605,33 +638,54 @@ class _HikerHomePageState extends State<HikerHomePage> {
           children: [
             const SizedBox(height: 10),
             ListTile(
-              title: Text(it.title.isEmpty ? '(无标题)' : hikerPlainText(it.title),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      color: AppTheme.textPrimary, fontSize: AppTheme.fontBody)),
+              title: Text(
+                it.title.isEmpty ? '(无标题)' : hikerPlainText(it.title),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontBody,
+                ),
+              ),
               subtitle: Text(
-                  it.url.isEmpty ? '(没有地址)' : it.url,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption)),
+                it.url.isEmpty ? '(没有地址)' : it.url,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontCaption,
+                ),
+              ),
             ),
             ListTile(
-              leading: Icon(Icons.play_arrow_rounded, color: AppTheme.accentOnSurface),
-              title: Text('打开',
-                  style: TextStyle(
-                      color: AppTheme.textPrimary, fontSize: AppTheme.fontBody)),
+              leading: Icon(
+                Icons.play_arrow_rounded,
+                color: AppTheme.accentOnSurface,
+              ),
+              title: Text(
+                '打开',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontBody,
+                ),
+              ),
               onTap: () {
                 Navigator.of(ctx).pop();
                 _open(it);
               },
             ),
             ListTile(
-              leading: Icon(Icons.refresh_rounded, color: AppTheme.accentOnSurface),
-              title: Text('刷新列表',
-                  style: TextStyle(
-                      color: AppTheme.textPrimary, fontSize: AppTheme.fontBody)),
+              leading: Icon(
+                Icons.refresh_rounded,
+                color: AppTheme.accentOnSurface,
+              ),
+              title: Text(
+                '刷新列表',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontBody,
+                ),
+              ),
               onTap: () {
                 Navigator.of(ctx).pop();
                 _load(page: 1);
@@ -642,6 +696,56 @@ class _HikerHomePageState extends State<HikerHomePage> {
         ),
       ),
     );
+  }
+
+  /// 长按源卡片「编辑源」：直接弹源配置框（与「源管理」页同一个）
+  Future<void> _editSourceConfig(String id) async {
+    final hit = _store.sources.where((e) => e.id == id).toList();
+    if (hit.isEmpty || !mounted) return;
+    await showHikerSourceConfigDialog(context, hit.first);
+  }
+
+  /// 长按源卡片 / 多选「分享」：导出成可再次导入的 JSON 放剪贴板
+  Future<void> _shareSources(List<String> ids) async {
+    final list = _store.sources.where((e) => ids.contains(e.id)).toList();
+    if (list.isEmpty) return;
+    final data = list.length == 1
+        ? list.first.raw
+        : [for (final s in list) s.raw];
+    final text = const JsonEncoder.withIndent('  ').convert(data);
+    await Clipboard.setData(ClipboardData(text: text));
+    AppToast.message('已复制 ${list.length} 个源，可粘贴到导入框');
+  }
+
+  /// 长按 / 多选「删除」。返回删除后的当前源 id（面板据此重标勾）。
+  Future<String?> _deleteSources(List<String> ids) async {
+    final before = _store.currentId;
+    for (final id in ids) {
+      await _store.remove(id);
+    }
+    if (!mounted) return _store.currentId;
+    AppToast.message('已删除 ${ids.length} 个源');
+    if (_store.currentId != before) {
+      // 删掉的正是当前源 ⇒ 与「设置页返回」同一套重置，避免列表还挂旧源
+      setState(() {
+        _cate = '';
+        _cateName = '首页';
+        _items = const [];
+        _lazyChain = const [];
+        _lastVars = const {};
+        _onClose.clear();
+        _didAutoRefresh = false;
+        _page = 1;
+        _hasMore = false;
+        _reqCount = 0;
+        _elapsedMs = 0;
+        _error = null;
+      });
+      _load(page: 1);
+    } else {
+      setState(() {});
+    }
+    return _store.currentId;
   }
 
   Future<void> _pickSource() async {
@@ -659,6 +763,9 @@ class _HikerHomePageState extends State<HikerHomePage> {
       actionLabel: '管理',
       onAction: _openSettings,
       emptyHint: '还没有可用的海阔源',
+      onEdit: _editSourceConfig,
+      onDelete: _deleteSources,
+      onShare: _shareSources,
       items: [
         for (final s in list)
           CardSourceItem(
@@ -740,7 +847,9 @@ class _HikerHomePageState extends State<HikerHomePage> {
   Widget build(BuildContext context) {
     final topInset = MediaQuery.paddingOf(context).top;
     final src = _store.current;
-    final cats = src == null ? const <({String name, String url})>[] : _cats(src);
+    final cats = src == null
+        ? const <({String name, String url})>[]
+        : _cats(src);
     return Scaffold(
       backgroundColor: AppTheme.backgroundPrimary,
       body: Column(
@@ -749,8 +858,7 @@ class _HikerHomePageState extends State<HikerHomePage> {
           _header(src),
           // 分类条只看"源自己声明了分类"，不再看静态的 usable 判定 ——
           // 否则被判"依赖内置模块"但实际能跑的源（见 _load 的注释）连分类都没了
-          if (cats.isNotEmpty && src != null)
-            _categoryBar(cats),
+          if (cats.isNotEmpty && src != null) _categoryBar(cats),
           if (_needConfigHint(src)) _configHint(src!),
           if (_items.isNotEmpty) _statsLine(),
           Expanded(child: _body()),
@@ -776,19 +884,29 @@ class _HikerHomePageState extends State<HikerHomePage> {
         ),
         child: Row(
           children: [
-            Icon(Icons.info_outline_rounded, size: 15, color: Colors.orange.shade400),
+            Icon(
+              Icons.info_outline_rounded,
+              size: 15,
+              color: Colors.orange.shade400,
+            ),
             const SizedBox(width: 6),
             Expanded(
               child: Text(
                 '这个源需要填「源配置」（${s.configKeys.map((k) => 'config.$k').join('、')}）',
                 maxLines: 2,
                 style: TextStyle(
-                    color: AppTheme.textSecondary, fontSize: AppTheme.fontCaption),
+                  color: AppTheme.textSecondary,
+                  fontSize: AppTheme.fontCaption,
+                ),
               ),
             ),
-            Text('去设置',
-                style: TextStyle(
-                    color: AppTheme.accentOnSurface, fontSize: AppTheme.fontCaption)),
+            Text(
+              '去设置',
+              style: TextStyle(
+                color: AppTheme.accentOnSurface,
+                fontSize: AppTheme.fontCaption,
+              ),
+            ),
           ],
         ),
       ),
@@ -817,9 +935,10 @@ class _HikerHomePageState extends State<HikerHomePage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: AppTheme.fontHeadline,
-                          fontWeight: FontWeight.bold),
+                        color: AppTheme.textPrimary,
+                        fontSize: AppTheme.fontHeadline,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 4),
@@ -834,8 +953,11 @@ class _HikerHomePageState extends State<HikerHomePage> {
                       ),
                     )
                   else
-                    Icon(Icons.expand_more_rounded,
-                        size: 16, color: AppTheme.textTertiary),
+                    Icon(
+                      Icons.expand_more_rounded,
+                      size: 16,
+                      color: AppTheme.textTertiary,
+                    ),
                 ],
               ),
             ),
@@ -902,11 +1024,14 @@ class _HikerHomePageState extends State<HikerHomePage> {
                   width: 0.6,
                 ),
               ),
-              child: Text(c.name,
-                  style: TextStyle(
-                      color: on ? Colors.white : AppTheme.textSecondary,
-                      fontSize: AppTheme.fontSubhead,
-                      fontWeight: on ? FontWeight.w600 : FontWeight.normal)),
+              child: Text(
+                c.name,
+                style: TextStyle(
+                  color: on ? Colors.white : AppTheme.textSecondary,
+                  fontSize: AppTheme.fontSubhead,
+                  fontWeight: on ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
             ),
           );
         }).toList(),
@@ -922,14 +1047,22 @@ class _HikerHomePageState extends State<HikerHomePage> {
       padding: const EdgeInsets.fromLTRB(18, 8, 18, 2),
       child: Row(
         children: [
-          Text(parts.join(' · '),
-              style: TextStyle(
-                  color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption)),
+          Text(
+            parts.join(' · '),
+            style: TextStyle(
+              color: AppTheme.textTertiary,
+              fontSize: AppTheme.fontCaption,
+            ),
+          ),
           const Spacer(),
           if (_cate.isNotEmpty)
-            Text(_cateName,
-                style: TextStyle(
-                    color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption)),
+            Text(
+              _cateName,
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: AppTheme.fontCaption,
+              ),
+            ),
         ],
       ),
     );
@@ -978,8 +1111,10 @@ class _HikerHomePageState extends State<HikerHomePage> {
             padding: const EdgeInsets.only(bottom: 6),
             child: TextButton(
               onPressed: () => _load(page: _page + 1),
-              child: Text('加载更多',
-                  style: TextStyle(color: AppTheme.accentOnSurface)),
+              child: Text(
+                '加载更多',
+                style: TextStyle(color: AppTheme.accentOnSurface),
+              ),
             ),
           ),
       ],
@@ -995,24 +1130,30 @@ class _HikerHomePageState extends State<HikerHomePage> {
           children: [
             const HikerLogo(size: 52),
             const SizedBox(height: 14),
-            Text('还没有海阔源',
-                style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: AppTheme.fontHeadline,
-                    fontWeight: FontWeight.bold)),
+            Text(
+              '还没有海阔源',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: AppTheme.fontHeadline,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             const SizedBox(height: 8),
             Text(
               '去「海阔设置」导入海阔视界导出的 JSON（数组）。\n'
               '导入时会自动标出哪些源在 Phase 1 可用。',
               textAlign: TextAlign.center,
               style: TextStyle(
-                  color: AppTheme.textTertiary,
-                  fontSize: AppTheme.fontFootnote,
-                  height: 1.6),
+                color: AppTheme.textTertiary,
+                fontSize: AppTheme.fontFootnote,
+                height: 1.6,
+              ),
             ),
             const SizedBox(height: 16),
             FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: AppTheme.accentColor),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.accentColor,
+              ),
               onPressed: _openSettings,
               child: const Text('打开海阔设置'),
             ),

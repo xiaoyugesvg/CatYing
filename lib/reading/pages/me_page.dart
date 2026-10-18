@@ -6,7 +6,6 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/settings_service.dart';
-import '../services/theme_switch.dart';
 import '../services/zlibrary_service.dart';
 import '../theme/jelly_palette.dart';
 import 'general_settings_page.dart';
@@ -35,11 +34,8 @@ import 'source_repo_page.dart';
 import 'tts_engine_page.dart';
 import 'zlibrary_auth_page.dart';
 import '../../common/theme.dart';
-import '../../widgets/app_icon_button.dart';
-import '../../widgets/app_page_header.dart';
-import 'about_page.dart';
 
-/// "我的"页：菜单（下载设置等）+ 右上角暗色模式切换 + 版本信息
+/// "我的"页：账号卡 + 菜单（下载设置等）+ 版本信息
 class MePage extends StatefulWidget {
   final bool isActive;
 
@@ -52,7 +48,6 @@ class MePage extends StatefulWidget {
 class _MePageState extends State<MePage> {
   int _session = 0; // 首次切到"我的" tab 时 +1，触发卡片入场动画
   bool _hasShownEntrance = false; // 是否已播过首次入场动画
-  final GlobalKey _themeToggleKey = GlobalKey(); // 暗色模式切换按钮（量取圆形扩散动画起点）
   String? _switchingTo; // 主题切换中（主题风格面板内 loading 遮罩用）
 
   @override
@@ -68,7 +63,6 @@ class _MePageState extends State<MePage> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final titleColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
     // 导航栏被隐藏的 tab（在"下载记录"下方依次补入口）
     final hiddenTabs = NavTab.values
         .where(
@@ -88,47 +82,9 @@ class _MePageState extends State<MePage> {
             bottom: 8 + JellyNavBar.contentBottomAvoid,
           ),
           children: [
-            // 标题 + 右上角暗色模式切换
-            Padding(
-              padding: const EdgeInsets.only(top: 6, bottom: 12),
-              child: Row(
-                children: [
-                  // 标题：坐标与其它顶栏页对齐（原来这里多包了一层
-                  // `Padding(left: 4)`，于是「我的」比别页标题右移 4px）
-                  AppPageTitle('我的', color: titleColor),
-                  const Spacer(),
-                  // ── 右上角三个圆形图标（按参考图 IMG_8564 的位置与顺序）──
-                  //   1. 扫码     → 去「书源仓库」扫码/口令导入
-                  //   2. 帮助（问号）→ 关于 / 使用帮助
-                  //   3. 明暗切换 → 月亮/太阳（跟随系统时点它=退出跟随并反转）
-                  _buildCircleIcon(
-                    isDark: isDark,
-                    icon: Icons.qr_code_scanner_rounded,
-                    tooltip: '扫码导入书源',
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const BookSourceRepoPage(),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  _buildCircleIcon(
-                    isDark: isDark,
-                    icon: Icons.help_outline_rounded,
-                    tooltip: '帮助',
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const AboutPage(),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  _buildThemeToggle(isDark),
-                ],
-              ),
-            ),
+            // 顶栏（「我的」标题 / 扫码 / 帮助 / 明暗切换）已按用户要求去掉，
+            // 页面直接从账号卡开始；留一点上边距不让灰色色带贴住状态栏。
+            const SizedBox(height: 8),
             // ── 我的笔记 / 阅读经历 / 阅读计划 ─────────────────────
             //    原来是登录卡下方**独立一行**（图标 + 常驻文字 label）。
             //    用户 2026 反馈：「那三个（我的笔记、阅读经历、阅读计划**只留图标**）
@@ -1311,81 +1267,6 @@ class _MePageState extends State<MePage> {
           link('缓存清理', () => _push(const GeneralSettingsPage())),
         ],
       ),
-    );
-  }
-
-  // -------------------- 暗色模式切换 --------------------
-  /// 顶栏右上角那三个图标按钮。
-  ///
-  /// 与 [_buildThemeToggle] 同一套外观：38×38 白色圆 + 居中图标，
-  /// 这样三个图标并排时尺寸一致（截图里它们是一样大的圆）。
-  /// 明暗切换那个不能复用本方法 —— 它要挂 `_themeToggleKey` 做
-  /// 圆形扩散动画的起点，所以单独实现。
-  ///
-  /// ⚠️ 实现已抽到 [AppIconButton]（B 档：图标按钮统一）。
-  ///
-  /// 这里原来用的是 **`JellyTheme.cardDark` 实底**，而其余三个页面
-  /// （书架/图书搜索/收藏）用的是**白 10% 淡底** —— 同一个概念两种观感。
-  /// 现在统一成淡底（`AppIconButton` 的默认形态）。
-  /// 尺寸仍是 38（比别处的 36 大一档，是「我的」页原本的规格，保留）。
-  Widget _buildCircleIcon({
-    required bool isDark,
-    required IconData icon,
-    required String tooltip,
-    required VoidCallback onTap,
-  }) {
-    return AppIconButton(
-      icon: icon,
-      tooltip: tooltip,
-      onTap: onTap,
-      isDark: isDark,
-      size: 38,
-    );
-  }
-
-  /// 右上角明暗模式切换图标：暗色显太阳、亮色显月亮（内置图标），颜色区分明暗
-  Widget _buildThemeToggle(bool isDark) {
-    return ListenableBuilder(
-      listenable: SettingsService(),
-      builder: (context, _) {
-        final dark = SettingsService().isDarkMode;
-        return Material(
-          key: _themeToggleKey,
-          color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-          shape: const CircleBorder(),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: () {
-              // 以图标中心作为主题切换圆形扩散动画的起点
-              final ro = _themeToggleKey.currentContext?.findRenderObject();
-              if (ro is RenderBox && ro.hasSize) {
-                ThemeSwitch.origin = ro.localToGlobal(
-                  ro.size.center(Offset.zero),
-                );
-              }
-              final s = SettingsService();
-              if (s.themeFollowSystem) {
-                // 跟随系统时手动切换：退出跟随，并切到与当前生效相反的明暗
-                s.setThemeFollowSystem(false);
-                s.setDarkMode(!s.isDarkMode);
-              } else {
-                s.setDarkMode(!s.isDarkMode);
-              }
-            },
-            child: SizedBox(
-              width: 38,
-              height: 38,
-              child: Center(
-                child: Icon(
-                  dark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-                  size: 20,
-                  color: dark ? Colors.amber.shade600 : Colors.indigo.shade400,
-                ),
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 

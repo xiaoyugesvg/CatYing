@@ -37,6 +37,8 @@ class SourceSubscription {
     this.lastUpdated = 0,
     this.count = 0,
     this.lastError = '',
+    this.updateHours = 24,
+    this.sourceIds = const [],
   });
 
   final String id;
@@ -57,6 +59,13 @@ class SourceSubscription {
   /// 最近一次失败原因（空 = 正常）
   final String lastError;
 
+  /// 自动更新间隔（小时）。0 = 只手动更新。
+  final int updateHours;
+
+  /// 这条订阅导入的源 id（书源 id / `venera:xxx`）。
+  /// 用于「订阅 tab → 只显示这个订阅带来的源」，更新后覆盖写入。
+  final List<String> sourceIds;
+
   SourceSubscription copyWith({
     String? name,
     String? url,
@@ -65,30 +74,35 @@ class SourceSubscription {
     int? lastUpdated,
     int? count,
     String? lastError,
-  }) =>
-      SourceSubscription(
-        id: id,
-        name: name ?? this.name,
-        url: url ?? this.url,
-        kind: kind ?? this.kind,
-        enabled: enabled ?? this.enabled,
-        builtin: builtin,
-        lastUpdated: lastUpdated ?? this.lastUpdated,
-        count: count ?? this.count,
-        lastError: lastError ?? this.lastError,
-      );
+    int? updateHours,
+    List<String>? sourceIds,
+  }) => SourceSubscription(
+    id: id,
+    name: name ?? this.name,
+    url: url ?? this.url,
+    kind: kind ?? this.kind,
+    enabled: enabled ?? this.enabled,
+    builtin: builtin,
+    lastUpdated: lastUpdated ?? this.lastUpdated,
+    count: count ?? this.count,
+    lastError: lastError ?? this.lastError,
+    updateHours: updateHours ?? this.updateHours,
+    sourceIds: sourceIds ?? this.sourceIds,
+  );
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'url': url,
-        'kind': kind.name,
-        'enabled': enabled,
-        'builtin': builtin,
-        'lastUpdated': lastUpdated,
-        'count': count,
-        'lastError': lastError,
-      };
+    'id': id,
+    'name': name,
+    'url': url,
+    'kind': kind.name,
+    'enabled': enabled,
+    'builtin': builtin,
+    'lastUpdated': lastUpdated,
+    'count': count,
+    'lastError': lastError,
+    'updateHours': updateHours,
+    'sourceIds': sourceIds,
+  };
 
   static SourceSubscription? tryParse(Object? raw) {
     if (raw is! Map) return null;
@@ -100,8 +114,8 @@ class SourceSubscription {
       (k) => k.name == kindName,
       orElse: () => SourceSubscriptionKind.novel,
     );
-    int n(Object? v) =>
-        v is num ? v.toInt() : (int.tryParse('$v') ?? 0);
+    int n(Object? v) => v is num ? v.toInt() : (int.tryParse('$v') ?? 0);
+    final ids = raw['sourceIds'];
     return SourceSubscription(
       id: id,
       name: (raw['name'] ?? '').toString(),
@@ -112,6 +126,10 @@ class SourceSubscription {
       lastUpdated: n(raw['lastUpdated']),
       count: n(raw['count']),
       lastError: (raw['lastError'] ?? '').toString(),
+      updateHours: raw.containsKey('updateHours') ? n(raw['updateHours']) : 24,
+      sourceIds: ids is List
+          ? ids.map((e) => e.toString()).where((e) => e.isNotEmpty).toList()
+          : const [],
     );
   }
 }

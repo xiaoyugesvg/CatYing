@@ -129,9 +129,7 @@ class _EmbyEditorPageState extends State<EmbyEditorPage> {
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: selected
-              ? AppTheme.backgroundElevated
-              : Colors.transparent,
+          color: selected ? AppTheme.backgroundElevated : Colors.transparent,
           borderRadius: BorderRadius.circular(18),
         ),
         child: Text(
@@ -190,8 +188,10 @@ class _EmbyEditorPageState extends State<EmbyEditorPage> {
                 fontSize: AppTheme.fontBody,
               ),
               border: InputBorder.none,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 14,
+              ),
               suffixIcon: suffixIcon,
             ),
           ),
@@ -209,8 +209,11 @@ class _EmbyEditorPageState extends State<EmbyEditorPage> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new,
-              color: AppTheme.textPrimary, size: 20),
+          icon: Icon(
+            Icons.arrow_back_ios_new,
+            color: AppTheme.textPrimary,
+            size: 20,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
         centerTitle: true,
@@ -252,11 +255,12 @@ class _EmbyEditorPageState extends State<EmbyEditorPage> {
             ),
             const SizedBox(height: 20),
 
-            // 账号名称（用户 2026-10-18：账号列表里全是服务器域名，认不出是哪个）
+            // 服务器名称（用户 2026-10-18：账号列表里全是服务器域名，认不出是哪个；
+            // 添加/编辑时都能在这里改名，列表卡片标题显示的就是它）
             _buildInput(
-              label: '账号名称（可选）',
+              label: '服务器名称',
               controller: _name,
-              placeholder: '如 家庭影院、客厅 NAS（留空用服务器地址）',
+              placeholder: '如 家庭影院、客厅 NAS（留空则用服务器地址）',
             ),
             const SizedBox(height: 16),
 
@@ -269,8 +273,11 @@ class _EmbyEditorPageState extends State<EmbyEditorPage> {
                 keyboardType: TextInputType.url,
                 autocorrect: false,
                 suffixIcon: IconButton(
-                  icon: Icon(Icons.paste_outlined,
-                      size: 18, color: AppTheme.textTertiary),
+                  icon: Icon(
+                    Icons.paste_outlined,
+                    size: 18,
+                    color: AppTheme.textTertiary,
+                  ),
                   onPressed: () => _paste(_url),
                 ),
               ),
@@ -283,8 +290,11 @@ class _EmbyEditorPageState extends State<EmbyEditorPage> {
               controller: _user,
               autocorrect: false,
               suffixIcon: IconButton(
-                icon: Icon(Icons.paste_outlined,
-                    size: 18, color: AppTheme.textTertiary),
+                icon: Icon(
+                  Icons.paste_outlined,
+                  size: 18,
+                  color: AppTheme.textTertiary,
+                ),
                 onPressed: () => _paste(_user),
               ),
             ),
@@ -301,8 +311,11 @@ class _EmbyEditorPageState extends State<EmbyEditorPage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   IconButton(
-                    icon: Icon(Icons.paste_outlined,
-                        size: 18, color: AppTheme.textTertiary),
+                    icon: Icon(
+                      Icons.paste_outlined,
+                      size: 18,
+                      color: AppTheme.textTertiary,
+                    ),
                     onPressed: () => _paste(_pass),
                   ),
                   IconButton(

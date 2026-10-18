@@ -34,6 +34,7 @@ import '../source/source_definition.dart';
 import '../source/source_manager.dart';
 import '../theme/jelly_theme.dart';
 import 'book_source_editor_page.dart';
+import 'book_source_qr_scan_page.dart';
 import 'comic_source_edit_page.dart';
 import 'source_warehouse_page.dart';
 import '../../common/theme.dart';
@@ -237,6 +238,7 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
   }
 
   Future<void> _updateFromCloud() async {
+    if (_busy) return;
     final url = _urlCtrl.text.trim();
     await SettingsService().setSourceRepoUrl(url);
     if (url.isEmpty) {
@@ -299,6 +301,12 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
               ),
             ),
           ),
+          // 导入源：右上角按钮 → 居中弹窗（用户 2026-10-18）
+          IconButton(
+            tooltip: '导入源',
+            icon: const Icon(Icons.file_download_outlined),
+            onPressed: _showImportDialog,
+          ),
           const SizedBox(width: 4),
         ],
       ),
@@ -308,9 +316,56 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
           final sources = _visibleSources;
           return Column(
             children: [
+              // 搜索框固定在顶栏下面（用户 2026-10-18）
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+                child: JellySearchBar(
+                  controller: _filterCtrl,
+                  hintText: '筛选已注册的漫画源',
+                  onChanged: (v) => setState(() => _filter = v),
+                  onCleared: () {
+                    _filterCtrl.clear();
+                    setState(() => _filter = '');
+                  },
+                ),
+              ),
               Expanded(
                 child: ReorderableListView.builder(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  // 计数 / 清空固定在列表头部（不参与拖动排序）
+                  header: Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
+                    child: Row(
+                      children: [
+                        Text(
+                          '共 ${SourceManager().sources.length} 个',
+                          style: TextStyle(
+                            fontSize: AppTheme.fontSubhead,
+                            color: JellyTheme.textSecondary,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (SourceManager().sources.isNotEmpty)
+                          TextButton(
+                            onPressed: _clearAll,
+                            child: const Text(
+                              '清空',
+                              style: TextStyle(
+                                fontSize: AppTheme.fontSubhead,
+                              ),
+                            ),
+                          ),
+                        if (SourceManager().sources.isEmpty)
+                          Text(
+                            '点右上角导入源',
+                            style: TextStyle(
+                              fontSize: AppTheme.fontSubhead,
+                              color: JellyTheme.textSecondary,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                   // 拖动排序：把新顺序交给 SourceManager
                   onReorder: (o, n) {
                     if (n > o) n -= 1; // Flutter 约定：newIndex 是"插入到之前"
@@ -323,81 +378,8 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
                     SourceManager().reorder(ids);
                     setState(() {});
                   },
-                  itemCount: sources.length + 1,
+                  itemCount: sources.isEmpty ? 1 : sources.length,
                   itemBuilder: (context, i) {
-                    // 前两块固定：云端卡片 + 计数/筛选/清空
-                    if (i == 0) {
-                      return Column(
-                        key: const ValueKey('head'),
-                        children: [
-                          _buildCloudCard(isDark),
-                          const SizedBox(height: 14),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 4),
-                            child: Row(
-                              children: [
-                                Text(
-                                  '共 ${SourceManager().sources.length} 个',
-                                  style: TextStyle(
-                                    fontSize: AppTheme.fontSubhead,
-                                    color: JellyTheme.textSecondary,
-                                  ),
-                                ),
-                                const Spacer(),
-                                if (SourceManager().sources.isNotEmpty)
-                                  TextButton(
-                                    onPressed: _clearAll,
-                                    child: const Text(
-                                      '清空',
-                                      style: TextStyle(
-                                        fontSize: AppTheme.fontSubhead,
-                                      ),
-                                    ),
-                                  ),
-                                // 内置漫画源已移除（用户 2026-10-13）：原来这里在"无源"时显示
-                                // 「恢复内置源」按钮，现在没有内置源可恢复 → 按钮一并去掉。
-                                // 无源时改为提示用户去上面的云端卡片填地址 / 导入 JSON。
-                                if (SourceManager().sources.isEmpty)
-                                  Padding(
-                                    padding: const EdgeInsets.only(right: 6),
-                                    child: Text(
-                                      '在上方填云端地址或导入 JSON',
-                                      style: TextStyle(
-                                        fontSize: AppTheme.fontSubhead,
-                                        color: JellyTheme.textSecondary,
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          // 筛选已注册的漫画源
-                          // ✅ 统一到共用组件 ✓（原为**手写一整套皮** ✗：40 高 / 圆角 20 / 卡片色
-                          //   容器 + 手画 `prefixIcon` 放大镜 + 自己实现的 `suffixIcon` 清空键 ✓）。
-                          //   ⚠️ 它原本是 **40 高 / 圆角 20** ✗，而书源体检那处是 **32 / 16** ✗
-                          //   —— 同模块**两种尺寸** ✓ 正是"排版不统一"的证据 ✓；
-                          //   统一成组件后**两页同款** ✓（这就是本次的目的 ✓）。
-                          // ⚠️ 必须**整段替换** ✓：`JellySearchBar` 自带底色/圆角/放大镜/清空键 ✓，
-                          //   若留下外层 `Container(decoration: …)` 就成"圆角方框套胶囊" ✗。
-                          // 参数对照 ✓：controller `_filterCtrl` ✓ · hintText 同文案 ✓ ·
-                          //   onChanged: setState(_filter = v) ✓（语义不变 ✓）·
-                          //   onCleared: 原为 `_filterCtrl.clear() + setState(_filter = '')` ✓
-                          //   → 这里**两者都保留** ✓（组件内部是否清 controller 我不假设 ✗，多清一次无害 ✓）
-                          JellySearchBar(
-                            controller: _filterCtrl,
-                            hintText: '筛选已注册的漫画源',
-                            onChanged: (v) => setState(() => _filter = v),
-                            onCleared: () {
-                              _filterCtrl.clear();
-                              setState(() => _filter = '');
-                            },
-                          ),
-                          const SizedBox(height: 10),
-                        ],
-                      );
-                    }
-                    // 空态
                     if (sources.isEmpty) {
                       return Padding(
                         key: const ValueKey('empty'),
@@ -405,7 +387,7 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
                         child: _buildEmptyState(isDark),
                       );
                     }
-                    final s = sources[i - 1];
+                    final s = sources[i];
                     return Container(
                       key: ValueKey('src-${s.id}'),
                       child: _buildSourceCard(isDark, s),
@@ -893,121 +875,289 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
     }
   }
 
-  /// 当前是否深色（弹层里拿不到页面 context 的 theme 时用）
-  bool isDarkNow() => Theme.of(context).brightness == Brightness.dark;
+  // ============================================================
+  // 导入源（顶部右上角按钮 → 居中弹窗）
+  // ============================================================
 
-  Widget _buildCloudCard(bool isDark) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '云端仓库',
-            style: TextStyle(
-              fontSize: AppTheme.fontHeadline,
-              fontWeight: FontWeight.w700,
-              color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
-            ),
+  /// 导入漫画源：网址 / 文件 / 文本 / 二维码（顺序按用户要求）
+  Future<void> _showImportDialog() async {
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _cardNow,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+        ),
+        title: Text(
+          '导入源',
+          style: TextStyle(
+            fontSize: AppTheme.fontHeadline,
+            fontWeight: FontWeight.w700,
+            color: _isDarkNow ? Colors.white : JellyTheme.textPrimaryLight,
           ),
-          const SizedBox(height: 3),
-          Text(
-            // 截图原文。这句同时回答了用户两个疑问：
-            // "会不会把我已有的源冲掉"（不会）+"多个地址怎么处理"（合并去重）
-            '导入按地址合并去重，不会覆盖已有源',
-            style: TextStyle(
-              fontSize: AppTheme.fontFootnote,
-              color: JellyTheme.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _urlCtrl,
-            style: TextStyle(
-              fontSize: AppTheme.fontBody,
-              color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
-            ),
-            keyboardType: TextInputType.url,
-            decoration: InputDecoration(
-              hintText: '书源地址（json / zip / 仓库索引）',
-              hintStyle: TextStyle(
-                fontSize: AppTheme.fontBody,
-                color: JellyTheme.textSecondary,
-              ),
-              filled: true,
-              fillColor: isDark
-                  ? Colors.white.withValues(alpha: 0.05)
-                  : Colors.black.withValues(alpha: 0.035),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 13,
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          // 两个按钮并排（截图布局）
-          Row(
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _busy ? null : _importFromFile,
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    side: BorderSide(
-                      color: isDark
-                          ? Colors.white.withValues(alpha: 0.22)
-                          : Colors.black.withValues(alpha: 0.16),
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    foregroundColor: isDark
-                        ? Colors.white
-                        : JellyTheme.textPrimaryLight,
-                  ),
-                  icon: const Icon(Icons.file_upload_outlined, size: 17),
-                  label: const Text(
-                    '导入文件',
-                    style: TextStyle(fontSize: AppTheme.fontBody),
-                  ),
+              Text(
+                '支持漫画源配置、Legado 漫画脚本；导入按地址合并去重',
+                style: TextStyle(
+                  fontSize: AppTheme.fontFootnote,
+                  color: JellyTheme.textSecondary,
+                  height: 1.45,
                 ),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: _busy ? null : _updateFromCloud,
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: _importTile(
+                      '网址',
+                      Icons.link_rounded,
+                      () => Navigator.pop(ctx, 'url'),
                     ),
                   ),
-                  icon: _busy
-                      ? const SizedBox(
-                          width: 15,
-                          height: 15,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.cloud_download_rounded, size: 17),
-                  label: const Text(
-                    '从云端更新',
-                    style: TextStyle(fontSize: AppTheme.fontBody),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _importTile(
+                      '文件',
+                      Icons.folder_open_rounded,
+                      () => Navigator.pop(ctx, 'file'),
+                    ),
                   ),
-                ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: _importTile(
+                      '文本',
+                      Icons.text_snippet_outlined,
+                      () => Navigator.pop(ctx, 'text'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _importTile(
+                      '二维码',
+                      Icons.qr_code_scanner_rounded,
+                      () => Navigator.pop(ctx, 'qr'),
+                    ),
+                  ),
+                ],
               ),
             ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
           ),
         ],
       ),
     );
+    if (!mounted || action == null) return;
+    if (action == 'url') {
+      await _importFromCloudDialog();
+    } else if (action == 'file') {
+      await _importFromFile();
+    } else if (action == 'text') {
+      await _importFromText();
+    } else if (action == 'qr') {
+      await _importByQrCode();
+    }
+  }
+
+  Widget _importTile(String label, IconData icon, VoidCallback onTap) {
+    final fg = _isDarkNow ? Colors.white : JellyTheme.textPrimaryLight;
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onTap,
+      child: Container(
+        height: 82,
+        decoration: BoxDecoration(
+          color: JellyTheme.primary.withValues(alpha: 0.09),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: JellyTheme.primary.withValues(alpha: 0.18),
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 24, color: JellyTheme.primary),
+            const SizedBox(height: 7),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: AppTheme.fontFootnote,
+                fontWeight: FontWeight.w600,
+                color: fg,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 网址导入：填云端仓库地址 → 从云端更新
+  Future<void> _importFromCloudDialog() async {
+    final ctrl = TextEditingController(text: _urlCtrl.text);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _cardNow,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+        ),
+        title: Text(
+          '网址导入',
+          style: TextStyle(
+            fontSize: AppTheme.fontHeadline,
+            fontWeight: FontWeight.w700,
+            color: _isDarkNow ? Colors.white : JellyTheme.textPrimaryLight,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '填云端仓库地址（json / zip / 仓库索引）',
+              style: TextStyle(
+                fontSize: AppTheme.fontFootnote,
+                color: JellyTheme.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: ctrl,
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+              style: TextStyle(
+                fontSize: AppTheme.fontBody,
+                color: _isDarkNow ? Colors.white : JellyTheme.textPrimaryLight,
+              ),
+              decoration: InputDecoration(
+                hintText: 'https://example.com/sources.json',
+                hintStyle: TextStyle(
+                  fontSize: AppTheme.fontBody,
+                  color: JellyTheme.textSecondary,
+                ),
+                filled: true,
+                fillColor: _isDarkNow
+                    ? Colors.white.withValues(alpha: 0.05)
+                    : Colors.black.withValues(alpha: 0.04),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('从云端更新'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    _urlCtrl.text = ctrl.text.trim();
+    await _updateFromCloud();
+  }
+
+  /// 文本导入：粘贴 JSON / 书源脚本
+  Future<void> _importFromText() async {
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _cardNow,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+        ),
+        title: Text(
+          '文本导入',
+          style: TextStyle(
+            fontSize: AppTheme.fontHeadline,
+            fontWeight: FontWeight.w700,
+            color: _isDarkNow ? Colors.white : JellyTheme.textPrimaryLight,
+          ),
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: TextField(
+            controller: ctrl,
+            maxLines: 8,
+            minLines: 5,
+            style: TextStyle(
+              fontSize: 12.5,
+              color: _isDarkNow ? Colors.white : JellyTheme.textPrimaryLight,
+            ),
+            decoration: InputDecoration(
+              hintText: '粘贴漫画源 JSON / Legado 书源脚本',
+              hintStyle: TextStyle(
+                fontSize: 12.5,
+                color: JellyTheme.textSecondary,
+              ),
+              filled: true,
+              fillColor: _isDarkNow
+                  ? Colors.white.withValues(alpha: 0.05)
+                  : Colors.black.withValues(alpha: 0.04),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+              contentPadding: const EdgeInsets.all(12),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('导入'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final text = ctrl.text.trim();
+    if (text.isEmpty) {
+      _toast('内容为空');
+      return;
+    }
+    await _applyImportedText(text);
+  }
+
+  /// 二维码导入：扫码后按文本解析
+  Future<void> _importByQrCode() async {
+    final text = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (_) => const BookSourceQrScanPage()),
+    );
+    if (text == null || text.trim().isEmpty) return;
+    await _applyImportedText(text);
   }
 
   /// 从本地文件导入漫画源。

@@ -21,7 +21,6 @@ class SourceSubscriptionStore extends ChangeNotifier {
   static final SourceSubscriptionStore instance = SourceSubscriptionStore._();
 
   static const _key = 'reading_source_subscriptions_v1';
-  static const _seedKey = 'reading_source_subscriptions_seeded_v1';
 
   final List<SourceSubscription> _items = [];
   List<SourceSubscription> get items => List.unmodifiable(_items);
@@ -48,30 +47,10 @@ class SourceSubscriptionStore extends ChangeNotifier {
           }
         }
       }
-      // 迁移：上一版把小说/漫画拆成两条内置订阅，现在合并成 legado-all.json。
-      // 只迁移"内置"记录，用户自己加的不动。
-      final oldSeedUrls = {
-        'https://raw.githubusercontent.com/leimao2333/leimao-sources/main/novel.json',
-        'https://raw.githubusercontent.com/leimao2333/leimao-sources/main/comic-legado.json',
-      };
-      final hadOldSeeds = _items.any(
-        (e) => e.builtin && oldSeedUrls.contains(e.url),
-      );
-      if (hadOldSeeds) {
-        _items.removeWhere((e) => e.builtin && oldSeedUrls.contains(e.url));
-        if (!_items.any((e) => e.url == _legadoAllUrl)) {
-          _items.add(_legadoAllSeed);
-        }
-        await _persist();
-      }
-
-      // 首次播种：把常用的两条链接记进来（只做一次；用户删掉不复活）
-      if (sp.getBool(_seedKey) != true) {
-        for (final s in _seeds) {
-          if (_items.any((e) => e.url == s.url)) continue;
-          _items.add(s);
-        }
-        await sp.setBool(_seedKey, true);
+      // 内置订阅已全部移除（用户 2026-10-18：链接自己填）。
+      // 老版本播种过的 builtin 记录在这里一次性清掉，用户自己加的（builtin=false）不动。
+      if (_items.any((e) => e.builtin)) {
+        _items.removeWhere((e) => e.builtin);
         await _persist();
       }
     } catch (e) {
@@ -81,33 +60,11 @@ class SourceSubscriptionStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  static const String _legadoAllUrl =
-      'https://raw.githubusercontent.com/leimao2333/leimao-sources/main/legado-all.json';
-
-  static const SourceSubscription _legadoAllSeed = SourceSubscription(
-    id: 'seed_leimao_legado_all',
-    name: '雷毛 Legado 综合源（80）',
-    url: _legadoAllUrl,
-    kind: SourceSubscriptionKind.legado,
-    builtin: true,
-  );
-
-  static List<SourceSubscription> get _seeds => [
-    _legadoAllSeed,
-    SourceSubscription(
-      id: 'seed_leimao_venera',
-      name: '雷毛 Venera 漫画源（33）',
-      url:
-          'https://raw.githubusercontent.com/leimao2333/leimao-sources/main/venera/index.json',
-      kind: SourceSubscriptionKind.venera,
-      builtin: true,
-    ),
-  ];
-
   Future<SourceSubscription?> add({
     required String name,
     required String url,
     required SourceSubscriptionKind kind,
+    int updateHours = 24,
   }) async {
     await load();
     final u = url.trim();
@@ -120,11 +77,32 @@ class SourceSubscriptionStore extends ChangeNotifier {
       name: name.trim().isEmpty ? u : name.trim(),
       url: u,
       kind: kind,
+      updateHours: updateHours,
     );
     _items.add(s);
     await _persist();
     notifyListeners();
     return s;
+  }
+
+  /// 编辑一条订阅（名称 / 链接 / 类型 / 自动更新间隔）。
+  Future<void> updateSubscription(
+    String id, {
+    String? name,
+    String? url,
+    SourceSubscriptionKind? kind,
+    int? updateHours,
+  }) async {
+    final i = _items.indexWhere((e) => e.id == id);
+    if (i < 0) return;
+    _items[i] = _items[i].copyWith(
+      name: name?.trim(),
+      url: url?.trim(),
+      kind: kind,
+      updateHours: updateHours,
+    );
+    await _persist();
+    notifyListeners();
   }
 
   Future<void> remove(String id) async {
@@ -205,6 +183,8 @@ class SourceSubscriptionStore extends ChangeNotifier {
         count: wanted.length,
         lastUpdated: now,
         lastError: '',
+        // 记下这条订阅带来的源 ⇒ 仓库页的订阅 tab 只显示它们
+        sourceIds: [for (final s in wanted) s.id],
       );
       await _persist();
       notifyListeners();
@@ -332,6 +312,7 @@ class SourceSubscriptionStore extends ChangeNotifier {
         count: defs.length,
         lastUpdated: now,
         lastError: '',
+        sourceIds: [for (final d in defs) d.id],
       );
       await _persist();
       notifyListeners();
@@ -364,13 +345,12 @@ class SourceSubscriptionStore extends ChangeNotifier {
     return (ok: ok, failed: failed);
   }
 
-  /// 自动更新周期：24 小时。首次（[SourceSubscription.lastUpdated] == 0）
+  /// 自动更新周期：每条订阅自己的 [SourceSubscription.updateHours]
+  /// （0 = 只手动更新）。首次（[SourceSubscription.lastUpdated] == 0）
   /// 会立即拉取，所以新装/新加的订阅不用再手动点「更新」。
-  static const Duration autoTtl = Duration(hours: 24);
-
   bool _autoRunning = false;
 
-  /// 启动时调用：把「从未更新过」或「超过 [autoTtl] 未更新」的订阅逐个拉一遍，
+  /// 启动时调用：把「从未更新过」或「超过各自间隔未更新」的订阅逐个拉一遍，
   /// 源体会落库（[BookSourceStore] / [SourceConfigStore]），下次启动直接用本地源，
   /// 不再依赖用户手动点更新。
   Future<void> autoUpdateStale() async {
@@ -385,7 +365,9 @@ class SourceSubscriptionStore extends ChangeNotifier {
                 s.enabled &&
                 s.kind.supported &&
                 (s.lastUpdated == 0 ||
-                    now - s.lastUpdated > autoTtl.inMilliseconds),
+                    (s.updateHours > 0 &&
+                        now - s.lastUpdated >
+                            Duration(hours: s.updateHours).inMilliseconds)),
           )
           .toList();
       for (final s in stale) {

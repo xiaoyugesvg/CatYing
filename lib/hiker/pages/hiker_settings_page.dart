@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../common/theme.dart';
 import '../../widgets/app_toast.dart';
@@ -71,11 +74,14 @@ class _HikerSettingsPageState extends State<HikerSettingsPage> {
         backgroundColor: AppTheme.backgroundPrimary,
         foregroundColor: AppTheme.textPrimary,
         elevation: 0,
-        title: Text('海阔设置',
-            style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: AppTheme.fontTitle3,
-                fontWeight: FontWeight.bold)),
+        title: Text(
+          '海阔设置',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontTitle3,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 6, 16, 40),
@@ -99,7 +105,8 @@ class _HikerSettingsPageState extends State<HikerSettingsPage> {
           _navTile(
             icon: Icons.cloud_download_outlined,
             title: '安装内置源',
-            subtitle: '随包内置、实测能跑的源（已装的更新，删掉的补回）'
+            subtitle:
+                '随包内置、实测能跑的源（已装的更新，删掉的补回）'
                 '；同时释放 App 自带资源',
             onTap: _installBuiltin,
             trailingIcon: Icons.add_circle_outline_rounded,
@@ -107,7 +114,8 @@ class _HikerSettingsPageState extends State<HikerSettingsPage> {
           _navTile(
             icon: Icons.folder_open_outlined,
             title: '文件管理（hiker://files）',
-            subtitle: '导入规则包 zip / 放数据文件 · 一批源靠它才能跑'
+            subtitle:
+                '导入规则包 zip / 放数据文件 · 一批源靠它才能跑'
                 '（如 Apollo，官方 App 里也不带）',
             onTap: () async {
               await Navigator.of(context).push(
@@ -283,30 +291,40 @@ class _HikerSettingsPageState extends State<HikerSettingsPage> {
   }
 
   Widget _stat(String label, String value) => Expanded(
-        child: Column(
-          children: [
-            Text(value,
-                style: TextStyle(
-                    color: AppTheme.accentOnSurface,
-                    fontSize: AppTheme.fontTitle2,
-                    fontWeight: FontWeight.bold)),
-            const SizedBox(height: 2),
-            Text(label,
-                style: TextStyle(
-                    color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption)),
-          ],
+    child: Column(
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            color: AppTheme.accentOnSurface,
+            fontSize: AppTheme.fontTitle2,
+            fontWeight: FontWeight.bold,
+          ),
         ),
-      );
+        const SizedBox(height: 2),
+        Text(
+          label,
+          style: TextStyle(
+            color: AppTheme.textTertiary,
+            fontSize: AppTheme.fontCaption,
+          ),
+        ),
+      ],
+    ),
+  );
 
   Widget _section(String t) => Padding(
-        padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
-        child: Text(t,
-            style: TextStyle(
-                color: AppTheme.textTertiary,
-                fontSize: AppTheme.fontCaption,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.5)),
-      );
+    padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+    child: Text(
+      t,
+      style: TextStyle(
+        color: AppTheme.textTertiary,
+        fontSize: AppTheme.fontCaption,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.5,
+      ),
+    ),
+  );
 
   Widget _navTile({
     required IconData icon,
@@ -326,25 +344,40 @@ class _HikerSettingsPageState extends State<HikerSettingsPage> {
       child: ListTile(
         onTap: onTap,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        leading: Icon(icon,
-            size: 20,
-            color: danger ? Colors.redAccent : AppTheme.accentOnSurface),
-        title: Text(title,
-            style: TextStyle(
-                color: danger ? Colors.redAccent : AppTheme.textPrimary,
-                fontSize: AppTheme.fontBody,
-                fontWeight: FontWeight.w500)),
+        leading: Icon(
+          icon,
+          size: 20,
+          color: danger ? Colors.redAccent : AppTheme.accentOnSurface,
+        ),
+        title: Text(
+          title,
+          style: TextStyle(
+            color: danger ? Colors.redAccent : AppTheme.textPrimary,
+            fontSize: AppTheme.fontBody,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
         subtitle: subtitle == null
             ? null
-            : Text(subtitle,
+            : Text(
+                subtitle,
                 maxLines: 2,
                 style: TextStyle(
-                    color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption)),
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontCaption,
+                ),
+              ),
         trailing: trailingIcon == null
-            ? Icon(Icons.chevron_right_rounded, size: 18, color: AppTheme.textTertiary)
-            : Icon(trailingIcon,
+            ? Icon(
+                Icons.chevron_right_rounded,
                 size: 18,
-                color: danger ? Colors.redAccent : AppTheme.textTertiary),
+                color: AppTheme.textTertiary,
+              )
+            : Icon(
+                trailingIcon,
+                size: 18,
+                color: danger ? Colors.redAccent : AppTheme.textTertiary,
+              ),
       ),
     );
   }
@@ -369,13 +402,22 @@ class _HikerSettingsPageState extends State<HikerSettingsPage> {
         activeThumbColor: AppTheme.accentColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         secondary: Icon(icon, size: 20, color: AppTheme.accentOnSurface),
-        title: Text(title,
-            style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTheme.fontBody)),
+        title: Text(
+          title,
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontBody,
+          ),
+        ),
         subtitle: subtitle == null
             ? null
-            : Text(subtitle,
+            : Text(
+                subtitle,
                 style: TextStyle(
-                    color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption)),
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontCaption,
+                ),
+              ),
       ),
     );
   }
@@ -409,16 +451,23 @@ class _HikerSettingsPageState extends State<HikerSettingsPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title,
-                        style: TextStyle(
-                            color: AppTheme.textPrimary, fontSize: AppTheme.fontBody)),
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: AppTheme.fontBody,
+                      ),
+                    ),
                     if (subtitle != null)
                       Padding(
                         padding: const EdgeInsets.only(top: 2),
-                        child: Text(subtitle,
-                            style: TextStyle(
-                                color: AppTheme.textTertiary,
-                                fontSize: AppTheme.fontCaption)),
+                        child: Text(
+                          subtitle,
+                          style: TextStyle(
+                            color: AppTheme.textTertiary,
+                            fontSize: AppTheme.fontCaption,
+                          ),
+                        ),
                       ),
                   ],
                 ),
@@ -437,7 +486,9 @@ class _HikerSettingsPageState extends State<HikerSettingsPage> {
                     height: 32,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
-                      color: on ? AppTheme.accentSurface : AppTheme.backgroundTertiary,
+                      color: on
+                          ? AppTheme.accentSurface
+                          : AppTheme.backgroundTertiary,
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
                         color: on
@@ -448,7 +499,9 @@ class _HikerSettingsPageState extends State<HikerSettingsPage> {
                     child: Text(
                       labelOf(o),
                       style: TextStyle(
-                        color: on ? AppTheme.accentOnSurface : AppTheme.textSecondary,
+                        color: on
+                            ? AppTheme.accentOnSurface
+                            : AppTheme.textSecondary,
                         fontSize: AppTheme.fontFootnote,
                         fontWeight: on ? FontWeight.w700 : FontWeight.w500,
                       ),
@@ -464,19 +517,50 @@ class _HikerSettingsPageState extends State<HikerSettingsPage> {
   }
 
   Widget _noticeCard(String text) => Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: AppTheme.backgroundTertiary,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Text(text,
-            style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: AppTheme.fontFootnote,
-                height: 1.65)),
-      );
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: AppTheme.backgroundTertiary,
+      borderRadius: BorderRadius.circular(14),
+    ),
+    child: Text(
+      text,
+      style: TextStyle(
+        color: AppTheme.textSecondary,
+        fontSize: AppTheme.fontFootnote,
+        height: 1.65,
+      ),
+    ),
+  );
 
   // ── 交互 ──────────────────────────────────────────────
+
+  /// 长按源卡片「编辑源」：直接弹源配置框
+  Future<void> _editSourceConfig(String id) async {
+    final hit = _store.sources.where((e) => e.id == id).toList();
+    if (hit.isEmpty || !mounted) return;
+    await showHikerSourceConfigDialog(context, hit.first);
+  }
+
+  /// 长按 / 多选「分享」：导出成可再次导入的 JSON 放剪贴板
+  Future<void> _shareSources(List<String> ids) async {
+    final list = _store.sources.where((e) => ids.contains(e.id)).toList();
+    if (list.isEmpty) return;
+    final data = list.length == 1
+        ? list.first.raw
+        : [for (final s in list) s.raw];
+    final text = const JsonEncoder.withIndent('  ').convert(data);
+    await Clipboard.setData(ClipboardData(text: text));
+    AppToast.message('已复制 ${list.length} 个源，可粘贴到导入框');
+  }
+
+  /// 长按 / 多选「删除」；返回删除后的当前源 id
+  Future<String?> _deleteSources(List<String> ids) async {
+    for (final id in ids) {
+      await _store.remove(id);
+    }
+    if (mounted) AppToast.message('已删除 ${ids.length} 个源');
+    return _store.currentId;
+  }
 
   Future<void> _pickSource() async {
     final list = _store.sources;
@@ -487,6 +571,9 @@ class _HikerSettingsPageState extends State<HikerSettingsPage> {
       title: '选择当前源',
       searchable: true,
       emptyHint: '还没有海阔源，先点「安装内置源」或导入',
+      onEdit: _editSourceConfig,
+      onDelete: _deleteSources,
+      onShare: _shareSources,
       items: [
         for (final s in list)
           CardSourceItem(
@@ -523,9 +610,11 @@ class _HikerSettingsPageState extends State<HikerSettingsPage> {
     // 预置远程 require 缓存（源里的 `$.require('https://…/f')` 用）
     final libs = await HikerBuiltin.installRequireLibs();
     if (!mounted) return;
-    AppToast.message('内置源：新增 $added、更新 $updated，共 $total 个源'
-        '${files > 0 ? '；自带资源已释放 $files 个' : ''}'
-        '${libs > 0 ? '；预置模块已释放 $libs 个' : ''}');
+    AppToast.message(
+      '内置源：新增 $added、更新 $updated，共 $total 个源'
+      '${files > 0 ? '；自带资源已释放 $files 个' : ''}'
+      '${libs > 0 ? '；预置模块已释放 $libs 个' : ''}',
+    );
     setState(() {});
   }
 
@@ -548,12 +637,20 @@ class _HikerSettingsPageState extends State<HikerSettingsPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.backgroundCard,
-        title: Text(title,
-            style: TextStyle(
-                color: AppTheme.textPrimary, fontSize: AppTheme.fontHeadline)),
-        content: Text(body,
-            style: TextStyle(
-                color: AppTheme.textSecondary, fontSize: AppTheme.fontSubhead)),
+        title: Text(
+          title,
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontHeadline,
+          ),
+        ),
+        content: Text(
+          body,
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: AppTheme.fontSubhead,
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),

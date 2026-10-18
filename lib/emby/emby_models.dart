@@ -51,28 +51,28 @@ class EmbyServer {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'type': type,
-        'baseUrl': baseUrl,
-        'username': username,
-        'password': password,
-        'accessToken': accessToken,
-        'userId': userId,
-        'deviceId': deviceId,
-      };
+    'id': id,
+    'name': name,
+    'type': type,
+    'baseUrl': baseUrl,
+    'username': username,
+    'password': password,
+    'accessToken': accessToken,
+    'userId': userId,
+    'deviceId': deviceId,
+  };
 
   factory EmbyServer.fromJson(Map<String, dynamic> j) => EmbyServer(
-        id: '${j['id'] ?? ''}',
-        name: '${j['name'] ?? 'Emby'}',
-        type: '${j['type'] ?? 'emby'}',
-        baseUrl: '${j['baseUrl'] ?? ''}',
-        username: '${j['username'] ?? ''}',
-        password: '${j['password'] ?? ''}',
-        accessToken: j['accessToken'] as String?,
-        userId: j['userId'] as String?,
-        deviceId: '${j['deviceId'] ?? ''}',
-      );
+    id: '${j['id'] ?? ''}',
+    name: '${j['name'] ?? 'Emby'}',
+    type: '${j['type'] ?? 'emby'}',
+    baseUrl: '${j['baseUrl'] ?? ''}',
+    username: '${j['username'] ?? ''}',
+    password: '${j['password'] ?? ''}',
+    accessToken: j['accessToken'] as String?,
+    userId: j['userId'] as String?,
+    deviceId: '${j['deviceId'] ?? ''}',
+  );
 
   static String newId() {
     final r = Random();
@@ -84,6 +84,40 @@ class EmbyServer {
     final r = Random();
     return List.generate(32, (_) => chars[r.nextInt(chars.length)]).join();
   }
+}
+
+/// Emby 条目里的一位演职人员（来自服务端自动刮削的 `People` 字段）。
+///
+/// `type`：Actor / GuestStar / Director / Writer / Producer …
+/// `role`：饰演的角色名（导演/编剧通常为空）
+class EmbyPerson {
+  const EmbyPerson({
+    required this.id,
+    required this.name,
+    this.role = '',
+    this.type = '',
+    this.imageTag,
+  });
+
+  final String id;
+  final String name;
+  final String role;
+  final String type;
+  final String? imageTag;
+
+  bool get hasPhoto => id.isNotEmpty && (imageTag ?? '').isNotEmpty;
+
+  bool get isDirector => type == 'Director';
+  bool get isWriter => type == 'Writer';
+  bool get isActor => type == 'Actor' || type == 'GuestStar';
+
+  factory EmbyPerson.fromJson(Map<String, dynamic> j) => EmbyPerson(
+    id: '${j['Id'] ?? ''}',
+    name: '${j['Name'] ?? ''}',
+    role: '${j['Role'] ?? ''}',
+    type: '${j['Type'] ?? ''}',
+    imageTag: j['PrimaryImageTag']?.toString(),
+  );
 }
 
 /// Emby 媒体条目（电影 / 剧集 / 单集 / 媒体库视图）。
@@ -104,7 +138,15 @@ class EmbyItem {
     this.indexNumber,
     this.parentIndexNumber,
     this.rating,
+    this.criticRating,
     this.runTimeTicks,
+    this.genres = const [],
+    this.people = const [],
+    this.studios = const [],
+    this.taglines = const [],
+    this.officialRating = '',
+    this.premiereDate = '',
+    this.originalTitle = '',
   });
 
   final String id;
@@ -132,12 +174,50 @@ class EmbyItem {
   final int? indexNumber;
   final int? parentIndexNumber;
   final double? rating;
+  final double? criticRating;
   final int? runTimeTicks;
+
+  /// ── 服务端自动刮削的元数据（TMDB / TVDB 抓回来的那套）─────────────
+  /// 简介、海报之外的「详情页内容」都在这里；列表接口不请求时保持为空。
+  final List<String> genres;
+  final List<EmbyPerson> people;
+  final List<String> studios;
+  final List<String> taglines;
+  final String officialRating;
+  final String premiereDate;
+  final String originalTitle;
 
   bool get isSeries => type == 'Series';
   bool get isEpisode => type == 'Episode';
   bool get isMovie => type == 'Movie';
   bool get isFolderish => type == 'Folder' || type == 'CollectionFolder';
+
+  /// 宣传语（刮削到的 Tagline）
+  String get tagline => taglines.isEmpty ? '' : taglines.first.trim();
+
+  /// 导演（多人用「 / 」连接）
+  String get directors => people
+      .where((p) => p.isDirector)
+      .map((p) => p.name)
+      .where((n) => n.isNotEmpty)
+      .join(' / ');
+
+  /// 编剧（多人用「 / 」连接）
+  String get writers => people
+      .where((p) => p.isWriter)
+      .map((p) => p.name)
+      .where((n) => n.isNotEmpty)
+      .join(' / ');
+
+  /// 演员（刮削时按服务端给出的顺序，主角在前）
+  List<EmbyPerson> get actors => people.where((p) => p.isActor).toList();
+
+  /// 首播日期：`2026-01-01T00:00:00…` → `2026-01-01`
+  String get premiereDateText {
+    final s = premiereDate.trim();
+    if (s.length >= 10) return s.substring(0, 10);
+    return s;
+  }
 
   /// 剧集显示 `S01E03`，电影为空
   String get episodeLabel {
@@ -189,15 +269,51 @@ class EmbyItem {
       indexNumber: (j['IndexNumber'] as num?)?.toInt(),
       parentIndexNumber: (j['ParentIndexNumber'] as num?)?.toInt(),
       rating: (j['CommunityRating'] as num?)?.toDouble(),
+      criticRating: (j['CriticRating'] as num?)?.toDouble(),
       runTimeTicks: (j['RunTimeTicks'] as num?)?.toInt(),
+      genres: _strings(j['Genres']),
+      people: _people(j['People']),
+      studios: _studios(j['Studios']),
+      taglines: _strings(j['Taglines']),
+      officialRating: '${j['OfficialRating'] ?? ''}',
+      premiereDate: '${j['PremiereDate'] ?? ''}',
+      originalTitle: '${j['OriginalTitle'] ?? ''}',
     );
+  }
+
+  static List<String> _strings(dynamic v) {
+    if (v is! List) return const [];
+    return [
+      for (final e in v)
+        if (e != null && e.toString().trim().isNotEmpty) e.toString().trim(),
+    ];
+  }
+
+  static List<EmbyPerson> _people(dynamic v) {
+    if (v is! List) return const [];
+    return [
+      for (final e in v)
+        if (e is Map) EmbyPerson.fromJson(Map<String, dynamic>.from(e)),
+    ];
+  }
+
+  /// Emby 的 Studios 是对象数组（`{Name, Id}`），也兼容纯字符串
+  static List<String> _studios(dynamic v) {
+    if (v is! List) return const [];
+    final out = <String>[];
+    for (final e in v) {
+      final name = e is Map ? '${e['Name'] ?? ''}' : '${e ?? ''}';
+      final t = name.trim();
+      if (t.isNotEmpty && !out.contains(t)) out.add(t);
+    }
+    return out;
   }
 
   /// backdrop 属于哪个条目（分集时是父剧集）。
   String get backdropImageId =>
       (backdropItemId != null && backdropItemId!.isNotEmpty)
-          ? backdropItemId!
-          : id;
+      ? backdropItemId!
+      : id;
 
   /// 继续观看进度（0~1，无数据返回 null）。
   double? get progress {

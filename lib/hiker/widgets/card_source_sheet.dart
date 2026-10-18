@@ -61,6 +61,16 @@ class CardSourceSheet extends StatefulWidget {
   /// 列表为空时的提示
   final String emptyHint;
 
+  /// 长按卡片菜单「编辑源」：一般打开源配置编辑框
+  final Future<void> Function(String id)? onEdit;
+
+  /// 长按菜单 / 多选栏「删除」；返回删除后的当前源 id（null = 未处理/失败），
+  /// 面板据此移除卡片并把勾标到新的当前源
+  final Future<String?> Function(List<String> ids)? onDelete;
+
+  /// 长按菜单 / 多选栏「分享」
+  final Future<void> Function(List<String> ids)? onShare;
+
   const CardSourceSheet({
     super.key,
     required this.title,
@@ -70,6 +80,9 @@ class CardSourceSheet extends StatefulWidget {
     this.actionLabel,
     this.onAction,
     this.emptyHint = '没有可用的源',
+    this.onEdit,
+    this.onDelete,
+    this.onShare,
   });
 
   /// 便捷弹出：返回选中的 id（用户没选 / 直接关掉 → null）
@@ -82,6 +95,9 @@ class CardSourceSheet extends StatefulWidget {
     String? actionLabel,
     VoidCallback? onAction,
     String emptyHint = '没有可用的源',
+    Future<void> Function(String id)? onEdit,
+    Future<String?> Function(List<String> ids)? onDelete,
+    Future<void> Function(List<String> ids)? onShare,
   }) {
     return showModalBottomSheet<String>(
       context: context,
@@ -95,6 +111,9 @@ class CardSourceSheet extends StatefulWidget {
         actionLabel: actionLabel,
         onAction: onAction,
         emptyHint: emptyHint,
+        onEdit: onEdit,
+        onDelete: onDelete,
+        onShare: onShare,
       ),
     );
   }
@@ -113,6 +132,15 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
   /// 当前分类（'' = 全部）。tab 口径与「海阔源管理」页一致：用源自己的
   /// `groupLabel`，排序后平铺成胶囊；没有分类（或只有一个）时不显示 tab 行。
   String _group = '';
+
+  /// 面板内的源列表 —— 删除后要原地消失，所以用可变副本，不直接读 widget.items
+  late final List<CardSourceItem> _items = List.of(widget.items);
+
+  /// 多选模式：点卡片 = 勾选（而不是切源）
+  bool _selectMode = false;
+  final Set<String> _picked = <String>{};
+
+  bool get _canMulti => widget.onDelete != null || widget.onShare != null;
 
   @override
   void initState() {
@@ -137,10 +165,42 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
     super.dispose();
   }
 
+  bool get _hasSelected => _items.any((e) => e.selected);
+
+  /// 复制一条并改选中态（删除当前源后要把回落的新当前源标上勾）
+  CardSourceItem _withSelected(CardSourceItem e, bool v) => CardSourceItem(
+    id: e.id,
+    title: e.title,
+    subtitle: e.subtitle,
+    selected: v,
+    warn: e.warn,
+    group: e.group,
+  );
+
+  /// 右上角「定位」：清掉分类/关键词过滤，再滚到当前选中的源。
+  void _locateSelected() {
+    if (!_hasSelected) return;
+    setState(() {
+      _group = '';
+      _keyword = '';
+      _searchController.clear();
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _selectedKey.currentContext;
+      if (ctx == null || !ctx.mounted) return;
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.35,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
   /// 全部分类（去重 + 排序）
   List<String> get _groups {
     final s = <String>{};
-    for (final e in widget.items) {
+    for (final e in _items) {
       final g = e.group.trim();
       if (g.isNotEmpty) s.add(g);
     }
@@ -150,7 +210,7 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
 
   /// 先按分类过滤，再按关键词过滤（两者叠加）
   List<CardSourceItem> get _list {
-    var l = widget.items;
+    var l = _items;
     if (_group.isNotEmpty) {
       l = l.where((e) => e.group.trim() == _group).toList();
     }
@@ -161,13 +221,274 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
     return l;
   }
 
+  // ── 长按菜单 / 多选 ─────────────────────────────────────
+
+  void _togglePick(String id) {
+    setState(() {
+      if (!_picked.remove(id)) _picked.add(id);
+      if (_picked.isEmpty) _selectMode = false;
+    });
+  }
+
+  void _enterSelectMode([String? first]) {
+    setState(() {
+      _selectMode = true;
+      _picked.clear();
+      if (first != null) _picked.add(first);
+    });
+  }
+
+  void _exitSelectMode() {
+    setState(() {
+      _selectMode = false;
+      _picked.clear();
+    });
+  }
+
+  Future<void> _confirmDelete(List<CardSourceItem> targets) async {
+    final ids = targets.map((e) => e.id).toList();
+    if (ids.isEmpty || widget.onDelete == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundCard,
+        title: Text(
+          ids.length > 1 ? '删除 ${ids.length} 个源？' : '删除这个源？',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontHeadline,
+          ),
+        ),
+        content: Text(
+          ids.length > 1
+              ? '删除后需要重新导入才能恢复。'
+              : '「${targets.first.title}」删除后需要重新导入才能恢复。',
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: AppTheme.fontBody,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text('取消', style: TextStyle(color: AppTheme.textSecondary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(
+              '删除',
+              style: TextStyle(color: Colors.redAccent.shade100),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final currentId = await widget.onDelete!(ids);
+    if (currentId == null || !mounted) return;
+    setState(() {
+      _items.removeWhere((e) => ids.contains(e.id));
+      _picked.removeAll(ids);
+      if (_picked.isEmpty) _selectMode = false;
+      // 删掉的可能是当前源 ⇒ 按宿主返回的新当前源重标勾
+      for (var i = 0; i < _items.length; i++) {
+        _items[i] = _withSelected(_items[i], _items[i].id == currentId);
+      }
+    });
+  }
+
+  /// 长按卡片：多选模式下 = 勾选；否则弹操作菜单
+  Future<void> _onLongPress(CardSourceItem item) async {
+    if (_selectMode) {
+      _togglePick(item.id);
+      return;
+    }
+    if (widget.onEdit == null && !_canMulti) return;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => DecoratedBox(
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundSecondary,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          border: Border.all(color: AppTheme.borderLight, width: 0.5),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 10),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+                child: Text(
+                  item.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontBody,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              if (widget.onEdit != null)
+                _menuTile(
+                  Icons.edit_outlined,
+                  '编辑源',
+                  () => Navigator.of(ctx).pop('edit'),
+                ),
+              if (widget.onShare != null)
+                _menuTile(
+                  Icons.ios_share_rounded,
+                  '分享',
+                  () => Navigator.of(ctx).pop('share'),
+                ),
+              if (_canMulti)
+                _menuTile(
+                  Icons.checklist_rounded,
+                  '多选',
+                  () => Navigator.of(ctx).pop('select'),
+                ),
+              if (widget.onDelete != null)
+                _menuTile(
+                  Icons.delete_outline_rounded,
+                  '删除',
+                  () => Navigator.of(ctx).pop('delete'),
+                  danger: true,
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (action == 'edit') {
+      await widget.onEdit?.call(item.id);
+    } else if (action == 'share') {
+      await widget.onShare?.call([item.id]);
+    } else if (action == 'select') {
+      _enterSelectMode(item.id);
+    } else if (action == 'delete') {
+      await _confirmDelete([item]);
+    }
+  }
+
+  Widget _menuTile(
+    IconData icon,
+    String label,
+    VoidCallback onTap, {
+    bool danger = false,
+  }) {
+    final color = danger ? Colors.redAccent.shade100 : AppTheme.textPrimary;
+    return ListTile(
+      dense: true,
+      leading: Icon(icon, size: 20, color: color),
+      title: Text(
+        label,
+        style: TextStyle(color: color, fontSize: AppTheme.fontBody),
+      ),
+      onTap: onTap,
+    );
+  }
+
+  /// 多选底栏：全选 / 已选数 / 分享 / 删除 / 完成
+  Widget _selectBar() {
+    final list = _list;
+    final allPicked =
+        list.isNotEmpty && list.every((e) => _picked.contains(e.id));
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: AppTheme.borderLight, width: 0.5),
+        ),
+      ),
+      child: Row(
+        children: [
+          TextButton(
+            onPressed: () => setState(() {
+              if (allPicked) {
+                _picked.clear();
+                _selectMode = false;
+              } else {
+                _picked.addAll(list.map((e) => e.id));
+              }
+            }),
+            child: Text(
+              allPicked ? '取消全选' : '全选',
+              style: TextStyle(
+                color: AppTheme.accentOnSurface,
+                fontSize: AppTheme.fontSubhead,
+              ),
+            ),
+          ),
+          Text(
+            '已选 ${_picked.length}',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: AppTheme.fontSubhead,
+            ),
+          ),
+          const Spacer(),
+          if (widget.onShare != null)
+            IconButton(
+              tooltip: '分享',
+              onPressed: _picked.isEmpty ? null : _sharePicked,
+              icon: Icon(
+                Icons.ios_share_rounded,
+                size: 20,
+                color: _picked.isEmpty
+                    ? AppTheme.textTertiary
+                    : AppTheme.accentOnSurface,
+              ),
+            ),
+          if (widget.onDelete != null)
+            IconButton(
+              tooltip: '删除',
+              onPressed: _picked.isEmpty ? null : _deletePicked,
+              icon: Icon(
+                Icons.delete_outline_rounded,
+                size: 20,
+                color: _picked.isEmpty
+                    ? AppTheme.textTertiary
+                    : Colors.redAccent.shade100,
+              ),
+            ),
+          TextButton(
+            onPressed: _exitSelectMode,
+            child: Text(
+              '完成',
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: AppTheme.fontSubhead,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _sharePicked() async {
+    final targets = _items.where((e) => _picked.contains(e.id)).toList();
+    if (targets.isEmpty || widget.onShare == null) return;
+    await widget.onShare!(targets.map((e) => e.id).toList());
+  }
+
+  Future<void> _deletePicked() async {
+    final targets = _items.where((e) => _picked.contains(e.id)).toList();
+    if (targets.isEmpty) return;
+    await _confirmDelete(targets);
+  }
+
   @override
   Widget build(BuildContext context) {
     final h = MediaQuery.of(context).size.height;
     final list = _list;
     final groups = _groups;
     // 有副标题时卡片要高一档，否则两行字会被压扁
-    final hasSub = widget.items.any((e) => (e.subtitle ?? '').isNotEmpty);
+    final hasSub = _items.any((e) => (e.subtitle ?? '').isNotEmpty);
 
     return Container(
       decoration: BoxDecoration(
@@ -213,7 +534,29 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
                         ),
                       ),
                     ),
-                    if (widget.actionLabel != null)
+                    if (!_selectMode && _hasSelected)
+                      IconButton(
+                        tooltip: '定位到当前源',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: _locateSelected,
+                        icon: Icon(
+                          Icons.my_location_rounded,
+                          size: 18,
+                          color: AppTheme.accentOnSurface,
+                        ),
+                      ),
+                    if (!_selectMode && _canMulti && _items.isNotEmpty)
+                      IconButton(
+                        tooltip: '多选',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: _enterSelectMode,
+                        icon: Icon(
+                          Icons.checklist_rounded,
+                          size: 18,
+                          color: AppTheme.accentOnSurface,
+                        ),
+                      ),
+                    if (widget.actionLabel != null && !_selectMode)
                       TextButton(
                         onPressed: () {
                           Navigator.of(context).pop();
@@ -240,11 +583,17 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
                     child: ListView(
                       scrollDirection: Axis.horizontal,
                       children: [
-                        _groupChip('全部', _group.isEmpty,
-                            () => setState(() => _group = '')),
+                        _groupChip(
+                          '全部',
+                          _group.isEmpty,
+                          () => setState(() => _group = ''),
+                        ),
                         for (final g in groups)
-                          _groupChip(g, _group == g,
-                              () => setState(() => _group = g)),
+                          _groupChip(
+                            g,
+                            _group == g,
+                            () => setState(() => _group = g),
+                          ),
                       ],
                     ),
                   ),
@@ -270,11 +619,12 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
                             _keyword.isNotEmpty
                                 ? '未找到匹配的源'
                                 : (_group.isNotEmpty
-                                    ? '这个分类下没有源'
-                                    : widget.emptyHint),
+                                      ? '这个分类下没有源'
+                                      : widget.emptyHint),
                             style: TextStyle(
-                                color: AppTheme.textTertiary,
-                                fontSize: AppTheme.fontSubhead),
+                              color: AppTheme.textTertiary,
+                              fontSize: AppTheme.fontSubhead,
+                            ),
                           ),
                         ),
                       )
@@ -287,21 +637,36 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
                             physics: const NeverScrollableScrollPhysics(),
                             gridDelegate:
                                 SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 2,
-                              mainAxisSpacing: 8,
-                              crossAxisSpacing: 10,
-                              childAspectRatio: hasSub ? 2.9 : 3.4,
-                            ),
+                                  crossAxisCount: 2,
+                                  mainAxisSpacing: 8,
+                                  crossAxisSpacing: 10,
+                                  childAspectRatio: hasSub ? 2.9 : 3.4,
+                                ),
                             itemCount: list.length,
-                            itemBuilder: (_, i) => _CardTile(
-                              // 选中项挂 key：弹窗打开时 Scrollable.ensureVisible 用它定位
-                              key: list[i].selected ? _selectedKey : null,
-                              item: list[i],
-                            ),
+                            itemBuilder: (_, i) {
+                              final item = list[i];
+                              final picked = _picked.contains(item.id);
+                              return _CardTile(
+                                // 选中项挂 key：弹窗打开时 Scrollable.ensureVisible 用它定位
+                                key: item.selected ? _selectedKey : null,
+                                item: item,
+                                selectMode: _selectMode,
+                                picked: picked,
+                                onTap: () {
+                                  if (_selectMode) {
+                                    _togglePick(item.id);
+                                  } else {
+                                    Navigator.of(context).pop(item.id);
+                                  }
+                                },
+                                onLongPress: () => _onLongPress(item),
+                              );
+                            },
                           ),
                         ],
                       ),
               ),
+              if (_selectMode) _selectBar(),
               const SizedBox(height: 6),
             ],
           ),
@@ -339,37 +704,54 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
 class _CardTile extends StatelessWidget {
   final CardSourceItem item;
 
-  const _CardTile({super.key, required this.item});
+  /// 多选模式：左侧图标变成复选框，高亮看 [picked] 而不是当前源
+  final bool selectMode;
+  final bool picked;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+
+  const _CardTile({
+    super.key,
+    required this.item,
+    required this.onTap,
+    required this.onLongPress,
+    this.selectMode = false,
+    this.picked = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     final sub = item.subtitle ?? '';
+    final active = selectMode ? picked : item.selected;
     return GestureDetector(
-      onTap: () => Navigator.of(context).pop(item.id),
+      onTap: onTap,
+      onLongPress: onLongPress,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
-          color: item.selected
+          color: active
               ? AppTheme.accentColor.withValues(alpha: 0.12)
               : AppTheme.backgroundTertiary,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: item.selected
+            color: active
                 ? AppTheme.accentColor.withValues(alpha: 0.4)
                 : AppTheme.borderLight,
-            width: item.selected ? 1 : 0.5,
+            width: active ? 1 : 0.5,
           ),
         ),
         child: Row(
           children: [
             Icon(
-              item.selected
-                  ? Icons.check_circle
-                  : Icons.radio_button_unchecked,
+              selectMode
+                  ? (picked
+                        ? Icons.check_box_rounded
+                        : Icons.check_box_outline_blank_rounded)
+                  : (item.selected
+                        ? Icons.check_circle
+                        : Icons.radio_button_unchecked),
               size: 16,
-              color: item.selected
-                  ? AppTheme.accentColor
-                  : AppTheme.textTertiary,
+              color: active ? AppTheme.accentColor : AppTheme.textTertiary,
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -383,12 +765,11 @@ class _CardTile extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: item.selected
+                      color: active
                           ? AppTheme.textPrimary
                           : AppTheme.textSecondary,
                       fontSize: AppTheme.fontSubhead,
-                      fontWeight:
-                          item.selected ? FontWeight.w600 : FontWeight.normal,
+                      fontWeight: active ? FontWeight.w600 : FontWeight.normal,
                     ),
                   ),
                   if (sub.isNotEmpty)
@@ -449,8 +830,10 @@ class _SheetSearchField extends StatelessWidget {
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
                 hintText: hint,
-                hintStyle:
-                    TextStyle(color: AppTheme.textTertiary, fontSize: 12),
+                hintStyle: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: 12,
+                ),
                 border: InputBorder.none,
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(vertical: 6),
@@ -465,8 +848,11 @@ class _SheetSearchField extends StatelessWidget {
               },
               child: Padding(
                 padding: const EdgeInsets.all(5),
-                child:
-                    Icon(Icons.cancel, color: AppTheme.textTertiary, size: 13),
+                child: Icon(
+                  Icons.cancel,
+                  color: AppTheme.textTertiary,
+                  size: 13,
+                ),
               ),
             ),
           const SizedBox(width: 6),

@@ -27,6 +27,7 @@ class SourceGroupTabs extends StatelessWidget {
     required this.groups,
     required this.selected,
     required this.onSelected,
+    this.onLocate,
   });
 
   /// 不含「全部」（内部补在最前面）。
@@ -34,42 +35,78 @@ class SourceGroupTabs extends StatelessWidget {
   final String selected;
   final ValueChanged<String> onSelected;
 
+  /// 右上角「定位到当前源」按钮；为 null 时不显示。
+  final VoidCallback? onLocate;
+
   static const String all = '全部';
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       height: 34,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        itemCount: groups.length + 1,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (context, i) {
-          final label = i == 0 ? all : groups[i - 1];
-          final sel = label == selected;
-          return GestureDetector(
-            onTap: () => onSelected(label),
-            child: Container(
-              alignment: Alignment.center,
-              padding: const EdgeInsets.symmetric(horizontal: 13),
-              decoration: BoxDecoration(
-                color: sel
-                    ? JellyTheme.primary
-                    : JellyTheme.primary.withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(17),
+      child: Row(
+        children: [
+          Expanded(
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: EdgeInsets.only(
+                left: 12,
+                right: onLocate == null ? 12 : 0,
               ),
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
-                  color: sel ? Colors.white : JellyTheme.primary,
+              itemCount: groups.length + 1,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, i) {
+                final label = i == 0 ? all : groups[i - 1];
+                final sel = label == selected;
+                return GestureDetector(
+                  onTap: () => onSelected(label),
+                  child: Container(
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.symmetric(horizontal: 13),
+                    decoration: BoxDecoration(
+                      color: sel
+                          ? JellyTheme.primary
+                          : JellyTheme.primary.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(17),
+                    ),
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                        color: sel ? Colors.white : JellyTheme.primary,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          if (onLocate != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 10, left: 6),
+              child: Tooltip(
+                message: '定位到当前源',
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(17),
+                  onTap: onLocate,
+                  child: Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: JellyTheme.primary.withValues(alpha: 0.10),
+                    ),
+                    child: Icon(
+                      Icons.my_location_rounded,
+                      size: 16,
+                      color: JellyTheme.primary,
+                    ),
+                  ),
                 ),
               ),
             ),
-          );
-        },
+        ],
       ),
     );
   }

@@ -127,9 +127,11 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     final q = _query.trim().toLowerCase();
     if (q.isNotEmpty) {
       list = list
-          .where((a) =>
-              a.name.toLowerCase().contains(q) ||
-              a.source.toLowerCase().contains(q))
+          .where(
+            (a) =>
+                a.name.toLowerCase().contains(q) ||
+                a.source.toLowerCase().contains(q),
+          )
           .toList();
     }
     switch (_sort) {
@@ -261,11 +263,17 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(_viewModeIcon(_viewMode),
-                size: 17, color: AppTheme.textSecondary),
+            Icon(
+              _viewModeIcon(_viewMode),
+              size: 17,
+              color: AppTheme.textSecondary,
+            ),
             const SizedBox(width: 3),
-            Icon(Icons.arrow_drop_down_rounded,
-                size: 16, color: AppTheme.textSecondary),
+            Icon(
+              Icons.arrow_drop_down_rounded,
+              size: 16,
+              color: AppTheme.textSecondary,
+            ),
           ],
         ),
       ),
@@ -273,11 +281,11 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
   }
 
   IconData _viewModeIcon(_AppViewMode m) => switch (m) {
-        _AppViewMode.two => Icons.grid_view_rounded,
-        _AppViewMode.three => Icons.apps_rounded,
-        _AppViewMode.four => Icons.grid_on_rounded,
-        _AppViewMode.list => Icons.view_list_rounded,
-      };
+    _AppViewMode.two => Icons.grid_view_rounded,
+    _AppViewMode.three => Icons.apps_rounded,
+    _AppViewMode.four => Icons.grid_on_rounded,
+    _AppViewMode.list => Icons.view_list_rounded,
+  };
 
   // ── 顶栏小图标 ────────────────────────────────────────────────
   Widget _topIcon(IconData icon, String tip, VoidCallback onTap) {
@@ -350,7 +358,9 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
                         backgroundColor: AppTheme.accentColor,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 18, vertical: 11),
+                          horizontal: 18,
+                          vertical: 11,
+                        ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(13),
                         ),
@@ -363,7 +373,9 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
                       label: const Text('浏览市场'),
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 18, vertical: 11),
+                          horizontal: 18,
+                          vertical: 11,
+                        ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(13),
                         ),
@@ -381,7 +393,11 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
       // 列表模式：一行一个（长按同样出菜单）
       return ListView(
         padding: const EdgeInsets.fromLTRB(
-            AppTheme.spacingMD, 0, AppTheme.spacingMD, 110),
+          AppTheme.spacingMD,
+          0,
+          AppTheme.spacingMD,
+          110,
+        ),
         children: [
           for (final a in apps)
             _listRow(
@@ -437,8 +453,10 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     if (app.isMaiyou) return '直播订阅 · 麦优';
     final parsed = app.parsed;
     final videoCount = parsed.cmsSites.length + parsed.spiderSites.length;
-    final liveCount =
-        parsed.liveGroups.fold<int>(0, (sum, g) => sum + g.channels.length);
+    final liveCount = parsed.liveGroups.fold<int>(
+      0,
+      (sum, g) => sum + g.channels.length,
+    );
     return [
       if (videoCount > 0) '影视 $videoCount',
       if (liveCount > 0) '频道 $liveCount',
@@ -451,11 +469,13 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     if (app.isWebApp) {
       final src = app.source;
       final isRemote = src.startsWith('http');
-      Get.to(() => MiniAppWebPage(
-            remoteUrl: isRemote ? src : null,
-            localRoot: isRemote ? null : src,
-            manifestJson: app.rawJson,
-          ));
+      Get.to(
+        () => MiniAppWebPage(
+          remoteUrl: isRemote ? src : null,
+          localRoot: isRemote ? null : src,
+          manifestJson: app.rawJson,
+        ),
+      );
       return;
     }
     if (app.isMaiyou) {
@@ -502,9 +522,10 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
                     child: Text(
                       title.isNotEmpty ? title.characters.first : '程',
                       style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700),
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -512,27 +533,37 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(title,
+                        Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (subtitle.isNotEmpty) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            subtitle,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                                color: AppTheme.textPrimary,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600)),
-                        if (subtitle.isNotEmpty) ...[
-                          const SizedBox(height: 3),
-                          Text(subtitle,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  color: AppTheme.textTertiary, fontSize: 11)),
+                              color: AppTheme.textTertiary,
+                              fontSize: 11,
+                            ),
+                          ),
                         ],
                       ],
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Icon(Icons.chevron_right_rounded,
-                      size: 18, color: AppTheme.textTertiary),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    size: 18,
+                    color: AppTheme.textTertiary,
+                  ),
                 ],
               ),
             ),
@@ -582,13 +613,28 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // 顶部拖动把手（与「添加程序」弹层保持同一套视觉语言）
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.only(top: 10, bottom: 8),
+                    decoration: BoxDecoration(
+                      color: AppTheme.textSecondary.withValues(alpha: 0.35),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-                  child: Text('程序设置',
-                      style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold)),
+                  padding: const EdgeInsets.fromLTRB(20, 2, 20, 4),
+                  child: Text(
+                    '程序设置',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
                 _settingRow(
                   title: '排序',
@@ -608,6 +654,9 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
                 _settingRow(
                   title: '视图',
                   desc: '一行几个，或列表（列表信息更全）',
+                  // 四个视图选项在手机宽度下放不进右侧 ⇒ 改为**标题下另起一行**，
+                  // 否则左侧说明会被挤成竖排小字（截图里的排版问题）。
+                  stacked: true,
                   control: Wrap(
                     spacing: 8,
                     runSpacing: 8,
@@ -627,8 +676,10 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
                   _settingRow(
                     title: '调整顺序',
                     desc: '长按拖动把手，重排已安装程序',
-                    control: Icon(Icons.chevron_right_rounded,
-                        color: AppTheme.textTertiary),
+                    control: Icon(
+                      Icons.chevron_right_rounded,
+                      color: AppTheme.textTertiary,
+                    ),
                     onTap: () {
                       Get.back();
                       _showReorderSheet();
@@ -644,39 +695,65 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     );
   }
 
-  /// 设置行（参考图 2 的排法）：左「标题 + 灰色说明」，右侧控件
+  /// 设置行（参考图 2 的排法）：左「标题 + 灰色说明」，右侧控件。
+  ///
+  /// [stacked] = true 时控件换到标题下方独占一行（选项多、右侧放不下时用），
+  /// 避免左侧说明被挤成一条竖排小字。
   Widget _settingRow({
     required String title,
     required String desc,
     required Widget control,
+    bool stacked = false,
     VoidCallback? onTap,
   }) {
+    final labels = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontSubhead + 1,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          desc,
+          style: TextStyle(
+            color: AppTheme.textTertiary,
+            fontSize: AppTheme.fontCaption,
+            height: 1.3,
+          ),
+        ),
+      ],
+    );
     final row = Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Expanded(
-            child: Column(
+      child: LayoutBuilder(
+        builder: (context, box) {
+          // 手机窄屏（内容宽 <300）连「排序」也改成上下排，防止右侧控件
+          // 把左侧说明挤成竖排；平板/大屏仍保持左文右控件。
+          final useStacked = stacked || box.maxWidth < 300;
+          if (useStacked) {
+            return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title,
-                    style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: AppTheme.fontSubhead + 1,
-                        fontWeight: FontWeight.w600)),
-                const SizedBox(height: 3),
-                Text(desc,
-                    style: TextStyle(
-                        color: AppTheme.textTertiary,
-                        fontSize: AppTheme.fontCaption,
-                        height: 1.3)),
+                labels,
+                const SizedBox(height: 10),
+                control,
               ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          control,
-        ],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(child: labels),
+              const SizedBox(width: 10),
+              control,
+            ],
+          );
+        },
       ),
     );
     if (onTap == null) return row;
@@ -684,29 +761,31 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
   }
 
   Widget _settingDivider() => Divider(
-        height: 1,
-        thickness: 0.5,
-        indent: 20,
-        endIndent: 20,
-        color: AppTheme.borderLight,
-      );
+    height: 1,
+    thickness: 0.5,
+    indent: 20,
+    endIndent: 20,
+    color: AppTheme.borderLight,
+  );
 
   Widget _sheetChip(String label, bool selected, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 4),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
         decoration: BoxDecoration(
           color: selected ? AppTheme.accentColor : AppTheme.backgroundTertiary,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: AppTheme.borderLight, width: 0.5),
         ),
-        child: Text(label,
-            style: TextStyle(
-                color: selected ? Colors.white : AppTheme.textSecondary,
-                fontSize: 13,
-                fontWeight: selected ? FontWeight.w600 : FontWeight.w500)),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? Colors.white : AppTheme.textSecondary,
+            fontSize: 13,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+          ),
+        ),
       ),
     );
   }
@@ -729,41 +808,51 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(app.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold)),
+                    child: Text(
+                      app.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ],
               ),
             ),
             ListTile(
-              leading:
-                  Icon(Icons.share_outlined, color: AppTheme.textSecondary),
-              title:
-                  Text('分享', style: TextStyle(color: AppTheme.textPrimary)),
+              leading: Icon(
+                Icons.share_outlined,
+                color: AppTheme.textSecondary,
+              ),
+              title: Text('分享', style: TextStyle(color: AppTheme.textPrimary)),
               onTap: () {
                 Get.back();
                 _shareApp(app);
               },
             ),
             ListTile(
-              leading:
-                  Icon(Icons.reorder_rounded, color: AppTheme.textSecondary),
-              title:
-                  Text('移动', style: TextStyle(color: AppTheme.textPrimary)),
+              leading: Icon(
+                Icons.reorder_rounded,
+                color: AppTheme.textSecondary,
+              ),
+              title: Text('移动', style: TextStyle(color: AppTheme.textPrimary)),
               onTap: () {
                 Get.back();
                 _showReorderSheet();
               },
             ),
             ListTile(
-              leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
-              title:
-                  const Text('删除', style: TextStyle(color: Colors.redAccent)),
+              leading: const Icon(
+                Icons.delete_outline,
+                color: Colors.redAccent,
+              ),
+              title: const Text(
+                '删除',
+                style: TextStyle(color: Colors.redAccent),
+              ),
               onTap: () {
                 Get.back();
                 _confirmRemove(app);
@@ -778,8 +867,7 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
 
   /// 分享：复制程序链接/配置到剪贴板（应用内没有分享 SDK，统一走复制）
   Future<void> _shareApp(MiniApp app) async {
-    final text =
-        app.source.trim().isNotEmpty ? app.source.trim() : app.rawJson;
+    final text = app.source.trim().isNotEmpty ? app.source.trim() : app.rawJson;
     await Clipboard.setData(ClipboardData(text: text));
     AppToast.message('已复制程序链接');
   }
@@ -803,15 +891,22 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
                 child: Row(
                   children: [
-                    Text('调整顺序',
-                        style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold)),
+                    Text(
+                      '调整顺序',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const Spacer(),
-                    Text('拖动右侧把手',
-                        style: TextStyle(
-                            color: AppTheme.textTertiary, fontSize: 11)),
+                    Text(
+                      '拖动右侧把手',
+                      style: TextStyle(
+                        color: AppTheme.textTertiary,
+                        fontSize: 11,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -825,13 +920,21 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
                       final a = service.apps[i];
                       return ListTile(
                         key: ValueKey(a.id),
-                        title: Text(a.name,
-                            style: TextStyle(color: AppTheme.textPrimary)),
-                        subtitle: Text(_appTag(a),
-                            style: TextStyle(
-                                color: AppTheme.textTertiary, fontSize: 11)),
-                        trailing: Icon(Icons.drag_handle_rounded,
-                            color: AppTheme.textTertiary),
+                        title: Text(
+                          a.name,
+                          style: TextStyle(color: AppTheme.textPrimary),
+                        ),
+                        subtitle: Text(
+                          _appTag(a),
+                          style: TextStyle(
+                            color: AppTheme.textTertiary,
+                            fontSize: 11,
+                          ),
+                        ),
+                        trailing: Icon(
+                          Icons.drag_handle_rounded,
+                          color: AppTheme.textTertiary,
+                        ),
                       );
                     },
                   ),
@@ -848,8 +951,10 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     Get.dialog(
       AlertDialog(
         backgroundColor: AppTheme.backgroundSecondary,
-        title: Text('删除程序',
-            style: TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
+        title: Text(
+          '删除程序',
+          style: TextStyle(color: AppTheme.textPrimary, fontSize: 16),
+        ),
         content: Text(
           '删除「${app.name}」？其影视源会从视频源列表移除。',
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
@@ -970,8 +1075,10 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     final ok = await Get.dialog<bool>(
       AlertDialog(
         backgroundColor: AppTheme.backgroundSecondary,
-        title: Text('添加麦优直播订阅',
-            style: TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
+        title: Text(
+          '添加麦优直播订阅',
+          style: TextStyle(color: AppTheme.textPrimary, fontSize: 16),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -998,11 +1105,13 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Get.back(result: false),
-              child: const Text('取消')),
+            onPressed: () => Get.back(result: false),
+            child: const Text('取消'),
+          ),
           TextButton(
-              onPressed: () => Get.back(result: true),
-              child: const Text('添加')),
+            onPressed: () => Get.back(result: true),
+            child: const Text('添加'),
+          ),
         ],
       ),
     );
@@ -1020,8 +1129,10 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     final ok = await Get.dialog<bool>(
       AlertDialog(
         backgroundColor: AppTheme.backgroundSecondary,
-        title: Text('网络导入',
-            style: TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
+        title: Text(
+          '网络导入',
+          style: TextStyle(color: AppTheme.textPrimary, fontSize: 16),
+        ),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -1037,8 +1148,14 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Get.back(result: false), child: const Text('取消')),
-          TextButton(onPressed: () => Get.back(result: true), child: const Text('导入')),
+          TextButton(
+            onPressed: () => Get.back(result: false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Get.back(result: true),
+            child: const Text('导入'),
+          ),
         ],
       ),
     );
@@ -1056,8 +1173,10 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     final ok = await Get.dialog<bool>(
       AlertDialog(
         backgroundColor: AppTheme.backgroundSecondary,
-        title: Text('粘贴 JSON',
-            style: TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
+        title: Text(
+          '粘贴 JSON',
+          style: TextStyle(color: AppTheme.textPrimary, fontSize: 16),
+        ),
         content: SizedBox(
           height: 220,
           child: TextField(
@@ -1077,8 +1196,14 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Get.back(result: false), child: const Text('取消')),
-          TextButton(onPressed: () => Get.back(result: true), child: const Text('导入')),
+          TextButton(
+            onPressed: () => Get.back(result: false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Get.back(result: true),
+            child: const Text('导入'),
+          ),
         ],
       ),
     );
@@ -1133,8 +1258,7 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     }
   }
 
-  Future<void> _run(
-      Future<({bool ok, String? error})> Function() task) async {
+  Future<void> _run(Future<({bool ok, String? error})> Function() task) async {
     if (_busy) return;
     _busy = true;
     try {
@@ -1232,11 +1356,11 @@ class _MiniAppCard extends StatelessWidget {
                 child: Icon(
                   app.isWebApp
                       ? (app.source.startsWith('http')
-                          ? Icons.public_rounded
-                          : Icons.code_rounded)
+                            ? Icons.public_rounded
+                            : Icons.code_rounded)
                       : app.isMaiyou
-                          ? Icons.live_tv_rounded
-                          : Icons.widgets_rounded,
+                      ? Icons.live_tv_rounded
+                      : Icons.widgets_rounded,
                   size: 12,
                   color: Colors.white.withValues(alpha: 0.9),
                 ),
@@ -1330,20 +1454,26 @@ class _AddTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title,
-                      style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600)),
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   const SizedBox(height: 2),
-                  Text(subtitle,
-                      style: TextStyle(
-                          color: AppTheme.textSecondary, fontSize: 12)),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
                 ],
               ),
             ),
-            Icon(Icons.chevron_right,
-                size: 18, color: AppTheme.textSecondary),
+            Icon(Icons.chevron_right, size: 18, color: AppTheme.textSecondary),
           ],
         ),
       ),

@@ -114,11 +114,26 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                         ),
                         const SizedBox(height: 14),
                       ],
+                      // 刮削到的类型标签（类型区）
+                      if (_item.genres.isNotEmpty) ...[
+                        _buildGenres(),
+                        const SizedBox(height: 20),
+                      ],
                       if (_item.overview.isNotEmpty) _buildOverview(),
                       if (_item.isSeries) ...[
                         if (_item.overview.isNotEmpty)
                           const SizedBox(height: 22),
                         _buildEpisodes(),
+                      ],
+                      // 刮削到的演职人员（导演 / 编剧 / 演员）
+                      if (_item.people.isNotEmpty) ...[
+                        const SizedBox(height: 22),
+                        _buildPeople(),
+                      ],
+                      // 出品公司 / 首播日期 / 官方分级等
+                      if (_hasFacts) ...[
+                        const SizedBox(height: 22),
+                        _buildFacts(),
                       ],
                     ],
                   ),
@@ -234,18 +249,33 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                     height: 1.15,
                   ),
                 ),
+                // 刮削到的宣传语（Tagline）
+                if (_item.tagline.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    _item.tagline,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.72),
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 10),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    if (_item.year != null)
-                      _MetaPill(text: '${_item.year}'),
+                    if (_item.year != null) _MetaPill(text: '${_item.year}'),
                     if (_item.rating != null && _item.rating! > 0)
                       _MetaPill(
                         text: '★ ${_item.rating!.toStringAsFixed(1)}',
                         highlighted: true,
                       ),
+                    if (_item.officialRating.isNotEmpty)
+                      _MetaPill(text: _item.officialRating),
                     if (_item.durationText.isNotEmpty)
                       _MetaPill(text: _item.durationText),
                     if (_item.type.isNotEmpty)
@@ -253,8 +283,8 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                         text: _item.isSeries
                             ? '剧集'
                             : _item.isEpisode
-                                ? '单集'
-                                : '电影',
+                            ? '单集'
+                            : '电影',
                       ),
                   ],
                 ),
@@ -264,7 +294,9 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                     onTap: () => _play(_item),
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 9),
+                        horizontal: 20,
+                        vertical: 9,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(999),
@@ -272,8 +304,11 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                       child: const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.play_arrow_rounded,
-                              size: 20, color: Colors.black),
+                          Icon(
+                            Icons.play_arrow_rounded,
+                            size: 20,
+                            color: Colors.black,
+                          ),
                           SizedBox(width: 4),
                           Text(
                             '播放',
@@ -298,38 +333,80 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
 
   // ── 简介 ──────────────────────────────────────────────────
 
+  /// 内容区小标题（左侧竖条 + 标题 + 可选右侧说明）
+  Widget _sectionTitle(String title, {String? trailing}) {
+    return Row(
+      children: [
+        Container(
+          width: 3,
+          height: 14,
+          decoration: BoxDecoration(
+            color: AppTheme.accentColor,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          title,
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontHeadline,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        if (trailing != null) ...[
+          const SizedBox(width: 8),
+          Text(
+            trailing,
+            style: TextStyle(
+              color: AppTheme.textTertiary,
+              fontSize: AppTheme.fontCaption,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildGenres() {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final g in _item.genres)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+            decoration: BoxDecoration(
+              color: AppTheme.backgroundSecondary,
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: AppTheme.borderLight, width: 0.5),
+            ),
+            child: Text(
+              g,
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: AppTheme.fontCaption,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
   Widget _buildOverview() {
     final long = _item.overview.length > 90;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Container(
-              width: 3,
-              height: 14,
-              decoration: BoxDecoration(
-                color: AppTheme.accentColor,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              '简介',
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: AppTheme.fontHeadline,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
+        _sectionTitle('简介'),
         const SizedBox(height: 10),
         Text(
           _item.overview,
           maxLines: _overviewExpanded ? null : 4,
-          overflow:
-              _overviewExpanded ? TextOverflow.clip : TextOverflow.ellipsis,
+          overflow: _overviewExpanded
+              ? TextOverflow.clip
+              : TextOverflow.ellipsis,
           style: TextStyle(
             color: AppTheme.textSecondary,
             fontSize: AppTheme.fontFootnote,
@@ -363,35 +440,7 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Container(
-              width: 3,
-              height: 14,
-              decoration: BoxDecoration(
-                color: AppTheme.accentColor,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              '选集',
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: AppTheme.fontHeadline,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              '${_episodes.length} 集',
-              style: TextStyle(
-                color: AppTheme.textTertiary,
-                fontSize: AppTheme.fontCaption,
-              ),
-            ),
-          ],
-        ),
+        _sectionTitle('选集', trailing: '${_episodes.length} 集'),
         const SizedBox(height: 12),
         if (_loading)
           const Padding(
@@ -440,15 +489,22 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                     fit: StackFit.expand,
                     children: [
                       CachedNetworkImage(
-                        imageUrl: _api.imageUrl(ep.id,
-                            tag: ep.imageTag, maxHeight: 240),
+                        imageUrl: _api.imageUrl(
+                          ep.id,
+                          tag: ep.imageTag,
+                          maxHeight: 240,
+                        ),
                         httpHeaders: _api.imageHeaders,
                         fit: BoxFit.cover,
                         placeholder: (_, _) => ColoredBox(
-                            color:
-                                AppTheme.backgroundPrimary.withValues(alpha: 0.5)),
+                          color: AppTheme.backgroundPrimary.withValues(
+                            alpha: 0.5,
+                          ),
+                        ),
                         errorWidget: (_, _, _) => ColoredBox(
-                          color: AppTheme.backgroundPrimary.withValues(alpha: 0.5),
+                          color: AppTheme.backgroundPrimary.withValues(
+                            alpha: 0.5,
+                          ),
                           child: Icon(
                             Icons.play_circle_outline_rounded,
                             color: AppTheme.textTertiary,
@@ -462,7 +518,9 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                           bottom: 4,
                           child: Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 5, vertical: 1),
+                              horizontal: 5,
+                              vertical: 1,
+                            ),
                             decoration: BoxDecoration(
                               color: Colors.black.withValues(alpha: 0.72),
                               borderRadius: BorderRadius.circular(5),
@@ -521,6 +579,162 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
           ),
         ),
       ),
+    );
+  }
+
+  // ── 演职人员（服务端刮削） ─────────────────────────────────
+
+  Widget _buildPeople() {
+    final directors = _item.directors;
+    final writers = _item.writers;
+    final actors = _item.actors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionTitle('演职人员'),
+        if (directors.isNotEmpty) _creditLine('导演', directors),
+        if (writers.isNotEmpty) _creditLine('编剧', writers),
+        if (actors.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          SizedBox(
+            height: 124,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: actors.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 14),
+              itemBuilder: (_, i) => _personTile(actors[i]),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _creditLine(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 9),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 56,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: AppTheme.fontCaption,
+                height: 1.45,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: AppTheme.fontFootnote,
+                height: 1.45,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _personTile(EmbyPerson p) {
+    return SizedBox(
+      width: 72,
+      child: Column(
+        children: [
+          ClipOval(
+            child: SizedBox(
+              width: 64,
+              height: 64,
+              child: p.hasPhoto
+                  ? CachedNetworkImage(
+                      imageUrl: _api.imageUrl(
+                        p.id,
+                        tag: p.imageTag,
+                        maxHeight: 200,
+                      ),
+                      httpHeaders: _api.imageHeaders,
+                      fit: BoxFit.cover,
+                      placeholder: (_, _) => ColoredBox(
+                        color: AppTheme.backgroundSecondary,
+                      ),
+                      errorWidget: (_, _, _) => _personPlaceholder(),
+                    )
+                  : _personPlaceholder(),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            p.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          if (p.role.trim().isNotEmpty) ...[
+            const SizedBox(height: 1),
+            Text(
+              p.role.trim(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: 11,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _personPlaceholder() {
+    return ColoredBox(
+      color: AppTheme.backgroundSecondary,
+      child: Icon(
+        Icons.person_outline_rounded,
+        color: AppTheme.textTertiary,
+        size: 28,
+      ),
+    );
+  }
+
+  // ── 影片信息（服务端刮削） ─────────────────────────────────
+
+  bool get _hasFacts =>
+      _item.studios.isNotEmpty ||
+      _item.premiereDateText.isNotEmpty ||
+      _item.officialRating.isNotEmpty ||
+      (_item.criticRating ?? 0) > 0 ||
+      (_item.originalTitle.isNotEmpty && _item.originalTitle != _item.name);
+
+  Widget _buildFacts() {
+    final rows = <(String, String)>[
+      if (_item.studios.isNotEmpty) ('出品公司', _item.studios.join(' / ')),
+      if (_item.premiereDateText.isNotEmpty) ('首播日期', _item.premiereDateText),
+      if (_item.officialRating.isNotEmpty) ('官方分级', _item.officialRating),
+      if ((_item.criticRating ?? 0) > 0)
+        ('媒体评分', '${_item.criticRating!.round()} 分'),
+      if (_item.originalTitle.isNotEmpty && _item.originalTitle != _item.name)
+        ('原始标题', _item.originalTitle),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionTitle('影片信息'),
+        const SizedBox(height: 4),
+        for (final r in rows) _creditLine(r.$1, r.$2),
+      ],
     );
   }
 

@@ -623,6 +623,16 @@ class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
           color: AppTheme.backgroundCard,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppTheme.glassBorderSoft, width: 0.6),
+          // 轻微投影：卡片之间不再是一层平白纸，层级更清楚
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(
+                alpha: AppBrightness.isLight.value ? 0.045 : 0.22,
+              ),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
         child: Column(
           // 卡片里图标、名称、版本信息统一居中（用户 2026-10-18）
@@ -641,6 +651,14 @@ class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
                       tint.withValues(alpha: 0.62),
                     ],
                   ),
+                  // 图标块也加一层同色柔光，和已安装页的彩色卡片呼应
+                  boxShadow: [
+                    BoxShadow(
+                      color: tint.withValues(alpha: 0.22),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
                 ),
                 alignment: Alignment.center,
                 child: Stack(

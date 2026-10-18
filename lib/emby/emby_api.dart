@@ -25,13 +25,15 @@ class EmbyApi {
   late final Dio _dio = _buildDio();
 
   Dio _buildDio() {
-    final d = Dio(BaseOptions(
-      baseUrl: server.normalizedUrl,
-      connectTimeout: const Duration(seconds: 8),
-      receiveTimeout: const Duration(seconds: 20),
-      // 让 4xx/5xx 走 DioException，便于统一翻译错误文案
-      validateStatus: (code) => code != null && code >= 200 && code < 400,
-    ));
+    final d = Dio(
+      BaseOptions(
+        baseUrl: server.normalizedUrl,
+        connectTimeout: const Duration(seconds: 8),
+        receiveTimeout: const Duration(seconds: 20),
+        // 让 4xx/5xx 走 DioException，便于统一翻译错误文案
+        validateStatus: (code) => code != null && code >= 200 && code < 400,
+      ),
+    );
     applyGlobalProxy(d);
     return d;
   }
@@ -40,11 +42,13 @@ class EmbyApi {
       'MediaBrowser Client="CatMovie", Device="iPhone", '
       'DeviceId="${server.deviceId}", Version="1.0.0"';
 
-  Options get _options => Options(headers: {
-        'X-Emby-Authorization': _authHeader,
-        if (server.accessToken != null && server.accessToken!.isNotEmpty)
-          'X-Emby-Token': server.accessToken!,
-      });
+  Options get _options => Options(
+    headers: {
+      'X-Emby-Authorization': _authHeader,
+      if (server.accessToken != null && server.accessToken!.isNotEmpty)
+        'X-Emby-Token': server.accessToken!,
+    },
+  );
 
   /// 登录并把 token / userId 写回 [EmbyStore]（由调用方负责持久化）。
   Future<({String token, String userId})> authenticate() async {
@@ -106,17 +110,20 @@ class EmbyApi {
 
   /// 某个媒体库的最新条目（电影 + 剧集）。
   Future<List<EmbyItem>> getLatest(String parentId, {int limit = 24}) {
-    return _items('/Items', query: {
-      'ParentId': parentId,
-      'Recursive': true,
-      'IncludeItemTypes': 'Movie,Series',
-      'SortBy': 'DateCreated',
-      'SortOrder': 'Descending',
-      'Limit': limit,
-      'Fields': 'Overview,ProductionYear,CommunityRating,RunTimeTicks',
-      'ImageTypeLimit': 1,
-      'EnableImageTypes': 'Primary,Backdrop',
-    });
+    return _items(
+      '/Items',
+      query: {
+        'ParentId': parentId,
+        'Recursive': true,
+        'IncludeItemTypes': 'Movie,Series',
+        'SortBy': 'DateCreated',
+        'SortOrder': 'Descending',
+        'Limit': limit,
+        'Fields': 'Overview,ProductionYear,CommunityRating,RunTimeTicks',
+        'ImageTypeLimit': 1,
+        'EnableImageTypes': 'Primary,Backdrop',
+      },
+    );
   }
 
   /// 剧集的所有分集。
@@ -134,7 +141,11 @@ class EmbyApi {
     );
   }
 
-  /// 单条详情（用于从列表进入后补全简介等字段）。
+  /// 单条详情（用于从列表进入后补全**服务端自动刮削**的全部元数据）。
+  ///
+  /// ⚠️ Emby 的 `/Items/{id}` 默认只返回基础字段，`Genres` / `People` /
+  /// `Studios` / `Taglines` 这类刮削结果**必须显式写进 `Fields`** 才会下发；
+  /// 少了这些，详情页就只剩标题、年份、评分和简介，看起来像"没刮削"。
   Future<EmbyItem?> getItem(String id) async {
     final uid = server.userId;
     if (uid == null || uid.isEmpty) throw EmbyApiException('尚未登录');
@@ -142,7 +153,10 @@ class EmbyApi {
       final res = await _dio.get(
         '/Users/$uid/Items/$id',
         queryParameters: {
-          'Fields': 'Overview,ProductionYear,CommunityRating,RunTimeTicks',
+          'Fields':
+              'Overview,ProductionYear,CommunityRating,CriticRating,'
+              'RunTimeTicks,Genres,People,Studios,Taglines,OfficialRating,'
+              'PremiereDate,OriginalTitle',
         },
         options: _options,
       );
@@ -215,8 +229,9 @@ class EmbyApi {
   }
 
   /// 图片请求头（CachedNetworkImage 用）。
-  Map<String, String> get imageHeaders =>
-      server.accessToken == null ? const {} : {'X-Emby-Token': server.accessToken!};
+  Map<String, String> get imageHeaders => server.accessToken == null
+      ? const {}
+      : {'X-Emby-Token': server.accessToken!};
 
   String _errorText(DioException e) {
     final code = e.response?.statusCode;

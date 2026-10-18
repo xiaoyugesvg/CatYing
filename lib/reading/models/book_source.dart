@@ -3,8 +3,6 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:tvbox/reading/models/builtin_book_sources.dart';
-
 /// 漫画源判据（编译一次，避免列表每次重建都重新编译正则）。
 final RegExp _comicHintRe = RegExp(r'漫画|漫畫|comic|manga');
 
@@ -327,8 +325,9 @@ class BookSourceStore {
   //（那个键仍留在 prefs 里，只是没人再用它了 ✓）
   static const _key = 'book_sources_v1';
 
-  /// 内置书源只播种一次：用户删掉后不再自动加回来。
-  static const _kBuiltinSeedKey = 'book_sources_builtin_seed_v1';
+  /// 内置书源已全部移除（用户 2026-10-18：让自己填）。
+  /// 这个键只用于**一次性清掉**旧版本播种进来的内置源，之后不再播种任何源。
+  static const _kBuiltinRemovedKey = 'book_sources_builtin_removed_v1';
 
   final List<BookSource> _items = [];
   List<BookSource> get all => List.unmodifiable(_items);
@@ -339,8 +338,8 @@ class BookSourceStore {
   final revision = ValueNotifier<int>(0);
 
   Future<void> init() async {
-    // 只加载用户自己导入/仓库导入的源；出厂只播种一次内置漫画源
-    // （用户 2026-10-17 要求把「看漫画」内置，见 [_seedBuiltin]）。
+    // 只加载用户自己导入/仓库导入的源；不再播种任何内置源。
+    // 老版本播种过「看漫画」「漫小肆」，这里一次性清掉。
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_key);
@@ -349,29 +348,21 @@ class BookSourceStore {
           ..clear()
           ..addAll(_decode(raw));
       }
-      await _seedBuiltin(prefs);
+      await _removeLegacyBuiltins(prefs);
     } catch (e) {
       debugPrint('[BookSource] 加载失败: $e');
     }
     revision.value++;
   }
 
-  /// 首次启动播种出厂内置书源（只做一次，用户删除后不复活）。
-  Future<void> _seedBuiltin(SharedPreferences prefs) async {
-    if (prefs.getBool(_kBuiltinSeedKey) == true) return;
-    final added = <BookSource>[];
-    for (final j in decodeBuiltinBookSources()) {
-      final s = BookSource.fromJson(j);
-      if (s == null) continue;
-      // 用户已经手动导入过同一条（id 相同）→ 不重复添加
-      if (_items.any((x) => x.id == s.id)) continue;
-      added.add(s);
-    }
-    if (added.isNotEmpty) {
-      _items.addAll(added);
-      await _persist();
-    }
-    await prefs.setBool(_kBuiltinSeedKey, true);
+  /// 清掉旧版本播种的内置源（只做一次；用户之后重新导入不会被误删）。
+  Future<void> _removeLegacyBuiltins(SharedPreferences prefs) async {
+    if (prefs.getBool(_kBuiltinRemovedKey) == true) return;
+    const legacyUrls = {'https://m.manhuagui.com', 'https://www.jjmhw9.top'};
+    final before = _items.length;
+    _items.removeWhere((s) => legacyUrls.contains(s.url.trim()));
+    if (_items.length != before) await _persist();
+    await prefs.setBool(_kBuiltinRemovedKey, true);
   }
 
   /// 兼容三种落盘形态：数组 / 单个对象 / {"sources":[...]}

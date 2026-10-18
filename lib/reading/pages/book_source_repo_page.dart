@@ -60,8 +60,6 @@ class BookSourceRepoPage extends StatefulWidget {
 class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   final store = BookSourceStore.instance;
 
-  /// 顶部导入卡片的地址输入框
-  final _urlCtrl = TextEditingController();
   bool _busy = false;
   bool _selectMode = false;
   String _keyword = '';
@@ -108,7 +106,6 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
 
   @override
   void dispose() {
-    _urlCtrl.dispose();
     _filterCtrl.dispose();
     super.dispose();
   }
@@ -173,10 +170,8 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
           final noBooks = store.sorted().every((s) => s.isComicSource);
           return Column(
             children: [
-              // 导入卡片**常驻页面顶部**（不藏进弹层）。
-              // 按目标设计：地址输入框 + 三个并排按钮就在页面上，
-              // 用户一眼看到"能怎么导"。
-              _importCard(),
+              // 搜索 + 分组操作固定在顶栏下面（不随列表滚动）
+              if (!noBooks) _pinnedFilters(list),
               Expanded(
                 child: noBooks
                     ? _emptyState()
@@ -192,139 +187,72 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   }
 
   // ============================================================
-  // 导入卡片（按截图：标题 + 说明 + 地址框 + 三个并排按钮）
+  // 顶栏下方固定区：搜索 + 分组操作（管理分组 / 创建分组 固定不动）
   // ============================================================
 
-  Widget _importCard() {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-      decoration: BoxDecoration(
-        color: _card,
-        borderRadius: BorderRadius.circular(16),
-      ),
+  Widget _pinnedFilters(List<BookSource> all) {
+    final base = all.where((s) => !_hiddenGroups.contains(s.group)).toList();
+    final counts = <String, int>{};
+    for (final s in base) {
+      counts[s.group] = (counts[s.group] ?? 0) + 1;
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 2, 16, 6),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '导入书源',
-            style: TextStyle(
-              fontSize: AppTheme.fontHeadline,
-              fontWeight: FontWeight.w700,
-              color: _titleColor,
-            ),
+          JellySearchBar(
+            controller: _filterCtrl,
+            hintText: '筛选已导入的书源',
+            onChanged: (v) => setState(() => _keyword = v.trim()),
+            onCleared: () {
+              _filterCtrl.clear();
+              setState(() => _keyword = '');
+            },
           ),
-          const SizedBox(height: 3),
-          Text(
-            // 截图原文。这句很重要：用户最怕"导入会不会把我已有的源冲掉"
-            '导入按地址合并去重，不会覆盖已有的源',
-            style: TextStyle(
-              fontSize: AppTheme.fontFootnote,
-              color: JellyTheme.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _urlCtrl,
-            style: TextStyle(fontSize: AppTheme.fontBody, color: _titleColor),
-            keyboardType: TextInputType.url,
-            decoration: InputDecoration(
-              hintText: '书源地址 (json / zip / 仓库索引)',
-              hintStyle: TextStyle(
-                fontSize: AppTheme.fontBody,
-                color: JellyTheme.textSecondary,
-              ),
-              filled: true,
-              fillColor: _isDark
-                  ? Colors.white.withValues(alpha: 0.05)
-                  : Colors.black.withValues(alpha: 0.035),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 13,
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _busy ? null : _importByFile,
-                  style: _outlineStyle(),
-                  child: const Text(
-                    '导入文件',
-                    style: TextStyle(fontSize: AppTheme.fontBody),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _busy ? null : _importByCode,
-                  style: _outlineStyle(),
-                  child: const Text(
-                    '口令导入',
-                    style: TextStyle(fontSize: AppTheme.fontBody),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: FilledButton(
-                  onPressed: _busy ? null : _importByUrlFromField,
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                  child: _busy
-                      ? const SizedBox(
-                          width: 15,
-                          height: 15,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text(
-                          '从地址导入',
-                          style: TextStyle(fontSize: AppTheme.fontBody),
-                        ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          // ✅ 二维码导入（用户 2026-10-12 新增）：整行按钮，扫到即走口令同款解析
+          const SizedBox(height: 8),
           SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: _busy ? null : _importByQrCode,
-              style: _outlineStyle(),
-              icon: const Icon(Icons.qr_code_scanner_rounded, size: 19),
-              label: const Text(
-                '二维码导入',
-                style: TextStyle(fontSize: AppTheme.fontBody),
-              ),
+            height: 34,
+            child: Row(
+              children: [
+                // 两个分组操作固定在最左侧，不随分组 chip 滚动
+                _squareIconBtn(Icons.menu_rounded, '管理分组', _showManageGroups),
+                const SizedBox(width: 8),
+                _groupActionBtn(
+                  Icons.create_new_folder_outlined,
+                  '创建分组',
+                  _showNewGroup,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      _groupChip(
+                        '全部',
+                        base.length,
+                        _pickedGroup == null,
+                        () => setState(() => _pickedGroup = null),
+                      ),
+                      for (final e in counts.entries) ...[
+                        const SizedBox(width: 8),
+                        _groupChip(
+                          e.key,
+                          e.value,
+                          _pickedGroup == e.key,
+                          () => setState(() => _pickedGroup = e.key),
+                        ),
+                      ],
+                      const SizedBox(width: 8),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
         ],
       ),
     );
   }
-
-  ButtonStyle _outlineStyle() => OutlinedButton.styleFrom(
-    padding: const EdgeInsets.symmetric(vertical: 12),
-    side: BorderSide(
-      color: _isDark
-          ? Colors.white.withValues(alpha: 0.22)
-          : Colors.black.withValues(alpha: 0.16),
-    ),
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-    foregroundColor: _titleColor,
-  );
 
   // ============================================================
   // AppBar：居中标题「书源仓库」+ 右侧分享 + 盾牌体检（并排常显）
@@ -364,6 +292,13 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
           if (store.isEmpty || _healthChecking) return;
           _runHealthCheck();
         }),
+        // 导入书源：右上角按钮 → 居中弹窗（用户 2026-10-18）
+        if (!_selectMode)
+          _appBarIcon(
+            Icons.file_download_outlined,
+            '导入书源',
+            _showImportSheet,
+          ),
         const SizedBox(width: 4),
       ],
     );
@@ -455,16 +390,6 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
     await _reloadComicSourcesIfNeeded(parsed);
     _toast(r.added > 0 ? '已导入 ${r.added} 个书源' : '已更新 ${r.updated} 个书源');
     await _showCompatReport(parsed);
-  }
-
-  /// 从顶部地址栏导入
-  Future<void> _importByUrlFromField() async {
-    final url = _urlCtrl.text.trim();
-    if (url.isEmpty) {
-      _toast('请先填写书源地址');
-      return;
-    }
-    await _fetchAndImport(url);
   }
 
   // ============================================================
@@ -628,20 +553,17 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   // ============================================================
 
   /// 主列表：
-  ///   共 N 个 + 清空  →  搜索框  →  统计 chips  →  分组 chip 行  →  书源卡片
-  /// （关键词搜索在 `_visible` 里完成，这里只做「隐藏组 / 选中分组」过滤）
+  ///   共 N 个 + 清空 → 统计 chips → 书源卡片
+  /// （搜索与分组操作在 `_pinnedFilters` 里，固定在顶栏下方；关键词搜索在
+  ///  `_visible` 里完成，这里只做「隐藏组 / 选中分组」过滤）
   Widget _sourceList(List<BookSource> all) {
     // 1) 按"隐藏组"和"选中分组"过滤
     var list = all.where((s) => !_hiddenGroups.contains(s.group)).toList();
     if (_pickedGroup != null) {
       list = list.where((s) => s.group == _pickedGroup).toList();
     }
-    // 2) 分组统计（用过滤后的全集算，chip 上的数字才对）
+    // 2) 未被隐藏的组（统计 + 共 N 个）
     final base = all.where((s) => !_hiddenGroups.contains(s.group)).toList();
-    final counts = <String, int>{};
-    for (final s in base) {
-      counts[s.group] = (counts[s.group] ?? 0) + 1;
-    }
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 90),
@@ -697,16 +619,6 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
             ],
           ),
         ),
-        // ── 搜索栏（从 AppBar 移到页面内）：圆角搜索框，筛选已导入的书源 ──
-        JellySearchBar(
-          controller: _filterCtrl,
-          hintText: '筛选已导入的书源',
-          onChanged: (v) => setState(() => _keyword = v.trim()),
-          onCleared: () {
-            _filterCtrl.clear();
-            setState(() => _keyword = '');
-          },
-        ),
         // ── 统计 chip 行：总数 / 待更新 / 正常 / 重复 / 异常 / 失效 ──
         //   数字全部基于真实数据计算（拿不到的项显示 0，不编造）。
         Padding(
@@ -716,40 +628,6 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
             child: ListView(
               scrollDirection: Axis.horizontal,
               children: _statChips(base),
-            ),
-          ),
-        ),
-        // ── 筛选/分组行 ──────────────────────────────────────
-        //   方形「☰」= 管理分组弹层 · 「⋯」= 更多（新建分组 / 设置分组）·
-        //   接着是「全部 N」「通常书源 N」「正版书源 N」…（按真实分组字段统计）
-        Padding(
-          padding: const EdgeInsets.only(top: 10, bottom: 4),
-          child: SizedBox(
-            height: 34,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: [
-                _squareIconBtn(Icons.menu_rounded, '管理分组', _showManageGroups),
-                const SizedBox(width: 8),
-                _moreBtn(),
-                const SizedBox(width: 8),
-                _groupChip(
-                  '全部',
-                  base.length,
-                  _pickedGroup == null,
-                  () => setState(() => _pickedGroup = null),
-                ),
-                for (final e in counts.entries) ...[
-                  const SizedBox(width: 8),
-                  _groupChip(
-                    e.key,
-                    e.value,
-                    _pickedGroup == e.key,
-                    () => setState(() => _pickedGroup = e.key),
-                  ),
-                ],
-                const SizedBox(width: 8),
-              ],
             ),
           ),
         ),
@@ -799,37 +677,6 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
             height: 34,
             child: Icon(icon, size: 18, color: JellyTheme.textSecondary),
           ),
-        ),
-      ),
-    );
-  }
-
-  /// 筛选行里的「⋯」更多按钮（新建分组 / 设置分组）
-  Widget _moreBtn() {
-    return PopupMenuButton<String>(
-      tooltip: '更多',
-      onSelected: (v) {
-        if (v == 'new') _showNewGroup();
-        if (v == 'set') _showSetGroup(Set<String>.from(_selected));
-      },
-      itemBuilder: (_) => const [
-        PopupMenuItem<String>(value: 'new', child: Text('新建分组')),
-        PopupMenuItem<String>(value: 'set', child: Text('设置分组')),
-      ],
-      child: Container(
-        width: 34,
-        height: 34,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: _isDark
-              ? Colors.white.withValues(alpha: 0.08)
-              : Colors.black.withValues(alpha: 0.04),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Icon(
-          Icons.more_horiz_rounded,
-          size: 18,
-          color: JellyTheme.textSecondary,
         ),
       ),
     );
@@ -1617,138 +1464,154 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
 
   // ============================================================
 
+  /// 导入书源：居中弹窗（用户 2026-10-18），四种方式按
+  /// 「网址 / 文件 / 文本 / 二维码」排列。
   Future<void> _showImportSheet() async {
-    await showModalBottomSheet<void>(
+    final action = await showDialog<String>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: _card,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        top: false,
-        child: Padding(
-          padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(ctx).bottom),
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _card,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+        ),
+        title: Text(
+          '导入书源',
+          style: TextStyle(
+            fontSize: AppTheme.fontHeadline,
+            fontWeight: FontWeight.w700,
+            color: _titleColor,
+          ),
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: 12),
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: JellyTheme.textSecondary.withValues(alpha: 0.35),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              const SizedBox(height: 16),
               Text(
-                '导入书源',
+                '选择一种导入方式，导入按地址合并去重，不会覆盖已有源',
                 style: TextStyle(
-                  fontSize: AppTheme.fontTitle3,
-                  fontWeight: FontWeight.w600,
-                  color: _titleColor,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                '用地址、口令、二维码或本地文件导入书源',
-                style: TextStyle(
-                  fontSize: AppTheme.fontSubhead,
+                  fontSize: AppTheme.fontFootnote,
                   color: JellyTheme.textSecondary,
+                  height: 1.45,
                 ),
               ),
-              const SizedBox(height: 18),
-              _importOption(
-                icon: Icons.link_rounded,
-                title: '网络导入',
-                subtitle: '填书源列表网址，自动拉取',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _importByUrl();
-                },
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: _importTile(
+                      '网址',
+                      Icons.link_rounded,
+                      () => Navigator.pop(ctx, 'url'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _importTile(
+                      '文件',
+                      Icons.folder_open_rounded,
+                      () => Navigator.pop(ctx, 'file'),
+                    ),
+                  ),
+                ],
               ),
-              _importOption(
-                icon: Icons.key_rounded,
-                title: '口令导入',
-                subtitle: '粘贴分享口令或书源 JSON',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _importByCode();
-                },
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: _importTile(
+                      '文本',
+                      Icons.text_snippet_outlined,
+                      () => Navigator.pop(ctx, 'text'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _importTile(
+                      '二维码',
+                      Icons.qr_code_scanner_rounded,
+                      () => Navigator.pop(ctx, 'qr'),
+                    ),
+                  ),
+                ],
               ),
-              _importOption(
-                icon: Icons.qr_code_scanner_rounded,
-                title: '二维码导入',
-                subtitle: '扫描书源二维码，自动识别',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _importByQrCode();
-                },
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => Navigator.pop(ctx, 'python'),
+                  icon: Icon(
+                    Icons.code_rounded,
+                    size: 16,
+                    color: JellyTheme.textSecondary,
+                  ),
+                  label: Text(
+                    '导入 Python 源',
+                    style: TextStyle(
+                      fontSize: AppTheme.fontFootnote,
+                      color: JellyTheme.textSecondary,
+                    ),
+                  ),
+                ),
               ),
-              _importOption(
-                icon: Icons.folder_open_rounded,
-                title: '本地文件导入',
-                subtitle: '选择 .json / .txt / .zip 书源文件',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _importByFile();
-                },
-              ),
-              _importOption(
-                icon: Icons.code_rounded,
-                title: '导入 Python 源',
-                subtitle: '选择 .py 文件，注册为 Python 书源',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _importByPython();
-                },
-              ),
-              const SizedBox(height: 18),
             ],
           ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'url') {
+      await _importByUrl();
+    } else if (action == 'file') {
+      await _importByFile();
+    } else if (action == 'text') {
+      await _importByCode();
+    } else if (action == 'qr') {
+      await _importByQrCode();
+    } else if (action == 'python') {
+      await _importByPython();
+    }
+  }
+
+  /// 弹窗里的一个方式按钮（2×2 宫格）
+  Widget _importTile(String label, IconData icon, VoidCallback onTap) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onTap,
+      child: Container(
+        height: 82,
+        decoration: BoxDecoration(
+          color: JellyTheme.primary.withValues(alpha: 0.09),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: JellyTheme.primary.withValues(alpha: 0.18),
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 24, color: JellyTheme.primary),
+            const SizedBox(height: 7),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: AppTheme.fontFootnote,
+                fontWeight: FontWeight.w600,
+                color: _titleColor,
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
-
-  Widget _importOption({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) => ListTile(
-    onTap: onTap,
-    leading: Container(
-      width: 40,
-      height: 40,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: JellyTheme.primary.withValues(alpha: 0.13),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Icon(icon, size: 20, color: JellyTheme.primary),
-    ),
-    title: Text(
-      title,
-      style: TextStyle(
-        fontSize: AppTheme.fontHeadline,
-        fontWeight: FontWeight.w600,
-        color: _titleColor,
-      ),
-    ),
-    subtitle: Text(
-      subtitle,
-      style: TextStyle(
-        fontSize: AppTheme.fontFootnote,
-        color: JellyTheme.textSecondary,
-      ),
-    ),
-    trailing: Icon(
-      Icons.chevron_right_rounded,
-      color: JellyTheme.textSecondary,
-    ),
-  );
 
   /// 地址导入
   Future<void> _importByUrl() async {

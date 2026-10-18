@@ -413,8 +413,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       child: ListView(
         padding: EdgeInsets.only(bottom: 12 + JellyNavBar.contentBottomAvoid),
         children: [
-          for (var i = 0; i < _homeSections.length; i++)
-            _homeSectionBlock(i),
+          for (var i = 0; i < _homeSections.length; i++) _homeSectionBlock(i),
         ],
       ),
     );
@@ -502,8 +501,9 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
               child: Text(
                 s.error!,
                 style: TextStyle(
-                    fontSize: AppTheme.fontSubhead,
-                    color: JellyTheme.textSecondary),
+                  fontSize: AppTheme.fontSubhead,
+                  color: JellyTheme.textSecondary,
+                ),
               ),
             ),
           )
@@ -770,8 +770,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       //   漫画视图，漫画页却没变"✗。下一帧对一次：动画没跑且没到位就直接跳 ✓
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        if (!_tabController.indexIsChanging &&
-            _tabController.index != target) {
+        if (!_tabController.indexIsChanging && _tabController.index != target) {
           _tabController.index = target;
         }
       });
@@ -916,42 +915,42 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       // 源标签行：上边距 8、下边距 4，左右与顶栏/内容对齐（16）
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
       child: Row(
-      children: [
-        // 「聚搜」固定在第一位，不随源 chip 横向滑动（对齐参考图）
-        _buildAggregateChip(isDark),
-        const SizedBox(width: 8),
-        Expanded(
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            padding: EdgeInsets.zero,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: chips,
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        // 搜索源按钮（快速源列表弹窗）：源排最右侧
-        // （用户 2026-10-06 反馈"漫画页少个搜索源"——与书源页 view_list 对齐）
-        Material(
-          color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-          shape: const CircleBorder(),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: _showQuickSourceSheet,
-            child: SizedBox(
-              width: 32,
-              height: 32,
-              // ✅ 用户 2026-10-07：与书源页统一成**向下箭头**（原来是 view_list ✗）
-              child: Icon(
-                Icons.keyboard_arrow_down_rounded,
-                size: 22,
-                color: JellyTheme.textPrimaryLight,
+        children: [
+          // 「聚搜」固定在第一位，不随源 chip 横向滑动（对齐参考图）
+          _buildAggregateChip(isDark),
+          const SizedBox(width: 8),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              padding: EdgeInsets.zero,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: chips,
               ),
             ),
           ),
-        ),
+          const SizedBox(width: 8),
+          // 搜索源按钮（快速源列表弹窗）：源排最右侧
+          // （用户 2026-10-06 反馈"漫画页少个搜索源"——与书源页 view_list 对齐）
+          Material(
+            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+            shape: const CircleBorder(),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: _showQuickSourceSheet,
+              child: SizedBox(
+                width: 32,
+                height: 32,
+                // ✅ 用户 2026-10-07：与书源页统一成**向下箭头**（原来是 view_list ✗）
+                child: Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  size: 22,
+                  color: JellyTheme.textPrimaryLight,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -1000,8 +999,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     );
     if (ok != true || !mounted) return;
     if (src.id.startsWith('legado:')) {
-      await BookSourceStore.instance
-          .remove(src.id.substring('legado:'.length));
+      await BookSourceStore.instance.remove(src.id.substring('legado:'.length));
     } else {
       // 配置源 / 内置源没有"删除定义"的落盘 API ⇒ 退化为禁用（不再出现在漫画页）
       await SourceManager().setEnabled(src.id, false);
@@ -1063,10 +1061,11 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   Future<void> _showQuickSourceSheet() async {
     final sources = SourceManager().enabledSources;
     final currentId = SourceManager().current.id;
+    // 当前源是否仍在这个弹窗的可见列表里（被停用 / 切订阅后会不在）
+    final hasCurrent = sources.any((s) => s.id == currentId);
     // 分组口径与「漫画仓」一致（Legado 的 bookSourceGroup，空 = 未分组）
     final groups = collectSourceGroups(sources.map((s) => s.group));
-    final isDark =
-        Theme.of(context).brightness == Brightness.dark;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final filter = TextEditingController();
     // 当前源 chip 的 key：打开弹窗后自动滚到它（源多时定位到当前位置）
     final currentKey = GlobalKey();
@@ -1103,6 +1102,24 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                 );
               });
             }
+            // 右上角「定位」：先清掉分组/关键词过滤，再滚到当前漫画源
+            void locateCurrent() {
+              setSheetState(() {
+                selectedGroup = SourceGroupTabs.all;
+                filter.clear();
+              });
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                final c = currentKey.currentContext;
+                if (c == null || !c.mounted) return;
+                Scrollable.ensureVisible(
+                  c,
+                  alignment: 0.35,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOut,
+                );
+              });
+            }
+
             return SafeArea(
               child: ConstrainedBox(
                 constraints: BoxConstraints(
@@ -1119,6 +1136,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                         selected: selectedGroup,
                         onSelected: (g) =>
                             setSheetState(() => selectedGroup = g),
+                        onLocate: hasCurrent ? locateCurrent : null,
                       ),
                     ),
                     Padding(
@@ -1145,7 +1163,9 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                 children: [
                                   for (final s in shown)
                                     KeyedSubtree(
-                                      key: s.id == currentId ? currentKey : null,
+                                      key: s.id == currentId
+                                          ? currentKey
+                                          : null,
                                       child: _quickSourceChip(
                                         name: s.name,
                                         selected: s.id == currentId,
@@ -1446,7 +1466,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                     children: g.options.map((o) {
                                       final selected =
                                           g.selected?.value == o.value ||
-                                              (g.selected == null && o.isAll);
+                                          (g.selected == null && o.isAll);
                                       return JellyFilterChip(
                                         label: o.name,
                                         selected: selected,
@@ -1485,16 +1505,17 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                   });
                                 },
                                 style: OutlinedButton.styleFrom(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 13),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 13,
+                                  ),
                                   side: BorderSide(
                                     color: isDark
                                         ? Colors.white.withValues(alpha: 0.22)
                                         : Colors.black.withValues(alpha: 0.16),
                                   ),
                                   shape: RoundedRectangleBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(14)),
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
                                   foregroundColor: labelColor,
                                 ),
                                 child: const Text('重置'),
@@ -1505,11 +1526,12 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                               child: FilledButton(
                                 onPressed: () => Navigator.pop(ctx, draft),
                                 style: FilledButton.styleFrom(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 13),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 13,
+                                  ),
                                   shape: RoundedRectangleBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(14)),
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
                                   backgroundColor: JellyTheme.primary,
                                 ),
                                 child: const Text('确定'),
@@ -1639,51 +1661,59 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                 // ⚠️ 用户 2026-10-07：筛选按钮单独拉出来，其余 4 个动作叠一起。
                 //   AppBar 分支（showBackButton）同样处理，保证两处一致。
                 _buildCategoryButton(
-                    Theme.of(context).brightness == Brightness.dark),
+                  Theme.of(context).brightness == Brightness.dark,
+                ),
                 const SizedBox(width: 6),
                 // ⚠️ 用户要求（本轮）：右上角由「并排滑动动作栏」改成**叠图标控件** ——
-//   · 最前的**完整可见**（深色圆底）
-//   · 后面各露出一部分，**左右滑动**循环切换最前
-//   · **长按**竖向展开全部
-//   原来的 `JellySlidingActions`（4 个并排）已整体替换，不再保留。
-JellyIconDeck(
-  items: [
-    JellyIconDeckItem(
-      icon: Icons.history_rounded,
-      tooltip: '浏览记录',
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const BrowseHistoryPage()),
-      ),
-    ),
-    JellyIconDeckItem(
-      icon: Icons.favorite_rounded,
-      tooltip: '收藏',
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => const FavoritesPage(showBackButton: true),
-        ),
-      ),
-    ),
-    JellyIconDeckItem(
-      icon: Icons.file_download_rounded,
-      tooltip: '下载',
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const ComicDownloadRecordsPage()),
-      ),
-    ),
-    JellyIconDeckItem(
-      icon: Icons.source_rounded,
-      tooltip: '漫画源仓库',
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const SourceRepoPage()),
-      ),
-    ),
-  ],
-),
+                //   · 最前的**完整可见**（深色圆底）
+                //   · 后面各露出一部分，**左右滑动**循环切换最前
+                //   · **长按**竖向展开全部
+                //   原来的 `JellySlidingActions`（4 个并排）已整体替换，不再保留。
+                JellyIconDeck(
+                  items: [
+                    JellyIconDeckItem(
+                      icon: Icons.history_rounded,
+                      tooltip: '浏览记录',
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const BrowseHistoryPage(),
+                        ),
+                      ),
+                    ),
+                    JellyIconDeckItem(
+                      icon: Icons.favorite_rounded,
+                      tooltip: '收藏',
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              const FavoritesPage(showBackButton: true),
+                        ),
+                      ),
+                    ),
+                    JellyIconDeckItem(
+                      icon: Icons.file_download_rounded,
+                      tooltip: '下载',
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const ComicDownloadRecordsPage(),
+                        ),
+                      ),
+                    ),
+                    JellyIconDeckItem(
+                      icon: Icons.source_rounded,
+                      tooltip: '漫画源仓库',
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const SourceRepoPage(),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
                 const SizedBox(width: 12),
               ],
             )
@@ -1710,101 +1740,111 @@ JellyIconDeck(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 SizedBox(
-              // 高度跟着布局走：原来是"标题行 + 居中的搜索行"两行(152)，
-              // 现在只有一行。搜索换成了可展开胶囊（高 50），
-              // 行高 = headerTop(8) + 50 = 58。
-              height: widget.showBackButton ? 60 : 58,
-              child: Stack(
-                children: [
-                  // ── 标题行（一行放下：标题 / 搜索框 / 图标组）────────
-                  //
-                  // 原来是两行：第一行「标题 + 滑动图标组」，
-                  // 第二行「居中的搜索框」。按用户截图重排成一行。
-                  //
-                  // ⚠️ 漫画页**不加拉绳**：图书/书源那根拉绳是"切到另一个
-                  // 搜索界面"的开关，而漫画页没有可切换的目标。
-                  // （用户漫画截图里标题右侧那根竖线是 iOS 的页面指示器，
-                  //   不是拉绳 —— 别误加。）
-                  if (!widget.showBackButton)
-                    Positioned(
-                      top: AppTheme.headerTop,
-                      left: AppTheme.headerSide,
-                      right: AppTheme.headerSide,
-                      child: Row(
-                        children: [
-                          AppPageTitle('漫画', isDark: isDark),
-                          const SizedBox(width: AppTheme.headerTitleGap),
-                          // ── 🔴 `Spacer` 而不是 `Expanded`（修"叠图标被裁"）──
-                          //
-                          // 原来包在 `Expanded` 里 ✗。`Expanded` 给的是 **tight 满宽**：
-                          //   · 它把中间那一大段宽度**全占掉**（约 230px），
-                          //   · 而 `_searchField()` 内部 `maxWidth: 107`，
-                          //     于是胶囊只画 107px，**剩下的是空白**（用户截图里那大片空 ✓）
-                          //   · 但"名额"已经被 `Expanded` 吃掉 ⇒ 右侧叠图标只能用零头
-                          //     ⇒ 一路顶到屏幕边缘、后面的卡片被裁掉 ✗
-                          //
-                          // 改 `Spacer` 后：搜索框只占内容宽（107），
-                          // `Spacer` 吃掉左侧空白，右侧图标组拿回足够宽度 ✓
-                          //（图书页/书源页上一轮已是这个写法，漫画页当时漏了。）
-                          const Spacer(),
-                          _searchField(),
-                          const SizedBox(width: 10),
-                          // ⚠️ 用户 2026-10-07（第二轮修正）：
-                          //   · **筛选按钮单独拉出来** ✓（不塞进滑动栏）
-                          //   · 其余 4 个动作叠在一起、左右滑动轮换 ✓
-                          _buildCategoryButton(isDark),
-                          const SizedBox(width: 10),
-                          // ⚠️ 用户要求（本轮）：右上角由「并排滑动动作栏」改成**叠图标控件** ——
-//   · 最前的**完整可见**（深色圆底）
-//   · 后面各露出一部分，**左右滑动**循环切换最前
-//   · **长按**竖向展开全部
-//   原来的 `JellySlidingActions`（4 个并排）已整体替换，不再保留。
-JellyIconDeck(
-  items: [
-    JellyIconDeckItem(
-      icon: Icons.history_rounded,
-      tooltip: '浏览记录',
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const BrowseHistoryPage()),
-      ),
-    ),
-    JellyIconDeckItem(
-      icon: Icons.favorite_rounded,
-      tooltip: '收藏',
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => const FavoritesPage(showBackButton: true),
-        ),
-      ),
-    ),
-    JellyIconDeckItem(
-      icon: Icons.file_download_rounded,
-      tooltip: '下载',
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const ComicDownloadRecordsPage()),
-      ),
-    ),
-    JellyIconDeckItem(
-      icon: Icons.source_rounded,
-      tooltip: '漫画源仓库',
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const SourceRepoPage()),
-      ),
-    ),
-  ],
-),
-                        ],
-                      ),
-                    ),
-                  // 第二行（搜索框 + 视图切换 + 分类按钮）已删除 ——
-                  // 搜索框并进标题行（Expanded 撑开），
-                  // 视图切换与分类按钮随图标组放在其右侧。
-                ],
-              ),
+                  // 高度跟着布局走：原来是"标题行 + 居中的搜索行"两行(152)，
+                  // 现在只有一行。搜索换成了可展开胶囊（高 50），
+                  // 行高 = headerTop(8) + 50 = 58。
+                  height: widget.showBackButton ? 60 : 58,
+                  child: Stack(
+                    children: [
+                      // ── 标题行（一行放下：标题 / 搜索框 / 图标组）────────
+                      //
+                      // 原来是两行：第一行「标题 + 滑动图标组」，
+                      // 第二行「居中的搜索框」。按用户截图重排成一行。
+                      //
+                      // ⚠️ 漫画页**不加拉绳**：图书/书源那根拉绳是"切到另一个
+                      // 搜索界面"的开关，而漫画页没有可切换的目标。
+                      // （用户漫画截图里标题右侧那根竖线是 iOS 的页面指示器，
+                      //   不是拉绳 —— 别误加。）
+                      if (!widget.showBackButton)
+                        Positioned(
+                          top: AppTheme.headerTop,
+                          left: AppTheme.headerSide,
+                          right: AppTheme.headerSide,
+                          child: Row(
+                            children: [
+                              AppPageTitle('漫画', isDark: isDark),
+                              const SizedBox(width: AppTheme.headerTitleGap),
+                              // ── 🔴 `Spacer` 而不是 `Expanded`（修"叠图标被裁"）──
+                              //
+                              // 原来包在 `Expanded` 里 ✗。`Expanded` 给的是 **tight 满宽**：
+                              //   · 它把中间那一大段宽度**全占掉**（约 230px），
+                              //   · 而 `_searchField()` 内部 `maxWidth: 107`，
+                              //     于是胶囊只画 107px，**剩下的是空白**（用户截图里那大片空 ✓）
+                              //   · 但"名额"已经被 `Expanded` 吃掉 ⇒ 右侧叠图标只能用零头
+                              //     ⇒ 一路顶到屏幕边缘、后面的卡片被裁掉 ✗
+                              //
+                              // 改 `Spacer` 后：搜索框只占内容宽（107），
+                              // `Spacer` 吃掉左侧空白，右侧图标组拿回足够宽度 ✓
+                              //（图书页/书源页上一轮已是这个写法，漫画页当时漏了。）
+                              const Spacer(),
+                              _searchField(),
+                              const SizedBox(width: 10),
+                              // ⚠️ 用户 2026-10-07（第二轮修正）：
+                              //   · **筛选按钮单独拉出来** ✓（不塞进滑动栏）
+                              //   · 其余 4 个动作叠在一起、左右滑动轮换 ✓
+                              _buildCategoryButton(isDark),
+                              const SizedBox(width: 10),
+                              // ⚠️ 用户要求（本轮）：右上角由「并排滑动动作栏」改成**叠图标控件** ——
+                              //   · 最前的**完整可见**（深色圆底）
+                              //   · 后面各露出一部分，**左右滑动**循环切换最前
+                              //   · **长按**竖向展开全部
+                              //   原来的 `JellySlidingActions`（4 个并排）已整体替换，不再保留。
+                              JellyIconDeck(
+                                items: [
+                                  JellyIconDeckItem(
+                                    icon: Icons.history_rounded,
+                                    tooltip: '浏览记录',
+                                    onTap: () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const BrowseHistoryPage(),
+                                      ),
+                                    ),
+                                  ),
+                                  JellyIconDeckItem(
+                                    icon: Icons.favorite_rounded,
+                                    tooltip: '收藏',
+                                    onTap: () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => const FavoritesPage(
+                                          showBackButton: true,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  JellyIconDeckItem(
+                                    icon: Icons.file_download_rounded,
+                                    tooltip: '下载',
+                                    onTap: () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const ComicDownloadRecordsPage(),
+                                      ),
+                                    ),
+                                  ),
+                                  JellyIconDeckItem(
+                                    icon: Icons.source_rounded,
+                                    tooltip: '漫画源仓库',
+                                    onTap: () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => const SourceRepoPage(),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      // 第二行（搜索框 + 视图切换 + 分类按钮）已删除 ——
+                      // 搜索框并进标题行（Expanded 撑开），
+                      // 视图切换与分类按钮随图标组放在其右侧。
+                    ],
+                  ),
                 ),
                 // 源切换小标签：从 Stack 里移出（Stack 高仅 58，原来
                 // top:50/52 的 chip 行超出被裁掉 → 源 tab 栏看不见），
@@ -1876,7 +1916,10 @@ JellyIconDeck(
               hasConfigured
                   ? '漫画源已锁定：未能连接密钥服务器，请检查网络后重启软件'
                   : '请到「漫画源仓库」填入云端地址并更新',
-              style: TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary),
+              style: TextStyle(
+                fontSize: AppTheme.fontSubhead,
+                color: JellyTheme.textSecondary,
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 20),
@@ -2043,7 +2086,10 @@ JellyIconDeck(
                 if (_history.isNotEmpty)
                   TextButton(
                     onPressed: _clearHistory,
-                    child: const Text('清空', style: TextStyle(fontSize: AppTheme.fontSubhead)),
+                    child: const Text(
+                      '清空',
+                      style: TextStyle(fontSize: AppTheme.fontSubhead),
+                    ),
                   ),
               ],
             ),

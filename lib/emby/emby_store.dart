@@ -109,6 +109,15 @@ class EmbyStore extends ChangeNotifier {
     await _persist();
   }
 
+  /// 只改显示名称（不重新登录、不动 token）。
+  Future<void> rename(String id, String name) async {
+    await load();
+    final idx = _servers.indexWhere((s) => s.id == id);
+    if (idx < 0) return;
+    _servers[idx].name = name.trim();
+    await _persist();
+  }
+
   Future<void> setActive(String id) async {
     await load();
     if (!_servers.any((s) => s.id == id)) return;
