@@ -64,40 +64,46 @@ class _SwipeActionTileState extends State<SwipeActionTile> {
       child: Stack(
         children: [
           // 右侧操作区
+          // ⚠️ 静止时必须整层隐藏：卡片底色大多是半透明的
+          //（AppTheme.backgroundCard* 只有 0.8/0.9 alpha），
+          // 不隐藏就会从卡片里透出「编辑/分享/删除」，看起来像 bug。
           Positioned.fill(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                for (final a in widget.actions)
-                  SizedBox(
-                    width: _actionWidth,
-                    child: Material(
-                      color: a.color,
-                      child: InkWell(
-                        onTap: () {
-                          _close();
-                          a.onTap();
-                        },
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(a.icon, size: 19, color: Colors.white),
-                            const SizedBox(height: 3),
-                            Text(
-                              a.label,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
+            child: Visibility(
+              visible: _offset != 0,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  for (final a in widget.actions)
+                    SizedBox(
+                      width: _actionWidth,
+                      child: Material(
+                        color: a.color,
+                        child: InkWell(
+                          onTap: () {
+                            _close();
+                            a.onTap();
+                          },
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(a.icon, size: 19, color: Colors.white),
+                              const SizedBox(height: 3),
+                              Text(
+                                a.label,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
           // 前景行
