@@ -277,7 +277,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
         // 普通模式：分享 + 盾牌（体检）两个图标**同时并排显示**，不用滑动切换。
         if (!_selectMode)
           // 书源仓（用户 2026-10-18）：从「我的」页移到这里，右上角图标进入
-          _appBarIcon(Icons.storage_rounded, '书源仓', () {
+          _appBarIcon(Icons.storefront_rounded, '书源仓', () {
             Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const SourceWarehousePage()),
@@ -289,14 +289,14 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
             _shareAll();
           }),
         // 盾牌（书源体检）：两种模式都在。
-        _appBarIcon(Icons.verified_user_rounded, '书源体检', () {
+        _appBarIcon(Icons.health_and_safety_rounded, '书源体检', () {
           if (store.isEmpty || _healthChecking) return;
           _runHealthCheck();
         }),
         // 导入书源：右上角按钮 → 居中弹窗（用户 2026-10-18）
         if (!_selectMode)
           _appBarIcon(
-            Icons.file_download_outlined,
+            Icons.input_rounded,
             '导入书源',
             _showImportSheet,
           ),

@@ -2033,7 +2033,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                 // ── 导入 ─────────────────────────────────────
                 groupLabel('导入'),
                 item(
-                  icon: Icons.file_download_outlined,
+                  icon: Icons.input_rounded,
                   title: '导入本地图书',
                   subtitle: '从本地文件导入 epub / pdf / txt 图书',
                   onTap: () {

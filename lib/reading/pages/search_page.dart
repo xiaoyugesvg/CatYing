@@ -1703,7 +1703,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                       ),
                     ),
                     JellyIconDeckItem(
-                      icon: Icons.source_rounded,
+                      icon: Icons.local_mall_rounded,
                       tooltip: '漫画源仓库',
                       onTap: () => Navigator.push(
                         context,
@@ -1826,7 +1826,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                     ),
                                   ),
                                   JellyIconDeckItem(
-                                    icon: Icons.source_rounded,
+                                    icon: Icons.local_mall_rounded,
                                     tooltip: '漫画源仓库',
                                     onTap: () => Navigator.push(
                                       context,

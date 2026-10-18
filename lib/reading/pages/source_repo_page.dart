@@ -288,13 +288,13 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(Icons.health_and_safety_outlined),
+                : const Icon(Icons.health_and_safety_rounded),
             onPressed: _healthChecking ? null : _runHealthCheck,
           ),
           // 漫画仓（用户 2026-10-18）：从「我的」页移到仓库页右上角
           IconButton(
             tooltip: '漫画仓',
-            icon: const Icon(Icons.inventory_2_outlined),
+            icon: const Icon(Icons.local_mall_rounded),
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(
@@ -305,7 +305,7 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
           // 导入源：右上角按钮 → 居中弹窗（用户 2026-10-18）
           IconButton(
             tooltip: '导入源',
-            icon: const Icon(Icons.file_download_outlined),
+            icon: const Icon(Icons.input_rounded),
             onPressed: _showImportDialog,
           ),
           const SizedBox(width: 4),

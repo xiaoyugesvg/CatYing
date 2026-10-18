@@ -19,7 +19,7 @@ class HomePagesSettingsPage extends StatelessWidget {
     NavFeature.live: Icons.live_tv_outlined,
     NavFeature.music: Icons.library_music_outlined,
     NavFeature.books: Icons.menu_book_outlined,
-    NavFeature.apps: Icons.widgets_outlined,
+    NavFeature.apps: Icons.storefront_outlined,
     // RSS / 海阔：之前漏了这两项 ⇒ 菜单设置里它们显示成默认灰圆圈，
     // 与其它项不一致（NavFeature 自己带 icon getter，这里只是复刻一份）
     NavFeature.rss: Icons.rss_feed_outlined,

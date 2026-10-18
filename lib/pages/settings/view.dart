@@ -108,7 +108,7 @@ class _SettingsPageState extends State<SettingsPage> {
               // 用户 2026-10-18：市场改为订阅制独立页（多订阅/多市场），
               // 「程序管理」直接进市场订阅页；已安装内容在「程序」tab 里看。
               _categoryTile(
-                icon: Icons.widgets_outlined,
+                icon: Icons.storefront_outlined,
                 title: '程序管理',
                 onTap: () => Get.to(() => const MiniAppMarketPage()),
               ),

@@ -802,7 +802,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                 ),
               ),
               JellyIconDeckItem(
-                icon: Icons.manage_search_rounded,
+                icon: Icons.storefront_rounded,
                 tooltip: '书源仓库',
                 onTap: () async {
                   await Navigator.push(

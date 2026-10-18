@@ -217,7 +217,7 @@ class _MePageState extends State<MePage> {
                         width: itemWidth,
                         child: _buildMenuItem(
                           isDark,
-                          icon: Icons.source_rounded,
+                          icon: Icons.local_mall_rounded,
                           iconBg: JellyTheme.primary,
                           title: '漫画源仓库',
                           subtitle: '启用源 · 云端配置',
@@ -243,7 +243,7 @@ class _MePageState extends State<MePage> {
                         width: itemWidth,
                         child: _buildMenuItem(
                           isDark,
-                          icon: Icons.library_books_rounded,
+                          icon: Icons.storefront_rounded,
                           iconBg: JellyTheme.primary,
                           title: '书源仓库',
                           subtitle: '导入书源 · 口令 · 排序',
@@ -1578,7 +1578,7 @@ class _MePageState extends State<MePage> {
                                       Expanded(
                                         child: _buildThemeTransferButton(
                                           isDark,
-                                          Icons.file_download_outlined,
+                                          Icons.input_rounded,
                                           '导入主题',
                                           _importThemes,
                                         ),
