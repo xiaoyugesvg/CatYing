@@ -973,6 +973,35 @@ class _LivePageState extends State<LivePage> {
                                 ),
                               ),
                               const SizedBox(width: 8),
+                              // 频道视图：列表 / 卡片 / 网格 2·3·4 列
+                              Obx(() {
+                                final mode = c.channelView.value;
+                                return GestureDetector(
+                                  onTap: () =>
+                                      _showChannelViewSheet(context, c),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 10,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: mode != 0
+                                          ? AppTheme.accentColor
+                                              .withValues(alpha: 0.16)
+                                          : AppTheme.backgroundTertiary,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Icon(
+                                      _viewIcon(mode),
+                                      size: 18,
+                                      color: mode != 0
+                                          ? AppTheme.accentOnSurface
+                                          : AppTheme.textSecondary,
+                                    ),
+                                  ),
+                                );
+                              }),
+                              const SizedBox(width: 8),
                               GestureDetector(
                                 onTap: () => _showEpgSheet(context, c),
                                 child: Container(
@@ -1898,37 +1927,47 @@ class _LivePageState extends State<LivePage> {
     final srcs = LiveService.instance.sources;
     showDialog(
       context: context,
-      builder: (ctx) {
-        return Dialog(
-          backgroundColor: AppTheme.backgroundSecondary,
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 28,
-            vertical: 24,
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(ctx).size.height * 0.55,
-              maxWidth: 360,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) {
+          final view = c.sourceView.value;
+          return Dialog(
+            backgroundColor: AppTheme.backgroundSecondary,
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 28,
+              vertical: 24,
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: EdgeInsets.fromLTRB(20, 18, 12, 8),
-                  child: Row(
-                    children: [
-                      Text(
-                        '选择直播源',
-                        style: TextStyle(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(ctx).size.height * 0.55,
+                maxWidth: 360,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(20, 18, 12, 8),
+                    child: Row(
+                      children: [
+                        Text(
+                          '选择直播源',
+                          style: TextStyle(
                           color: AppTheme.textPrimary,
                           fontSize: AppTheme.fontHeadline,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
                       const Spacer(),
+                      // 视图切换（列表 / 两列 / 三列）
+                      _sheetViewButton(
+                        view: view,
+                        onChanged: (v) {
+                          c.setSourceView(v);
+                          setModalState(() {});
+                        },
+                      ),
                       TextButton(
                         onPressed: () {
                           Navigator.pop(ctx);
@@ -1952,8 +1991,9 @@ class _LivePageState extends State<LivePage> {
                   )
                 else
                   Flexible(
-                    child: ListView.separated(
-                      shrinkWrap: true,
+                    child: view == 0
+                        ? ListView.separated(
+                            shrinkWrap: true,
                       padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                       itemCount: srcs.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 6),
@@ -2052,14 +2092,174 @@ class _LivePageState extends State<LivePage> {
                           ),
                         );
                       },
-                    ),
+                          )
+                        : _sourceGrid(srcs, c, view, ctx),
                   ),
                 const SizedBox(height: 10),
               ],
             ),
           ),
         );
+        },
+      ),
+    );
+  }
+
+  /// 直播源弹窗的网格视图（两列 / 三列）
+  Widget _sourceGrid(
+    List<LiveSource> srcs,
+    LiveController c,
+    int view,
+    BuildContext dialogCtx,
+  ) {
+    return GridView.builder(
+      shrinkWrap: true,
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: view == 1 ? 2 : 3,
+        mainAxisSpacing: 6,
+        crossAxisSpacing: 6,
+        childAspectRatio: view == 1 ? 2.5 : 1.15,
+      ),
+      itemCount: srcs.length,
+      itemBuilder: (_, i) {
+        final src = srcs[i];
+        final isActive = c.selectedSourceIndex == i;
+        return Material(
+          color: isActive
+              ? AppTheme.accentColor.withValues(alpha: 0.12)
+              : AppTheme.backgroundTertiary.withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () async {
+              Navigator.pop(dialogCtx);
+              await c.selectSource(i);
+              _autoplayCurrent();
+            },
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: isActive
+                    ? Border.all(
+                        color: AppTheme.accentColor.withValues(alpha: 0.45),
+                        width: 0.8)
+                    : null,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 7,
+                        height: 7,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: isActive
+                              ? AppTheme.accentColor
+                              : (src.loaded
+                                  ? const Color(0xFF4CAF50)
+                                  : AppTheme.textTertiary),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          src.name,
+                          maxLines: view == 1 ? 1 : 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: isActive
+                                ? AppTheme.accentColor
+                                : AppTheme.textPrimary,
+                            fontSize:
+                                view == 1 ? AppTheme.fontSubhead : 12,
+                            fontWeight: isActive
+                                ? FontWeight.w700
+                                : FontWeight.w600,
+                            height: 1.2,
+                          ),
+                        ),
+                      ),
+                      if (isActive)
+                        Icon(
+                          Icons.check_circle_rounded,
+                          size: 16,
+                          color: AppTheme.accentColor,
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    isActive ? '当前播放' : src.statusText(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isActive
+                          ? AppTheme.accentColor.withValues(alpha: 0.75)
+                          : AppTheme.textTertiary,
+                      fontSize: AppTheme.fontCaption,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
       },
+    );
+  }
+
+  /// 弹窗标题栏的视图切换按钮（列表 / 两列 / 三列）
+  Widget _sheetViewButton({
+    required int view,
+    required ValueChanged<int> onChanged,
+  }) {
+    return PopupMenuButton<int>(
+      tooltip: '切换视图',
+      initialValue: view,
+      color: AppTheme.backgroundSecondary,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      onSelected: onChanged,
+      itemBuilder: (_) => const [
+        PopupMenuItem(
+          value: 0,
+          child: Row(children: [
+            Icon(Icons.view_list_rounded, size: 16),
+            SizedBox(width: 8),
+            Text('列表'),
+          ]),
+        ),
+        PopupMenuItem(
+          value: 1,
+          child: Row(children: [
+            Icon(Icons.grid_view_rounded, size: 16),
+            SizedBox(width: 8),
+            Text('两列'),
+          ]),
+        ),
+        PopupMenuItem(
+          value: 2,
+          child: Row(children: [
+            Icon(Icons.apps_rounded, size: 16),
+            SizedBox(width: 8),
+            Text('三列'),
+          ]),
+        ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Icon(
+          _viewIcon(view),
+          size: 20,
+          color: AppTheme.textSecondary,
+        ),
+      ),
     );
   }
 
@@ -2071,7 +2271,9 @@ class _LivePageState extends State<LivePage> {
   ) async {
     showDialog(
       context: context,
-      builder: (ctx) {
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) {
+        final view = c.groupView.value;
         return Dialog(
           backgroundColor: AppTheme.backgroundSecondary,
           insetPadding: const EdgeInsets.symmetric(
@@ -2091,19 +2293,32 @@ class _LivePageState extends State<LivePage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Padding(
-                  padding: EdgeInsets.fromLTRB(20, 18, 20, 10),
-                  child: Text(
-                    '选择分组',
-                    style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: AppTheme.fontHeadline,
-                      fontWeight: FontWeight.w600,
-                    ),
+                  padding: EdgeInsets.fromLTRB(20, 18, 12, 10),
+                  child: Row(
+                    children: [
+                      Text(
+                        '选择分组',
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: AppTheme.fontHeadline,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const Spacer(),
+                      _sheetViewButton(
+                        view: view,
+                        onChanged: (v) {
+                          c.setGroupView(v);
+                          setModalState(() {});
+                        },
+                      ),
+                    ],
                   ),
                 ),
                 Flexible(
-                  child: ListView.separated(
-                    shrinkWrap: true,
+                  child: view == 0
+                      ? ListView.separated(
+                          shrinkWrap: true,
                     padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                     itemCount: groups.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 6),
@@ -2181,10 +2396,146 @@ class _LivePageState extends State<LivePage> {
                         ),
                       );
                     },
-                  ),
+                        )
+                      : _groupGrid(groups, c, view, ctx),
                 ),
                 const SizedBox(height: 10),
               ],
+            ),
+          ),
+        );
+        },
+      ),
+    );
+  }
+
+  /// 分组弹窗的网格视图（两列 / 三列）
+  Widget _groupGrid(
+    List<LiveGroup> groups,
+    LiveController c,
+    int view,
+    BuildContext dialogCtx,
+  ) {
+    return GridView.builder(
+      shrinkWrap: true,
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: view == 1 ? 2 : 3,
+        mainAxisSpacing: 6,
+        crossAxisSpacing: 6,
+        childAspectRatio: view == 1 ? 2.5 : 1.2,
+      ),
+      itemCount: groups.length,
+      itemBuilder: (_, i) {
+        final g = groups[i];
+        final selected = c.selectedGroup == i;
+        return Material(
+          color: selected
+              ? AppTheme.accentColor.withValues(alpha: 0.12)
+              : AppTheme.backgroundTertiary.withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () {
+              Navigator.pop(dialogCtx);
+              c.selectGroup(i);
+              _autoplayCurrent();
+            },
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: selected
+                    ? Border.all(
+                        color: AppTheme.accentColor.withValues(alpha: 0.45),
+                        width: 0.8)
+                    : null,
+              ),
+              child: view == 1
+                  ? Row(
+                      children: [
+                        Icon(
+                          Icons.playlist_play_rounded,
+                          size: 18,
+                          color: selected
+                              ? AppTheme.accentColor
+                              : AppTheme.textTertiary,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            g.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: selected
+                                  ? AppTheme.accentColor
+                                  : AppTheme.textPrimary,
+                              fontSize: AppTheme.fontFootnote,
+                              fontWeight: selected
+                                  ? FontWeight.w700
+                                  : FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          '${g.channels.length}',
+                          style: TextStyle(
+                            color: AppTheme.textTertiary,
+                            fontSize: AppTheme.fontCaption,
+                          ),
+                        ),
+                      ],
+                    )
+                  : Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.playlist_play_rounded,
+                              size: 16,
+                              color: selected
+                                  ? AppTheme.accentColor
+                                  : AppTheme.textTertiary,
+                            ),
+                            if (selected) ...[
+                              const Spacer(),
+                              Icon(
+                                Icons.check_circle_rounded,
+                                size: 14,
+                                color: AppTheme.accentColor,
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          g.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: selected
+                                ? AppTheme.accentColor
+                                : AppTheme.textPrimary,
+                            fontSize: 12,
+                            height: 1.15,
+                            fontWeight: selected
+                                ? FontWeight.w700
+                                : FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${g.channels.length} 个',
+                          style: TextStyle(
+                            color: AppTheme.textTertiary,
+                            fontSize: AppTheme.fontCaption,
+                          ),
+                        ),
+                      ],
+                    ),
             ),
           ),
         );
@@ -2413,6 +2764,133 @@ class _LivePageState extends State<LivePage> {
     );
   }
 
+  IconData _viewIcon(int mode) => switch (mode) {
+        1 => Icons.view_agenda_rounded,
+        2 => Icons.grid_view_rounded,
+        3 => Icons.apps_rounded,
+        4 => Icons.grid_on_rounded,
+        _ => Icons.view_list_rounded,
+      };
+
+  /// 频道列表视图切换面板（用户 2026-10-18）
+  Future<void> _showChannelViewSheet(
+    BuildContext context,
+    LiveController c,
+  ) async {
+    const modes = [
+      (0, '列表', Icons.view_list_rounded),
+      (1, '卡片', Icons.view_agenda_rounded),
+      (2, '两列', Icons.grid_view_rounded),
+      (3, '三列', Icons.apps_rounded),
+      (4, '四列', Icons.grid_on_rounded),
+    ];
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '频道视图',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontHeadline,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  for (final m in modes)
+                    Expanded(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          c.setChannelView(m.$1);
+                        },
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 3),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          decoration: BoxDecoration(
+                            color: c.channelView.value == m.$1
+                                ? AppTheme.accentColor.withValues(alpha: 0.16)
+                                : AppTheme.backgroundTertiary,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Column(
+                            children: [
+                              Icon(
+                                m.$3,
+                                size: 20,
+                                color: c.channelView.value == m.$1
+                                    ? AppTheme.accentOnSurface
+                                    : AppTheme.textSecondary,
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                m.$2,
+                                style: TextStyle(
+                                  color: c.channelView.value == m.$1
+                                      ? AppTheme.accentOnSurface
+                                      : AppTheme.textSecondary,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 频道台标（列表/卡片/网格共用）
+  Widget _channelLogo(LiveChannel ch, {required double size}) {
+    final hasLogo = (ch.logo ?? '').trim().isNotEmpty;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(size * 0.18),
+      child: Container(
+        width: size,
+        height: size,
+        color: AppTheme.backgroundSecondary,
+        alignment: Alignment.center,
+        child: hasLogo
+            ? CachedNetworkImage(
+                imageUrl: ch.logo!.trim(),
+                width: size,
+                height: size,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => Icon(
+                  Icons.live_tv_rounded,
+                  size: size * 0.5,
+                  color: AppTheme.textTertiary,
+                ),
+              )
+            : Icon(
+                Icons.live_tv_rounded,
+                size: size * 0.5,
+                color: AppTheme.textTertiary,
+              ),
+      ),
+    );
+  }
+
   Widget _buildChannelList(LiveController c, List<LiveChannel> channels) {
     if (channels.isEmpty) {
       return Center(
@@ -2430,6 +2908,15 @@ class _LivePageState extends State<LivePage> {
             ),
           ],
         ),
+      );
+    }
+    final mode = c.channelView.value;
+    if (mode == 1) return _buildChannelCards(c, channels);
+    if (mode >= 2) {
+      return _buildChannelGrid(
+        c,
+        channels,
+        mode == 2 ? 2 : (mode == 3 ? 3 : 4),
       );
     }
     return ListView.separated(
@@ -2463,29 +2950,7 @@ class _LivePageState extends State<LivePage> {
               ),
               child: Row(
                 children: [
-                  // 频道台标（源里带 logo 就显示，加载失败回退 TV 图标）
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Container(
-                      width: 36,
-                      height: 36,
-                      color: AppTheme.backgroundSecondary,
-                      alignment: Alignment.center,
-                      child: (ch.logo ?? '').trim().isEmpty
-                          ? Icon(Icons.live_tv_rounded,
-                              size: 20, color: AppTheme.textTertiary)
-                          : CachedNetworkImage(
-                              imageUrl: ch.logo!.trim(),
-                              width: 36,
-                              height: 36,
-                              fit: BoxFit.contain,
-                              errorBuilder: (_, __, ___) => Icon(
-                                  Icons.live_tv_rounded,
-                                  size: 20,
-                                  color: AppTheme.textTertiary),
-                            ),
-                    ),
-                  ),
+                  _channelLogo(ch, size: 36),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
@@ -2519,25 +2984,235 @@ class _LivePageState extends State<LivePage> {
                       ],
                     ),
                   ),
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => c.toggleFavorite(ch),
-                    child: Padding(
-                      padding: const EdgeInsets.all(6),
-                      child: Icon(
-                        fav ? Icons.star_rounded : Icons.star_border_rounded,
-                        color:
-                            fav ? AppTheme.accentColor : AppTheme.textTertiary,
-                        size: 21,
-                      ),
-                    ),
-                  ),
+                  _channelFavButton(c, ch, fav),
                   Icon(
                     Icons.play_circle_fill_rounded,
                     color: selected
                         ? AppTheme.accentColor
                         : AppTheme.textTertiary.withValues(alpha: 0.5),
                     size: 22,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _channelFavButton(LiveController c, LiveChannel ch, bool fav) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => c.toggleFavorite(ch),
+      child: Padding(
+        padding: const EdgeInsets.all(6),
+        child: Icon(
+          fav ? Icons.star_rounded : Icons.star_border_rounded,
+          color: fav ? AppTheme.accentColor : AppTheme.textTertiary,
+          size: 21,
+        ),
+      ),
+    );
+  }
+
+  /// 卡片视图：一行一个，台标更大、名称两行
+  Widget _buildChannelCards(LiveController c, List<LiveChannel> channels) {
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 12),
+      itemCount: channels.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemBuilder: (_, i) {
+        final ch = channels[i];
+        final selected = c.selectedChannelIndex.value == i;
+        final fav = c.isFavorite(ch);
+        return Material(
+          color: selected
+              ? AppTheme.accentColor.withValues(alpha: 0.12)
+              : AppTheme.backgroundTertiary.withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: () {
+              c.selectChannel(i);
+              _playChannelEntry(ch);
+            },
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: selected
+                    ? Border.all(
+                        color: AppTheme.accentColor.withValues(alpha: 0.45),
+                        width: 0.8)
+                    : null,
+              ),
+              child: Row(
+                children: [
+                  _channelLogo(ch, size: 58),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          ch.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: selected
+                                ? AppTheme.accentColor
+                                : AppTheme.textPrimary,
+                            fontSize: AppTheme.fontBody,
+                            fontWeight:
+                                selected ? FontWeight.w700 : FontWeight.w600,
+                            height: 1.25,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          ch.urls.isNotEmpty ? ch.group : '未下载',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: AppTheme.textTertiary,
+                            fontSize: AppTheme.fontCaption,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  _channelFavButton(c, ch, fav),
+                  Icon(
+                    Icons.play_circle_fill_rounded,
+                    color: selected
+                        ? AppTheme.accentColor
+                        : AppTheme.textTertiary.withValues(alpha: 0.5),
+                    size: 26,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// 网格视图：每行 2 / 3 / 4 个
+  Widget _buildChannelGrid(
+    LiveController c,
+    List<LiveChannel> channels,
+    int cols,
+  ) {
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 12),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: cols,
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
+        // 4 列时台标接近正方形 + 一行文字；2/3 列留出两行文字
+        childAspectRatio: cols == 2 ? 0.96 : (cols == 3 ? 0.86 : 0.74),
+      ),
+      itemCount: channels.length,
+      itemBuilder: (_, i) {
+        final ch = channels[i];
+        final selected = c.selectedChannelIndex.value == i;
+        final fav = c.isFavorite(ch);
+        final compact = cols >= 4;
+        return Material(
+          color: selected
+              ? AppTheme.accentColor.withValues(alpha: 0.12)
+              : AppTheme.backgroundTertiary.withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () {
+              c.selectChannel(i);
+              _playChannelEntry(ch);
+            },
+            child: Container(
+              padding: EdgeInsets.all(compact ? 5 : 7),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: selected
+                    ? Border.all(
+                        color: AppTheme.accentColor.withValues(alpha: 0.45),
+                        width: 0.8)
+                    : null,
+              ),
+              child: Column(
+                children: [
+                  Expanded(
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Container(
+                          decoration: BoxDecoration(
+                            color: AppTheme.backgroundSecondary,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          alignment: Alignment.center,
+                          padding: const EdgeInsets.all(6),
+                          child: (ch.logo ?? '').trim().isEmpty
+                              ? Icon(
+                                  Icons.live_tv_rounded,
+                                  size: compact ? 20 : 28,
+                                  color: AppTheme.textTertiary,
+                                )
+                              : CachedNetworkImage(
+                                  imageUrl: ch.logo!.trim(),
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (_, __, ___) => Icon(
+                                    Icons.live_tv_rounded,
+                                    size: compact ? 20 : 28,
+                                    color: AppTheme.textTertiary,
+                                  ),
+                                ),
+                        ),
+                        Positioned(
+                          top: 0,
+                          right: 0,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => c.toggleFavorite(ch),
+                            child: Container(
+                              padding: const EdgeInsets.all(3),
+                              decoration: BoxDecoration(
+                                color: AppTheme.backgroundPrimary
+                                    .withValues(alpha: 0.55),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                fav
+                                    ? Icons.star_rounded
+                                    : Icons.star_border_rounded,
+                                size: compact ? 13 : 15,
+                                color: fav
+                                    ? AppTheme.accentColor
+                                    : AppTheme.textTertiary,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    ch.name,
+                    maxLines: compact ? 1 : 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: selected
+                          ? AppTheme.accentColor
+                          : AppTheme.textPrimary,
+                      fontSize: compact ? 10 : 11.5,
+                      height: 1.15,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    ),
                   ),
                 ],
               ),

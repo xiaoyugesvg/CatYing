@@ -496,11 +496,15 @@ class _HomePageState extends State<HomePage>
                         // ✅ iPad（宽 ≥ 800 且短边 ≥ 600）：左侧竖栏 + 内容（内容自动让位 ✓）
                         ? Row(
                             children: [
-                              JellyNavRail(
-                                currentIndex: currentIndex,
-                                onTap: (i) => _onNavTap(i, visible, currentIndex),
-                                onLongPress: _onNavLongPress,
-                                items: navItems,
+                              ListenableBuilder(
+                                listenable: SettingsService(),
+                                builder: (context, _) => JellyNavRail(
+                                  currentIndex: currentIndex,
+                                  onTap: (i) =>
+                                      _onNavTap(i, visible, currentIndex),
+                                  onLongPress: _onNavLongPress,
+                                  items: navItems,
+                                ),
                               ),
                               Expanded(
                                 child: _embeddedOrTabs(currentIndex, visible, pages),

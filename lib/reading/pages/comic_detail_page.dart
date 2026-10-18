@@ -4,6 +4,7 @@ import '../../widgets/common_widgets.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:html/parser.dart' as html_parser;
 import '../models/comic.dart';
 import '../source/adapter.dart';
 import '../source/source_manager.dart';
@@ -948,8 +949,24 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     );
   }
 
+  /// 简介兜底清洗：部分源（Venera 脚本 / Legado 转义 HTML）给的是富文本，
+  /// 直接塞进 `Text` 会原样显示 `<span class="title">` 这类标签。
+  String _plainSynopsis(String raw) {
+    if (!raw.contains('<') && !raw.contains('&lt;')) return raw;
+    var text = raw;
+    try {
+      text = html_parser.parse(raw).documentElement?.text ?? raw;
+    } catch (_) {}
+    // 二次转义（解析一次后仍是标签文本）再剥一层
+    text = text.replaceAll(RegExp(r'<[^>]*>'), '');
+    return text
+        .replaceAll(RegExp(r'^简介\s*[:：]\s*'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
   Widget _buildSynopsis(Color titleColor, Color secondaryColor) {
-    final desc = _comic.description!;
+    final desc = _plainSynopsis(_comic.description!);
     // 简介较长时提供展开/收起
     final likelyLong = desc.length > 60 || desc.contains('\n');
     return Column(

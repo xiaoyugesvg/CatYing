@@ -9,7 +9,6 @@ import 'manhuaren_config.dart';
 import 'manhuaren_source.dart';
 import 'models.dart';
 import '../models/book_source.dart' show BookSourceStore;
-import '../novel_source/model/book_source.dart' show XiaoshuoBookSource;
 import 'site_config.dart';
 import 'source_config_store.dart';
 import 'source_definition.dart';
@@ -131,9 +130,7 @@ class SourceManager extends ChangeNotifier {
       for (final bs in BookSourceStore.instance.all) {
         if (bs.type != '2') continue;
         try {
-          _register(LegadoComicMangaSource(
-            XiaoshuoBookSource.fromJson(bs.raw),
-          ));
+          _register(LegadoComicMangaSource.fromRaw(bs.raw));
         } catch (e) {
           _log('Legado 漫画源注册失败: ${bs.name} -> $e');
         }
@@ -235,9 +232,7 @@ class SourceManager extends ChangeNotifier {
         );
       case 'legado':
         try {
-          return LegadoComicMangaSource(
-            XiaoshuoBookSource.fromJson(def.config),
-          );
+          return LegadoComicMangaSource.fromRaw(def.config);
         } catch (e) {
           _log('Legado 漫画源解析失败: ${def.id} -> $e');
           return null;

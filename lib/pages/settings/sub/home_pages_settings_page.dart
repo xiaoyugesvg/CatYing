@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 import '../../../common/theme.dart';
 import '../../../reading/services/settings_service.dart';
 import '../../../services/nav_feature_service.dart';
+import 'nav_appearance_page.dart';
 import 'settings_shared.dart';
 
 /// 设置 → 主页页面
@@ -116,6 +117,57 @@ class HomePagesSettingsPage extends StatelessWidget {
             return SettingsGroup(
               title: '悬浮导航栏',
               children: [
+                // 底栏风格（水墨/液态玻璃/炫彩/霓虹）+ 每个 tab 的自定义图标
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const NavAppearancePage(),
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.auto_awesome_mosaic_outlined,
+                          size: 20,
+                          color: AppTheme.textSecondary,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '风格与图标',
+                                style: TextStyle(
+                                  color: AppTheme.textPrimary,
+                                  fontSize: AppTheme.fontSubhead,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '液态玻璃 / 炫彩 / 霓虹，支持上传图片替换图标',
+                                style: TextStyle(
+                                  color: AppTheme.textTertiary,
+                                  fontSize: AppTheme.fontCaption,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          color: AppTheme.textTertiary,
+                          size: 20,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
                 unifiedSwitchRow(
                   icon: Icons.filter_center_focus,
                   title: '悬浮样式',

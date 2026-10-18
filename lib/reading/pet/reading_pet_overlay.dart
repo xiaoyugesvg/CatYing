@@ -220,88 +220,108 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
             final maxY = (constraints.maxHeight - petSize).clamp(0.0, double.infinity);
             final left = (_pet.posX * maxX).clamp(0.0, maxX);
             final top = (_pet.posY * maxY).clamp(0.0, maxY);
+            // 贴边状态：posX 吸附到 0 / 1 时，宠物「扒」在屏幕边缘
+            //（身体探出屏幕一部分 + 朝屏幕内侧微倾），而不是贴平站在边上。
+            final dockLeft = _pet.posX <= 0.001;
+            final dockRight = _pet.posX >= 0.999;
+
+            Widget petBody = Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_bubble != null) _bubbleView(),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _onTap,
+                  onLongPress: _openMenu,
+                  onPanStart: (_) => setState(() => _dragging = true),
+                  onPanUpdate: (d) {
+                    final nx = (left + d.delta.dx) / maxX;
+                    final ny = (top + d.delta.dy) / maxY;
+                    _pet.setPosition(nx, ny);
+                  },
+                  onPanEnd: (_) {
+                    // 用户 2026-10-18：「宠物贴边」——
+                    // 松手时离左/右边缘 24px 以内就吸附到屏幕边缘，
+                    // 不再和屏幕之间留一条缝。
+                    final snapX = left <= 24
+                        ? 0.0
+                        : (left >= maxX - 24 ? 1.0 : _pet.posX);
+                    if (snapX != _pet.posX) {
+                      _pet.setPosition(snapX, _pet.posY);
+                    }
+                    _pet.persistPosition();
+                    setState(() => _dragging = false);
+                  },
+                  child: AnimatedBuilder(
+                    animation: _anim,
+                    builder: (context, _) => Opacity(
+                      opacity: _dragging ? 0.85 : 1,
+                      child: AnimatedScale(
+                        scale: _bounce ? 1.12 : 1.0,
+                        duration: const Duration(milliseconds: 140),
+                        curve: Curves.easeOutBack,
+                        // 自定义 PNG / GIF 皮肤优先；否则用内置插画 / 矢量
+                        child: _pet.isCustomPet &&
+                                _pet.customPetPath.isNotEmpty
+                            ? CustomPetImage(
+                                path: _pet.customPetPath,
+                                size: petSize,
+                                bob: sin(_anim.value * 2 * pi) * 1.6,
+                              )
+                            : PetView(
+                                species: _pet.species,
+                                outfit: _pet.equippedOutfit,
+                                t: _anim.value * 4,
+                                size: petSize,
+                                mood: _pet.mood,
+                              ),
+                      ),
+                    ),
+                  ),
+                ),
+                // 等级小徽标
+                Transform.translate(
+                  offset: const Offset(0, -6),
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      'Lv.${_pet.level}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+
+            if (dockLeft || dockRight) {
+              // 探出屏幕 ~14%，并以内侧边缘为轴朝屏幕里倾 6°
+              petBody = Transform.translate(
+                offset: Offset(dockLeft ? -petSize * 0.14 : petSize * 0.14, 0),
+                child: Transform.rotate(
+                  angle: dockLeft ? 0.10 : -0.10,
+                  alignment:
+                      dockLeft ? Alignment.centerLeft : Alignment.centerRight,
+                  child: petBody,
+                ),
+              );
+            }
 
             return Stack(
+              clipBehavior: Clip.none,
               children: [
                 Positioned(
                   left: left,
                   top: top,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (_bubble != null) _bubbleView(),
-                      GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: _onTap,
-                        onLongPress: _openMenu,
-                        onPanStart: (_) => setState(() => _dragging = true),
-                        onPanUpdate: (d) {
-                          final nx = (left + d.delta.dx) / maxX;
-                          final ny = (top + d.delta.dy) / maxY;
-                          _pet.setPosition(nx, ny);
-                        },
-                        onPanEnd: (_) {
-                          // 用户 2026-10-18：「宠物贴边」——
-                          // 松手时离左/右边缘 24px 以内就吸附到屏幕边缘，
-                          // 不再和屏幕之间留一条缝。
-                          final snapX = left <= 24
-                              ? 0.0
-                              : (left >= maxX - 24 ? 1.0 : _pet.posX);
-                          if (snapX != _pet.posX) {
-                            _pet.setPosition(snapX, _pet.posY);
-                          }
-                          _pet.persistPosition();
-                          setState(() => _dragging = false);
-                        },
-                        child: AnimatedBuilder(
-                          animation: _anim,
-                          builder: (context, _) => Opacity(
-                            opacity: _dragging ? 0.85 : 1,
-                            child: AnimatedScale(
-                              scale: _bounce ? 1.12 : 1.0,
-                              duration: const Duration(milliseconds: 140),
-                              curve: Curves.easeOutBack,
-                              // 自定义 PNG / GIF 皮肤优先；否则用内置插画 / 矢量
-                              child: _pet.isCustomPet &&
-                                      _pet.customPetPath.isNotEmpty
-                                  ? CustomPetImage(
-                                      path: _pet.customPetPath,
-                                      size: petSize,
-                                      bob: sin(_anim.value * 2 * pi) * 1.6,
-                                    )
-                                  : PetView(
-                                      species: _pet.species,
-                                      outfit: _pet.equippedOutfit,
-                                      t: _anim.value * 4,
-                                      size: petSize,
-                                      mood: _pet.mood,
-                                    ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      // 等级小徽标
-                      Transform.translate(
-                        offset: const Offset(0, -6),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.55),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            'Lv.${_pet.level}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                  child: petBody,
                 ),
               ],
             );

@@ -1,10 +1,12 @@
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../common/theme.dart';
+import '../source/global_proxy.dart';
 import '../theme/jelly_theme.dart';
 import 'pet_models.dart';
 import 'pet_service.dart';
@@ -25,6 +27,9 @@ class _PetCenterPageState extends State<PetCenterPage>
     vsync: this,
     duration: const Duration(seconds: 4),
   )..repeat();
+
+  /// AI 生成中（按钮转圈 / 防重复点击）
+  bool _aiBusy = false;
 
   @override
   void initState() {
@@ -243,16 +248,35 @@ class _PetCenterPageState extends State<PetCenterPage>
                   label: Text(has ? '更换图片' : '选择图片'),
                 ),
               ),
-              if (has) ...[
+              const SizedBox(width: 10),
+              // AI 生成：描述 → 出图 → 自动切为自定义桌宠
+              OutlinedButton.icon(
+                onPressed: _aiBusy ? null : _aiGeneratePet,
+                icon: _aiBusy
+                    ? const SizedBox(
+                        width: 15,
+                        height: 15,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.auto_awesome, size: 17),
+                label: Text(_aiBusy ? '生成中' : 'AI 生成'),
+              ),
+            ],
+          ),
+          if (has) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
                 if (!_pet.isCustomPet) ...[
-                  const SizedBox(width: 10),
-                  OutlinedButton(
-                    onPressed: () =>
-                        _pet.setCustomPet(_pet.customPetPath),
-                    child: const Text('使用'),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () =>
+                          _pet.setCustomPet(_pet.customPetPath),
+                      child: const Text('使用这张'),
+                    ),
                   ),
+                  const SizedBox(width: 10),
                 ],
-                const SizedBox(width: 10),
                 OutlinedButton(
                   onPressed: _removeCustomPet,
                   style: OutlinedButton.styleFrom(
@@ -261,8 +285,8 @@ class _PetCenterPageState extends State<PetCenterPage>
                   child: const Text('移除'),
                 ),
               ],
-            ],
-          ),
+            ),
+          ],
         ],
       ),
     );
@@ -304,6 +328,196 @@ class _PetCenterPageState extends State<PetCenterPage>
   Future<void> _removeCustomPet() async {
     await _pet.clearCustomPet();
     _toast('已移除自定义桌宠');
+  }
+
+  /// AI 生成可选的画风（用户 2026-10-18：想要更多风格提示词）。
+  ///
+  /// 全部以「白色背景 + 全身」为约束 —— 生成图会走自动抠图，
+  /// 白底最好抠；深色/复杂背景会把整块背景当成宠物保留下来。
+  static const List<({String label, String prompt})> _aiStyles = [
+    (label: '水墨国风', prompt: '水墨国风插画，粗黑描边，宣纸质感'),
+    (label: 'Q版贴纸', prompt: 'Q版贴纸风，圆润可爱，粗描边，扁平矢量'),
+    (label: '毛绒玩偶', prompt: '毛绒玩具质感，柔软绒毛，圆滚滚'),
+    (label: '黏土手办', prompt: '黏土手办质感，3D 渲染，柔和光影'),
+    (label: '像素风', prompt: '16-bit 像素画风，清晰像素颗粒'),
+    (label: '日系动漫', prompt: '日系动漫赛璐璐上色，大眼睛，干净线条'),
+    (label: '水彩手绘', prompt: '水彩手绘，柔和晕染，纸面质感'),
+    (label: '扁平插画', prompt: '扁平化矢量插画，简洁色块，无渐变'),
+    (label: '简笔线稿', prompt: '黑白简笔线稿，干净流畅的线条'),
+  ];
+
+  String _composeAiPrompt(int styleIndex, String extra) {
+    final style = _aiStyles[styleIndex.clamp(0, _aiStyles.length - 1)];
+    final tail = extra.trim().isEmpty ? '' : '，${extra.trim()}';
+    return '一只${_pet.species.name}，${style.prompt}$tail，'
+        '白色背景，全身，居中构图，无文字，无边框';
+  }
+
+  /// AI 生成桌宠：选画风 + 补充描述 → 调生成接口 → 保存并切换为自定义皮肤。
+  ///
+  /// 生成图通常是白底 —— 自定义静态图会走 [CustomPetImage] 的
+  /// 「去白底 + 裁到本体」处理，所以生成出来就是一只干净的贴纸宠物。
+  Future<void> _aiGeneratePet() async {
+    final extraCtrl = TextEditingController(text: '圆滚滚，表情傲娇');
+    var styleIndex = 0;
+    final label = _isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          final prompt = _composeAiPrompt(styleIndex, extraCtrl.text);
+          return AlertDialog(
+            backgroundColor: _card,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+            title: Text(
+              'AI 生成桌宠',
+              style: TextStyle(
+                color: label,
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '画风',
+                    style: TextStyle(
+                      color: JellyTheme.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (var i = 0; i < _aiStyles.length; i++)
+                        ChoiceChip(
+                          label: Text(_aiStyles[i].label),
+                          selected: styleIndex == i,
+                          onSelected: (_) =>
+                              setLocal(() => styleIndex = i),
+                          labelStyle: TextStyle(
+                            fontSize: 12,
+                            color: styleIndex == i
+                                ? (_isDark
+                                    ? Colors.white
+                                    : JellyTheme.primaryDark)
+                                : JellyTheme.textSecondary,
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    '补充描述（可选）',
+                    style: TextStyle(
+                      color: JellyTheme.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: extraCtrl,
+                    onChanged: (_) => setLocal(() {}),
+                    maxLines: 2,
+                    minLines: 1,
+                    style: TextStyle(color: label, fontSize: 13.5),
+                    decoration: InputDecoration(
+                      hintText: '如：圆滚滚、躺着、戴围巾、粉色调',
+                      hintStyle: TextStyle(
+                        color: JellyTheme.textSecondary,
+                        fontSize: 12.5,
+                      ),
+                      filled: true,
+                      fillColor: _isDark
+                          ? Colors.white.withValues(alpha: 0.06)
+                          : Colors.black.withValues(alpha: 0.04),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    '生成提示词：$prompt',
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: AppTheme.textTertiary,
+                      fontSize: 10.5,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('生成'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final prompt = _composeAiPrompt(styleIndex, extraCtrl.text);
+    setState(() => _aiBusy = true);
+    try {
+      final url =
+          'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image'
+          '?prompt=${Uri.encodeComponent(prompt)}&image_size=square_hd';
+      final dio = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 20),
+          receiveTimeout: const Duration(seconds: 120),
+          responseType: ResponseType.bytes,
+          validateStatus: (c) => c != null && c < 400,
+        ),
+      );
+      applyGlobalProxy(dio);
+      final res = await dio.get<List<int>>(url);
+      final bytes = res.data;
+      if (bytes == null || bytes.isEmpty) {
+        throw Exception('生成接口返回为空');
+      }
+      final dir = await getApplicationSupportDirectory();
+      final dst = File(
+        '${dir.path}/pet_ai_${DateTime.now().millisecondsSinceEpoch}.png',
+      );
+      await dst.writeAsBytes(bytes, flush: true);
+      final old = _pet.customPetPath;
+      await _pet.setCustomPet(dst.path);
+      if (old.isNotEmpty && old != dst.path) {
+        try {
+          final f = File(old);
+          if (f.existsSync()) f.deleteSync();
+        } catch (_) {}
+      }
+      _toast('已用 AI 生成并切换桌宠');
+    } catch (e) {
+      _toast('AI 生成失败：$e');
+    } finally {
+      if (mounted) setState(() => _aiBusy = false);
+    }
   }
 
   Widget _actionsCard() {

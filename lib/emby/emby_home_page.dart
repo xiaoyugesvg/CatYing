@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
@@ -31,10 +33,24 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
   /// 避免"标题已是新服务器、列表还是旧服务器"的串台。
   String? _loadedServerId;
 
+  // ── 顶部幻灯片（Backdrop 轮播）──────────────────────────────
+  final PageController _heroController =
+      PageController(viewportFraction: 0.86);
+  Timer? _heroTimer;
+  int _heroIndex = 0;
+  List<EmbyItem> _heroItems = const [];
+
   @override
   void initState() {
     super.initState();
     _bootstrap();
+  }
+
+  @override
+  void dispose() {
+    _heroTimer?.cancel();
+    _heroController.dispose();
+    super.dispose();
   }
 
   Future<void> _bootstrap() async {
@@ -49,6 +65,7 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
   Future<void> _refresh() async {
     final server = _store.activeServer;
     if (server == null || !server.isConfigured) {
+      _heroTimer?.cancel();
       setState(() {
         _loading = false;
         _error = null;
@@ -56,6 +73,7 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
         _views = const [];
         _resume = const [];
         _latest.clear();
+        _heroItems = const [];
       });
       return;
     }
@@ -67,6 +85,7 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
         _views = const [];
         _resume = const [];
         _latest.clear();
+        _heroItems = const [];
       }
     });
     final api = EmbyApi(server);
@@ -97,7 +116,10 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
           ..addAll(latest);
         _loadedServerId = server.id;
         _loading = false;
+        _heroItems = _pickHeroItems();
+        _heroIndex = 0;
       });
+      _scheduleHero();
     } on EmbyApiException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -111,6 +133,42 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
         _error = '加载失败：$e';
       });
     }
+  }
+
+  /// 幻灯片候选：优先「继续观看」，再按各媒体库的最新条目补足；
+  /// 只收有横版背景图（Backdrop）的条目，最多 6 张。
+  List<EmbyItem> _pickHeroItems() {
+    final seen = <String>{};
+    final out = <EmbyItem>[];
+    void take(Iterable<EmbyItem> list) {
+      for (final it in list) {
+        if (out.length >= 6) return;
+        if (it.id.isEmpty || !seen.add(it.id)) continue;
+        if (it.backdropTag == null || it.backdropTag!.isEmpty) continue;
+        out.add(it);
+      }
+    }
+
+    take(_resume);
+    for (final v in _views) {
+      take(_latest[v.id] ?? const <EmbyItem>[]);
+    }
+    return out;
+  }
+
+  void _scheduleHero() {
+    _heroTimer?.cancel();
+    if (_heroItems.length <= 1) return;
+    _heroTimer = Timer.periodic(const Duration(seconds: 6), (_) {
+      if (!mounted || _heroItems.length <= 1) return;
+      if (!_heroController.hasClients) return;
+      final next = (_heroIndex + 1) % _heroItems.length;
+      _heroController.animateToPage(
+        next,
+        duration: const Duration(milliseconds: 420),
+        curve: Curves.easeOutCubic,
+      );
+    });
   }
 
   Future<void> _openSettings() async {
@@ -140,6 +198,8 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
               SliverToBoxAdapter(child: _header(server, servers)),
+              if (_heroItems.isNotEmpty)
+                SliverToBoxAdapter(child: _heroCarousel()),
               if (_loading && _views.isEmpty)
                 const SliverFillRemaining(
                   hasScrollBody: false,
@@ -202,15 +262,16 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
 
   Widget _header(EmbyServer? server, List<EmbyServer> servers) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+      padding: const EdgeInsets.fromLTRB(16, 12, 12, 2),
       child: Row(
         children: [
           Text(
             'Emby',
             style: TextStyle(
               color: AppTheme.textPrimary,
-              fontSize: AppTheme.fontTitle3,
-              fontWeight: FontWeight.w700,
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.2,
             ),
           ),
           const SizedBox(width: 10),
@@ -218,6 +279,11 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
             Flexible(
               child: PopupMenuButton<String>(
                 tooltip: '切换服务器',
+                color: AppTheme.backgroundSecondary,
+                shape: RoundedRectangleBorder(
+                  borderRadius:
+                      BorderRadius.circular(AppTheme.glassRadiusCard),
+                ),
                 onSelected: (id) async {
                   await _store.setActive(id);
                   if (mounted) setState(() {});
@@ -250,17 +316,41 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
           else if (server != null)
             Flexible(child: _serverChip(server.name)),
           const Spacer(),
-          IconButton(
+          _headerAction(
+            icon: Icons.refresh_rounded,
             tooltip: '刷新',
-            icon: Icon(Icons.refresh_rounded, color: AppTheme.textSecondary),
-            onPressed: _refresh,
+            onTap: _refresh,
           ),
-          IconButton(
+          const SizedBox(width: 8),
+          _headerAction(
+            icon: Icons.settings_outlined,
             tooltip: 'Emby 管理',
-            icon: Icon(Icons.settings_outlined, color: AppTheme.textSecondary),
-            onPressed: _openSettings,
+            onTap: _openSettings,
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _headerAction({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: AppTheme.backgroundTertiary,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, size: 19, color: AppTheme.textSecondary),
+        ),
       ),
     );
   }
@@ -287,13 +377,170 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
 
   Widget _sectionTitle(String text) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-      child: Text(
-        text,
-        style: TextStyle(
-          color: AppTheme.textPrimary,
-          fontSize: AppTheme.fontHeadline,
-          fontWeight: FontWeight.w700,
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 10),
+      child: Row(
+        children: [
+          Container(
+            width: 3,
+            height: 14,
+            decoration: BoxDecoration(
+              color: AppTheme.accentColor,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            text,
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: AppTheme.fontHeadline,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── 顶部幻灯片 ─────────────────────────────────────────────
+
+  Widget _heroCarousel() {
+    final width = MediaQuery.sizeOf(context).width;
+    final cardWidth = width * 0.86;
+    final height = (cardWidth * 9 / 16).clamp(170.0, 236.0);
+    return Column(
+      children: [
+        SizedBox(
+          height: height,
+          child: PageView.builder(
+            controller: _heroController,
+            physics: const BouncingScrollPhysics(),
+            onPageChanged: (i) => setState(() => _heroIndex = i),
+            itemCount: _heroItems.length,
+            itemBuilder: (_, i) => Padding(
+              padding: EdgeInsets.only(
+                left: i == 0 ? 16 : 6,
+                right: i == _heroItems.length - 1 ? 16 : 6,
+              ),
+              child: _heroCard(_heroItems[i], cardWidth),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        if (_heroItems.length > 1)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              for (var i = 0; i < _heroItems.length; i++)
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  width: i == _heroIndex ? 16 : 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: i == _heroIndex
+                        ? AppTheme.accentColor
+                        : AppTheme.textTertiary.withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  Widget _heroCard(EmbyItem item, double cardWidth) {
+    final title = item.isEpisode ? (item.seriesName ?? item.name) : item.name;
+    final meta = [
+      if (item.isEpisode && item.episodeLabel.isNotEmpty) item.episodeLabel,
+      if (item.year != null) '${item.year}',
+      if (item.rating != null && item.rating! > 0)
+        '★ ${item.rating!.toStringAsFixed(1)}',
+      item.isSeries ? '剧集' : '电影',
+    ].join('  ·  ');
+    return GestureDetector(
+      onTap: () => _openItem(item),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            _backdrop(item, width: cardWidth),
+            // 底部压暗，保证标题在任何封面上都看得清
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.transparent,
+                    Color(0x33000000),
+                    Color(0xCC000000),
+                  ],
+                  stops: [0.35, 0.62, 1],
+                ),
+              ),
+            ),
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 14,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      height: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    meta,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.play_arrow_rounded,
+                            size: 16, color: Colors.black),
+                        const SizedBox(width: 2),
+                        Text(
+                          item.isSeries ? '选集' : '播放',
+                          style: const TextStyle(
+                            color: Colors.black,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -301,7 +548,7 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
 
   Widget _resumeRow() {
     return SizedBox(
-      height: 150,
+      height: 186,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -309,31 +556,53 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
         separatorBuilder: (_, _) => const SizedBox(width: 12),
         itemBuilder: (_, i) {
           final item = _resume[i];
+          final p = item.progress;
           return GestureDetector(
             onTap: () => _openItem(item),
             child: SizedBox(
-              width: 200,
+              width: 220,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+                  _posterShell(
+                    radius: AppTheme.radiusMD,
                     child: AspectRatio(
                       aspectRatio: 16 / 9,
-                      child: _image(item, width: 200),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          _image(item, width: 220),
+                          if (p != null)
+                            Positioned(
+                              left: 0,
+                              right: 0,
+                              bottom: 0,
+                              child: LinearProgressIndicator(
+                                value: p,
+                                minHeight: 3,
+                                backgroundColor:
+                                    Colors.white.withValues(alpha: 0.25),
+                                valueColor: AlwaysStoppedAnimation(
+                                    AppTheme.accentColor),
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 8),
                   Text(
                     item.name,
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: AppTheme.textPrimary,
                       fontSize: AppTheme.fontSubhead,
                       fontWeight: FontWeight.w600,
+                      height: 1.25,
                     ),
                   ),
+                  const SizedBox(height: 2),
                   Text(
                     item.seriesName ?? item.episodeLabel,
                     maxLines: 1,
@@ -367,7 +636,7 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
       );
     }
     return SizedBox(
-      height: 196,
+      height: 236,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -378,27 +647,31 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
           return GestureDetector(
             onTap: () => _openItem(item),
             child: SizedBox(
-              width: 112,
+              width: 118,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+                  _posterShell(
+                    radius: AppTheme.radiusMD,
                     child: AspectRatio(
                       aspectRatio: 2 / 3,
-                      child: _image(item, width: 112),
+                      child: _image(item, width: 118),
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 8),
+                  // 片名给足两行：中文长标题（如「机动战士高达 闪光的哈萨维」）
+                  // 单行必然被截断（用户 2026-10-18 反馈）。
                   Text(
                     item.name,
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: AppTheme.textPrimary,
                       fontSize: AppTheme.fontSubhead,
+                      height: 1.25,
                     ),
                   ),
+                  const SizedBox(height: 2),
                   Text(
                     [
                       if (item.year != null) '${item.year}',
@@ -417,6 +690,55 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
             ),
           );
         },
+      ),
+    );
+  }
+
+  /// 海报外壳：圆角 + 阴影，压住纯白/纯黑底色，观感更立体。
+  Widget _posterShell({required Widget child, required double radius}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(radius),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.16),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(radius),
+        child: child,
+      ),
+    );
+  }
+
+  Widget _backdrop(EmbyItem item, {required double width}) {
+    final server = _store.activeServer;
+    if (server == null) {
+      return ColoredBox(color: AppTheme.backgroundSecondary);
+    }
+    final api = EmbyApi(server);
+    return CachedNetworkImage(
+      imageUrl: api.imageUrl(
+        item.backdropImageId,
+        tag: item.backdropTag,
+        imageType: 'Backdrop',
+        maxHeight: 720,
+      ),
+      httpHeaders: api.imageHeaders,
+      fit: BoxFit.cover,
+      memCacheWidth: (width * 2).round(),
+      placeholder: (_, _) => ColoredBox(color: AppTheme.backgroundSecondary),
+      errorWidget: (_, _, _) => ColoredBox(
+        color: AppTheme.backgroundSecondary,
+        child: Icon(
+          Icons.image_outlined,
+          color: AppTheme.textTertiary,
+          size: 32,
+        ),
       ),
     );
   }

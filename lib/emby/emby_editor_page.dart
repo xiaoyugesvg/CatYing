@@ -95,7 +95,7 @@ class _EmbyEditorPageState extends State<EmbyEditorPage> {
     final server = EmbyServer(
       id: id,
       name: _name.text.trim().isEmpty
-          ? Uri.tryParse(url)?.host ?? 'Emby'
+          ? (widget.existing?.name ?? Uri.tryParse(url)?.host ?? 'Emby')
           : _name.text.trim(),
       type: effectiveType,
       baseUrl: url,
@@ -251,6 +251,14 @@ class _EmbyEditorPageState extends State<EmbyEditorPage> {
               ),
             ),
             const SizedBox(height: 20),
+
+            // 账号名称（用户 2026-10-18：账号列表里全是服务器域名，认不出是哪个）
+            _buildInput(
+              label: '账号名称（可选）',
+              controller: _name,
+              placeholder: '如 家庭影院、客厅 NAS（留空用服务器地址）',
+            ),
+            const SizedBox(height: 16),
 
             // 服务器地址（Plex 隐藏）
             if (_type != 'plex') ...[

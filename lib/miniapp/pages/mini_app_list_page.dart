@@ -9,23 +9,19 @@ import '../../services/prefs_mirror.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/home_search_bar.dart';
 import '../models/mini_app.dart';
+import '../services/market_subscription_store.dart';
 import '../services/mini_app_service.dart';
 import 'mini_app_detail_page.dart';
 import 'mini_app_maiyou_page.dart';
 import 'mini_app_market_page.dart';
 import 'mini_app_web_page.dart';
 
-/// 「程序」tab 主页：已安装小程序网格 + 导入入口。
+/// 「程序」tab 主页：**直接显示已安装**的小程序（不再有「已安装 / 市场」双 Tab）。
 ///
-/// 作为影视悬浮导航栏的独立分类页使用（NavFeature.apps / tabIndex 7），
-/// 也是设置页「程序管理」入口的目标页。
+/// 市场改为**订阅制**独立页面：一个订阅 = 一个市场，可添加多个，
+/// 入口在顶栏的商店按钮 / 「添加程序」弹层（见 [MiniAppMarketPage]）。
 class MiniAppListPage extends StatefulWidget {
-  const MiniAppListPage({super.key, this.initialTab = 0});
-
-  /// 进来先看哪个 Tab：0 = 已安装 / 1 = **市场**。
-  /// 设置里的「程序管理」直接进市场（用户 2026-10-14：「就是一个加载
-  /// 程序市场页面」）。
-  final int initialTab;
+  const MiniAppListPage({super.key});
 
   @override
   State<MiniAppListPage> createState() => _MiniAppListPageState();
@@ -81,34 +77,10 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
   final _searchCtrl = TextEditingController();
   String _query = '';
 
-  /// 顶部双 Tab（对齐参考图）：0 = 已安装 / 1 = 市场
-  int _tab = 0;
-
-  /// 市场 Tab 是否进过 —— 懒加载：没点过就不建 State、不发请求
-  bool _marketVisited = false;
-
-  /// 从「添加程序 → 小程序市场」导入时带进市场 Tab 的地址与已解析清单
-  /// （带上清单是为了省掉一次重复下载）
-  String? _pendingMarketUrl;
-  List<MiniAppMarketEntry>? _pendingMarketList;
-
   @override
   void initState() {
     super.initState();
-    // 进来就要看「市场」（设置 → 程序管理）：⚠️ 市场页的 initState 只会读一次
-    // `service.marketUrl`，读早了拿到空串 ⇒ **读完 prefs 再建它**。
-    //
-    // ⚠️ 这里**只能调一次** `ensureLoaded()`：它内部是"先把 _loaded 置 true
-    //    再 await 读盘"⇒ 第二次调用会**立刻返回**（读还没完）✗。
-    //    所以 initialTab==1 时把 `.then` 挂在**同一次**调用上。
-    if (widget.initialTab == 1) {
-      _tab = 1;
-      service.ensureLoaded().then((_) {
-        if (mounted) setState(() => _marketVisited = true);
-      });
-    } else {
-      service.ensureLoaded();
-    }
+    service.ensureLoaded();
     _restoreViewMode();
     // 监听 controller 而不是用 TextField.onChanged：
     // 点「×」清空、收起时清空都是**程序化** clear()，不会触发 onChanged，
@@ -175,145 +147,137 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: Container(
-        color: Colors.transparent,
-        child: SafeArea(
-          bottom: false,
-          child: Column(
-            children: [
-              // ── 顶栏 ──────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppTheme.spacingMD,
-                  AppTheme.spacingMD,
-                  AppTheme.spacingMD,
-                  0,
-                ),
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            // ── 顶栏：标题 / 搜索 / 市场 / 设置 / 添加 ─────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppTheme.spacingMD,
+                AppTheme.spacingMD,
+                AppTheme.spacingMD,
+                0,
+              ),
+              child: Row(
+                children: [
+                  Text(
+                    '程序',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: AppTheme.fontTitle3,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  HomeSearchBar(
+                    hintText: '搜索程序',
+                    controller: _searchCtrl,
+                    // 已安装列表是本地过滤，不需要"进搜索页"，空提交即收起
+                    onSubmitted: (_) {},
+                    onTapEmpty: () {},
+                  ),
+                  const SizedBox(width: 4),
+                  _topIcon(Icons.storefront_rounded, '程序市场', _openMarket),
+                  _topIcon(Icons.tune_rounded, '设置', _showSettingsSheet),
+                  _topIcon(Icons.add_circle_outline, '添加程序', _showAddSheet),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppTheme.spacingSM),
+
+            // ── 已安装 N + 视图切换（用户 2026-10-18：视图按钮放到明面上）──
+            Obx(() {
+              final count = service.apps.length;
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 2, 12, 8),
                 child: Row(
                   children: [
-                    // 左：标题「程序」
-                    // （原来是"搜索时把标题整条换成输入框"，现在搜索框自带走起，
-                    //   标题始终在，和影视首页一致）
                     Text(
-                      '程序',
+                      '已安装',
                       style: TextStyle(
                         color: AppTheme.textPrimary,
-                        fontSize: AppTheme.fontTitle3,
-                        fontWeight: FontWeight.bold,
+                        fontSize: AppTheme.fontHeadline,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '$count',
+                      style: TextStyle(
+                        color: AppTheme.textTertiary,
+                        fontSize: AppTheme.fontCaption,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                     const Spacer(),
-                    // 右：搜索 / 设置 / 添加
-                    // 搜索只作用于「已安装」，在「市场」Tab 下不显示（免得是个死按钮）
-                    //
-                    // 🔴 2026-10-14：换成影视首页同一个 `HomeSearchBar`
-                    // （用户："程序的搜索图标点开后的框和影视不一样"）。
-                    // 原来这里是个自带 `OutlineInputBorder` 的裸 TextField：
-                    // 方角描边、撑满整行，和影视那个"圆钮→透明小胶囊"完全是两套东西。
-                    if (_tab == 0)
-                      HomeSearchBar(
-                        hintText: '搜索程序',
-                        controller: _searchCtrl,
-                        // 已安装列表是本地过滤，不需要"进搜索页"，空提交即收起
-                        onSubmitted: (_) {},
-                        onTapEmpty: () {},
-                      ),
-                    const SizedBox(width: 4),
-                    _topIcon(Icons.tune_rounded, '设置', _showSettingsSheet),
-                    _topIcon(Icons.add_circle_outline, '添加程序', _showAddSheet),
+                    _viewModeButton(),
                   ],
                 ),
-              ),
-              const SizedBox(height: AppTheme.spacingSM),
+              );
+            }),
 
-              // ── 双 Tab：已安装 / 市场（对齐参考图，选中项带下划线指示条）──
-              _tabBar(),
-              const SizedBox(height: AppTheme.spacingSM),
-
-              // IndexedStack：切 Tab 不丢市场那屏的滚动/已加载清单
-              Expanded(
-                child: IndexedStack(
-                  index: _tab,
-                  children: [
-                    Obx(() => _buildBody()),
-                    _marketVisited
-                        ? MiniAppMarketView(
-                            initialUrl: _pendingMarketUrl,
-                            initialList: _pendingMarketList,
-                            onInstalled: () => setState(() {}),
-                          )
-                        : const SizedBox.shrink(),
-                  ],
-                ),
-              ),
-            ],
-          ),
+            // ── 已安装内容（没有「市场 Tab」了）──────────────────
+            Expanded(child: Obx(() => _buildBody())),
+          ],
         ),
       ),
     );
   }
 
-  /// 顶部双 Tab（参考图 1：等宽两格 + 选中下划线）
-  Widget _tabBar() {
-    const tabs = ['已安装', '市场'];
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacingMD),
-      child: Row(
-        children: [
-          for (var i = 0; i < tabs.length; i++)
-            Expanded(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => _switchTab(i),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      tabs[i],
-                      style: TextStyle(
-                        color: _tab == i
-                            ? AppTheme.textPrimary
-                            : AppTheme.textTertiary,
-                        fontSize: AppTheme.fontSubhead + 1,
-                        fontWeight:
-                            _tab == i ? FontWeight.w600 : FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      height: 2,
-                      width: _tab == i ? 28 : 0,
-                      decoration: BoxDecoration(
-                        color: AppTheme.accentColor,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+  void _openMarket() {
+    Get.to(() => const MiniAppMarketPage());
+  }
+
+  /// 顶栏的视图切换（一行两个 / 三个 / 四个 / 列表）
+  Widget _viewModeButton() {
+    return PopupMenuButton<_AppViewMode>(
+      tooltip: '切换视图',
+      initialValue: _viewMode,
+      color: AppTheme.backgroundSecondary,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      onSelected: _setViewMode,
+      itemBuilder: (_) => [
+        for (final m in _AppViewMode.values)
+          PopupMenuItem(
+            value: m,
+            child: Row(
+              children: [
+                Icon(_viewModeIcon(m), size: 17),
+                const SizedBox(width: 8),
+                Text(m.label, style: const TextStyle(fontSize: 13)),
+              ],
             ),
-        ],
+          ),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(_viewModeIcon(_viewMode),
+                size: 17, color: AppTheme.textSecondary),
+            const SizedBox(width: 3),
+            Icon(Icons.arrow_drop_down_rounded,
+                size: 16, color: AppTheme.textSecondary),
+          ],
+        ),
       ),
     );
   }
 
-  Future<void> _switchTab(int i) async {
-    if (i == _tab) return;
-    // ⚠️ 顺序很重要：市场地址存在 prefs 里，必须**先读出来再建市场 Tab**
-    //   —— MarketView 的 initState 只会读一次 `service.marketUrl`，
-    //   读早了拿到空串 → 地址栏空白、也不会自动加载（看着像"没记住地址"）。
-    if (i == 1) await service.ensureLoaded();
-    if (!mounted) return;
-    // 切到「市场」时搜索框会被移除（那里的搜索只作用于已安装列表），
-    // 不清空的话回到「已安装」会看到"列表被过滤过、但输入框是收起的"。
-    // 放在 setState 外面：clear() 会同步触发上面挂的监听器，那里已经 setState 了。
-    if (i != 0) _searchCtrl.clear();
-    setState(() {
-      _tab = i;
-      _marketVisited = true;
-    });
-  }
+  IconData _viewModeIcon(_AppViewMode m) => switch (m) {
+        _AppViewMode.two => Icons.grid_view_rounded,
+        _AppViewMode.three => Icons.apps_rounded,
+        _AppViewMode.four => Icons.grid_on_rounded,
+        _AppViewMode.list => Icons.view_list_rounded,
+      };
 
   // ── 顶栏小图标 ────────────────────────────────────────────────
   Widget _topIcon(IconData icon, String tip, VoidCallback onTap) {
@@ -334,10 +298,82 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
   Widget _buildBody() {
     final apps = _visibleApps();
     if (apps.isEmpty) {
+      final empty = _query.trim().isEmpty;
       return Center(
-        child: Text(
-          _query.trim().isEmpty ? '还没有程序，点右上角 + 导入' : '没有匹配的程序',
-          style: TextStyle(color: AppTheme.textTertiary, fontSize: 13),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: AppTheme.accentColor.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  empty ? Icons.widgets_outlined : Icons.search_off_rounded,
+                  size: 30,
+                  color: AppTheme.accentOnSurface,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                empty ? '还没有程序' : '没有匹配的程序',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontHeadline,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                empty ? '导入 TVBox 配置，或从小程序市场安装' : '换个关键词再试试',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontFootnote,
+                  height: 1.5,
+                ),
+              ),
+              if (empty) ...[
+                const SizedBox(height: 18),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    FilledButton.icon(
+                      onPressed: _showAddSheet,
+                      icon: const Icon(Icons.add_rounded, size: 18),
+                      label: const Text('导入程序'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.accentColor,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 18, vertical: 11),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(13),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    OutlinedButton.icon(
+                      onPressed: _openMarket,
+                      icon: const Icon(Icons.storefront_rounded, size: 18),
+                      label: const Text('浏览市场'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 18, vertical: 11),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(13),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
         ),
       );
     }
@@ -882,14 +918,14 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
                 },
               ),
               const SizedBox(height: AppTheme.spacingMD),
-              // 小程序市场：导入市场清单 → 列出里面的程序 → 点「安装」下载导入
+              // 小程序市场：订阅制（一个订阅 = 一个市场），在独立市场页里安装
               _AddTile(
                 icon: Icons.storefront_outlined,
                 title: '小程序市场',
-                subtitle: '导入市场链接，列出里面的程序并安装',
+                subtitle: '订阅市场（可多个），浏览并安装里面的程序',
                 onTap: () {
                   Get.back();
-                  _importFromUrlDialog();
+                  _openMarket();
                 },
               ),
               const SizedBox(height: AppTheme.spacingMD),
@@ -1061,14 +1097,10 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
       final market = r.market;
       if (!mounted) return;
       if (market != null) {
-        // 市场清单 → 直接切到「市场」Tab，并带上已解析好的清单
-        // （老版本是 push 一个独立市场页；参考图里市场就是程序页的一个 Tab）
-        setState(() {
-          _pendingMarketUrl = url;
-          _pendingMarketList = market;
-          _marketVisited = true;
-          _tab = 1;
-        });
+        // 市场清单 → 记为一条订阅，然后打开市场页（可切换 / 管理订阅）
+        await MarketSubscriptionStore.instance.add(name: '', url: url);
+        if (!mounted) return;
+        _openMarket();
       } else {
         AppToast.message(r.ok ? '导入成功' : (r.error ?? '导入失败'));
       }
@@ -1174,15 +1206,52 @@ class _MiniAppCard extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
+            // 右上角柔光：让纯渐变卡片有一点层次
+            Positioned(
+              top: -26,
+              right: -26,
+              child: Container(
+                width: 84,
+                height: 84,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withValues(alpha: 0.10),
+                ),
+              ),
+            ),
+            // 类型角标：网页 / 直播订阅 / TVBox
+            Positioned(
+              left: 8,
+              top: 8,
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  app.isWebApp
+                      ? (app.source.startsWith('http')
+                          ? Icons.public_rounded
+                          : Icons.code_rounded)
+                      : app.isMaiyou
+                          ? Icons.live_tv_rounded
+                          : Icons.widgets_rounded,
+                  size: 12,
+                  color: Colors.white.withValues(alpha: 0.9),
+                ),
+              ),
+            ),
             // 首字：略往上挪，给底部名称留出位置，别挤在一起
             Align(
-              alignment: const Alignment(0, -0.22),
+              alignment: const Alignment(0, -0.18),
               child: Text(
                 initial,
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 26,
-                  fontWeight: FontWeight.bold,
+                  fontSize: 28,
+                  fontWeight: FontWeight.w800,
+                  shadows: [Shadow(blurRadius: 10, color: Colors.black26)],
                 ),
               ),
             ),

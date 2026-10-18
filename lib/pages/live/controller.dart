@@ -11,10 +11,24 @@ class LiveController extends GetxController {
   final searchKeyword = ''.obs;
   final selectedChannelIndex = 0.obs;
 
+  /// 频道列表视图：0=列表 1=卡片 2=两列 3=三列 4=四列
+  final channelView = 0.obs;
+
+  /// 直播源弹窗视图：0=列表 1=两列 2=三列
+  final sourceView = 0.obs;
+
+  /// 分组弹窗视图：0=列表 1=两列 2=三列
+  final groupView = 0.obs;
+
+  static const _kChannelViewKey = 'live_channel_view';
+  static const _kSourceViewKey = 'live_source_view';
+  static const _kGroupViewKey = 'live_group_view';
+
   @override
   void onInit() {
     super.onInit();
     loadFavorites();
+    _loadViewModes();
     // 恢复统一由 LiveService.onInit 完成（live_lives 优先 / live_url 自动加载），
     // 这里只监听变化刷新 UI，避免双重恢复互相覆盖导致直播页空白
     ever(service.sources, (_) => update());
@@ -112,6 +126,44 @@ class LiveController extends GetxController {
       await prefs.setStringList('live_favorites', favoriteKeys.toList());
     } catch (_) {}
     update();
+  }
+
+  // ── 视图模式（列表 / 卡片 / 网格 2·3·4 列）──────────────────
+
+  Future<void> _loadViewModes() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      channelView.value = (prefs.getInt(_kChannelViewKey) ?? 0).clamp(0, 4);
+      sourceView.value = (prefs.getInt(_kSourceViewKey) ?? 0).clamp(0, 2);
+      groupView.value = (prefs.getInt(_kGroupViewKey) ?? 0).clamp(0, 2);
+    } catch (_) {}
+  }
+
+  Future<void> setChannelView(int v) async {
+    channelView.value = v.clamp(0, 4);
+    update();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_kChannelViewKey, channelView.value);
+    } catch (_) {}
+  }
+
+  Future<void> setSourceView(int v) async {
+    sourceView.value = v.clamp(0, 2);
+    update();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_kSourceViewKey, sourceView.value);
+    } catch (_) {}
+  }
+
+  Future<void> setGroupView(int v) async {
+    groupView.value = v.clamp(0, 2);
+    update();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_kGroupViewKey, groupView.value);
+    } catch (_) {}
   }
 
   /// 全部分组的频道（跨组搜索用）

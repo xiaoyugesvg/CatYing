@@ -57,7 +57,7 @@ import 'package:flutter/services.dart'
 // 正解：**主 isolate 先把字符串读出来**，经 spawn 参数带进去，
 // worker 侧用 `preloadFetchJs` 填进那个包的静态字段（见 fetch.dart 的说明）。
 import 'package:quickjs_engine/extensions/fetch.dart'
-    show kFetchJsAssetPath, preloadFetchJs;
+    show kFetchJsAssetPath, kBundledFetchJs, preloadFetchJs;
 
 /// 一次 isolate 执行的返回。
 class RunnerResult {
@@ -127,10 +127,11 @@ class BookSourceRunner {
       String? fetchJs;
       try {
         fetchJs = await rootBundle.loadString(kFetchJsAssetPath);
-      } catch (e) {
-        // 桌面/测试环境偶发取不到，交给 worker 的兜底路径
-        // ignore: avoid_print
-        debugPrint('[BookSourceRunner] 预加载 fetch.js 失败（有兜底）: $e');
+      } catch (_) {
+        // iOS 打包时这条包资源偶发不在 asset manifest 里（日志里那句
+        // `Unable to load asset: "packages/quickjs_engine/assets/js/fetch.js"`）。
+        // 用内置常量顶上：内容等价，还能省掉 worker 侧的重复失败与日志噪音。
+        fetchJs = kBundledFetchJs;
       }
 
       isolate = await Isolate.spawn<List<Object?>>(

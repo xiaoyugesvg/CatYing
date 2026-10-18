@@ -99,7 +99,7 @@ class EmbyApi {
         'MediaTypes': 'Video',
         'Fields': 'Overview,ProductionYear,CommunityRating,RunTimeTicks',
         'ImageTypeLimit': 1,
-        'EnableImageTypes': 'Primary',
+        'EnableImageTypes': 'Primary,Backdrop',
       },
     );
   }
@@ -115,7 +115,7 @@ class EmbyApi {
       'Limit': limit,
       'Fields': 'Overview,ProductionYear,CommunityRating,RunTimeTicks',
       'ImageTypeLimit': 1,
-      'EnableImageTypes': 'Primary',
+      'EnableImageTypes': 'Primary,Backdrop',
     });
   }
 
@@ -129,7 +129,7 @@ class EmbyApi {
         'UserId': uid,
         'Fields': 'Overview,ProductionYear,CommunityRating,RunTimeTicks',
         'ImageTypeLimit': 1,
-        'EnableImageTypes': 'Primary',
+        'EnableImageTypes': 'Primary,Backdrop',
       },
     );
   }
@@ -184,10 +184,18 @@ class EmbyApi {
   }
 
   /// 图片地址（带 token；Emby 的图片接口也接受 `api_key`）。
-  String imageUrl(String itemId, {int maxHeight = 480, String? tag}) {
+  ///
+  /// [imageType]：`Primary` = 竖版海报，`Backdrop` = 横版背景图
+  /// （首页幻灯片 / 详情页头图用）。
+  String imageUrl(
+    String itemId, {
+    int maxHeight = 480,
+    String? tag,
+    String imageType = 'Primary',
+  }) {
     final t = server.accessToken ?? '';
     final tagPart = (tag == null || tag.isEmpty) ? '' : '&tag=$tag';
-    return '${server.normalizedUrl}/Items/$itemId/Images/Primary'
+    return '${server.normalizedUrl}/Items/$itemId/Images/$imageType'
         '?maxHeight=$maxHeight&quality=90$tagPart&api_key=$t';
   }
 

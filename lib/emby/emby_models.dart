@@ -97,6 +97,9 @@ class EmbyItem {
     this.seriesName,
     this.collectionType,
     this.imageTag,
+    this.backdropTag,
+    this.backdropItemId,
+    this.playedPercentage,
     this.year,
     this.indexNumber,
     this.parentIndexNumber,
@@ -114,6 +117,17 @@ class EmbyItem {
   /// 仅媒体库视图有：`movies` / `tvshows` / `music` …
   final String? collectionType;
   final String? imageTag;
+
+  /// 横版背景图（Emby Backdrop）。列表页幻灯片 / 详情页头图用。
+  ///
+  /// 分集的 backdrop 通常挂在父剧集上（`ParentBackdropItemId` +
+  /// `ParentBackdropImageTags`），这里一并兼容。
+  final String? backdropTag;
+  final String? backdropItemId;
+
+  /// 继续观看进度（0~100，来自 `UserData.PlayedPercentage`）。
+  final double? playedPercentage;
+
   final int? year;
   final int? indexNumber;
   final int? parentIndexNumber;
@@ -147,6 +161,18 @@ class EmbyItem {
 
   factory EmbyItem.fromJson(Map<String, dynamic> j) {
     final tags = j['ImageTags'];
+    final backdrops = j['BackdropImageTags'];
+    final parentBackdrops = j['ParentBackdropImageTags'];
+    String? backdropTag;
+    String? backdropItemId;
+    if (backdrops is List && backdrops.isNotEmpty) {
+      backdropTag = '${backdrops.first}';
+    } else if (parentBackdrops is List && parentBackdrops.isNotEmpty) {
+      backdropTag = '${parentBackdrops.first}';
+      backdropItemId = j['ParentBackdropItemId']?.toString();
+    }
+    final userData = j['UserData'];
+    final played = userData is Map ? userData['PlayedPercentage'] : null;
     return EmbyItem(
       id: '${j['Id'] ?? ''}',
       name: '${j['Name'] ?? ''}',
@@ -156,11 +182,27 @@ class EmbyItem {
       seriesName: j['SeriesName'] as String?,
       collectionType: j['CollectionType'] as String?,
       imageTag: tags is Map ? '${tags['Primary'] ?? ''}' : null,
+      backdropTag: backdropTag,
+      backdropItemId: backdropItemId,
+      playedPercentage: played is num ? played.toDouble() : null,
       year: (j['ProductionYear'] as num?)?.toInt(),
       indexNumber: (j['IndexNumber'] as num?)?.toInt(),
       parentIndexNumber: (j['ParentIndexNumber'] as num?)?.toInt(),
       rating: (j['CommunityRating'] as num?)?.toDouble(),
       runTimeTicks: (j['RunTimeTicks'] as num?)?.toInt(),
     );
+  }
+
+  /// backdrop 属于哪个条目（分集时是父剧集）。
+  String get backdropImageId =>
+      (backdropItemId != null && backdropItemId!.isNotEmpty)
+          ? backdropItemId!
+          : id;
+
+  /// 继续观看进度（0~1，无数据返回 null）。
+  double? get progress {
+    final p = playedPercentage;
+    if (p == null || p <= 0) return null;
+    return (p / 100).clamp(0.0, 1.0);
   }
 }

@@ -30,6 +30,7 @@ import 'reading/services/settings_service.dart';
 import 'reading/services/reader_override_service.dart';
 import 'reading/services/bookshelf_service.dart';
 import 'reading/services/book_reading_progress_service.dart';
+import 'reading/services/source_subscription_store.dart';
 import 'reading/services/zlibrary_service.dart';
 import 'reading/services/remote_config_service.dart';
 import 'reading/models/book_source.dart';
@@ -187,6 +188,11 @@ void main() async {
   await SettingsService().init();
   await ReaderOverrideService().init();
   await BookFontService().init();
+  // 小说书源（Legado 格式）：导入 / 管理在「阅读 → 我的 → 书源仓库」
+  // ⚠️ 必须早于 SourceManager().init() —— 后者会把 BookSourceStore 里
+  // type=2 的 Legado 漫画源注册进漫画模块（原来这里排在 init 之后，
+  // 导致冷启动时 Legado 漫画源全部缺失）。
+  await BookSourceStore.instance.init();
   // 🔴 这里原来是**裸调用** `await SourceManager().init()` ✗ —— 它的内部
   // （加载 sources.json / 逐条实例化源 / 恢复当前源）任何一处抛异常都会
   // 一路冒到 main()，**启动即崩** ✗（用户看到的是"打开就闪退"，
@@ -213,8 +219,15 @@ void main() async {
   await TrimPresetService().init();
   await ReadingProgressService().init();
   await BookReadingProgressService().init();
-  // 小说书源（Legado 格式）：导入 / 管理在「阅读 → 我的 → 书源仓库」
-  await BookSourceStore.instance.init();
+  // 内置源订阅（Legado 综合 / Venera 漫画）后台自动拉取：
+  // 首次启动就导入并落盘，之后按 24h 间隔刷新，无需用户再手动点「更新」。
+  // 不 await，并延后 3 秒 —— 订阅下载含 80 条规则 + 33 个 JS 脚本，
+  // 不能和启动阶段其它网络初始化抢带宽。
+  unawaited(
+    Future<void>.delayed(const Duration(seconds: 3)).then(
+      (_) => SourceSubscriptionStore.instance.autoUpdateStale(),
+    ),
+  );
   await BookDownloadService().init();
   // Z-Library 图书服务：RemoteConfigService 后台拉取云端域名配置，
   // ZlibraryService 初始化后并发探测选最优节点（不阻塞启动）。

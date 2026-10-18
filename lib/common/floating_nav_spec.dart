@@ -25,6 +25,36 @@ import '../reading/theme/jelly_palette.dart';
 ///     抽象概念辨识度低（用户得先记住位置）
 ///   · 用户要求"要么都有图标与文字要么只有图标" —— 统一成前者
 ///     与多数页面一致，改动面最小
+///
+/// 悬浮底栏的视觉风格（用户 2026-10-18：底栏要能换风格，液态 / 炫彩等）。
+///
+/// 只用 id 持久化（`nav_style`）；新增风格时在 [fromId] 的 fallback 之外
+/// 直接加一个枚举项即可。
+enum FloatingNavStyle {
+  /// 当前默认：跟随主题色的浅色胶囊
+  ink('ink', '水墨'),
+
+  /// 液态玻璃：高透光 + 白色高光描边
+  liquid('liquid', '液态玻璃'),
+
+  /// 炫彩：主题色渐变，图标纯白
+  aurora('aurora', '炫彩'),
+
+  /// 霓虹：深色底 + 发光描边
+  neon('neon', '霓虹');
+
+  const FloatingNavStyle(this.id, this.label);
+
+  final String id;
+  final String label;
+
+  static FloatingNavStyle fromId(String? id) => values.firstWhere(
+        (e) => e.id == id,
+        orElse: () => FloatingNavStyle.ink,
+      );
+}
+
+/// 底栏统一视觉规格（几何 / 取色 / 阴影）。
 class FloatingNavSpec {
   FloatingNavSpec._();
 
@@ -122,4 +152,58 @@ class FloatingNavSpec {
   /// ⚠️ 别在调用方另写 8 —— 那会把图标挤压到比另两条栏小 2px
   /// （影视栏当初就是 `vertical: 8` + 与文字同排，图标显得偏小）。
   static const double itemPadH = 10.0;
+
+  // ── 风格取色（2026-10-18 新增）────────────────────────────────
+  //
+  // 悬浮栏支持 4 种风格：水墨 / 液态玻璃 / 炫彩 / 霓虹。
+  // 图标文字色与选中指示器底色都从这里取，底栏与侧栏共用同一套，
+  // 避免"自定义了风格但某一处仍是旧配色"。
+
+  /// 图标/文字颜色
+  static Color styleContentColor(
+    FloatingNavStyle style, {
+    required bool selected,
+    required bool isDark,
+    required JellyPalette palette,
+  }) {
+    switch (style) {
+      case FloatingNavStyle.aurora:
+        return Colors.white.withValues(alpha: selected ? 1 : 0.76);
+      case FloatingNavStyle.neon:
+        return selected ? Colors.white : Colors.white.withValues(alpha: 0.58);
+      case FloatingNavStyle.liquid:
+      case FloatingNavStyle.ink:
+        return selected
+            ? selectedColor(isDark, palette)
+            : unselectedColor(isDark, palette);
+    }
+  }
+
+  /// 炫彩风格的固定渐变色（不跟主题走：主题默认是墨灰，混出来不"炫"）
+  static const List<Color> auroraColors = [
+    Color(0xFF7C4DFF),
+    Color(0xFFFF4D8D),
+    Color(0xFF22D3EE),
+  ];
+
+  /// 霓虹风格的固定主色（描边 / 光晕 / 选中指示器）
+  static const Color neonColor = Color(0xFF22D3EE);
+
+  /// 选中指示器底色
+  static Color styleIndicatorColor(
+    FloatingNavStyle style, {
+    required bool isDark,
+    required JellyPalette palette,
+  }) {
+    switch (style) {
+      case FloatingNavStyle.aurora:
+        return Colors.white.withValues(alpha: 0.26);
+      case FloatingNavStyle.neon:
+        return neonColor.withValues(alpha: 0.30);
+      case FloatingNavStyle.liquid:
+        return Colors.white.withValues(alpha: isDark ? 0.20 : 0.62);
+      case FloatingNavStyle.ink:
+        return isDark ? palette.navSelectedFg : palette.navSelectedBg;
+    }
+  }
 }

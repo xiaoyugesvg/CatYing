@@ -248,6 +248,9 @@ class SettingsService extends ChangeNotifier {
   static const _kNavVisibleTabsKey = 'nav_visible_tabs';
   static const _kNavFloatingKey = 'nav_floating';
   static const _kNavIconOnlyKey = 'nav_icon_only';
+  // 悬浮底栏外观（用户 2026-10-18）：风格 id + 各 tab 的自定义图标路径
+  static const _kNavStyleKey = 'nav_style';
+  static const _kNavCustomIconsKey = 'nav_custom_icons';
   static const _kNavOrderVersionKey =
       'nav_order_version'; // 导航 tab 顺序版本（v2: 书架与收藏互换）
   static const _kPageTabsFollowNavKey = 'page_tabs_follow_nav';
@@ -408,6 +411,8 @@ class SettingsService extends ChangeNotifier {
   List<NavTab> _visibleNavTabs = NavTab.values.toList(); // 导航栏可见 tab，默认全显示
   bool _navFloating = true; // 导航栏是否悬浮（胶囊型毛玻璃样式），默认开启
   bool _navIconOnly = false; // 导航栏只显示图标（隐藏文字标签），默认关
+  String _navStyle = 'ink'; // 悬浮栏风格：ink / liquid / aurora / neon
+  final Map<String, String> _navCustomIcons = {}; // tab 标签 → 自定义图标文件路径
   bool _pageTabsFollowNav = true; // 收藏/书架/下载页 tab 是否跟随导航栏 manga/book 可见性
 
   // ── 书架 / 收藏 卡片外观（用户 2026-10-15：显示设置新增 3 项）────────
@@ -651,6 +656,13 @@ class SettingsService extends ChangeNotifier {
   List<NavTab> get visibleNavTabs => List.unmodifiable(_visibleNavTabs);
   bool get navFloating => _navFloating;
   bool get navIconOnly => _navIconOnly;
+  String get navStyle => _navStyle;
+
+  /// 自定义底栏图标（tab 标签 → 图片路径）。
+  Map<String, String> get navCustomIcons => Map.unmodifiable(_navCustomIcons);
+
+  /// 某个 tab 是否上传了自定义图标；没有返回 null。
+  String? navIconFor(String label) => _navCustomIcons[label];
   bool get pageTabsFollowNav => _pageTabsFollowNav;
   HomeBannerStyle get homeBannerStyle => _homeBannerStyle;
   PageDefaultContent get pageDefaultContent => _pageDefaultContent;
@@ -886,6 +898,23 @@ class SettingsService extends ChangeNotifier {
       // 导航栏悬浮开关
       _navFloating = prefs.getBool(_kNavFloatingKey) ?? true;
       _navIconOnly = prefs.getBool(_kNavIconOnlyKey) ?? false;
+      // 悬浮底栏风格 + 自定义图标
+      _navStyle = prefs.getString(_kNavStyleKey) ?? 'ink';
+      final iconsRaw = prefs.getString(_kNavCustomIconsKey);
+      if (iconsRaw != null && iconsRaw.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(iconsRaw);
+          if (decoded is Map) {
+            _navCustomIcons
+              ..clear()
+              ..addAll(decoded.map(
+                (k, v) => MapEntry('$k', '$v'),
+              ));
+          }
+        } catch (e) {
+          _log('读取自定义底栏图标失败: $e');
+        }
+      }
       // 书架/收藏 卡片外观（显示设置，2026-10-15）
       _listDensity = (prefs.getInt(_kListDensityKey) ?? 1).clamp(0, 2);
       _coverRadius = (prefs.getInt(_kCoverRadiusKey) ?? 1).clamp(0, 2);
@@ -2528,6 +2557,74 @@ class SettingsService extends ChangeNotifier {
       PrefsMirror.snapshotSoon();
     } catch (e) {
       _log('保存导航栏纯图标开关失败: $e');
+    }
+  }
+
+  /// 设置悬浮底栏风格（值见 `FloatingNavStyle.id`：ink / liquid / aurora / neon）
+  Future<void> setNavStyle(String id) async {
+    if (_navStyle == id) return;
+    _navStyle = id;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kNavStyleKey, id);
+      PrefsMirror.snapshotSoon();
+    } catch (e) {
+      _log('保存底栏风格失败: $e');
+    }
+  }
+
+  /// 上传自定义底栏图标：把选中的图片复制到应用目录后登记（源图可能被系统清理）。
+  Future<bool> setNavCustomIcon(String label, String sourcePath) async {
+    try {
+      final src = File(sourcePath);
+      if (!await src.exists()) return false;
+      final root = await getApplicationDocumentsDirectory();
+      final dir = Directory('${root.path}/nav_icons');
+      if (!await dir.exists()) await dir.create(recursive: true);
+      final ext = _pickImageExt(src.path);
+      final dest = File('${dir.path}/nav_${label.codeUnits.join('_')}.$ext');
+      await src.copy(dest.path);
+      final old = _navCustomIcons[label];
+      _navCustomIcons[label] = dest.path;
+      await _persistNavCustomIcons();
+      notifyListeners();
+      if (old != null && old.isNotEmpty && old != dest.path) {
+        try {
+          final f = File(old);
+          if (await f.exists()) await f.delete();
+        } catch (_) {}
+      }
+      return true;
+    } catch (e) {
+      _log('保存自定义底栏图标失败: $e');
+      return false;
+    }
+  }
+
+  /// 恢复某个 tab 的默认图标（删除已复制的图片）。
+  Future<void> clearNavCustomIcon(String label) async {
+    final old = _navCustomIcons.remove(label);
+    await _persistNavCustomIcons();
+    notifyListeners();
+    if (old != null && old.isNotEmpty) {
+      try {
+        final f = File(old);
+        if (await f.exists()) await f.delete();
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _persistNavCustomIcons() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        _kNavCustomIconsKey,
+        jsonEncode(_navCustomIcons),
+      );
+      PrefsMirror.snapshotSoon();
+    } catch (e) {
+      _log('保存自定义底栏图标失败: $e');
     }
   }
 

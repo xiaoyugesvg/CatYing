@@ -27,8 +27,99 @@ import '../novel_source/model/xiaoshuo_book_chapter.dart';
 import '../novel_source/web_book/web_book.dart';
 import 'manga_source.dart';
 
+/// 老式「扁平」Legado 规则（`ruleChapterList` / `ruleBookContent` / …）
+/// → 新式嵌套规则（`ruleToc.chapterList` / `ruleContent.content` / …）。
+///
+/// 小说链路把扁平源交给 Node 引擎（那边有 `normalizeLegadoSource`），但
+/// **漫画链路只走 Dart 的 `XiaoshuoBookSource`**，而它只读嵌套结构 ⇒
+/// 内置的「看漫画」「漫小肆」这类扁平源在漫画模块里此前拿不到任何规则
+/// （详情空白、章节为空、取图 0 张）。这里补齐同一套映射。
+Map<String, dynamic> normalizeLegadoComicRules(Map<String, dynamic> raw) {
+  final out = Map<String, dynamic>.from(raw);
+
+  String? str(String key) {
+    final v = raw[key];
+    if (v is String && v.trim().isNotEmpty) return v.trim();
+    return null;
+  }
+
+  /// 只在嵌套项缺失时补，显式写好的新式规则优先。
+  void put(String section, String key, String? value) {
+    if (value == null || value.isEmpty) return;
+    final cur = out[section];
+    final map =
+        cur is Map ? Map<String, dynamic>.from(cur) : <String, dynamic>{};
+    final exist = map[key];
+    if (exist is String && exist.trim().isNotEmpty) return;
+    map[key] = value;
+    out[section] = map;
+  }
+
+  // 搜索
+  final searchUrl = str('ruleSearchUrl');
+  if (searchUrl != null &&
+      (out['searchUrl'] is! String ||
+          (out['searchUrl'] as String).trim().isEmpty)) {
+    out['searchUrl'] = searchUrl;
+  }
+  put('ruleSearch', 'bookList', str('ruleSearchList'));
+  put('ruleSearch', 'name', str('ruleSearchName'));
+  put('ruleSearch', 'author', str('ruleSearchAuthor'));
+  put('ruleSearch', 'kind', str('ruleSearchKind'));
+  put('ruleSearch', 'lastChapter', str('ruleSearchLastChapter'));
+  put('ruleSearch', 'coverUrl', str('ruleSearchCoverUrl'));
+  put('ruleSearch', 'bookUrl', str('ruleSearchNoteUrl'));
+
+  // 发现：老版 ruleFindUrl 的 `标题::地址\n…` 与新 exploreUrl 同格式
+  final findUrl = str('ruleFindUrl');
+  if (findUrl != null &&
+      (out['exploreUrl'] == null ||
+          '${out['exploreUrl']}'.trim().isEmpty)) {
+    out['exploreUrl'] = findUrl;
+  }
+
+  // 详情
+  put('ruleBookInfo', 'name', str('ruleBookName'));
+  put('ruleBookInfo', 'author', str('ruleBookAuthor'));
+  put('ruleBookInfo', 'kind', str('ruleBookKind') ?? str('ruleKind'));
+  put(
+    'ruleBookInfo',
+    'intro',
+    str('ruleIntroduce') ?? str('ruleBookIntroduce'),
+  );
+  put('ruleBookInfo', 'coverUrl', str('ruleCoverUrl'));
+  put('ruleBookInfo', 'lastChapter', str('ruleBookLastChapter'));
+  put('ruleBookInfo', 'tocUrl', str('ruleChapterUrl'));
+
+  // 目录
+  put('ruleToc', 'chapterList', str('ruleChapterList'));
+  put('ruleToc', 'chapterName', str('ruleChapterName'));
+  put('ruleToc', 'chapterUrl', str('ruleContentUrl'));
+  put('ruleToc', 'nextTocUrl', str('ruleChapterUrlNext'));
+
+  // 正文（漫画里就是图片地址规则）
+  put('ruleContent', 'content', str('ruleBookContent'));
+  put('ruleContent', 'nextContentUrl', str('ruleContentUrlNext'));
+
+  // 详情页 URL 正则
+  final urlPattern = str('ruleBookUrlPattern');
+  if (urlPattern != null &&
+      (out['bookUrlPattern'] == null ||
+          '${out['bookUrlPattern']}'.trim().isEmpty)) {
+    out['bookUrlPattern'] = urlPattern;
+  }
+
+  return out;
+}
+
 class LegadoComicMangaSource extends MangaSource {
   LegadoComicMangaSource(this.source);
+
+  /// 直接从书源原始 JSON 构造（会自动做扁平 → 嵌套归一化）。
+  factory LegadoComicMangaSource.fromRaw(Map<String, dynamic> raw) =>
+      LegadoComicMangaSource(
+        XiaoshuoBookSource.fromJson(normalizeLegadoComicRules(raw)),
+      );
 
   final XiaoshuoBookSource source;
   final WebBook _web = WebBook();
@@ -195,10 +286,32 @@ class LegadoComicMangaSource extends MangaSource {
       title: b.name,
       cover: b.coverUrl ?? '',
       author: b.author,
-      description: b.intro,
+      description: _cleanIntro(b.intro),
       tags: _splitTags(b.kind),
       url: b.bookUrl,
     );
+  }
+
+  /// 简介清洗：部分源的简介字段本身是**转义后的 HTML**
+  /// （例如 `&lt;span class="title"&gt;简介：&lt;/span&gt;`），
+  /// 直接展示就会在详情页看到一坨标签 ⇒ 先反解再按 HTML 取纯文本。
+  String? _cleanIntro(String? raw) {
+    final s = raw?.trim() ?? '';
+    if (s.isEmpty) return null;
+    var text = s;
+    if (text.contains('<') || text.contains('&lt;')) {
+      try {
+        final doc = html_parser.parse(text);
+        text = doc.documentElement?.text ?? text;
+      } catch (_) {}
+      // 源里可能是**二次转义**的 HTML（解析一次后仍是标签文本），再剥一层
+      text = text.replaceAll(RegExp(r'<[^>]*>'), '');
+    }
+    text = text
+        .replaceAll(RegExp(r'^简介\s*[:：]\s*'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return text.isEmpty ? null : text;
   }
 
   List<String>? _splitTags(String? raw) {
@@ -246,8 +359,7 @@ class LegadoComicMangaSource extends MangaSource {
             ? manga.cover
             : book.coverUrl!.trim(),
         author: book.author.trim().isEmpty ? manga.author : book.author.trim(),
-        description:
-            (book.intro ?? '').trim().isEmpty ? manga.description : book.intro,
+        description: _cleanIntro(book.intro) ?? manga.description,
         status: (book.bookStatus ?? '').trim().isEmpty
             ? manga.status
             : book.bookStatus,

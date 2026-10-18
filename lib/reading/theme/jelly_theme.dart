@@ -147,6 +147,19 @@ class JellyTheme {
         hintStyle: TextStyle(color: textSecondary),
       ),
 
+      // 开关：开 = 蓝色轨道 + 白点，关 = 灰轨道 + 白点
+      //（不配时轨道跟随 Material 默认主色；「水墨书香」的主色是近黑 #3A3A3A，
+      //  深色下就成了用户看到的"全黑开关"⇒ 统一改用调色板里的蓝）
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.all(Colors.white),
+        trackColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? blue
+              : textSecondary.withValues(alpha: 0.30),
+        ),
+        trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
+      ),
+
       // 文字主题
       textTheme: const TextTheme(
         titleLarge: TextStyle(fontSize: AppTheme.fontPageTitle, fontWeight: FontWeight.bold),
@@ -221,6 +234,17 @@ class JellyTheme {
           vertical: 16,
         ),
         hintStyle: TextStyle(color: textSecondary),
+      ),
+
+      // 开关：开 = 蓝色轨道 + 白点，关 = 灰轨道 + 白点（同浅色，避免全黑）
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.all(Colors.white),
+        trackColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? blue
+              : textSecondary.withValues(alpha: 0.30),
+        ),
+        trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
       ),
 
       // 文字主题

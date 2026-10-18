@@ -3,8 +3,37 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart'; // compute（弹幕解析丢 isolate）
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart'; // Ticker（每帧推进弹幕）
+import 'package:shared_preferences/shared_preferences.dart';
 
 // ============================================================
+
+/// 弹幕滚动速度（px/s）的默认值与可调范围。
+///
+/// 旧默认 150px/s 在手机上约 2.6 秒就穿屏，用户 2026-10-18 反馈「太快了」，
+/// 统一放慢到 90（约 4.5 秒穿屏），范围收窄到 50~200。
+/// 播放器与设置页共用这几个常量，避免两处默认值/范围漂移。
+const String kDanmuSpeedPrefKey = 'danmu_speed';
+const double kDanmuSpeedDefault = 90;
+const double kDanmuSpeedMin = 50;
+const double kDanmuSpeedMax = 200;
+
+/// 一次性迁移标记：老存档里的 150 是旧默认值（不是用户主动调的），统一降到 90。
+const String _kDanmuSpeedMigrated = 'danmu_speed_slower_v1';
+
+/// 读取滚动速度（含一次性放慢迁移）。
+Future<double> loadDanmuSpeed(SharedPreferences prefs) async {
+  var v = (prefs.getDouble(kDanmuSpeedPrefKey) ?? kDanmuSpeedDefault)
+      .clamp(kDanmuSpeedMin, kDanmuSpeedMax)
+      .toDouble();
+  if (prefs.getBool(_kDanmuSpeedMigrated) != true) {
+    // 只迁移"旧默认值 150"—— 用户真的手动拖到 150 的概率极低，
+    // 而其他数值（自己调过的）保持不动。
+    if ((v - 150).abs() < 0.5) v = kDanmuSpeedDefault;
+    await prefs.setBool(_kDanmuSpeedMigrated, true);
+    await prefs.setDouble(kDanmuSpeedPrefKey, v);
+  }
+  return v;
+}
 
 class DanmuItem {
   final double time; // 秒
@@ -381,15 +410,22 @@ class _DanmuLayerState extends State<DanmuLayer>
   int get _maxActive => widget.maxActive.clamp(10, 200);
 
   /// 补播队列 + 每帧铺设上限：把"列表就绪瞬间几十条弹幕的文本布局"
-  /// 分摊到连续几帧（每帧 10 条 ≈ 1-2ms），消除单次掉帧。
-  /// 位置在铺设那一刻按当前播放位置现算，视觉上 ~100ms 内铺满，不可感知。
+  /// 分摊到连续几帧（每帧 2 条 ≈ 0.5ms），消除单次掉帧。
+  ///
+  /// ⚠️ 用户 2026-10-18：「一次出一堆，卡卡的」—— 原来每帧铺 10 条、
+  ///   队列最多收 60 条 ⇒ 列表就绪后约 100ms 内整屏一起冒出来。
+  ///   现在改成**小批量 + 批次间隔**（每帧最多 2 条、每批间隔 4 帧），
+  ///   队列上限也降到 12 条，观感是陆续飘进来而不是"糊一屏"。
   final List<DanmuItem> _pendingCatchup = [];
-  static const int _catchupPerFrame = 10;
+  static const int _catchupPerFrame = 2;
+  static const int _catchupMax = 12;
+  static const int _catchupGapFrames = 4;
+  int _catchupCooldown = 0;
 
   /// 正常生成路径的每帧上限：与补播对齐，防止密集场景下一帧 spawn 十几条
   /// 全部走 TextPainter.layout（每条 1~2ms）→ 单帧 20ms+ 掉帧。
   /// 超出部分留到下一帧继续（`_nextIndex` 不推进，条件仍满足）。
-  static const int _spawnPerFrame = 12;
+  static const int _spawnPerFrame = 8;
 
   /// 绘制用 TextPainter 缓存（CustomPaint 模式）：同文案同样式只 layout 一次。
   /// ⚠️ 与旧 `_widthCache` 合并：现在宽度直接取缓存里 fill 层的 `.width`，
@@ -674,14 +710,17 @@ class _DanmuLayerState extends State<DanmuLayer>
     _active.removeWhere(
         (a) => a.item.mode == 1 ? a.x + a.width < -16 : a.remaining <= 0);
 
-    // 补播队列分帧铺开：每帧最多 `_catchupPerFrame` 条，
-    // 避免"列表就绪瞬间几十条文本布局"挤在同一帧造成单次掉帧。
-    // ⚠️ 2026-10-14：补播与正常 spawn **共享同一帧预算** —— 原来两者各自封顶
-    //   （12 + 10）⇒ 单帧最多新增 22 条弹幕，每条 cache-miss 都是一次
-    //   `TextPainter.layout`，正是 `_spawnPerFrame` 想避免的"单帧 20ms+ 掉帧"。
-    final drained = _pendingCatchup.isNotEmpty
-        ? _drainCatchup(pos, budget: _spawnPerFrame - spawnCount)
-        : 0;
+    // 补播队列分帧铺开：每帧最多 `_catchupPerFrame` 条，且批次之间留几帧
+    // 间隔 —— 避免"列表就绪瞬间整屏一起冒出来"（用户 2026-10-18 反馈）。
+    var drained = 0;
+    if (_pendingCatchup.isNotEmpty) {
+      if (_catchupCooldown > 0) {
+        _catchupCooldown--;
+      } else {
+        drained = _drainCatchup(pos, budget: _catchupPerFrame);
+        if (drained > 0) _catchupCooldown = _catchupGapFrames;
+      }
+    }
 
     // 位置在前进（dt>0）说明画面还在动 → 需要重绘；
     // 或本帧有增减（生成/回收/补播）→ 也需要重绘。
@@ -701,6 +740,7 @@ class _DanmuLayerState extends State<DanmuLayer>
     _active.clear();
     _trackRightEdge.clear(); // 清屏后轨道全空，重建一次即可
     _pendingCatchup.clear(); // seek/换集时丢弃未铺完的补播
+    _catchupCooldown = 0;
     var i = 0;
     while (i < _sorted.length && _sorted[i].time <= pos) {
       i++;
@@ -722,14 +762,14 @@ class _DanmuLayerState extends State<DanmuLayer>
     if (_sorted.isEmpty || _nextIndex <= 0) return;
     final startX = _viewportWidth > 0 ? _viewportWidth : 0.0;
     // 补播窗口：速度越慢/屏越宽，弹幕在屏内停留越久，能补的窗口越长。
-    // 封顶 12s 防止往历史里扫太深（且受 `_maxActive` 总量限制）。
+    // 封顶 6 秒 + 最多 12 条 —— 补太多会在就绪瞬间"糊一屏"（用户反馈）。
     final window =
-        _speed > 0 ? ((startX + 240) / _speed).clamp(3.0, 12.0) : 6.0;
+        _speed > 0 ? ((startX + 240) / _speed).clamp(2.5, 6.0) : 4.0;
     // 从游标往前扫（时间倒序），超窗即停；头插 ⇒ 收完即时间正序
     for (var i = _nextIndex - 1; i >= 0; i--) {
       final d = _sorted[i];
       if (pos - d.time > window) break;
-      if (_pendingCatchup.length >= _maxActive) break;
+      if (_pendingCatchup.length >= _catchupMax) break;
       _pendingCatchup.insert(0, d);
     }
   }

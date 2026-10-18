@@ -4,7 +4,7 @@ import '../../common/theme.dart';
 import '../../emby/emby_accounts_page.dart';
 import '../../widgets/common_widgets.dart';
 import '../../widgets/glass.dart';
-import '../../miniapp/pages/mini_app_list_page.dart';
+import '../../miniapp/pages/mini_app_market_page.dart';
 import '../../hiker/pages/hiker_settings_page.dart';
 import 'controller.dart';
 import 'sub/about_settings_page.dart';
@@ -105,14 +105,12 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const SizedBox(height: AppTheme.spacingMD),
               // 程序（独立小程序模块：TVBox 配置 影视+直播）
-              // 用户 2026-10-13：设置里这项叫「程序管理」（不是「小程序」）
-              // 用户 2026-10-14：「程序管理」直接进**程序市场**那个 Tab
-              //   （`initialTab: 1`）—— 它就是"加程序/逛市场"的入口，
-              //   进去先看已安装再切市场多一步。
+              // 用户 2026-10-18：市场改为订阅制独立页（多订阅/多市场），
+              // 「程序管理」直接进市场订阅页；已安装内容在「程序」tab 里看。
               _categoryTile(
                 icon: Icons.widgets_outlined,
                 title: '程序管理',
-                onTap: () => Get.to(() => const MiniAppListPage(initialTab: 1)),
+                onTap: () => Get.to(() => const MiniAppMarketPage()),
               ),
               const SizedBox(height: AppTheme.spacingMD),
 

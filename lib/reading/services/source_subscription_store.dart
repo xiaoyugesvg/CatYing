@@ -356,6 +356,41 @@ class SourceSubscriptionStore extends ChangeNotifier {
     return (ok: ok, failed: failed);
   }
 
+  /// 自动更新周期：24 小时。首次（[SourceSubscription.lastUpdated] == 0）
+  /// 会立即拉取，所以新装/新加的订阅不用再手动点「更新」。
+  static const Duration autoTtl = Duration(hours: 24);
+
+  bool _autoRunning = false;
+
+  /// 启动时调用：把「从未更新过」或「超过 [autoTtl] 未更新」的订阅逐个拉一遍，
+  /// 源体会落库（[BookSourceStore] / [SourceConfigStore]），下次启动直接用本地源，
+  /// 不再依赖用户手动点更新。
+  Future<void> autoUpdateStale() async {
+    if (_autoRunning) return;
+    _autoRunning = true;
+    try {
+      await load();
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final stale = _items
+          .where((s) =>
+              s.enabled &&
+              s.kind.supported &&
+              (s.lastUpdated == 0 ||
+                  now - s.lastUpdated > autoTtl.inMilliseconds))
+          .toList();
+      for (final s in stale) {
+        // 期间用户可能停用 / 删除，逐条再确认一次
+        final cur = _items.where((e) => e.id == s.id).firstOrNull;
+        if (cur == null || !cur.enabled) continue;
+        await update(s.id);
+      }
+    } catch (e) {
+      _log('自动更新订阅失败: $e');
+    } finally {
+      _autoRunning = false;
+    }
+  }
+
   String _friendly(Object e) {
     final s = e.toString();
     if (s.contains('SocketException') || s.contains('timed out')) {

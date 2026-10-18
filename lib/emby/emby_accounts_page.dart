@@ -257,7 +257,17 @@ class _EmbyAccountsPageState extends State<EmbyAccountsPage> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '$typeLabel · ${s.username} · ${s.normalizedUrl}',
+                        '$typeLabel · ${s.username}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: AppTheme.fontCaption,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        s.normalizedUrl,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -275,7 +285,11 @@ class _EmbyAccountsPageState extends State<EmbyAccountsPage> {
                     Icons.more_horiz,
                     color: AppTheme.textSecondary,
                   ),
-                  color: AppTheme.backgroundElevated,
+                  // 用**不透明**的卡片色：backgroundElevated 在浅色主题下是
+                  // 半透明的，弹层会透出后面的卡片，看起来像一块灰雾
+                  //（用户 2026-10-18：「整体 UI 太丑」）。
+                  color: AppTheme.backgroundSecondary,
+                  elevation: 8,
                   shape: RoundedRectangleBorder(
                     borderRadius:
                         BorderRadius.circular(AppTheme.glassRadiusCard),

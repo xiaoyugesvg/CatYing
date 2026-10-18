@@ -298,7 +298,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   int _danmuLoadGen = 0;
   double _danmuFontSize = 14;
   double _danmuOpacity = 1;
-  double _danmuSpeed = 150;
+  double _danmuSpeed = kDanmuSpeedDefault;
   int _danmuTracks = 4;
 
   /// 同屏活跃弹幕上限（10~200）。高密度源调低可明显减少绘制压力。
@@ -1153,7 +1153,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         28.0,
       );
       _danmuOpacity = (prefs.getDouble('danmu_opacity') ?? 1).clamp(0.2, 1.0);
-      _danmuSpeed = (prefs.getDouble('danmu_speed') ?? 150).clamp(80.0, 240.0);
+      // 滚动速度：旧默认 150 太快（用户反馈），统一走 loadDanmuSpeed 的
+      // 默认 90 与一次性放慢迁移；范围 50~200。
+      _danmuSpeed = await loadDanmuSpeed(prefs);
       _danmuTracks = (prefs.getInt('danmu_tracks') ?? 4).clamp(2, 8);
       _danmuMaxActive = (prefs.getInt('danmu_max_active') ?? 60).clamp(10, 200);
       _danmuBlockWords = prefs.getStringList('danmu_block_words') ?? const [];
@@ -2557,8 +2559,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   /// 「弹幕速度」滑条右侧文案
   String _danmuSpeedLabel(double v) {
-    if (v < 120) return '极慢';
-    if (v < 190) return '适中';
+    if (v < 70) return '极慢';
+    if (v < 120) return '适中';
     return '极快';
   }
 
@@ -4384,9 +4386,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                 label: '弹幕速度',
                                 valueText: _danmuSpeedLabel(_danmuSpeed),
                                 value: _danmuSpeed,
-                                min: 80,
-                                max: 240,
-                                divisions: 16,
+                                min: kDanmuSpeedMin,
+                                max: kDanmuSpeedMax,
+                                divisions: 15,
                                 ticks: const ['极慢', '适中', '极快'],
                                 onChanged: (v) {
                                   refresh(() => _danmuSpeed = v);

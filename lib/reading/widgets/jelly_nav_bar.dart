@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import '../../common/floating_nav_spec.dart';
 import '../services/settings_service.dart';
@@ -86,6 +88,10 @@ class _JellyNavBarState extends State<JellyNavBar>
     with SingleTickerProviderStateMixin {
   /// 当前栏的取色调色板（可被 widget.palette 覆盖）
   JellyPalette get _pal => widget.palette ?? JellyTheme.palette;
+
+  /// 当前悬浮栏风格（设置页可切换：水墨 / 液态玻璃 / 炫彩 / 霓虹）
+  FloatingNavStyle get _style =>
+      FloatingNavStyle.fromId(SettingsService().navStyle);
 
   late AnimationController _controller;
   int _previousIndex = 0;
@@ -235,11 +241,7 @@ class _JellyNavBarState extends State<JellyNavBar>
           final bgAnim = SettingsService().backgroundAnimation;
           final navBody = Container(
             height: JellyNavBar.floatingBarHeight,
-            decoration: BoxDecoration(
-              color: FloatingNavSpec.barColor(isDark, _pal)
-                  .withValues(alpha: bgAnim ? FloatingNavSpec.barAlpha : 0.8),
-              borderRadius: BorderRadius.circular(_floatingRadius),
-            ),
+            decoration: _barDecoration(isDark, opaque: bgAnim),
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: _floatingTopPad),
               child: _buildNavContent(
@@ -259,6 +261,10 @@ class _JellyNavBarState extends State<JellyNavBar>
               ),
             ),
           );
+          // 炫彩/霓虹是不透明底，模糊背景没有意义（白耗一次全屏高斯）
+          final useBlur = !bgAnim &&
+              (_style == FloatingNavStyle.ink ||
+                  _style == FloatingNavStyle.liquid);
           return Padding(
             padding: EdgeInsets.fromLTRB(
               horizontalMargin + sidePad,
@@ -269,32 +275,115 @@ class _JellyNavBarState extends State<JellyNavBar>
             child: Container(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(_floatingRadius),
-                boxShadow: [
-                  // #6：原来深色下用主色 15%（带颜色），而影视/音乐是纯黑 6%
-                  // —— 三条栏阴影不一致。现在统一走规格里的 shadowAlpha
-                  // （明暗都用同一个值，与 FloatingNavSpec 完全一致）。
-                  BoxShadow(
-                    color: Colors.black
-                        .withValues(alpha: FloatingNavSpec.shadowAlpha),
-                    blurRadius: FloatingNavSpec.shadowBlur,
-                    offset: FloatingNavSpec.shadowOffset,
-                  ),
-                ],
+                boxShadow: _barShadow(),
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(_floatingRadius),
-                child: bgAnim
-                    ? navBody
-                    : BackdropFilter(
+                child: useBlur
+                    ? BackdropFilter(
                         filter: JellyTheme.glassFilter,
                         child: navBody,
-                      ),
+                      )
+                    : navBody,
               ),
             ),
           );
         },
       ),
     );
+  }
+
+  /// 悬浮胶囊底色（按风格分支）
+  BoxDecoration _barDecoration(bool isDark, {required bool opaque}) {
+    final radius = BorderRadius.circular(_floatingRadius);
+    switch (_style) {
+      case FloatingNavStyle.liquid:
+        // 液态玻璃：高透光渐变 + 白色高光描边
+        return BoxDecoration(
+          borderRadius: radius,
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: isDark
+                ? [
+                    Colors.white.withValues(alpha: 0.18),
+                    Colors.white.withValues(alpha: 0.05),
+                  ]
+                : [
+                    Colors.white.withValues(alpha: 0.82),
+                    Colors.white.withValues(alpha: 0.46),
+                  ],
+          ),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: isDark ? 0.22 : 0.75),
+          ),
+        );
+      case FloatingNavStyle.aurora:
+        // 炫彩：固定霓虹渐变（不跟主题走，否则墨灰主题下不"炫"）
+        return BoxDecoration(
+          borderRadius: radius,
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: FloatingNavSpec.auroraColors,
+          ),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.30)),
+        );
+      case FloatingNavStyle.neon:
+        // 霓虹：深色底 + 发光描边
+        return BoxDecoration(
+          color: const Color(0xFF101116),
+          borderRadius: radius,
+          border: Border.all(
+            color: FloatingNavSpec.neonColor.withValues(alpha: 0.90),
+            width: 1.2,
+          ),
+        );
+      case FloatingNavStyle.ink:
+        return BoxDecoration(
+          color: FloatingNavSpec.barColor(isDark, _pal)
+              .withValues(alpha: opaque ? FloatingNavSpec.barAlpha : 0.8),
+          borderRadius: radius,
+        );
+    }
+  }
+
+  /// 悬浮胶囊外阴影（炫彩/霓虹带同色光晕）
+  List<BoxShadow> _barShadow() {
+    switch (_style) {
+      case FloatingNavStyle.aurora:
+        return [
+          BoxShadow(
+            color: FloatingNavSpec.auroraColors.first.withValues(alpha: 0.42),
+            blurRadius: 20,
+            offset: const Offset(0, 6),
+          ),
+        ];
+      case FloatingNavStyle.neon:
+        return [
+          BoxShadow(
+            color: FloatingNavSpec.neonColor.withValues(alpha: 0.45),
+            blurRadius: 18,
+            spreadRadius: 1,
+          ),
+        ];
+      case FloatingNavStyle.liquid:
+        return [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.16),
+            blurRadius: 22,
+            offset: const Offset(0, 8),
+          ),
+        ];
+      case FloatingNavStyle.ink:
+        return [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: FloatingNavSpec.shadowAlpha),
+            blurRadius: FloatingNavSpec.shadowBlur,
+            offset: FloatingNavSpec.shadowOffset,
+          ),
+        ];
+    }
   }
 
   /// 导航栏内部内容（弹性指示器 + 导航项），两种模式共用
@@ -334,9 +423,11 @@ class _JellyNavBarState extends State<JellyNavBar>
                     scale: scale,
                     child: Container(
                       decoration: BoxDecoration(
-                        color: isDark
-                            ? JellyTheme.navSelectedFg
-                            : JellyTheme.navSelectedBg,
+                        color: FloatingNavSpec.styleIndicatorColor(
+                          _style,
+                          isDark: isDark,
+                          palette: _pal,
+                        ),
                         borderRadius:
                             BorderRadius.circular(bandHeight / 2),
                       ),
@@ -363,6 +454,7 @@ class _JellyNavBarState extends State<JellyNavBar>
                           ? () => widget.onSlideUp!(index)
                           : null,
                       palette: _pal,
+                      style: _style,
                       iconOnly: iconOnly,
                       iconSize: iconSize,
                     ),
@@ -387,12 +479,14 @@ class _JellyNavItem extends StatelessWidget {
   final bool iconOnly;
   final double iconSize;
   final JellyPalette palette;
+  final FloatingNavStyle style;
 
   const _JellyNavItem({
     required this.item,
     required this.isSelected,
     required this.onTap,
     required this.palette,
+    required this.style,
     this.onLongPress,
     this.onSlideUp,
     this.iconOnly = false,
@@ -404,9 +498,12 @@ class _JellyNavItem extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     // 取色走 FloatingNavSpec —— 与影视/音乐同一套规则，
     // 这样三条栏的"选中/未选中颜色"永远一致（用户要求颜色统一）。
-    final color = isSelected
-        ? FloatingNavSpec.selectedColor(isDark, palette)
-        : FloatingNavSpec.unselectedColor(isDark, palette);
+    final color = FloatingNavSpec.styleContentColor(
+      style,
+      selected: isSelected,
+      isDark: isDark,
+      palette: palette,
+    );
 
     return GestureDetector(
       // 上滑手势：唤起批量多选等（书架 tab 用；与长按并存）
@@ -422,7 +519,12 @@ class _JellyNavItem extends StatelessWidget {
         highlightColor: Colors.transparent,
         child: Center(
           child: iconOnly
-              ? _buildIcon(color)
+              ? AnimatedScale(
+                  scale: isSelected ? 1.06 : 1.0,
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOut,
+                  child: _buildIcon(color),
+                )
               // 用户调大 App 文字缩放（app.dart 全局 textScaler）时，
               // icon+label 的 Column 高度会超过 bandHeight → RenderFlex
               // 垂直溢出（黄黑条纹）。用 FittedBox(scaleDown) 包住：
@@ -433,7 +535,13 @@ class _JellyNavItem extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      _buildIcon(color),
+                      // 选中时图标轻微放大（1.06），比"只换颜色"更有反馈
+                      AnimatedScale(
+                        scale: isSelected ? 1.06 : 1.0,
+                        duration: const Duration(milliseconds: 180),
+                        curve: Curves.easeOut,
+                        child: _buildIcon(color),
+                      ),
                       const SizedBox(height: FloatingNavSpec.iconLabelGap),
                       Text(
                         item.label,
@@ -461,6 +569,24 @@ class _JellyNavItem extends StatelessWidget {
   }
 
   Widget _buildIcon(Color color) {
+    // 用户上传的自定义图标优先（设置 → 主页页面 → 底栏风格与图标）
+    final custom = SettingsService().navIconFor(item.label);
+    if (custom != null && custom.isNotEmpty) {
+      return Opacity(
+        opacity: isSelected ? 1 : 0.62,
+        child: Image.file(
+          File(custom),
+          width: iconSize,
+          height: iconSize,
+          fit: BoxFit.contain,
+          errorBuilder: (_, _, _) => _defaultIcon(color),
+        ),
+      );
+    }
+    return _defaultIcon(color);
+  }
+
+  Widget _defaultIcon(Color color) {
     if (item.iconBuilder != null) {
       return item.iconBuilder!(color, iconSize);
     }

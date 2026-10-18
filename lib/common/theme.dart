@@ -376,7 +376,18 @@ class AppTheme {
         ),
       ),
       switchTheme: SwitchThemeData(
-        thumbColor: WidgetStateProperty.all(accentColor),
+        // 之前只设了 thumbColor ⇒ 轨道走 Material 默认主色（深色主题下近黑），
+        // 用户看到的就是"开关全黑"。这里按平台习惯补全：
+        // 开 = 主题色轨道 + 白色圆点；关 = 灰轨道 + 白色圆点。
+        thumbColor: WidgetStateProperty.all(Colors.white),
+        trackColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              // 不能直接用 accentColor：默认「水墨书香」的 primary 是 #3A3A3A，
+              // 深色下就是用户说的"全黑开关" ⇒ 统一用调色板里的蓝。
+              ? _palette.blue
+              : textTertiary.withValues(alpha: 0.30),
+        ),
+        trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
       ),
       // #3：以下三项原来**只有 darkTheme 有**，lightTheme 缺 ——
       // 导致浅色模式下底部导航、Chip、文字全是 Material 默认样式，
@@ -605,6 +616,17 @@ class AppTheme {
           horizontal: spacingLG,
           vertical: spacingMD,
         ),
+      ),
+      // 开关：开 = 蓝色轨道 + 白点，关 = 灰轨道 + 白点
+      //（深色主题原来漏配 ⇒ 轨道走 Material 默认主色，看起来就是全黑）
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.all(Colors.white),
+        trackColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? _palette.blue
+              : textTertiary.withValues(alpha: 0.30),
+        ),
+        trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
       ),
       // ── 按钮统一（三个模块的按钮圆角/内边距/按压反馈一致）──────────
       //

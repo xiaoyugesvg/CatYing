@@ -3344,8 +3344,8 @@ class _BookshelfPageState extends State<BookshelfPage>
             builder: (context, constraints) {
               // 计算内容总宽度（粗略估算用于判断）
               // 每个 chip 间距 8，最后一个不加
-              const chipPadding = 24.0; // horizontal 12*2
-              const addChipPadding = 20.0; // horizontal 10*2
+              const chipPadding = 22.0; // horizontal 11*2
+              const addChipPadding = 18.0; // horizontal 9*2
               const spacing = 8.0;
               const textStyle = TextStyle(
                 fontSize: AppTheme.fontFootnote,
@@ -3403,7 +3403,7 @@ class _BookshelfPageState extends State<BookshelfPage>
               // 标签行：正在读/想读/已读完/全部…… 可横向滑动
               final scrollView = SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.only(left: 16),
+                padding: const EdgeInsets.only(left: 10),
                 child: Row(mainAxisSize: MainAxisSize.min, children: chips),
               );
 
@@ -3417,22 +3417,12 @@ class _BookshelfPageState extends State<BookshelfPage>
               //    那道背景框**一样高**（原来固定 28，跟标签框对不齐）；
               //    ③ 宽度再收窄一点，视觉上与标签更接近。
               final iconColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
-              // 标签背景框高度 = 文字行高 + 上下内边距 6*2
-              //（与 `_buildAllShelfChip` / `_buildShelfChip` 的 padding 一致，
-              //  改了那边这里自动跟着走，不会再有"差 2px"的对不齐）。
-              final chipBoxHeight = (TextPainter(
-                        text: const TextSpan(text: '全部', style: textStyle),
-                        textDirection: TextDirection.ltr,
-                        // 必须带上 textScaler：系统字号放大时标签文字会变高，
-                        // 不带就会算出一个偏矮的胶囊（又对不齐了）。
-                        textScaler: MediaQuery.textScalerOf(context),
-                      )..layout())
-                      .height +
-                  12;
               // 管理 / 排序：**两个独立的圆形按钮**（用户 2026-10-18 给的截图）
               //   · 左：管理书架（列表/筛选样式的图标）
               //   · 右：排序方式（上下箭头）
-              //   原来是同一枚胶囊里的两段，用户要求拆开成两个独立面板入口。
+              //   用户 2026-10-18 二次反馈：太靠左、比旁边 chips 显大 ⇒
+              //   左侧留 16 与标签行对齐，直径收到 30、图标 17。
+              const btnSize = 30.0;
               Widget roundBtn(IconData icon, String tip, VoidCallback onTap) {
                 return Tooltip(
                   message: tip,
@@ -3440,8 +3430,8 @@ class _BookshelfPageState extends State<BookshelfPage>
                     behavior: HitTestBehavior.opaque,
                     onTap: onTap,
                     child: Container(
-                      width: chipBoxHeight,
-                      height: chipBoxHeight,
+                      width: btnSize,
+                      height: btnSize,
                       decoration: BoxDecoration(
                         color: isDark
                             ? Colors.white.withValues(alpha: 0.08)
@@ -3454,32 +3444,35 @@ class _BookshelfPageState extends State<BookshelfPage>
                           width: 0.5,
                         ),
                       ),
-                      child: Icon(icon, size: 18, color: iconColor),
+                      child: Icon(icon, size: 17, color: iconColor),
                     ),
                   ),
                 );
               }
 
-              final fixedButtons = Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  roundBtn(
-                    Icons.subject_rounded,
-                    '管理书架',
-                    _showManageShelves,
-                  ),
-                  const SizedBox(width: 8),
-                  roundBtn(
-                    Icons.swap_vert_rounded,
-                    '排序方式',
-                    _showSortSheet,
-                  ),
-                ],
+              final fixedButtons = Padding(
+                padding: const EdgeInsets.only(left: 20),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    roundBtn(
+                      Icons.subject_rounded,
+                      '管理书架',
+                      _showManageShelves,
+                    ),
+                    const SizedBox(width: 8),
+                    roundBtn(
+                      Icons.swap_vert_rounded,
+                      '排序方式',
+                      _showSortSheet,
+                    ),
+                  ],
+                ),
               );
 
               // 固定按钮在**左侧**（用户多次点名"管理/排序移到左边"），
               // 标签行占满剩余宽度；内容不足时居中，超出则横向滚动
-              final fixedWidth = chipBoxHeight * 2 + 8;
+              const fixedWidth = 20.0 + btnSize * 2 + 8;
               return Row(
                 children: [
                   fixedButtons,
@@ -3515,12 +3508,12 @@ class _BookshelfPageState extends State<BookshelfPage>
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
           decoration: BoxDecoration(
             color: selected
                 ? JellyTheme.primary
                 : (isDark ? JellyTheme.cardDark : JellyTheme.cardLight),
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(14),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.05),
@@ -3579,12 +3572,12 @@ class _BookshelfPageState extends State<BookshelfPage>
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
           decoration: BoxDecoration(
             color: selected
                 ? JellyTheme.primary
                 : (isDark ? JellyTheme.cardDark : JellyTheme.cardLight),
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(14),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.05),
@@ -3633,10 +3626,10 @@ class _BookshelfPageState extends State<BookshelfPage>
       child: GestureDetector(
         onTap: _createShelf,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
           decoration: BoxDecoration(
             color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(14),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.05),

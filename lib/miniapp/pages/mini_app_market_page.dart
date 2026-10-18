@@ -1,132 +1,139 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../common/theme.dart';
 import '../../widgets/app_toast.dart';
 import '../models/mini_app.dart';
+import '../services/market_subscription_store.dart';
 import '../services/mini_app_service.dart';
 
-/// 「程序 → 市场」Tab 的主体（无 Scaffold，直接嵌进程序页）。
-///
-/// 2026-10-13 改版（对齐用户给的参考图）：
-///   · 顶部一行：**市场地址（JSON）输入框 + 「加载」按钮**（地址会记住，下次自动填回）
-///   · 下面是市场条目列表，每条是**行式卡片**：
-///     彩色首字图标 · 名称 · `v版本 · 作者` · 描述 · 右侧「安装 / 重装」药丸按钮
-///
-/// 与旧版独立路由页的区别：不再自带 AppBar/Scaffold，因为参考图里"市场"
-/// 是程序页的一个 Tab，不是二级页面。
-class MiniAppMarketView extends StatefulWidget {
-  /// 初始市场地址（从「添加程序 → 小程序市场」导进来时带过来；空则用上次保存的）
-  final String? initialUrl;
+/// 市场条目的视图：列表 / 一行 2·3·4 个（用户 2026-10-18）
+enum _MarketView {
+  list('列表', 0),
+  two('一行两个', 2),
+  three('一行三个', 3),
+  four('一行四个', 4);
 
-  /// 已解析好的清单（导入时顺带解析过 → 直接用，省一次重复下载）
-  final List<MiniAppMarketEntry>? initialList;
+  const _MarketView(this.label, this.columns);
+  final String label;
+  final int columns;
 
-  /// 安装成功回调（列表页用来刷新「已安装」那一屏）
-  final VoidCallback? onInstalled;
-
-  const MiniAppMarketView({
-    super.key,
-    this.initialUrl,
-    this.initialList,
-    this.onInstalled,
-  });
-
-  @override
-  State<MiniAppMarketView> createState() => MiniAppMarketViewState();
+  bool get isList => columns == 0;
 }
 
-class MiniAppMarketViewState extends State<MiniAppMarketView> {
+/// 「程序市场」页（用户 2026-10-18 改版）。
+///
+/// ── 与旧版的区别 ──────────────────────────────────────────────
+/// 旧版市场是「程序」页里的一个 Tab，只能填**一个**市场地址。
+/// 现在改成**订阅制**：
+///   · 一个订阅 = 一个市场（`{"apps":[…]}` 清单地址）；
+///   · 可以添加多个订阅，顶部 chip 切换，各自独立缓存；
+///   · 程序主页只显示已安装，市场从顶栏的商店按钮 / 添加弹层进入。
+class MiniAppMarketPage extends StatefulWidget {
+  const MiniAppMarketPage({super.key, this.initialSubscriptionId});
+
+  /// 打开时默认选中的订阅（空 = 第一条）
+  final String? initialSubscriptionId;
+
+  @override
+  State<MiniAppMarketPage> createState() => _MiniAppMarketPageState();
+}
+
+class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
   final _service = MiniAppService.instance;
-  final _urlCtrl = TextEditingController();
+  final _store = MarketSubscriptionStore.instance;
 
-  List<MiniAppMarketEntry>? _list;
-  String? _error;
+  String? _selectedId;
+  final Map<String, List<MiniAppMarketEntry>> _cache = {};
+
   bool _loading = false;
-
-  /// 当前清单属于哪个市场地址（换地址时先清旧清单，避免"地址已换、列表还是旧的"）
-  String _loadedUrl = '';
-
-  /// 载入序号：快速换地址/连点加载时，旧响应一律丢弃
+  String? _error;
   int _loadSeq = 0;
 
-  /// 正在安装的 appId
   final _installing = <String>{};
+
+  /// 视图（列表 / 2·3·4 列），存 prefs 重启保持
+  static const _kViewKey = 'miniapp_market_view_mode';
+  _MarketView _view = _MarketView.two;
 
   @override
   void initState() {
     super.initState();
-    _urlCtrl.text = (widget.initialUrl?.trim().isNotEmpty ?? false)
-        ? widget.initialUrl!.trim()
-        : _service.marketUrl;
-    final pre = widget.initialList;
-    if (pre != null && pre.isNotEmpty) {
-      // 导入时已解析过 → 直接用，不再下载；地址也顺手记住
-      _list = pre;
-      _loadedUrl = _urlCtrl.text.trim();
-      if (_urlCtrl.text.isNotEmpty) _service.setMarketUrl(_urlCtrl.text);
-    } else if (_urlCtrl.text.isNotEmpty) {
-      _load();
-    }
+    _restoreView();
+    _bootstrap();
   }
 
-  @override
-  void didUpdateWidget(covariant MiniAppMarketView oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // 「添加程序」又导了一个不同的市场地址 → 换地址并重新加载
-    final incoming = widget.initialUrl?.trim() ?? '';
-    if (incoming.isEmpty || incoming == _urlCtrl.text.trim()) return;
-    _urlCtrl.text = incoming;
-    final pre = widget.initialList;
-    if (pre != null && pre.isNotEmpty) {
-      setState(() {
-        _list = pre;
-        _loadedUrl = incoming;
-        _error = null;
-        _loading = false;
-      });
-      _service.setMarketUrl(incoming);
-    } else {
-      _load();
-    }
+  Future<void> _restoreView() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final i = p.getInt(_kViewKey) ?? _MarketView.two.index;
+      if (i >= 0 && i < _MarketView.values.length && mounted) {
+        setState(() => _view = _MarketView.values[i]);
+      }
+    } catch (_) {}
   }
 
-  @override
-  void dispose() {
-    _urlCtrl.dispose();
-    super.dispose();
+  Future<void> _setViewMode(_MarketView v) async {
+    setState(() => _view = v);
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setInt(_kViewKey, v.index);
+    } catch (_) {}
   }
 
-  Future<void> _load() async {
-    final url = _urlCtrl.text.trim();
-    if (url.isEmpty) {
-      AppToast.message('先填市场地址');
-      return;
+  Future<void> _bootstrap() async {
+    await _store.load();
+    if (!mounted) return;
+    final id = widget.initialSubscriptionId ??
+        (_store.items.isNotEmpty ? _store.items.first.id : null);
+    setState(() => _selectedId = id);
+    if (id != null) await _loadFor(id);
+  }
+
+  MarketSubscription? get _selected {
+    final id = _selectedId;
+    if (id == null) return null;
+    for (final s in _store.items) {
+      if (s.id == id) return s;
     }
+    return null;
+  }
+
+  Future<void> _loadFor(String id) async {
+    final sub = _store.items.where((e) => e.id == id).firstOrNull;
+    if (sub == null) return;
     final seq = ++_loadSeq;
     setState(() {
       _loading = true;
       _error = null;
-      // 换了地址：先清掉旧地址的清单，别让两个市场的条目混在一屏
-      if (url != _loadedUrl) _list = null;
     });
-    // 记住地址：下次进「市场」自动填回并加载
-    await _service.setMarketUrl(url);
     try {
-      final list = await _service.fetchMarket(url);
-      // 期间又换过地址/重新加载 → 这次结果作废
+      final list = await _service.fetchMarket(sub.url);
       if (!mounted || seq != _loadSeq) return;
       setState(() {
-        _list = list;
-        _loadedUrl = url;
         _loading = false;
-        _error = (list == null || list.isEmpty) ? '这个地址不是小程序市场清单' : null;
+        _cache[sub.url] = list ?? const [];
+        _error = (list == null || list.isEmpty)
+            ? '这个地址不是有效的小程序市场清单'
+            : null;
       });
     } catch (e) {
       if (!mounted || seq != _loadSeq) return;
       setState(() {
         _loading = false;
-        _error = '加载失败: $e';
+        _error = '加载失败：$e';
       });
+    }
+  }
+
+  Future<void> _switchTo(MarketSubscription sub) async {
+    if (_selectedId == sub.id) return;
+    setState(() {
+      _selectedId = sub.id;
+      _error = null;
+    });
+    if (!_cache.containsKey(sub.url)) {
+      await _loadFor(sub.id);
     }
   }
 
@@ -139,166 +146,620 @@ class MiniAppMarketViewState extends State<MiniAppMarketView> {
     AppToast.message(r.ok ? '已安装「${e.name}」' : (r.error ?? '安装失败'));
     if (r.ok) {
       await _service.ensureLoaded();
-      widget.onInstalled?.call();
       if (mounted) setState(() {});
     }
   }
 
+  // ── 订阅管理 ─────────────────────────────────────────────────
+
+  Future<void> _showSubscriptionDialog({MarketSubscription? existing}) async {
+    final nameCtrl = TextEditingController(text: existing?.name ?? '');
+    final urlCtrl = TextEditingController(text: existing?.url ?? '');
+    final isEdit = existing != null;
+    final ok = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+        ),
+        title: Text(
+          isEdit ? '编辑市场订阅' : '添加市场订阅',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
+                decoration: _inputDeco('订阅名称（可选，默认用域名）'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: urlCtrl,
+                keyboardType: TextInputType.url,
+                autocorrect: false,
+                style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                decoration: _inputDeco('市场清单地址（https://…/apps.json）'),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '一个订阅对应一个市场；可添加多个订阅在顶部切换。',
+                style: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: 11,
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          if (isEdit)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'delete'),
+              style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+              child: const Text('删除'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'cancel'),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (urlCtrl.text.trim().isEmpty) {
+                AppToast.message('市场地址不能为空');
+                return;
+              }
+              Navigator.pop(ctx, 'save');
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || ok == null || ok == 'cancel') return;
+    if (ok == 'delete' && existing != null) {
+      await _store.remove(existing.id);
+      if (!mounted) return;
+      final next = _store.items.isNotEmpty ? _store.items.first.id : null;
+      setState(() => _selectedId = next);
+      if (next != null) await _loadFor(next);
+      return;
+    }
+    if (ok != 'save') return;
+    final name = nameCtrl.text.trim();
+    final url = urlCtrl.text.trim();
+    if (url.isEmpty) return;
+    if (isEdit) {
+      await _store.update(existing.id, name: name, url: url);
+      if (!mounted) return;
+      setState(() => _selectedId = existing.id);
+      await _loadFor(existing.id);
+    } else {
+      final sub = await _store.add(name: name, url: url);
+      if (!mounted) return;
+      setState(() => _selectedId = sub.id);
+      await _loadFor(sub.id);
+    }
+  }
+
+  InputDecoration _inputDeco(String hint) => InputDecoration(
+        hintText: hint,
+        hintStyle: TextStyle(color: AppTheme.textTertiary, fontSize: 12.5),
+        isDense: true,
+        filled: true,
+        fillColor: AppTheme.backgroundTertiary,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+      );
+
+  // ── UI ───────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _addressRow(),
-        // 已有清单时重新加载：顶部细进度条，避免"点了加载没反应"
-        if (_loading && (_list?.isNotEmpty ?? false))
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-                AppTheme.spacingMD, 8, AppTheme.spacingMD, 0),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(2),
-              child: LinearProgressIndicator(
-                minHeight: 2,
-                color: AppTheme.accentColor,
-                backgroundColor:
-                    AppTheme.textTertiary.withValues(alpha: 0.18),
+    return Scaffold(
+      backgroundColor: AppTheme.backgroundPrimary,
+      appBar: AppBar(
+        backgroundColor: AppTheme.backgroundPrimary,
+        elevation: 0,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back_ios_new,
+              size: 20, color: AppTheme.textPrimary),
+          onPressed: () => Navigator.maybePop(context),
+        ),
+        centerTitle: true,
+        title: Text(
+          '程序市场',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontHeadline,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        actions: [
+          PopupMenuButton<_MarketView>(
+            tooltip: '切换视图',
+            initialValue: _view,
+            color: AppTheme.backgroundSecondary,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            onSelected: _setViewMode,
+            itemBuilder: (_) => [
+              for (final v in _MarketView.values)
+                PopupMenuItem(
+                  value: v,
+                  child: Row(
+                    children: [
+                      Icon(_viewIcon(v), size: 17),
+                      const SizedBox(width: 8),
+                      Text(v.label, style: const TextStyle(fontSize: 13)),
+                    ],
+                  ),
+                ),
+            ],
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Icon(
+                _viewIcon(_view),
+                size: 20,
+                color: AppTheme.textSecondary,
               ),
             ),
           ),
-        const SizedBox(height: 10),
-        Expanded(child: _body()),
-      ],
+          IconButton(
+            tooltip: '刷新',
+            icon: Icon(Icons.refresh_rounded, color: AppTheme.textSecondary),
+            onPressed: _selected == null
+                ? null
+                : () => _loadFor(_selected!.id),
+          ),
+          IconButton(
+            tooltip: '添加订阅',
+            icon: Icon(Icons.add_rounded, color: AppTheme.textPrimary),
+            onPressed: () => _showSubscriptionDialog(),
+          ),
+          const SizedBox(width: 4),
+        ],
+      ),
+      body: ListenableBuilder(
+        listenable: _store,
+        builder: (context, _) {
+          final subs = _store.items;
+          if (subs.isEmpty) return _emptyNoSubs();
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _subscriptionBar(subs),
+              const SizedBox(height: 8),
+              if (_loading && (_bodyEntries.isEmpty))
+                const Expanded(
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else
+                Expanded(child: _body()),
+            ],
+          );
+        },
+      ),
     );
   }
 
-  /// 市场地址（JSON）行：圆角输入框 + 「加载」按钮（对齐参考图 1）
-  Widget _addressRow() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacingMD),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _urlCtrl,
-              keyboardType: TextInputType.url,
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-              decoration: InputDecoration(
-                isDense: true,
-                hintText: '市场地址（JSON）',
-                hintStyle: TextStyle(color: AppTheme.textTertiary, fontSize: 13),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: AppTheme.borderMedium),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: AppTheme.borderMedium),
-                ),
+  List<MiniAppMarketEntry> get _bodyEntries {
+    final sub = _selected;
+    if (sub == null) return const [];
+    return _cache[sub.url] ?? const [];
+  }
+
+  Widget _emptyNoSubs() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: AppTheme.accentColor.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
               ),
-              onSubmitted: (_) => _load(),
+              child: Icon(Icons.storefront_rounded,
+                  size: 30, color: AppTheme.accentOnSurface),
             ),
-          ),
-          const SizedBox(width: 10),
-          SizedBox(
-            height: 42,
-            child: FilledButton(
-              onPressed: _loading ? null : _load,
+            const SizedBox(height: 14),
+            Text(
+              '还没有市场订阅',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: AppTheme.fontHeadline,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '一个订阅对应一个市场，可以添加多个\n在顶部切换不同市场',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: AppTheme.fontFootnote,
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 18),
+            FilledButton.icon(
+              onPressed: () => _showSubscriptionDialog(),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('添加订阅'),
               style: FilledButton.styleFrom(
                 backgroundColor: AppTheme.accentColor,
-                padding: const EdgeInsets.symmetric(horizontal: 20),
+                foregroundColor: Colors.white,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                  borderRadius: BorderRadius.circular(14),
+                ),
               ),
-              child: Text(_loading ? '加载中' : '加载',
-                  style: const TextStyle(fontSize: 14)),
             ),
-          ),
-        ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _subscriptionBar(List<MarketSubscription> subs) {
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacingMD),
+        itemCount: subs.length + 1,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          if (i == subs.length) {
+            return GestureDetector(
+              onTap: () => _showSubscriptionDialog(),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppTheme.backgroundTertiary,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: AppTheme.borderLight, width: 0.6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.add_rounded,
+                        size: 16, color: AppTheme.textSecondary),
+                    const SizedBox(width: 4),
+                    Text(
+                      '订阅',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+          final sub = subs[i];
+          final selected = sub.id == _selectedId;
+          return GestureDetector(
+            onTap: () => _switchTo(sub),
+            onLongPress: () => _showSubscriptionDialog(existing: sub),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: selected
+                    ? AppTheme.accentColor
+                    : AppTheme.backgroundTertiary,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: selected
+                      ? Colors.transparent
+                      : AppTheme.borderLight,
+                  width: 0.6,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.storefront_rounded,
+                    size: 15,
+                    color: selected ? Colors.white : AppTheme.textSecondary,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    sub.name,
+                    style: TextStyle(
+                      color: selected ? Colors.white : AppTheme.textSecondary,
+                      fontSize: 12.5,
+                      fontWeight:
+                          selected ? FontWeight.w700 : FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }
 
   Widget _body() {
-    if (_loading && (_list == null || _list!.isEmpty)) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
     final err = _error;
-    if (err != null) {
+    final entries = _bodyEntries;
+    if (err != null && entries.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.storefront_outlined,
+              Icon(Icons.cloud_off_rounded,
                   size: 40, color: AppTheme.textTertiary),
               const SizedBox(height: 10),
-              Text(err,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: AppTheme.textSecondary)),
+              Text(
+                err,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: AppTheme.fontFootnote,
+                ),
+              ),
               const SizedBox(height: 14),
-              TextButton(onPressed: _load, child: const Text('重试')),
+              TextButton(
+                onPressed: _selected == null
+                    ? null
+                    : () => _loadFor(_selected!.id),
+                child: const Text('重试'),
+              ),
             ],
           ),
         ),
       );
     }
-
-    final list = _list ?? const <MiniAppMarketEntry>[];
-    if (list.isEmpty) {
+    if (entries.isEmpty) {
       return Center(
-        child: Text('填上面的地址，点「加载」拉取市场清单',
-            style: TextStyle(color: AppTheme.textTertiary, fontSize: 13)),
+        child: Text(
+          _loading ? '加载中…' : '这个市场暂时没有内容',
+          style: TextStyle(color: AppTheme.textTertiary, fontSize: 13),
+        ),
       );
     }
-
-    return ListView.separated(
-      // 用户 2026-10-13：底部留白加大——原来只留 24，列表最后几条会被
-      // 底部悬浮菜单栏遮住一部分。这里放到 130（菜单栏高度 + 余量），
-      // 保证能完整滑到底、最后一项也露在外面。
-      padding: const EdgeInsets.fromLTRB(
-          AppTheme.spacingMD, 0, AppTheme.spacingMD, 130),
-      itemCount: list.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
-      itemBuilder: (c, i) => _tile(list[i]),
+    return RefreshIndicator(
+      onRefresh: () async {
+        final sub = _selected;
+        if (sub != null) await _loadFor(sub.id);
+      },
+      child: _view.isList ? _listBody(entries) : _gridBody(entries),
     );
   }
 
-  /// 市场条目：**行式卡片**（对齐参考图 1）
+  IconData _viewIcon(_MarketView v) => switch (v) {
+        _MarketView.list => Icons.view_list_rounded,
+        _MarketView.two => Icons.grid_view_rounded,
+        _MarketView.three => Icons.apps_rounded,
+        _MarketView.four => Icons.grid_on_rounded,
+      };
+
+  Widget _listBody(List<MiniAppMarketEntry> entries) {
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(
+          AppTheme.spacingMD, 4, AppTheme.spacingMD, 40),
+      itemCount: entries.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 10),
+      itemBuilder: (_, i) => _tile(entries[i]),
+    );
+  }
+
+  Widget _gridBody(List<MiniAppMarketEntry> entries) {
+    final cols = _view.columns;
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(
+          AppTheme.spacingMD, 4, AppTheme.spacingMD, 40),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: cols,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        // 固定行高：2 列留出描述位，4 列紧凑一点但按钮仍可点
+        mainAxisExtent: cols == 2 ? 204 : (cols == 3 ? 186 : 170),
+      ),
+      itemCount: entries.length,
+      itemBuilder: (_, i) => _card(entries[i]),
+    );
+  }
+
+  /// 卡片视图（用户 2026-10-18：市场也要一行 2/3/4 个的卡片）
+  Widget _card(MiniAppMarketEntry e) {
+    final installed = _service.isInstalled(e.appId);
+    final busy = _installing.contains(e.appId);
+    final tint = _tintFor(e.appId);
+    final initial = e.name.isNotEmpty ? e.name.characters.first : '程';
+    final cols = _view.columns;
+    final compact = cols >= 4;
+    return GestureDetector(
+      onTap: busy ? null : () => _install(e),
+      child: Container(
+        padding: EdgeInsets.all(compact ? 8 : 10),
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundCard,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppTheme.glassBorderSoft, width: 0.6),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      tint.withValues(alpha: 0.95),
+                      tint.withValues(alpha: 0.62),
+                    ],
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Container(
+                      width: compact ? 34 : 44,
+                      height: compact ? 34 : 44,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white.withValues(alpha: 0.18),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        initial,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: compact ? 16 : 20,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    if (installed)
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: Container(
+                          padding: const EdgeInsets.all(2),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.25),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.check_rounded,
+                            size: 12,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(height: compact ? 5 : 7),
+            Text(
+              e.name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: compact ? 10.5 : 12,
+                height: 1.2,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              [
+                if (e.version.isNotEmpty) 'v${e.version}',
+                if (e.author.isNotEmpty) e.author,
+              ].join(' · '),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: compact ? 9 : 10,
+              ),
+            ),
+            SizedBox(height: compact ? 4 : 7),
+            SizedBox(
+              width: double.infinity,
+              height: compact ? 26 : 30,
+              child: FilledButton(
+                onPressed: busy ? null : () => _install(e),
+                style: FilledButton.styleFrom(
+                  backgroundColor: installed
+                      ? tint.withValues(alpha: 0.18)
+                      : AppTheme.accentColor,
+                  foregroundColor: installed ? tint : Colors.white,
+                  padding: EdgeInsets.zero,
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  textStyle: TextStyle(
+                    fontSize: compact ? 10 : 11.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                child: Text(busy ? '…' : (installed ? '重装' : '安装')),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _tile(MiniAppMarketEntry e) {
     final installed = _service.isInstalled(e.appId);
     final busy = _installing.contains(e.appId);
     final tint = _tintFor(e.appId);
     final initial = e.name.isNotEmpty ? e.name.characters.first : '程';
-
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: AppTheme.backgroundCard,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppTheme.glassBorderSoft, width: 0.6),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 彩色首字图标（参考图里每条颜色不同）
           Container(
-            width: 44,
-            height: 44,
+            width: 46,
+            height: 46,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              color: tint,
+              borderRadius: BorderRadius.circular(13),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  tint.withValues(alpha: 0.95),
+                  tint.withValues(alpha: 0.65),
+                ],
+              ),
             ),
             child: Text(
               initial,
               style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700),
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
           const SizedBox(width: 12),
@@ -306,15 +767,17 @@ class MiniAppMarketViewState extends State<MiniAppMarketView> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(e.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600)),
+                Text(
+                  e.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 const SizedBox(height: 3),
-                // 「v版本 · 作者」—— 与参考图一致的一行小字
                 Text(
                   [
                     if (e.version.isNotEmpty) 'v${e.version}',
@@ -323,39 +786,48 @@ class MiniAppMarketViewState extends State<MiniAppMarketView> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                      color: AppTheme.textTertiary, fontSize: 11),
+                    color: AppTheme.textTertiary,
+                    fontSize: 11,
+                  ),
                 ),
                 if (e.description.isNotEmpty) ...[
                   const SizedBox(height: 5),
-                  Text(e.description,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 12,
-                          height: 1.35)),
+                  Text(
+                    e.description,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
                 ],
               ],
             ),
           ),
           const SizedBox(width: 10),
-          // 「安装 / 重装」药丸按钮
           SizedBox(
             height: 32,
             child: FilledButton(
               onPressed: busy ? null : () => _install(e),
               style: FilledButton.styleFrom(
                 backgroundColor: installed
-                    ? tint.withValues(alpha: 0.22)
+                    ? tint.withValues(alpha: 0.18)
                     : AppTheme.accentColor,
                 foregroundColor: installed ? tint : Colors.white,
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16)),
+                  borderRadius: BorderRadius.circular(16),
+                ),
               ),
-              child: Text(busy ? '…' : (installed ? '重装' : '安装'),
-                  style: const TextStyle(
-                      fontSize: 12, fontWeight: FontWeight.w600)),
+              child: Text(
+                busy ? '…' : (installed ? '重装' : '安装'),
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
           ),
         ],
@@ -364,15 +836,14 @@ class MiniAppMarketViewState extends State<MiniAppMarketView> {
   }
 
   static const _tints = <Color>[
-    Color(0xFF4FC3F7), // 蓝
-    Color(0xFF9575CD), // 紫
-    Color(0xFF66BB6A), // 绿
-    Color(0xFFFFA726), // 橙
-    Color(0xFFEF5350), // 红
-    Color(0xFF26A69A), // 青
+    Color(0xFF4FC3F7),
+    Color(0xFF9575CD),
+    Color(0xFF66BB6A),
+    Color(0xFFFFA726),
+    Color(0xFFEF5350),
+    Color(0xFF26A69A),
   ];
 
-  /// 按 appId 稳定取色（不用 String.hashCode：不保证跨进程稳定）
   Color _tintFor(String id) {
     var h = 0;
     for (final c in id.codeUnits) {

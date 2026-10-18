@@ -137,18 +137,55 @@ class XiaoshuoBookSource {
     return v.toString();
   }
 
+  /// 宽容取整：数字 / 数字字符串 / 中文类型名（"漫画"=2 等）。
+  static int _asInt(Object? v, [int fallback = 0]) {
+    if (v is num) return v.toInt();
+    if (v is String) {
+      final s = v.trim();
+      final n = int.tryParse(s);
+      if (n != null) return n;
+      switch (s) {
+        case '有声':
+        case 'audio':
+          return 1;
+        case '漫画':
+        case 'comic':
+          return 2;
+        case '文件':
+        case 'file':
+          return 3;
+      }
+    }
+    return fallback;
+  }
+
+  /// 宽容取布尔：bool / "true" / 1 / 0。
+  static bool _asBool(Object? v, bool fallback) {
+    if (v is bool) return v;
+    if (v is num) return v != 0;
+    if (v is String) {
+      final s = v.trim().toLowerCase();
+      if (s == 'true' || s == '1') return true;
+      if (s == 'false' || s == '0') return false;
+    }
+    return fallback;
+  }
+
   factory XiaoshuoBookSource.fromJson(Map<String, dynamic> json) {
     return XiaoshuoBookSource(
       bookSourceUrl: json['bookSourceUrl'] as String? ?? '',
       bookSourceName: json['bookSourceName'] as String? ?? '',
       bookSourceGroup: json['bookSourceGroup'] as String?,
-      bookSourceType: json['bookSourceType'] as int? ?? 0,
+      // ⚠️ Legado 源里 bookSourceType 既可能是数字（0/1/2/3），也可能是
+      // 中文文本（"漫画"）。原来写死 `as int?` ⇒ 遇到文本型直接抛类型错，
+      // 整条源在漫画模块被跳过（内置「看漫画」「漫小肆」就是这么消失的）。
+      bookSourceType: _asInt(json['bookSourceType']),
       bookUrlPattern: json['bookUrlPattern'] as String?,
-      customOrder: json['customOrder'] as int? ?? 0,
-      enabled: json['enabled'] as bool? ?? true,
-      enabledExplore: json['enabledExplore'] as bool? ?? true,
+      customOrder: _asInt(json['customOrder']),
+      enabled: _asBool(json['enabled'], true),
+      enabledExplore: _asBool(json['enabledExplore'], true),
       jsLib: json['jsLib'] as String?,
-      enabledCookieJar: json['enabledCookieJar'] as bool? ?? true,
+      enabledCookieJar: _asBool(json['enabledCookieJar'], true),
       concurrentRate: json['concurrentRate']?.toString(),
       // [FIX-HEADER-MAP] `header` 在 legado 里是 **JSON 字符串**（如 '{"User-Agent":"…"}'），
       // 但本项目服务层保存 Cookie 时会把它写成 **Map**（book_source_service.dart 里
@@ -163,9 +200,9 @@ class XiaoshuoBookSource {
       coverDecodeJs: json['coverDecodeJs'] as String?,
       bookSourceComment: json['bookSourceComment'] as String?,
       variableComment: json['variableComment'] as String?,
-      lastUpdateTime: json['lastUpdateTime'] as int? ?? 0,
-      respondTime: json['respondTime'] as int? ?? 180000,
-      weight: json['weight'] as int? ?? 0,
+      lastUpdateTime: _asInt(json['lastUpdateTime']),
+      respondTime: _asInt(json['respondTime'], 180000),
+      weight: _asInt(json['weight']),
       exploreUrl: json['exploreUrl'] as String?,
       exploreScreen: json['exploreScreen'] as String?,
       ruleExplore: _parseExploreRule(json['ruleExplore']),
@@ -177,7 +214,7 @@ class XiaoshuoBookSource {
       parserConfig: json['parser'] is Map<String, dynamic>
           ? Map<String, dynamic>.from(json['parser'] as Map)
           : null,
-      subCategoryDetection: json['subCategoryDetection'] as bool? ?? true,
+      subCategoryDetection: _asBool(json['subCategoryDetection'], true),
       filterKeywords: _parseStringList(json['filterKeywords']),
       subCategoryPatterns: _parseStringList(json['subCategoryPatterns']),
     );

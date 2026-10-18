@@ -164,6 +164,14 @@ class AnalyzeUrl {
     url = url.replaceAll('<page>', page.toString());
     url = url.replaceAll('《page》', page.toString());
 
+    // 老式扁平书源的 `ruleSearchUrl` 用裸占位符 `searchKey` / `searchPage`
+    // （如 `https://m.manhuagui.com/s/searchKey.html`）。漫画链路没有
+    // Node 侧的归一化，这里补上，否则扁平源搜索会请求到字面量地址。
+    if (key != null && key!.isNotEmpty) {
+      url = url.replaceAll('searchKey', key!);
+    }
+    url = url.replaceAll('searchPage', page.toString());
+
     // 兜底：确保任何残留的 {{key}}/{{page}} 被替换（极少见，
     // 仅当上面的正则未覆盖时触发）。
     if (key != null && key!.isNotEmpty) {

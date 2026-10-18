@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../../common/floating_nav_spec.dart';
+import '../services/settings_service.dart';
 import '../theme/jelly_palette.dart';
 import '../theme/jelly_theme.dart';
 import 'jelly_nav_bar.dart';
@@ -50,6 +53,7 @@ class JellyNavRail extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final pal = palette ?? JellyTheme.palette;
+    final style = FloatingNavStyle.fromId(SettingsService().navStyle);
     return SizedBox(
       width: totalWidth,
       child: Padding(
@@ -81,7 +85,7 @@ class JellyNavRail extends StatelessWidget {
               children: [
                 for (var i = 0; i < items.length; i++) ...[
                   if (i > 0) const SizedBox(height: _itemGap),
-                  _railItem(items[i], i == currentIndex, isDark, pal, i),
+                  _railItem(items[i], i == currentIndex, isDark, pal, style, i),
                 ],
               ],
             ),
@@ -98,11 +102,15 @@ class JellyNavRail extends StatelessWidget {
     bool selected,
     bool isDark,
     JellyPalette pal,
+    FloatingNavStyle style,
     int index,
   ) {
-    final fg = selected
-        ? FloatingNavSpec.selectedColor(isDark, pal)
-        : FloatingNavSpec.unselectedColor(isDark, pal);
+    final fg = FloatingNavSpec.styleContentColor(
+      style,
+      selected: selected,
+      isDark: isDark,
+      palette: pal,
+    );
     return Tooltip(
       message: item.label,
       child: GestureDetector(
@@ -116,29 +124,47 @@ class JellyNavRail extends StatelessWidget {
           height: _itemSize,
           decoration: BoxDecoration(
             color: selected
-                ? FloatingNavSpec.selectedItemBg(isDark, pal)
+                ? FloatingNavSpec.styleIndicatorColor(
+                    style,
+                    isDark: isDark,
+                    palette: pal,
+                  )
                 : Colors.transparent,
             shape: BoxShape.circle,
           ),
-          child: Center(
-            child: item.iconBuilder != null
-                ? item.iconBuilder!(fg, FloatingNavSpec.iconSize)
-                : item.emoji != null
-                    ? Text(
-                        item.emoji!,
-                        style: TextStyle(
-                          fontSize: FloatingNavSpec.iconSize,
-                          height: 1.0,
-                        ),
-                      )
-                    : Icon(
-                        item.icon,
-                        color: fg,
-                        size: FloatingNavSpec.iconSize,
-                      ),
-          ),
+          child: Center(child: _buildIcon(item, fg, selected)),
         ),
       ),
     );
+  }
+
+  Widget _buildIcon(JellyNavItem item, Color fg, bool selected) {
+    final custom = SettingsService().navIconFor(item.label);
+    if (custom != null && custom.isNotEmpty) {
+      return Opacity(
+        opacity: selected ? 1 : 0.62,
+        child: Image.file(
+          File(custom),
+          width: FloatingNavSpec.iconSize,
+          height: FloatingNavSpec.iconSize,
+          fit: BoxFit.contain,
+          errorBuilder: (_, _, _) => _defaultIcon(item, fg),
+        ),
+      );
+    }
+    return _defaultIcon(item, fg);
+  }
+
+  Widget _defaultIcon(JellyNavItem item, Color fg) {
+    if (item.iconBuilder != null) {
+      return item.iconBuilder!(fg, FloatingNavSpec.iconSize);
+    }
+    if (item.emoji != null) {
+      return Text(
+        item.emoji!,
+        style: TextStyle(fontSize: FloatingNavSpec.iconSize, height: 1.0),
+      );
+    }
+    return Icon(item.icon, color: fg, size: FloatingNavSpec.iconSize);
   }
 }

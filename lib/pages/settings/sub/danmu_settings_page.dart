@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../common/theme.dart';
 import '../../../widgets/common_widgets.dart';
+import '../../../widgets/danmaku.dart' show loadDanmuSpeed, kDanmuSpeedMin, kDanmuSpeedMax;
 import '../../webview/view.dart';
 import 'settings_shared.dart';
 import '../../../widgets/app_toast.dart';
@@ -74,6 +75,8 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
 
   Future<void> _load() async {
     final p = await SharedPreferences.getInstance();
+    // 滚动速度走共享读取（含一次性放慢迁移，与播放器同一口径）
+    final speed = await loadDanmuSpeed(p);
     if (!mounted) return;
     setState(() {
       _enabled = p.getBool('danmu_enabled') ?? true;
@@ -97,7 +100,7 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
           (p.getDouble('danmu_top_padding') ?? 0.0).clamp(0.0, 0.5);
       _bottomPadding =
           (p.getDouble('danmu_bottom_padding') ?? 0.0).clamp(0.0, 0.5);
-      _speed = (p.getDouble('danmu_speed') ?? 150).clamp(60.0, 300.0);
+      _speed = speed;
       _strokeWidth = (p.getDouble('danmu_stroke_width') ?? 1.5).clamp(0.0, 3.0);
       _fontWeight = p.getInt('danmu_font_weight') ?? 500;
       _maxActive = (p.getInt('danmu_max_active') ?? 60).clamp(10, 200);
@@ -488,9 +491,9 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
               _sliderRow(
                 label: '滚动速度',
                 value: _speed,
-                min: 60,
-                max: 300,
-                divisions: 24,
+                min: kDanmuSpeedMin,
+                max: kDanmuSpeedMax,
+                divisions: 15,
                 text: '${_speed.round()}',
                 onChanged: (v) async {
                   setState(() => _speed = v);
@@ -1038,8 +1041,8 @@ class _DanmuPreviewState extends State<_DanmuPreview>
                   animation: _c,
                   builder: (context, _) {
                     // 速度：值越大，走完一屏用的时间越短
-                    // speed 范围 60~300 → 周期 6s~1.2s，与真实弹幕观感接近
-                    final secs = (300 - widget.speed) / 40 + 1.2;
+                    // speed 范围 50~200 → 周期约 6.2s~1.2s，与真实弹幕观感接近
+                    final secs = (kDanmuSpeedMax - widget.speed) / 30 + 1.2;
                     final p = ((_c.value * 6 / secs) + phase) % 1.0;
                     // 从右侧进入、向左移出
                     final x = w - p * (w + 220);

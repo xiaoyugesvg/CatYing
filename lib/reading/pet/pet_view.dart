@@ -1,7 +1,12 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 
 import 'pet_models.dart';
 
@@ -43,72 +48,85 @@ class PetView extends StatelessWidget {
     // 用户 2026-10-18：「十二生肖都弄成圆形」——
     // 没有插画的物种（猫/牛/蛇/麒麟/朱雀/白虎/玄武/凤凰）也不再画
     // 全身矢量团子，统一裁成**圆形头部**，与有插画的生肖观感一致。
+    //
+    // 用户 2026-10-18（再次）：「只要宠物本身，不要圆形白底」——
+    // 悬浮桌宠这里不再套米白圆底/圆形裁切，头部直接画在透明画布上。
     return SizedBox(
       width: size,
       height: size,
-      child: ClipOval(
-        child: ColoredBox(
-          color: const Color(0xFFF7F3EA),
-          child: CustomPaint(
-            painter: _InkPetPainter(
-              species: species,
-              outfit: outfit,
-              t: t,
-              mood: mood,
-              headOnly: true,
-            ),
-          ),
+      child: CustomPaint(
+        painter: _InkPetPainter(
+          species: species,
+          outfit: outfit,
+          t: t,
+          mood: mood,
+          headOnly: true,
         ),
       ),
     );
   }
 
-  /// 图片皮肤：用户提供的生肖插画，做成圆角贴纸卡片。
+  /// 图片皮肤：**去背景 + 只保留宠物本体**，并加更有存在感的动效。
   ///
-  /// 插画是 3:4 竖图（顶部带书法标题），这里用 `BoxFit.cover` + 底部对齐，
-  /// 只保留动物本体；再叠加轻微上下浮动与摇摆，保证"灵动"。
+  /// ── 旧实现的问题（用户 2026-10-18）────────────────────────────
+  /// 原来把 3:4 插画塞进一个白色圆形贴纸里（`BoxShape.circle` +
+  /// `BoxFit.cover` + 底部对齐），插画自带的白底 + 圆形留白 ⇒
+  /// 悬浮在桌面上时"一个大白圆里一只小动物"，又占地方又不好看。
+  ///
+  /// 现在：把图片丢掉与边缘连通的近白像素（保留宠物身上的白肚皮），
+  /// 再裁到宠物本体的包围盒，按原比例绘制 —— 悬浮在桌面上就是一只
+  /// 干净的贴纸宠物，没有白底和多余留白。
   Widget _buildImagePet(String asset) {
-    final bob = math.sin(t * 2 * math.pi) * 1.6;
-    final sway = math.sin(t * 2 * math.pi + 0.8) * 0.012;
+    // 呼吸 / 摇摆 / 浮动 + 每 6 秒一次小跳（比原来的小幅平移更"活"）
+    final cycle = t * 2 * math.pi;
+    final breathe = 1 + math.sin(cycle * 2) * 0.018;
+    final sway = math.sin(cycle + 0.8) * 0.035;
+    final bob = math.sin(cycle) * 2.0 + math.sin(cycle * 0.5) * 1.0;
+    final hopPhase = (t % 6.0) / 6.0;
+    final hop =
+        math.pow(math.max(0.0, math.sin(hopPhase * math.pi)), 8) * 7.0;
     return SizedBox(
       width: size,
       height: size,
-      child: Transform.translate(
-        offset: Offset(0, bob),
-        child: Transform.rotate(
-          angle: sway,
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              // 用户 2026-10-18：生肖宠物统一**圆形**（原来是圆角方形贴纸）
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.12),
-                  blurRadius: 8,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Image.asset(
-              asset,
-              width: size,
-              height: size,
-              fit: BoxFit.cover,
-              alignment: Alignment.bottomCenter,
-              errorBuilder: (_, _, _) => CustomPaint(
-                painter: _InkPetPainter(
-                  species: species,
-                  outfit: outfit,
-                  t: t,
-                  mood: mood,
-                  headOnly: true,
+      child: Stack(
+        alignment: Alignment.bottomCenter,
+        children: [
+          // 影子：跳起来时收小，落地时铺开
+          Positioned(
+            bottom: size * 0.015,
+            child: Transform.scale(
+              scale: (1 - hop / 26).clamp(0.6, 1.0),
+              child: Container(
+                width: size * 0.46,
+                height: size * 0.055,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.13),
+                  borderRadius: BorderRadius.circular(999),
                 ),
               ),
             ),
           ),
-        ),
+          Transform.translate(
+            offset: Offset(0, -(bob + hop)),
+            child: Transform.rotate(
+              angle: sway,
+              child: Transform.scale(
+                scale: breathe,
+                child: _CutoutPetView(
+                  cacheKey: 'asset:$asset',
+                  loader: () async =>
+                      (await rootBundle.load(asset)).buffer.asUint8List(),
+                  size: size,
+                  fallback: Image.asset(
+                    asset,
+                    fit: BoxFit.contain,
+                    gaplessPlayback: true,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -139,19 +157,256 @@ class CustomPetImage extends StatelessWidget {
     if (!f.existsSync()) {
       return SizedBox(width: size, height: size);
     }
+    final isGif = path.toLowerCase().endsWith('.gif');
     return SizedBox(
       width: size,
       height: size,
       child: Transform.translate(
         offset: Offset(0, bob),
-        child: Image.file(
-          f,
-          fit: BoxFit.contain,
-          gaplessPlayback: true,
-        ),
+        // GIF 保留原样（逐帧动画无法做静态抠图）；
+        // 静态图同样做「去白底 + 裁到本体」，自定义图也不会带一圈白。
+        child: isGif
+            ? Image.file(f, fit: BoxFit.contain, gaplessPlayback: true)
+            : _CutoutPetView(
+                cacheKey: 'file:$path',
+                loader: f.readAsBytes,
+                size: size,
+                fallback: Image.file(
+                  f,
+                  fit: BoxFit.contain,
+                  gaplessPlayback: true,
+                ),
+              ),
       ),
     );
   }
+}
+
+// ══════════════════════════════════════════════════════════════
+// 图片宠物：去背景 + 只保留本体
+// ══════════════════════════════════════════════════════════════
+
+class _PetCutout {
+  const _PetCutout(this.image, this.crop);
+
+  final ui.Image image;
+
+  /// 宠物本体在图片里的包围盒（像素坐标）。
+  final ui.Rect crop;
+}
+
+/// 同一张图只处理一次（处理结果常驻内存）。
+final Map<String, Future<_PetCutout?>> _cutoutCache = {};
+
+Future<_PetCutout?> _cutoutFor(
+  String key,
+  Future<Uint8List> Function() loader,
+) {
+  return _cutoutCache.putIfAbsent(key, () async {
+    try {
+      final bytes = await loader();
+      final codec = await ui.instantiateImageCodec(bytes, targetWidth: 360);
+      final frame = await codec.getNextFrame();
+      final src = frame.image;
+      final w = src.width;
+      final h = src.height;
+      final bd = await src.toByteData(format: ui.ImageByteFormat.rawRgba);
+      src.dispose();
+      if (bd == null || w <= 0 || h <= 0) return null;
+      // 复制一份：worker 会原地改写 alpha
+      final raw = Uint8List.fromList(bd.buffer.asUint8List());
+      final res = await compute(_cutoutWorker, <Object?>[raw, w, h]);
+      if (res == null) return null;
+      final out = res[0] as Uint8List;
+      final completer = Completer<ui.Image>();
+      ui.decodeImageFromPixels(
+        out,
+        w,
+        h,
+        ui.PixelFormat.rgba8888,
+        completer.complete,
+      );
+      final img = await completer.future;
+      return _PetCutout(
+        img,
+        ui.Rect.fromLTRB(
+          (res[1] as int).toDouble(),
+          (res[2] as int).toDouble(),
+          (res[3] as int).toDouble(),
+          (res[4] as int).toDouble(),
+        ),
+      );
+    } catch (_) {
+      return null;
+    }
+  });
+}
+
+/// [compute] worker：去掉与边缘连通的近白像素，并返回宠物包围盒。
+///
+/// 只删「与画布边缘连通」的白色 → 宠物肚子/眼睛里的白色不会被误删。
+List<Object?>? _cutoutWorker(List<Object?> args) {
+  final bytes = args[0] as Uint8List;
+  final w = args[1] as int;
+  final h = args[2] as int;
+  if (w <= 0 || h <= 0) return null;
+  final bg = Uint8List(w * h);
+  final stack = <int>[];
+
+  bool nearWhite(int idx) {
+    final i = idx * 4;
+    return bytes[i] >= 230 && bytes[i + 1] >= 230 && bytes[i + 2] >= 224;
+  }
+
+  void seed(int x, int y) {
+    if (x < 0 || y < 0 || x >= w || y >= h) return;
+    final idx = y * w + x;
+    if (bg[idx] != 0 || !nearWhite(idx)) return;
+    bg[idx] = 1;
+    stack.add(idx);
+  }
+
+  for (var x = 0; x < w; x++) {
+    seed(x, 0);
+    seed(x, h - 1);
+  }
+  for (var y = 0; y < h; y++) {
+    seed(0, y);
+    seed(w - 1, y);
+  }
+  while (stack.isNotEmpty) {
+    final idx = stack.removeLast();
+    final x = idx % w;
+    final y = idx ~/ w;
+    seed(x - 1, y);
+    seed(x + 1, y);
+    seed(x, y - 1);
+    seed(x, y + 1);
+  }
+
+  var minX = w, minY = h, maxX = -1, maxY = -1;
+  // 先把背景透明化
+  for (var y = 0; y < h; y++) {
+    for (var x = 0; x < w; x++) {
+      final idx = y * w + x;
+      if (bg[idx] == 1) bytes[idx * 4 + 3] = 0;
+    }
+  }
+
+  // ── 只保留最大的连通块（宠物本体）──────────────────────────
+  // 生肖插画顶部还有书法标题「戌狗」和红色印章，它们与宠物不连通；
+  // 如果按所有非白像素取包围盒，标题会把画面撑高、宠物又变小。
+  final visited = Uint8List(w * h);
+
+  void pushNeighbor(int nx, int ny) {
+    if (nx < 0 || ny < 0 || nx >= w || ny >= h) return;
+    final n = ny * w + nx;
+    if (bg[n] == 1 || visited[n] == 1) return;
+    visited[n] = 1;
+    stack.add(n);
+  }
+
+  var bestCount = 0;
+  for (var i = 0; i < w * h; i++) {
+    if (bg[i] == 1 || visited[i] == 1) continue;
+    visited[i] = 1;
+    stack.add(i);
+    var count = 0;
+    var cMinX = w, cMinY = h, cMaxX = -1, cMaxY = -1;
+    while (stack.isNotEmpty) {
+      final idx = stack.removeLast();
+      count++;
+      final x = idx % w;
+      final y = idx ~/ w;
+      if (x < cMinX) cMinX = x;
+      if (y < cMinY) cMinY = y;
+      if (x > cMaxX) cMaxX = x;
+      if (y > cMaxY) cMaxY = y;
+      pushNeighbor(x - 1, y);
+      pushNeighbor(x + 1, y);
+      pushNeighbor(x, y - 1);
+      pushNeighbor(x, y + 1);
+    }
+    if (count > bestCount) {
+      bestCount = count;
+      minX = cMinX;
+      minY = cMinY;
+      maxX = cMaxX;
+      maxY = cMaxY;
+    }
+  }
+  if (maxX < minX || maxY < minY) return null;
+  return <Object?>[
+    bytes,
+    math.max(0, minX - 1),
+    math.max(0, minY - 1),
+    math.min(w, maxX + 2),
+    math.min(h, maxY + 2),
+  ];
+}
+
+/// 把去背后的图片按原比例画在画布上（底部对齐，不裁圆、不留白）。
+class _CutoutPetView extends StatelessWidget {
+  const _CutoutPetView({
+    required this.cacheKey,
+    required this.loader,
+    required this.size,
+    this.fallback,
+  });
+
+  final String cacheKey;
+  final Future<Uint8List> Function() loader;
+  final double size;
+  final Widget? fallback;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<_PetCutout?>(
+      future: _cutoutFor(cacheKey, loader),
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return SizedBox(width: size, height: size);
+        }
+        final cut = snap.data;
+        if (cut == null) {
+          return SizedBox(width: size, height: size, child: fallback);
+        }
+        return SizedBox(
+          width: size,
+          height: size,
+          child: CustomPaint(painter: _CutoutPainter(cut)),
+        );
+      },
+    );
+  }
+}
+
+class _CutoutPainter extends CustomPainter {
+  _CutoutPainter(this.cut);
+
+  final _PetCutout cut;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final src = cut.crop;
+    if (src.width <= 0 || src.height <= 0) return;
+    final aspect = src.width / src.height;
+    var dw = size.width;
+    var dh = dw / aspect;
+    if (dh > size.height) {
+      dh = size.height;
+      dw = dh * aspect;
+    }
+    canvas.drawImageRect(
+      cut.image,
+      src,
+      Rect.fromLTWH((size.width - dw) / 2, size.height - dh, dw, dh),
+      Paint()..filterQuality = FilterQuality.medium,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_CutoutPainter old) => old.cut != cut;
 }
 
 /// 圆形头像：同一个团子画法 + 米白纸底，自动裁成圆形。
