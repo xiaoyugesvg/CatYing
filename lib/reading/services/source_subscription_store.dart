@@ -217,23 +217,20 @@ class SourceSubscriptionStore extends ChangeNotifier {
       if (text.trim().isEmpty) throw Exception('订阅返回为空');
 
       // ── 漫画配置包（{"version":1,"sources":[{type,engine,config}]}）──
-      // 这类文件（如 x.muiu.site/…/comic.json）不是 Legado 书源，必须写进
-      // SourceConfigStore；以前误走 BookSourceStore，结果漫画源出现在书源仓库。
-      final configDefs = _parseConfigDefs(text);
-      if (sub.kind != SourceSubscriptionKind.comic && configDefs.isNotEmpty) {
-        throw Exception('这是漫画配置源，请在「漫源仓库」添加订阅');
+      // 只属于漫源仓库：书源仓的订阅即使混了这类内容也**不能**写进
+      // SourceConfigStore（否则会跑到漫源仓库显示 —— 用户明确禁止两边串）。
+      var configDefs = _parseConfigDefs(text);
+      if (sub.kind != SourceSubscriptionKind.comic) {
+        configDefs = const [];
       }
 
-      var all = BookSourceImportParser.parseSources(text);
-      var wanted = all.where((s) {
-        // 统一判据：兼容没写 bookSourceType 的漫画脚本
-        if (sub.kind == SourceSubscriptionKind.comic) return s.isComicSource;
-        // 书源仓的订阅：**书源 + 漫画源都收**（用户 2026-10-18：
-        // 「书源既要能导入书源，也要能导入漫画源并用图片模式」）。
-        return true;
-      }).toList();
-      // 漫画仓的订阅：一律按漫画源入库，避免没有 bookSourceType 的脚本
-      // 被当成小说源跑到书源仓库里。
+      // ⚠️ 不再按「是不是漫画源」过滤：用户从哪个仓导入，就原样收进哪个仓，
+      //    由 _warehouse 决定显示位置（2026-10-18 用户明确要求）。
+      var wanted = BookSourceImportParser.parseSources(
+        text,
+      ).where((s) => !s.isConfig).toList();
+      final parsedCount = wanted.length;
+      // 漫画仓的订阅：一律按漫画源入库（图片模式），避免书源仓的源跑过来。
       if (sub.kind == SourceSubscriptionKind.comic) {
         wanted = [
           for (final s in wanted)
@@ -245,7 +242,7 @@ class SourceSubscriptionStore extends ChangeNotifier {
       final side = sub.kind.feedsComic ? 'comic' : 'book';
       wanted = [for (final s in wanted) s.withWarehouse(side)];
       if (wanted.isEmpty && configDefs.isEmpty) {
-        throw Exception('没有解析到${sub.kind.label}（共 ${all.length} 条）');
+        throw Exception('没有解析到${sub.kind.label}（共 $parsedCount 条）');
       }
 
       // 配置源写入 SourceConfigStore（与漫画源仓库共用同一份）
@@ -269,22 +266,26 @@ class SourceSubscriptionStore extends ChangeNotifier {
 
       var added = 0;
       var updated = 0;
+      var storedBookIds = <String>[];
       if (wanted.isNotEmpty) {
         final r = await BookSourceStore.instance.addAll(wanted);
         added = r.added;
         updated = r.updated;
+        // ⚠️ 用**入库后的 id**：两个仓导入同一个源时，后导入的副本会
+        // 拿到带仓库后缀的独立 id；记原 id 会让订阅 tab 找不到它。
+        storedBookIds = r.ids;
       }
       await SourceManager().reload();
 
       final now = DateTime.now().millisecondsSinceEpoch;
       _items[i] = sub.copyWith(
-        count: configDefs.length + wanted.length,
+        count: configDefs.length + storedBookIds.length,
         lastUpdated: now,
         lastError: '',
         // 记下这条订阅带来的源 ⇒ 仓库页的订阅 tab 只显示它们
         sourceIds: [
           for (final d in configDefs) d.id,
-          for (final s in wanted) s.id,
+          ...storedBookIds,
         ],
       );
       await _persist();
@@ -305,7 +306,7 @@ class SourceSubscriptionStore extends ChangeNotifier {
       return (
         ok: true,
         message: parts.join('；'),
-        count: configDefs.length + wanted.length,
+        count: configDefs.length + storedBookIds.length,
       );
     } catch (e) {
       final msg = _friendly(e);
@@ -539,6 +540,15 @@ class SourceSubscriptionStore extends ChangeNotifier {
     try {
       final decoded = jsonDecode(text);
       if (decoded is Map && decoded['sources'] is List) {
+        // ⚠️ Legado 书源合集（如 x.muiu.site/…/book.json）同样是
+        // `{"version":1,"sources":[…]}`, 但每条是 bookSourceName/bookSourceUrl。
+        // 原来这里不区分 ⇒ 被误判成「漫画配置源」而拒绝导入（用户 2026-10-18）。
+        final rawList = (decoded['sources'] as List).whereType<Map>();
+        final looksBookBundle = rawList.any(
+          (m) =>
+              m.containsKey('bookSourceName') || m.containsKey('bookSourceUrl'),
+        );
+        if (looksBookBundle) return const [];
         return SourceConfigFile.fromJson(
           Map<String, dynamic>.from(decoded),
         ).sources.where((d) => d.id.trim().isNotEmpty).toList();

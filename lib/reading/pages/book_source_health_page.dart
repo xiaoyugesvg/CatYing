@@ -329,8 +329,8 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
           ),
         ),
         actions: [
-          // 防护（装饰，对齐参考图右上盾牌）
-          Icon(Icons.health_and_safety_rounded, size: 18, color: _subColor),
+          // 雷达（装饰，对齐参考图右上角）
+          Icon(Icons.radar, size: 18, color: _subColor),
           const SizedBox(width: 4),
           // 刷新：重跑体检（进行中禁用）
           IconButton(
@@ -363,7 +363,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
     return [
       const SizedBox(height: 60),
       Icon(
-        Icons.health_and_safety_rounded,
+        Icons.radar,
         size: 84,
         color: JellyTheme.primary,
       ),

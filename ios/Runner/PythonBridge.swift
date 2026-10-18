@@ -38,7 +38,7 @@ import Python
     private let watchdogQueue = DispatchQueue(label: "com.tvbox.python.watchdog")
 
     /// 当前超时预算（ms）；截止时刻用 static（C 回调无捕获，只能访问全局）
-    private var timeoutMs: Int64 = 10000
+    private var timeoutMs: Int64 = 25000
     private static var sharedDeadlineNanos: Int64 = 0
     /// 正在执行 Python 代码的**线程 id**（PyThreadState_GetID 的结果）。
     /// ⚠️ CPython 的 `PyThreadState_SetAsyncExc(unsigned long id, PyObject *exc)`

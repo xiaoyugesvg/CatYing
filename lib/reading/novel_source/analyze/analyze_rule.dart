@@ -785,7 +785,7 @@ class AnalyzeRule {
 
     switch (sourceRule.mode) {
       case Mode.js:
-        final jsResult = _evalJs(rule, result);
+        final jsResult = _evalJs(rule, result, raw: true);
         // single（getElement / bookInfoInit）：JS 可以返回任意类型，
         // 官方就是把返回值直接 setContent —— 例如 init 的 `{a:'书名'}`。
         // 以前一律返回 [] ⇒ init 的 JS 结果被丢弃，详情页字段全空。
@@ -793,6 +793,20 @@ class AnalyzeRule {
         if (jsResult is List) return jsResult;
         // 列表规则里 JS 返回单个对象：包一层，别静默丢数据
         if (jsResult is Map) return [jsResult];
+        // 有些脚本会返回「JSON 字符串」而不是数组/对象（`JSON.stringify(...)`
+        // 或接口原始文本），这里解析一次，避免直接判空导致「没有返回任何章节」。
+        if (jsResult is String) {
+          final t = jsResult.trim();
+          if (t.startsWith('[') || t.startsWith('{')) {
+            try {
+              final decoded = jsonDecode(t);
+              if (decoded is List) return decoded;
+              if (decoded is Map) return [decoded];
+            } catch (_) {
+              // 不是合法 JSON ⇒ 按普通字符串规则处理
+            }
+          }
+        }
         return [];
       case Mode.regex:
         if (result is String) {
@@ -833,7 +847,8 @@ class AnalyzeRule {
     return _analyzeByJson!;
   }
 
-  String _evalJs(String jsStr, dynamic result, {Map<String, dynamic>? extraBindings}) {
+  dynamic _evalJs(String jsStr, dynamic result,
+      {Map<String, dynamic>? extraBindings, bool raw = false}) {
     try {
       _jsEngine ??= JsEngine.shared;
       final expanded = _expandJavaBridge(jsStr);
@@ -866,7 +881,7 @@ class AnalyzeRule {
           'hostCache': HostBridge.instance.cache,
           if (extraBindings != null) ...extraBindings,
         };
-        final out = _jsEngine!.eval(expanded, bindings: bindings);
+        final evalRes = _jsEngine!.evalResult(expanded, bindings: bindings);
         final lastError = _jsEngine!.lastError;
         // ① 同步 HTTP（java.ajax/get/post/…）
         final need = SyncHttpBridge.pendingRequest(lastError);
@@ -884,6 +899,30 @@ class AnalyzeRule {
               HostBridge.normalize(_dispatchHostCall(call.op, call.args));
           continue;
         }
+        if (evalRes == null || evalRes.isError) {
+          return raw ? null : '';
+        }
+        if (raw) return evalRes.rawResult;
+        // 数组/对象结果：`stringResult` 是 Dart 的 `[a, b]` / `{k: v}` 形态，
+        // 既不是合法 JSON、也没法按行切分 ⇒ 漫画/小说 `@js` 返回图片或
+        // 段落数组时会被调用方当成 1 条坏数据（症状：正文 0 图）。
+        // 列表按行拼接（调用方 `split('\n')` 即得到原数组元素），对象转 JSON。
+        final rawVal = evalRes.rawResult;
+        if (rawVal is List) {
+          return rawVal
+              .map((e) => e == null ? '' : '$e')
+              .where((s) => s.isNotEmpty)
+              .join('\n');
+        }
+        if (rawVal is Map) {
+          try {
+            return jsonEncode(rawVal);
+          } catch (_) {
+            // 含不可编码值时退回字符串形态
+          }
+        }
+        var out = evalRes.stringResult;
+        if (out == 'null' || out == 'undefined') out = '';
         // ── 🔴 失败必须可见（修"静默空串"）──────────────────────────
         //
         // 原实现：走到这里就 `return out`，而 `out` 可能是空串 ——
@@ -904,6 +943,10 @@ class AnalyzeRule {
           AppLog.instance.w('[书源JS] 求值失败，返回空串: '
               '${brief.length > 120 ? '${brief.substring(0, 120)}…' : brief} '
               '→ $lastError');
+        }
+        // 整数结果带 .0（QuickJS 按 double 返回）时规整，避免 URL 拼接出错。
+        if (out.length > 2 && RegExp(r'^-?\d+\.0+$').hasMatch(out)) {
+          out = out.substring(0, out.indexOf('.'));
         }
         return out;
       }
@@ -1255,6 +1298,14 @@ class AnalyzeRule {
     }
     final replaced = _replaceInnerRules(sourceRule.rawRule, result);
     final parts = replaced.split('##');
+    if (parts.length == 1) {
+      // 内嵌表达式替换后同样要认单 `#` 正则替换（与 SourceRule 判据一致）。
+      final single = SourceRule.splitSingleHashReplacement(replaced);
+      if (single != null) {
+        return _RuleState(
+            single.$1, single.$2, single.$3, single.$4, sourceRule.templateMode);
+      }
+    }
     return _RuleState(
       parts[0].trim(),
       parts.length > 1 ? parts[1] : '',

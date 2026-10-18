@@ -683,7 +683,19 @@ function runJs(expr, ctx) {
         },
       },
     },
-    JSON,
+    // 兼容：部分源脚本会把「已经是对象」的结果再 JSON.parse 一次
+    // （Legado 里 result 常被脚本自己 JSON.parse；我们有时直接给了对象）。
+    // 原生实现会对对象抛 `Unexpected token o in JSON at position 1`。
+    JSON: (() => {
+      const j = Object.create(JSON);
+      j.parse = (text, reviver) => {
+        if (text !== null && text !== undefined && typeof text !== 'string') {
+          return text;
+        }
+        return JSON.parse(text, reviver);
+      };
+      return j;
+    })(),
     Math,
     String,
     Number,
@@ -966,6 +978,31 @@ function splitInlineJs(rule) {
 }
 
 /**
+ * 兼容「单 # 分隔」的旧式替换规则：`规则#正则#替换`。
+ *
+ * Legado 官方是 `##正则##替换`，但不少老源（读书/漫画源包）写成单个 `#`，
+ * 例如松子漫画的 `ruleContentUrl`：
+ *   `href#^/read/(\d+)/$#https://…/chapter_pics&id=$1`
+ * 不支持的话整串会被当 CSS 选择器 → 取空 → 目录 0 章、正文无图。
+ *
+ * 只在**恰好两个 `#`**、且中间段明显像正则时才认，避免误拆
+ * `div#a #b` 这类 CSS 选择器。
+ */
+function splitSingleHashReplacement(raw) {
+  const i1 = raw.indexOf('#');
+  if (i1 <= 0) return null;
+  const i2 = raw.indexOf('#', i1 + 1);
+  if (i2 < 0) return null;
+  if (raw.indexOf('#', i2 + 1) >= 0) return null; // 多于两段，不猜
+  const base = raw.slice(0, i1).trim();
+  const re = raw.slice(i1 + 1, i2);
+  const rep = raw.slice(i2 + 1);
+  if (!base || !re) return null;
+  if (!/[\^\\()\[\]|+*?$]/.test(re)) return null; // 明显不像正则 → 不拆
+  return { base, re, rep };
+}
+
+/**
  * 对整条规则求值，并执行 Legado 的 `##正则##替换`（可链式）。
  * 拆分放在最外层：`a||b##r##rep` = (a/b 兜底取值) 后整体替换。
  */
@@ -985,6 +1022,13 @@ function evalRule(params) {
     // 原样交给 || 分支逐段处理（段级再拆 ##）。
     const bad = pairs.some(([, rep]) => rep.includes('||') || rep.includes('{{'));
     if (!bad) { base = raw0.slice(0, hi); hashPairs = pairs; }
+  } else if (!looksLikeJsRule(raw0)) {
+    // 兼容单 `#` 写法（见 splitSingleHashReplacement）
+    const single = splitSingleHashReplacement(raw0);
+    if (single) {
+      base = single.base;
+      hashPairs = [[single.re, single.rep]];
+    }
   }
   const v = evalRuleCore({ ...params, rule: base });
   if (!hashPairs) return v;
@@ -1013,6 +1057,12 @@ function nodeOrDocToString(input) {
       return input.__nodes.map((n) => $.html(n)).join('\n');
     }
     try { return $.root().html() || ''; } catch (_) { return ''; }
+  }
+  // JSON 响应被包装成 { __json: … }：@js 里的 `result` 必须是**原始 JSON 文本**，
+  // 否则 `JSON.parse(result)` 会拿到对象并抛
+  // `Unexpected token o in JSON at position 1`（用户 2026-10-18 的目录报错）。
+  if (input && input.__json !== undefined) {
+    try { return JSON.stringify(input.__json); } catch (_) { return ''; }
   }
   return input == null ? '' : input;
 }
@@ -1343,6 +1393,19 @@ function extractFromNode(node, kind, isList) {
   return nodes.length > 0 ? get(nodes[0]) : '';
 }
 
+/** 是否含有 XPath 特征语法（`.comic-card` 这种 CSS 不能算） */
+function looksLikeXPathSelector(s) {
+  const t = String(s || '').trim();
+  if (!t) return false;
+  return t.startsWith('/') ||
+    t.startsWith('./') ||
+    t.startsWith('.//') ||
+    /\/@[\w-]+/.test(t) ||
+    /\/text\(\s*\)?/.test(t) ||
+    /\[@[\w-]+/.test(t) ||
+    /\[contains\(/.test(t);
+}
+
 /** 逐级处理 @ 分段 */
 function walkParts($, nodes, parts, isList) {
   let cur = nodes;
@@ -1397,7 +1460,11 @@ function walkParts($, nodes, parts, isList) {
         continue;
       }
 
-      if (nextSel.startsWith('/') || nextSel.startsWith('.')) {
+      // ⚠️ 只有**确实是 XPath** 时才转换：`class.comic-grid@class.comic-card`
+      // 的第二段归一化后是 `.comic-card`（合法 CSS），以前因为以 `.` 开头被
+      // 送进 xpathToCss → 变成 `comic-card`（标签名）→ 选区 0 个，
+      // 表现为“搜索/目录规则永远取不到内容”。
+      if (looksLikeXPathSelector(nextSel)) {
         nextSel = xpathToCss(nextSel) || nextSel;
       }
       try {
@@ -1460,9 +1527,15 @@ function evalList({ rule, input, vars, ctx }) {
   const { prefix, parts } = splitRule(r);
 
   if (prefix === 'js') {
+    // JSON 响应是 {__json} 包装：@js 的 result 必须是原始 JSON 文本，
+    // 否则脚本里的 JSON.parse(result) 拿到对象会报
+    // `Unexpected token o in JSON at position 1`。
+    const jsInput = input && input.__json !== undefined
+      ? JSON.stringify(input.__json)
+      : nodeOrDocToString(input);
     const out = runJs(parts[0], {
     ...ctx,
-    result: input,
+    result: jsInput,
     // java.getElements 要用到当前文档与作用域节点
     __cheerio: input && input.__cheerio ? input.__cheerio : ctx.__cheerio,
     __nodes: input && input.__nodes ? input.__nodes : ctx.__nodes,

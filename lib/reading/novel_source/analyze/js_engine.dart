@@ -142,8 +142,10 @@ class JsEngine {
   /// 超时由原生中断处理器打断成可捕获错误（日志里会显示「执行超时」）。
   ///
   /// ⚠️ 只计**脚本自身**耗时，宿主请求（java.ajax 等）的等待不计入，
-  /// 所以慢速网络源不会因此被误杀；10s 对正常源非常宽裕。
-  static const int _evalTimeoutMs = 10000;
+  /// 所以慢速网络源不会因此被误杀。
+  // 2026-10-18：10s → 20s。部分书源的 jsLib 是混淆大脚本（几万行），
+  // 首次求值在低端机上会超过 10s，被误判为"规则执行超时"。
+  static const int _evalTimeoutMs = 20000;
 
   /// JS 堆上限（64MB）：防止病态脚本把内存吃爆导致 OOM 崩溃。
   static const int _evalMemoryLimit = 64 * 1024 * 1024;
@@ -217,6 +219,24 @@ class JsEngine {
   /// 执行失败记录到运行日志（设置 → 高级 → 运行日志），便于真机排查
   /// 「书源 JS 规则不生效」类问题（脚本摘要 + 错误信息）。
   String eval(String jsStr, {Map<String, dynamic>? bindings}) {
+    final result = evalResult(jsStr, bindings: bindings);
+    if (result == null || result.isError) return '';
+    var s = result.stringResult;
+    if (s == 'null' || s == 'undefined' || s.isEmpty) return '';
+    // 整数结果带 .0（QuickJS 按 double 返回）时规整，避免 URL 拼接出错。
+    if (s.length > 2 && RegExp(r'^-?\d+\.0+$').hasMatch(s)) {
+      s = s.substring(0, s.indexOf('.'));
+    }
+    return s;
+  }
+
+  /// 与 [eval] 相同，但保留**原始 Dart 类型**（List / Map / num / bool…）。
+  ///
+  /// 书源的目录/搜索规则经常是 `@js:` 直接返回数组（如
+  /// `@js:JSON.parse(result).data.list`）。`stringResult` 对数组/对象只能
+  /// 给 `[object Object]` 之类的字符串，调用方再判 `is List` 就会失败，
+  /// 表现成「这个源没有返回任何章节」。列表类规则统一走这里。
+  JsEvalResult? evalResult(String jsStr, {Map<String, dynamic>? bindings}) {
     try {
       if (bindings != null) {
         for (final entry in bindings.entries) {
@@ -225,21 +245,17 @@ class JsEngine {
       }
       final result = runtime.evaluate(jsStr);
       if (result.isError) {
-        lastError = result.stringResult; // [PATCH-5] 供同步重放解析抓取标记
-        AppLog.instance.w('[书源JS] 执行失败: ${_brief(jsStr)} → ${result.stringResult}');
-        return '';
+        lastError = result.stringResult;
+        AppLog.instance.w(
+            '[书源JS] 执行失败: ${_brief(jsStr)} → ${result.stringResult}');
+        return result;
       }
       lastError = null;
-      var s = result.stringResult;
-      if (s == 'null' || s == 'undefined' || s.isEmpty) return '';
-      // 整数结果带 .0（QuickJS 按 double 返回）时规整，避免 URL 拼接出错。
-      if (s.length > 2 && RegExp(r'^-?\d+\.0+$').hasMatch(s)) {
-        s = s.substring(0, s.indexOf('.'));
-      }
-      return s;
+      return result;
     } catch (e) {
+      lastError = '$e';
       AppLog.instance.w('[书源JS] 执行异常: ${_brief(jsStr)} → $e');
-      return '';
+      return null;
     }
   }
 

@@ -53,9 +53,11 @@ class VeneraHostBridge {
   static Dio _createDio() {
     final dio = Dio(
       BaseOptions(
-        connectTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(seconds: 30),
-        sendTimeout: const Duration(seconds: 30),
+        // 2026-10-18：15/30 → 25/45。漫画站点图片/接口在弱网下常超时，
+        // 被源脚本当成"站点不可用"直接抛错。
+        connectTimeout: const Duration(seconds: 25),
+        receiveTimeout: const Duration(seconds: 45),
+        sendTimeout: const Duration(seconds: 45),
         responseType: ResponseType.bytes,
         followRedirects: true,
         validateStatus: (_) => true,
@@ -500,8 +502,12 @@ class VeneraHostBridge {
       final respHeaders = <String, String>{};
       res.headers.forEach((k, v) => respHeaders[k] = v.join(', '));
       final isBinary = m['bytes'] == true;
+      final code = res.statusCode ?? 0;
       return {
-        'status': res.statusCode ?? 0,
+        // 有些站点用 210 这类非标准 2xx 表示成功，而漫画脚本常直接写
+        // `if (status !== 200) throw 'Invalid status Code: …'` ⇒ 统一按 200
+        // 上报，避免把「成功但状态码是 2xx 变体」误判成加载失败。
+        'status': (code >= 200 && code < 300) ? 200 : code,
         'headers': respHeaders,
         'body': isBinary
             ? Uint8List.fromList(bytes)

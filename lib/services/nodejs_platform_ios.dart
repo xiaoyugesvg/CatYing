@@ -60,8 +60,11 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
   int _spiderPort = 0;
 
   final Dio _dio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 15),
-    receiveTimeout: const Duration(seconds: 15),
+    // 2026-10-18：15s → 20s / 60s。用户日志里 `Spider 源加载失败:
+    // receiveTimeout 15s` 后 spiderPort 一直是 0，整个 Node 源都加载不出来。
+    // 源包常有几 MB，弱网 15s 明显不够；连接给 20s、接收给 60s。
+    connectTimeout: const Duration(seconds: 20),
+    receiveTimeout: const Duration(seconds: 60),
   ));
 
   // ============================================================
@@ -218,6 +221,27 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
     return sourcePath;
   }
 
+  /// 最近一次载入的源缓存目录（供恢复流程重新 loadPath 用）
+  String? _lastSourceCachePath;
+
+  @override
+  Future<String?> getLastSourceCachePath() async => _lastSourceCachePath;
+
+  /// 按源地址生成**独立缓存目录**：`<source>/cache_<url md5 前 20 位>`。
+  ///
+  /// 2026-10-18：原来所有源共用 `<source>/index.js` 一个槽位 ——
+  ///   · 切订阅/切程序源时会复用上一个源的缓存（可能载入错脚本）；
+  ///   · 而且每次切回来都要重新下载。
+  /// 改成按 URL 分目录后：同一个源永远命中自己的缓存，不同源互不覆盖，
+  /// 切换订阅也不会重复下载。
+  Future<String> _cacheDirFor(String url) async {
+    final base = await getDocumentsSourcePath();
+    final key = md5.convert(utf8.encode(url.trim())).toString().substring(0, 20);
+    final dir = Directory('$base/cache_$key');
+    if (!await dir.exists()) await dir.create(recursive: true);
+    return dir.path;
+  }
+
   // ============================================================
   // 启动 / 停止
   // ============================================================
@@ -358,7 +382,8 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
   @override
   Future<bool> waitForNodeReady() async {
     if (_isNodeReady) return true;
-    final deadline = DateTime.now().add(const Duration(seconds: 30));
+    // 2026-10-18：30s → 45s（冷启动 + 首次 require 大源包）
+    final deadline = DateTime.now().add(const Duration(seconds: 45));
     while (DateTime.now().isBefore(deadline)) {
       if (_isNodeReady) return true;
       await Future.delayed(const Duration(milliseconds: 200));
@@ -370,7 +395,9 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
   @override
   Future<bool> waitForSpiderPort() async {
     if (_spiderPort > 0) return true;
-    final deadline = DateTime.now().add(const Duration(seconds: 30));
+    // 2026-10-18：30s → 60s。源包下载 + require 初始化在弱网/低端机上
+    // 常常超过 30s；原值会让启动直接判失败（spiderPort=0），首页空白。
+    final deadline = DateTime.now().add(const Duration(seconds: 60));
     while (DateTime.now().isBefore(deadline)) {
       if (_spiderPort > 0) return true;
       await Future.delayed(const Duration(milliseconds: 200));
@@ -409,7 +436,10 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
     // （见 _sourceLoadGeneration 的说明）
     _sourceLoadGeneration++;
 
-    final sourcePath = await getDocumentsSourcePath();
+    // 每个源地址一个独立缓存目录（见 [_cacheDirFor]）：命中缓存就不再下载，
+    // 不同订阅/程序源之间也不会互相覆盖。
+    final sourcePath = await _cacheDirFor(normalizedUrl);
+    _lastSourceCachePath = sourcePath;
     final indexJSPath = '$sourcePath/index.js';
     final indexMd5Path = '$sourcePath/index.js.md5';
     final configJSPath = '$sourcePath/index.config.js';
@@ -460,7 +490,18 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       final md5Future = _tryGetText('${jsAuth.url}.md5', jsAuth.headers);
       final configFuture = _tryGetBytes(configAuth.url, configAuth.headers);
 
-      final jsResponse = await jsFuture;
+      // 主脚本下载失败（弱网断流 / 超时）自动重试一次：
+      // 日志里 15s 超时后直接判定"Spider 源加载失败"，spiderPort 永久为 0。
+      Response<List<int>> jsResponse;
+      try {
+        jsResponse = await jsFuture;
+      } on DioException catch (e) {
+        AppLog.instance.w('[IOSNodeJS] 主源文件下载失败，重试一次: ${e.message}');
+        jsResponse = await _dio.get<List<int>>(
+          jsAuth.url,
+          options: _opts(jsAuth.headers, type: ResponseType.bytes),
+        );
+      }
       final md5Data = (await md5Future)?.trim();
       final configData = await configFuture;
 
@@ -497,6 +538,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
   @override
   Future<bool> deleteSource() async {
     final sourcePath = await getDocumentsSourcePath();
+    _lastSourceCachePath = null;
     final dir = Directory(sourcePath);
     if (await dir.exists()) {
       try {
@@ -536,8 +578,8 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
           headers: {'x-auth-token': authToken},
           responseType: ResponseType.json,
           contentType: 'application/json',
-          sendTimeout: const Duration(seconds: 15),
-          receiveTimeout: const Duration(seconds: 15),
+          sendTimeout: const Duration(seconds: 30),
+          receiveTimeout: const Duration(seconds: 30),
           // 关键：Dio 默认对 4xx/5xx 抛异常，会让下面的 statusCode>=400 分支
           // 变成死代码，并且丢掉 Node 返回的错误详情（例如 403 白名单里的
           // allowedRoots / resolved 路径）。这里放开校验，自己解析 body。

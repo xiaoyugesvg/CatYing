@@ -429,7 +429,8 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
       return ListView(
         padding: const EdgeInsets.fromLTRB(
           AppTheme.spacingMD,
-          0,
+          // 与「全部」分组 tab 拉开距离（用户 2026-10-18）
+          12,
           AppTheme.spacingMD,
           110,
         ),
@@ -462,7 +463,8 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     return GridView.builder(
       padding: const EdgeInsets.fromLTRB(
         AppTheme.spacingMD,
-        0,
+        // 与「全部」分组 tab 拉开距离（用户 2026-10-18）
+        12,
         AppTheme.spacingMD,
         110,
       ),

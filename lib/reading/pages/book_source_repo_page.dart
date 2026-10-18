@@ -27,6 +27,7 @@ import 'source_warehouse_page.dart';
 //   （书源页本身不再提供「浏览记录 / 收藏」入口，如需查看请到漫画/图书搜索页或“我的”页。）
 import '../widgets/jelly_search_bar.dart';
 import '../widgets/swipe_action_tile.dart';
+import '../widgets/import_box_icon.dart';
 import '../theme/jelly_theme.dart';
 import '../../common/theme.dart';
 import '../../services/python_manager.dart';
@@ -58,6 +59,26 @@ class BookSourceRepoPage extends StatefulWidget {
   State<BookSourceRepoPage> createState() => _BookSourceRepoPageState();
 }
 
+/// 书源列表排序（固定在「全部」标签行左侧的排序按钮）
+enum _RepoSort {
+  custom('自定义顺序'),
+  name('名称'),
+  group('分组');
+
+  const _RepoSort(this.label);
+  final String label;
+}
+
+/// 统计 chip 的筛选口径（那一行图标 + 数字是可以点的）
+enum _StatFilter {
+  all,
+  pending,
+  enabled,
+  duplicate,
+  disabled,
+  dead,
+}
+
 class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   final store = BookSourceStore.instance;
 
@@ -76,6 +97,12 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
 
   /// 被「隐藏组」的组名（不显示其书源）
   final Set<String> _hiddenGroups = {};
+
+  /// 排序（默认保持自定义顺序，可直接拖动）
+  _RepoSort _sort = _RepoSort.custom;
+
+  /// 统计 chip 当前筛选（默认全部）
+  _StatFilter _stat = _StatFilter.all;
 
   /// 书源体检结果（id → 健康度）。「体检」按钮跑完填这里，
   /// 卡片上会显示徽标 —— 不用逐个点进去看。
@@ -142,7 +169,20 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   /// 只显示**书源仓**名下的源：书源 + 从书源仓导入的漫画源（图片模式阅读）。
   /// 漫源仓库里的源不会出现在这里（用户 2026-10-18：「从哪个仓订阅就用哪个」）。
   List<BookSource> get _visible {
-    final all = store.sorted().where((s) => s.belongsToBook).toList();
+    var all = store.sorted().where((s) => s.belongsToBook).toList();
+    switch (_sort) {
+      case _RepoSort.custom:
+        break;
+      case _RepoSort.name:
+        all.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      case _RepoSort.group:
+        all.sort((a, b) {
+          final g = a.group.compareTo(b.group);
+          return g != 0
+              ? g
+              : a.name.toLowerCase().compareTo(b.name.toLowerCase());
+        });
+    }
     if (_keyword.isEmpty) return all;
     final k = _keyword.toLowerCase();
     return all
@@ -215,14 +255,10 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
             height: 34,
             child: Row(
               children: [
-                // 两个分组操作固定在最左侧，不随分组 chip 滚动
-                _squareIconBtn(Icons.menu_rounded, '管理分组', _showManageGroups),
+                // 「全部」这行左侧固定：排序 + 清空（用户 2026-10-18）
+                _sortButton(),
                 const SizedBox(width: 8),
-                _groupActionBtn(
-                  Icons.create_new_folder_outlined,
-                  '创建分组',
-                  _showNewGroup,
-                ),
+                _clearButton(base),
                 const SizedBox(width: 10),
                 Expanded(
                   child: ListView(
@@ -232,7 +268,10 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                         '全部',
                         base.length,
                         _pickedGroup == null,
-                        () => setState(() => _pickedGroup = null),
+                        () => setState(() {
+                          _pickedGroup = null;
+                          _stat = _StatFilter.all;
+                        }),
                       ),
                       for (final e in counts.entries) ...[
                         const SizedBox(width: 8),
@@ -262,8 +301,9 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
 
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
-      // 居中标题（左为自动返回箭头）
-      centerTitle: true,
+      // 标题靠左，紧挨返回按钮（用户 2026-10-18）
+      centerTitle: false,
+      titleSpacing: 0,
       title: Text(
         _selectMode ? '多选书源' : '书源仓库',
         overflow: TextOverflow.ellipsis,
@@ -288,17 +328,18 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
             if (store.isEmpty) return;
             _shareAll();
           }),
-        // 盾牌（书源体检）：两种模式都在。
-        _appBarIcon(Icons.health_and_safety_rounded, '书源体检', () {
+        // 雷达（书源体检）：两种模式都在。
+        _appBarIcon(Icons.radar, '书源体检', () {
           if (store.isEmpty || _healthChecking) return;
           _runHealthCheck();
         }),
         // 导入书源：右上角按钮 → 居中弹窗（用户 2026-10-18）
         if (!_selectMode)
-          _appBarIcon(
-            Icons.input_rounded,
-            '导入书源',
-            _showImportSheet,
+          IconButton(
+            tooltip: '导入书源',
+            visualDensity: VisualDensity.compact,
+            onPressed: _showImportSheet,
+            icon: ImportBoxIcon(size: 22, color: _titleColor),
           ),
         const SizedBox(width: 4),
       ],
@@ -553,93 +594,81 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   // 列表
   // ============================================================
 
-  /// 主列表：
-  ///   共 N 个 + 清空 → 统计 chips → 书源卡片
-  /// （搜索与分组操作在 `_pinnedFilters` 里，固定在顶栏下方；关键词搜索在
-  ///  `_visible` 里完成，这里只做「隐藏组 / 选中分组」过滤）
+  /// 主列表：统计 chips（可点击筛选）→ 书源卡片
+  /// （搜索与排序 / 清空 / 分组操作在 `_pinnedFilters` 里，固定在顶栏下方；
+  ///  关键词搜索在 `_visible` 里完成，这里只做「隐藏组 / 选中分组 / 统计口径」过滤）
   Widget _sourceList(List<BookSource> all) {
     // 1) 按"隐藏组"和"选中分组"过滤
     var list = all.where((s) => !_hiddenGroups.contains(s.group)).toList();
     if (_pickedGroup != null) {
       list = list.where((s) => s.group == _pickedGroup).toList();
     }
-    // 2) 未被隐藏的组（统计 + 共 N 个）
+    // 2) 未被隐藏的组（统计 + 分组 chip）
     final base = all.where((s) => !_hiddenGroups.contains(s.group)).toList();
+
+    // 3) 统计 chip 的筛选（用户 2026-10-18：那一行图标数字要能切换）
+    final duplicateIds = <String>{};
+    final seenKeys = <String>{};
+    for (final s in base) {
+      final k = s.url.trim().isNotEmpty ? s.url.trim() : s.id;
+      if (!seenKeys.add(k)) duplicateIds.add(s.id);
+    }
+    switch (_stat) {
+      case _StatFilter.all:
+        break;
+      case _StatFilter.pending:
+        // 模型没有"待更新"字段 ⇒ 恒为空（保留枚举，实际不会展示）
+        list = const [];
+      case _StatFilter.enabled:
+        list = list.where((s) => s.enabled).toList();
+      case _StatFilter.duplicate:
+        list = list.where((s) => duplicateIds.contains(s.id)).toList();
+      case _StatFilter.disabled:
+        list = list.where((s) => !s.enabled).toList();
+      case _StatFilter.dead:
+        list = list
+            .where(
+              (s) => _health[s.id]?.level == BookSourceHealthLevel.dead,
+            )
+            .toList();
+    }
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 90),
       children: [
-        // ── 共 N 个 + 清空 ────────────────────────────────────
+        // ── 统计 chip 行（可点击筛选）──────────────────────────
         Padding(
-          padding: const EdgeInsets.fromLTRB(4, 8, 0, 6),
-          child: Row(
-            children: [
-              Text(
-                '共 ${base.length} 个',
+          padding: const EdgeInsets.only(top: 6),
+          child: SizedBox(
+            height: 32,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: _statChips(base, duplicateIds),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        // ── 书源卡片 ──────────────────────────────────────────
+        if (list.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            child: Center(
+              child: Text(
+                '这个筛选下没有书源',
                 style: TextStyle(
                   fontSize: AppTheme.fontSubhead,
                   color: JellyTheme.textSecondary,
                 ),
               ),
-              const Spacer(),
-              TextButton(
-                onPressed: () async {
-                  final ok = await showDialog<bool>(
-                    context: context,
-                    builder: (c) => AlertDialog(
-                      title: const Text('清空书源'),
-                      content: Text('将删除全部 ${base.length} 个书源，不可恢复。'),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(c, false),
-                          child: const Text('取消'),
-                        ),
-                        TextButton(
-                          onPressed: () => Navigator.pop(c, true),
-                          child: const Text(
-                            '清空',
-                            style: TextStyle(color: Colors.redAccent),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                  if (ok == true) {
-                    // removeAll() 无参（清空全部）；这里要删的是
-                    // "未被隐藏的组"里的源，所以逐个 remove
-                    for (final s in base) {
-                      await store.remove(s.id);
-                    }
-                  }
-                },
-                child: const Text(
-                  '清空',
-                  style: TextStyle(fontSize: AppTheme.fontSubhead),
-                ),
-              ),
-            ],
-          ),
-        ),
-        // ── 统计 chip 行：总数 / 待更新 / 正常 / 重复 / 异常 / 失效 ──
-        //   数字全部基于真实数据计算（拿不到的项显示 0，不编造）。
-        Padding(
-          padding: const EdgeInsets.only(top: 10),
-          child: SizedBox(
-            height: 32,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: _statChips(base),
             ),
-          ),
-        ),
-        const SizedBox(height: 4),
-        // ── 书源卡片 ──────────────────────────────────────────
-        for (final s in list) _sourceTile(s),
+          )
+        else
+          for (final s in list) _sourceTile(s),
       ],
     );
   }
 
-  /// 分组 chip 行左侧的小圆钮（分组设置 / 新建分组）
+  /// 卡片操作圆钮（编辑 / 置顶 / 登录 / 删除）
   Widget _groupActionBtn(IconData icon, String tip, VoidCallback onTap) {
     return Tooltip(
       message: tip,
@@ -661,10 +690,83 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
     );
   }
 
-  /// 筛选行左侧的**方形**小按钮（☰ 管理分组）
-  Widget _squareIconBtn(IconData icon, String tip, VoidCallback onTap) {
+  /// 「全部」行左侧的排序按钮：排序方式 + 管理分组 / 新建分组
+  Widget _sortButton() {
+    return PopupMenuButton<String>(
+      tooltip: '排序 / 分组',
+      initialValue: _sort.name,
+      color: _isDark ? JellyTheme.cardDark : Colors.white,
+      onSelected: (v) {
+        if (v == '__manage') {
+          _showManageGroups();
+          return;
+        }
+        if (v == '__new') {
+          _showNewGroup();
+          return;
+        }
+        final hit = _RepoSort.values.where((e) => e.name == v).toList();
+        if (hit.isNotEmpty) setState(() => _sort = hit.first);
+      },
+      itemBuilder: (_) => [
+        for (final v in _RepoSort.values)
+          PopupMenuItem<String>(
+            value: v.name,
+            child: Row(
+              children: [
+                Icon(
+                  v == _sort ? Icons.check_rounded : Icons.sort_rounded,
+                  size: 17,
+                ),
+                const SizedBox(width: 8),
+                Text(v.label, style: const TextStyle(fontSize: 13)),
+              ],
+            ),
+          ),
+        const PopupMenuDivider(),
+        const PopupMenuItem<String>(
+          value: '__manage',
+          child: Row(
+            children: [
+              Icon(Icons.tune_rounded, size: 17),
+              SizedBox(width: 8),
+              Text('管理分组', style: TextStyle(fontSize: 13)),
+            ],
+          ),
+        ),
+        const PopupMenuItem<String>(
+          value: '__new',
+          child: Row(
+            children: [
+              Icon(Icons.create_new_folder_outlined, size: 17),
+              SizedBox(width: 8),
+              Text('新建分组', style: TextStyle(fontSize: 13)),
+            ],
+          ),
+        ),
+      ],
+      child: Container(
+        width: 34,
+        height: 34,
+        decoration: BoxDecoration(
+          color: _isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(
+          Icons.sort_rounded,
+          size: 18,
+          color: JellyTheme.textSecondary,
+        ),
+      ),
+    );
+  }
+
+  /// 「全部」行左侧的清空按钮
+  Widget _clearButton(List<BookSource> base) {
     return Tooltip(
-      message: tip,
+      message: '清空已导入书源',
       child: Material(
         color: _isDark
             ? Colors.white.withValues(alpha: 0.08)
@@ -672,77 +774,120 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
         borderRadius: BorderRadius.circular(8),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: onTap,
+          onTap: base.isEmpty
+              ? null
+              : () async {
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (c) => AlertDialog(
+                      title: const Text('清空书源'),
+                      content: Text('将删除全部 ${base.length} 个书源，不可恢复。'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(c, false),
+                          child: const Text('取消'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.pop(c, true),
+                          child: const Text(
+                            '清空',
+                            style: TextStyle(color: Colors.redAccent),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (ok == true) {
+                    for (final s in base) {
+                      await store.remove(s.id);
+                    }
+                  }
+                },
           child: SizedBox(
             width: 34,
             height: 34,
-            child: Icon(icon, size: 18, color: JellyTheme.textSecondary),
+            child: Icon(
+              Icons.delete_outline_rounded,
+              size: 18,
+              color: base.isEmpty
+                  ? JellyTheme.textSecondary.withValues(alpha: 0.4)
+                  : Colors.redAccent,
+            ),
           ),
         ),
       ),
     );
   }
 
-  /// 统计 chip 行：总数 / 待更新 / 正常 / 重复 / 异常 / 失效。
-  /// 数字全部基于真实数据计算；模型拿不到的项（待更新）显示 0。
-  List<Widget> _statChips(List<BookSource> base) {
+  /// 统计 chip 行：总数 / 正常 / 重复 / 异常 / 失效 —— **可点击筛选**。
+  List<Widget> _statChips(List<BookSource> base, Set<String> duplicateIds) {
     final total = base.length;
-    // 正常 = 启用；异常 = 停用
     final enabled = base.where((s) => s.enabled).length;
     final disabled = total - enabled;
-    // 重复 = 按 id/url 去重后多出来的条数
-    final unique = base
-        .map((s) => s.url.trim().isNotEmpty ? s.url.trim() : s.id)
-        .toSet()
+    final duplicate = duplicateIds.length;
+    final dead = base
+        .where((s) => _health[s.id]?.level == BookSourceHealthLevel.dead)
         .length;
-    final duplicate = total - unique;
-    // 失效 = 体检判死的源（未跑体检则为 0，不编造）
-    final dead = _health.values
-        .where((h) => h.level == BookSourceHealthLevel.dead)
-        .length;
-    // 待更新：模型没有"可更新"字段 → 恒为 0
-    const pending = 0;
-    final stats = <(IconData, int)>[
-      (Icons.menu_book_rounded, total),
-      (Icons.update_rounded, pending),
-      (Icons.check_circle_outline_rounded, enabled),
-      (Icons.copy_all_rounded, duplicate),
-      (Icons.error_outline_rounded, disabled),
-      (Icons.heart_broken_outlined, dead),
+    final stats = <(_StatFilter, IconData, int)>[
+      (_StatFilter.all, Icons.menu_book_rounded, total),
+      (_StatFilter.enabled, Icons.check_circle_outline_rounded, enabled),
+      (_StatFilter.duplicate, Icons.copy_all_rounded, duplicate),
+      (_StatFilter.disabled, Icons.error_outline_rounded, disabled),
+      (_StatFilter.dead, Icons.heart_broken_outlined, dead),
     ];
     return [
       for (var i = 0; i < stats.length; i++) ...[
         if (i > 0) const SizedBox(width: 8),
-        _statChip(stats[i].$1, stats[i].$2),
+        _statChip(
+          stats[i].$2,
+          stats[i].$3,
+          filter: stats[i].$1,
+          selected: _stat == stats[i].$1,
+        ),
       ],
       const SizedBox(width: 8),
     ];
   }
 
-  /// 一个统计 chip：浅底圆角块 + 小图标 + 数量（截图同款）
-  Widget _statChip(IconData icon, int count) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: _isDark
-            ? Colors.white.withValues(alpha: 0.07)
-            : Colors.black.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: JellyTheme.textSecondary),
-          const SizedBox(width: 5),
-          Text(
-            '$count',
-            style: TextStyle(
-              fontSize: AppTheme.fontSubhead,
-              fontWeight: FontWeight.w600,
-              color: _titleColor,
+  /// 一个统计 chip：浅底圆角块 + 小图标 + 数量；点一下按该口径筛选
+  Widget _statChip(
+    IconData icon,
+    int count, {
+    required _StatFilter filter,
+    required bool selected,
+  }) {
+    final onColor = _isDark ? JellyTheme.backgroundDark : Colors.white;
+    return GestureDetector(
+      onTap: () => setState(() => _stat = filter),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: selected
+              ? (_isDark ? Colors.white : JellyTheme.primary)
+              : (_isDark
+                    ? Colors.white.withValues(alpha: 0.07)
+                    : Colors.black.withValues(alpha: 0.04)),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 14,
+              color: selected ? onColor : JellyTheme.textSecondary,
             ),
-          ),
-        ],
+            const SizedBox(width: 5),
+            Text(
+              '$count',
+              style: TextStyle(
+                fontSize: AppTheme.fontSubhead,
+                fontWeight: FontWeight.w600,
+                color: selected ? onColor : _titleColor,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2215,7 +2360,8 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   ///（漫画源在阅读器里自动走图片模式）。漫源仓库的导入不走这里。
   List<BookSource> _parseSources(String text) => [
     for (final s in BookSourceImportParser.parseSources(text))
-      s.withWarehouse('book'),
+      // config 型源属于漫源仓库的配置引擎，不能进书源仓
+      if (!s.isConfig) s.withWarehouse('book'),
   ];
 
   // ============================================================

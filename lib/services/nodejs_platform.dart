@@ -106,6 +106,11 @@ abstract class NodeJSPlatform {
   /// - iOS:               `<Documents>/nodejs-project/src/source`
   Future<String> getDocumentsSourcePath();
 
+  /// 最近一次实际载入的源缓存目录（按源 URL 分目录缓存）。
+  /// 恢复流程（scene_recovery）要重新 `/source/loadPath` 时必须用这个，
+  /// 不能再用根目录 —— 根目录下已没有 `index.js`。
+  Future<String?> getLastSourceCachePath() async => null;
+
   // ============================================================
   // 运行时下载（仅 Windows）
   // ============================================================

@@ -410,7 +410,9 @@ class NodeJSManager {
     final startAt = DateTime.now();
     final url = 'http://127.0.0.1:$port/source/loadPath';
     try {
-      final sourcePath = await getDocumentsSourcePath();
+      final sourcePath =
+          await _platform.getLastSourceCachePath() ??
+              await getDocumentsSourcePath();
       AppLog.instance.reload('start', port: port,
           fields: {'sourcePath': sourcePath, 'url': url});
       final dio = _localHttpDio;

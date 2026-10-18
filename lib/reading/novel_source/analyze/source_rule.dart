@@ -82,12 +82,9 @@ class SourceRule {
       rule = ruleStr;
     } else {
       rule = ruleStr;
-      isCss = _looksLikeCss(ruleStr);
     }
 
     rule = _splitPutRule(rule);
-    elementsRule = rule;
-
     // 内嵌表达式检测：`{{...}}`（规则/JS 表达式）与 `@get:{...}`（变量引用）。
     // 含内嵌表达式时 `##` 分割延迟到替换完成后（表达式内部可含 `##` 正则）。
     rawRule = rule;
@@ -97,8 +94,16 @@ class SourceRule {
       // 首个内嵌表达式位于开头、或前置文本不含 ## → 模板模式。
       final prefix = rule.substring(0, firstInner);
       templateMode = prefix.trim().isEmpty || !prefix.contains('##');
+      elementsRule = rule;
     } else {
       _splitRegex(rule);
+      elementsRule = rule;
+      // CSS 判定必须用**去掉正则替换段后的选择器**：`href#^/read/(\d+)/$#…`
+      // 里 `https:` 的冒号会被 _looksLikeCss 当成伪类 ⇒ 整条规则被按 CSS
+      // 查询（`querySelectorAll('href')` ⇒ 0 个）⇒ 章节地址全空。
+      if (mode == Mode.defaultMode && !isCss && !ruleStr.startsWith('@@')) {
+        isCss = _looksLikeCss(rule);
+      }
     }
   }
 
@@ -169,11 +174,60 @@ class SourceRule {
 
   void _splitRegex(String ruleStr) {
     final parts = ruleStr.split('##');
-    rule = parts[0].trim();
-    if (parts.length > 1) replaceRegex = parts[1];
-    if (parts.length > 2) replacement = parts[2];
-    if (parts.length > 3) replaceFirst = true;
+    if (parts.length > 1) {
+      rule = parts[0].trim();
+      replaceRegex = parts[1];
+      if (parts.length > 2) replacement = parts[2];
+      if (parts.length > 3) replaceFirst = true;
+      return;
+    }
+    rule = ruleStr.trim();
+    final single = splitSingleHashReplacement(ruleStr);
+    if (single == null) return;
+    rule = single.$1;
+    replaceRegex = single.$2;
+    replacement = single.$3;
+    replaceFirst = single.$4;
   }
+
+  /// 单 `#` 正则替换兼容（`选择器#正则#替换` / `选择器#正则`）。
+  ///
+  /// 部分老源（异次元 / 社区书源）把 legado 的 `##正则##替换` 写成单 `#`：
+  ///   `href#^/read/(\d+)/$#https://site/read/$1/`
+  ///   `class.detail-line.0@text#作者：\s*`（无替换段 = 删除匹配）
+  /// 原实现只 split `'##'` ⇒ 整串（含 `#正则#替换`）被当成选择器求值 ⇒
+  /// 目录 0 章、作者/分类带着「作者：」前缀、正文 0 图。
+  ///
+  /// 判据与 Node 引擎 `splitSingleHashReplacement` 一致：`#` 恰好 1 个或 2 个、
+  /// 且正则段含正则特征字符才认 —— 这样 CSS 的 `div#main` / `#content`
+  /// （`main`、`content` 不含特征字符）不会被误切。
+  static (String, String, String, bool)? splitSingleHashReplacement(String raw) {
+    final i1 = raw.indexOf('#');
+    if (i1 <= 0) return null;
+    final i2 = raw.indexOf('#', i1 + 1);
+    if (i2 < 0) {
+      final base = raw.substring(0, i1).trim();
+      final re = raw.substring(i1 + 1);
+      if (base.isEmpty || re.isEmpty) return null;
+      // 只有 1 个 `#` 时判据更严（无空白 + 含 `^ \ * + ? $`）：
+      // 排除 `div#list li:contains(测试)` 这类**带 # 的 CSS 选择器**被误切。
+      if (RegExp(r'\s').hasMatch(re)) return null;
+      if (!RegExp(r'[\^\\*+?$]').hasMatch(re)) return null;
+      return (base, re, '', false);
+    }
+    if (raw.indexOf('#', i2 + 1) >= 0) return null;
+    final base = raw.substring(0, i1).trim();
+    final re = raw.substring(i1 + 1, i2);
+    final rep = raw.substring(i2 + 1);
+    if (base.isEmpty || re.isEmpty) return null;
+    if (!_looksLikeRegex(re)) return null;
+    return (base, re, rep, false);
+  }
+
+  static bool _looksLikeRegex(String re) {
+    return RegExp(r'[\^\\\(\)\[\]\|+*?$]').hasMatch(re);
+  }
+
 
   static Map<String, String> _parseJsonMap(String jsonStr) {
     final result = <String, String>{};

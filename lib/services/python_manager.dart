@@ -31,8 +31,13 @@ class PythonManager {
   final ValueNotifier<bool> ready = ValueNotifier(false);
   final ValueNotifier<String?> lastError = ValueNotifier(null);
 
-  /// 默认超时（ms）——与 Node 引擎同一量级
-  int _timeoutMs = 10000;
+  /// 默认超时（ms）。
+  ///
+  /// 2026-10-18：10s → **25s**。用户日志里多次出现
+  /// `call(video.xxx.category) 超时未返回（预算 10000ms）`——分类接口通常要
+  /// 连续请求站点（列表 + 详情/分页），弱网或站点慢时 10s 很容易误杀，
+  /// 随后引擎被标记卡死、后续请求全部失败。放宽后单次慢请求能正常完成。
+  int _timeoutMs = 25000;
   int get timeoutMs => _timeoutMs;
 
   // ── 引擎「卡死」标记（2026-10-14）──────────────────────────────
@@ -112,7 +117,8 @@ class PythonManager {
 
   /// 启动/握手超时预算：冷启动要解 Py_Initialize + 导入适配层，给宽一点，
   /// 但**必须有限**（绝不能无限等原生队列）。
-  static const Duration _ensureTimeout = Duration(seconds: 20);
+  /// 2026-10-18：20s → 30s（低端机冷启动 + 首次 import 依赖可能超过 20s）。
+  static const Duration _ensureTimeout = Duration(seconds: 30);
 
   /// 设置超时预算（原生 watchdog 按此中断死循环脚本）
   Future<void> setTimeout(int ms) async {

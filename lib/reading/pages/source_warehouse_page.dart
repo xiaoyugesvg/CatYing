@@ -19,6 +19,7 @@ import '../source/source_definition.dart';
 import '../source/source_manager.dart';
 import '../source/venera/venera_manga_source.dart';
 import '../theme/jelly_theme.dart';
+import '../widgets/import_box_icon.dart';
 import '../widgets/swipe_action_tile.dart';
 import 'book_source_editor_page.dart';
 import 'book_source_qr_scan_page.dart';
@@ -550,14 +551,10 @@ class _WarehouseTabState extends State<_WarehouseTab>
     var name = nameCtl.text.trim();
     if (name.isEmpty) name = Uri.tryParse(url)?.host ?? url;
 
-    // Venera 索引属于漫源仓库；书源仓加了也不会显示，直接拦住并说明
+    // 两个仓彻底分开：在哪个仓添加订阅，就只喂哪个仓（用户 2026-10-18：
+    // 「我自己知道怎么导入，你别区分；但不能两边串」）。
+    // Venera 索引仍用 venera 类型下载脚本，其余一律按当前仓处理。
     final lower = url.toLowerCase();
-    if (!widget.comic && lower.contains('venera')) {
-      _toast('这是 Venera 漫画源，请在「漫源仓库」添加');
-      return;
-    }
-    // 两个仓彻底分开：漫画仓的订阅只喂漫画仓，书源仓只喂书源仓。
-    // 只有 Venera 的 index.json 需要单独识别。
     final kind = widget.comic
         ? (lower.contains('venera')
               ? SourceSubscriptionKind.venera
@@ -1371,6 +1368,8 @@ class _WarehouseTabState extends State<_WarehouseTab>
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        centerTitle: false,
+        titleSpacing: 0,
         iconTheme: IconThemeData(color: titleColor),
         title: Text(
           _selectMode
@@ -1441,7 +1440,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
                             height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Icon(Icons.health_and_safety_rounded),
+                        : const Icon(Icons.radar),
                   ),
                 // 多选（列表长按改成拖动排序后，多选入口放这里）
                 IconButton(
@@ -1455,7 +1454,10 @@ class _WarehouseTabState extends State<_WarehouseTab>
                 IconButton(
                   tooltip: widget.comic ? '导入源' : '导入书源 / 漫画源',
                   onPressed: _showComicImportDialog,
-                  icon: const Icon(Icons.file_open_rounded),
+                  icon: ImportBoxIcon(
+                    size: 22,
+                    color: _isDark ? Colors.white : JellyTheme.textPrimaryLight,
+                  ),
                 ),
                 IconButton(
                   tooltip: '添加订阅',
@@ -1938,9 +1940,9 @@ class _WarehouseTabState extends State<_WarehouseTab>
     await _applyComicImport(text);
   }
 
-  /// 书源仓的导入：同时接受 Legado 书源与漫画源（一律打 `book` 归属）。
-  ///
-  /// 漫画源（bookSourceType=2 / 图片规则）在书源阅读器里会自动走图片模式。
+  /// 书源仓的导入：**只要能从 Legado 书源 JSON 解析出来就收**，
+  /// 不再按「漫画 / 小说」类型筛选或让人去另一个仓（用户 2026-10-18）。
+  /// 入库后统一打 `book` 归属，只在书源仓显示。
   Future<({bool ok, String message})> _importBookText(String text) async {
     try {
       final parsed = BookSourceImportParser.parseSources(text);
@@ -1949,18 +1951,15 @@ class _WarehouseTabState extends State<_WarehouseTab>
         if (s.raw['bookSourceName'] == null && s.raw['bookSourceUrl'] == null) {
           continue;
         }
+        // config 型源属于漫源仓库的配置引擎，不能收进书源仓
+        if (s.isConfig) continue;
         wanted.add(s.withWarehouse('book'));
       }
       if (wanted.isEmpty) {
-        final low = text.toLowerCase();
-        if (low.contains('extends comicsource') ||
-            text.contains('"fileName"')) {
-          return (ok: false, message: '这是 Venera 漫画源，请在「漫源仓库」导入');
-        }
-        if (text.contains('"sources"') && text.contains('"config"')) {
-          return (ok: false, message: '这是漫画配置源，请在「漫源仓库」导入');
-        }
-        return (ok: false, message: '没解析出书源（支持 Legado 书源 JSON）');
+        return (
+          ok: false,
+          message: '没解析出 Legado 书源（需要 bookSourceName / bookSourceUrl）',
+        );
       }
       final r = await _sourceStore.addAll(wanted);
       await SourceManager().reload();

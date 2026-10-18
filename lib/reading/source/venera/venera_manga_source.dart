@@ -208,7 +208,7 @@ class VeneraMangaSource extends MangaSource {
     }
     final prefs = await SharedPreferences.getInstance();
     final runtime = getJavascriptRuntime(
-      extraArgs: const {'timeout': 15000, 'memoryLimit': 64 * 1024 * 1024},
+      extraArgs: const {'timeout': 30000, 'memoryLimit': 64 * 1024 * 1024},
     );
     final bridge = VeneraHostBridge(
       sourceKey: sourceKey,

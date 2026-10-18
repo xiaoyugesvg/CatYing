@@ -201,6 +201,15 @@ class BookSource {
     return BookSource(raw: {...raw, '_warehouse': w}, id: id);
   }
 
+  /// 换一个存储 id（两个仓导入同一个源时，避免互相覆盖）。
+  ///
+  /// `_id` 必须写进 raw —— [BookSourceStore._persist] 只保存 raw，
+  /// 重启后 [fromJson] 要能恢复这个带仓库后缀的 id，否则两份副本会撞回
+  /// 同一个 id（表现为「书源仓导入的又跑到漫画仓」）。
+  BookSource withId(String newId) => newId == id
+      ? this
+      : BookSource(raw: {...raw, '_id': newId}, id: newId);
+
   /// 是否只用于搜索（Legado 的 enabledExplore 之类）
   String get comment {
     final c = _configBody;
@@ -267,10 +276,16 @@ class BookSource {
     // ⚠️ id 由 bookSourceUrl 派生（见 _decode / id getter），
     // 所以改 url 时必须把 id 一起更新 —— 否则改完 URL 后
     // 这条书源的 id 还是旧的，删除/启用都会找错对象。
-    final newId =
+    // 若这条是本仓副本（id 带 `\u0001<仓库>` 后缀），后缀要保留：
+    // 否则改一次名字/地址就会和另一仓的同源条目撞 id、互相覆盖。
+    final newBase =
         (next['bookSourceUrl'] ?? next['url'] ?? next['bookSourceName'] ?? '')
             .toString();
-    return BookSource(raw: next, id: newId.isEmpty ? id : newId);
+    final sep = id.indexOf('\u0001');
+    final suffix = sep >= 0 ? id.substring(sep) : '';
+    final newId = newBase.isEmpty ? id : '$newBase$suffix';
+    if (next.containsKey('_id') && newId != id) next['_id'] = newId;
+    return BookSource(raw: next, id: newId);
   }
 
   BookSource copyWith({bool? enabled, int? order, String? group}) {
@@ -318,7 +333,11 @@ class BookSource {
     final url = (j['bookSourceUrl'] ?? j['url'] ?? '').toString().trim();
     // 名字和地址至少要有一个，否则没法展示也没法识别
     if (name.isEmpty && url.isEmpty) return null;
-    final id = url.isNotEmpty ? url : name;
+    // 存储 id（两个仓的同源副本带仓库后缀）优先；没有才按 URL / 名称生成
+    final storedId = (j['_id'] ?? '').toString().trim();
+    final id = storedId.isNotEmpty
+        ? storedId
+        : (url.isNotEmpty ? url : name);
     return BookSource(raw: j, id: id);
   }
 
@@ -465,15 +484,52 @@ class BookSourceStore {
     return BookSource(raw: m, id: s.id);
   }
 
-  Future<({int added, int updated})> addAll(List<BookSource> list) async {
+  /// 书源 id 与仓库标记之间的分隔符（不会出现在 URL / 名称里）。
+  static const String _kWarehouseSep = '\u0001';
+
+  /// 取基础 id（去掉本仓副本的 `\u0001<warehouse>` 后缀）
+  static String _baseId(String id) {
+    final i = id.indexOf(_kWarehouseSep);
+    return i < 0 ? id : id.substring(0, i);
+  }
+
+  /// 同一基础 id + 同一仓库的已有条目下标
+  int _indexOfSameSource(String baseId, String warehouse) {
+    for (var i = 0; i < _items.length; i++) {
+      final e = _items[i];
+      if (e.warehouse != warehouse) continue;
+      if (_baseId(e.id) == baseId) return i;
+    }
+    return -1;
+  }
+
+  Future<({int added, int updated, List<String> ids})> addAll(
+    List<BookSource> list,
+  ) async {
     var added = 0;
     var updated = 0;
+    final storedIds = <String>[];
     for (final orig in list) {
       // 导入即自动判定「发现」开关：没有发现规则的源自动关闭发现
       // （书源页不展示该源，搜索/聚搜不受影响），避免点进发现只报
       // "没有配置分类浏览"。
-      final s = _applyAutoExplore(orig);
-      final i = _items.indexWhere((e) => e.id == s.id);
+      var s = _applyAutoExplore(orig);
+      final wh = s.warehouse;
+      final base = _baseId(s.id);
+      var i = _indexOfSameSource(base, wh);
+      // 🔴 两个仓共用同一个 BookSourceStore：同一个源在两个仓都导入时，
+      //    id 会撞在一起互相覆盖（表现为"书源仓导入的跑到漫画仓 / 反过来"）。
+      //    这里给「后导入的那一仓」一份独立 id，两份配置互不影响。
+      if (i < 0 && _items.any((e) => _baseId(e.id) == base)) {
+        var newId = '$base$_kWarehouseSep$wh';
+        var n = 1;
+        while (_items.any((e) => e.id == newId)) {
+          n++;
+          newId = '$base$_kWarehouseSep$wh$n';
+        }
+        s = s.withId(newId);
+        i = _indexOfSameSource(base, wh);
+      }
       if (i >= 0) {
         // 保留用户当前的启用状态与顺序，只更新配置本身
         final keep = _items[i];
@@ -483,9 +539,10 @@ class BookSourceStore {
         _items.add(s);
         added++;
       }
+      storedIds.add(s.id);
     }
     await _persist();
-    return (added: added, updated: updated);
+    return (added: added, updated: updated, ids: storedIds);
   }
 
   Future<void> setEnabled(String id, bool enabled) async {

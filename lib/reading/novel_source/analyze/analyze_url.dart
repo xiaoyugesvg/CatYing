@@ -51,9 +51,11 @@ class AnalyzeUrl {
   int webViewDelayTime = 0;
 
   // 静态 Dio 实例提升性能
+  // 2026-10-18：15s/30s → 25s/45s。弱网下书源分类/详情经常在 15s 连接
+  // 超时后被判"网络请求失败"，放宽后能显著减少误报。
   static final Dio _dio = Dio()
-    ..options.connectTimeout = const Duration(seconds: 15)
-    ..options.receiveTimeout = const Duration(seconds: 30)
+    ..options.connectTimeout = const Duration(seconds: 25)
+    ..options.receiveTimeout = const Duration(seconds: 45)
     ..options.validateStatus =
         ((status) => status != null && status >= 200 && status < 300)
     // 书源直连链路改用浏览器一致的原始请求（Host 首行 + Title-Case

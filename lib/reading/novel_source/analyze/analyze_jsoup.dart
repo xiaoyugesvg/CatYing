@@ -265,7 +265,13 @@ class AnalyzeByJsoup {
   List<String> getStringList(String ruleStr) {
     if (ruleStr.isEmpty) return [];
 
-    final sourceRule = SourceRule(ruleStr);
+    // legado 的 `-` 前缀 = 结果倒序（站点常把最新章节排在前面）。
+    var rule = ruleStr.trim();
+    final reverse = rule.startsWith('-');
+    if (reverse) rule = rule.substring(1).trim();
+    if (rule.isEmpty) return [];
+
+    final sourceRule = SourceRule(rule);
     final elementsRule = sourceRule.elementsRule;
 
     if (elementsRule.isEmpty) {
@@ -304,7 +310,7 @@ class AnalyzeByJsoup {
       }
     }
 
-    return textS;
+    return reverse ? textS.reversed.toList() : textS;
   }
 
   List<String> _getResultList(String ruleStr) {
@@ -653,7 +659,15 @@ class AnalyzeByJsoup {
   List<dynamic> getElements(String ruleStr) {
     if (ruleStr.isEmpty) return [];
 
-    final sourceRule = SourceRule(ruleStr);
+    // legado 的 `-` 前缀 = 结果倒序（如 `-id.chapters@class.grid@tag.a`）：
+    // 站点把最新章节排在前面，倒序后目录才是正序。原来 `-` 被当成选择器
+    // 的一部分 ⇒ `querySelectorAll('-id.chapters')` 抛异常/0 元素 ⇒ 目录空。
+    var ruleStrX0 = ruleStr.trim();
+    final reverse = ruleStrX0.startsWith('-');
+    if (reverse) ruleStrX0 = ruleStrX0.substring(1).trim();
+    if (ruleStrX0.isEmpty) return [];
+
+    final sourceRule = SourceRule(ruleStrX0);
     final elementsRule = sourceRule.elementsRule;
 
     if (elementsRule.isEmpty) return [_element];
@@ -690,7 +704,7 @@ class AnalyzeByJsoup {
       }
     }
 
-    return result;
+    return reverse ? result.reversed.toList() : result;
   }
 
   List<Element> _getElementsCss(Element element, String ruleStr) {

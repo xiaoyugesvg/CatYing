@@ -138,16 +138,23 @@ Future<({bool ok, String message})> importComicSourcesText(
       veneraDefs.addAll(results.whereType<SourceDefinition>());
     }
 
-    // Legado 漫画脚本
+    // Legado 格式书源（含漫画脚本）：**不再按类型过滤**。
+    // 用户 2026-10-18 明确要求：「我自己知道从哪个仓导入，你别区分；
+    // 但在哪个仓导入就只在哪个仓显示」。所以漫源仓库收到的 Legado 源
+    // 一律强制 bookSourceType=2 + `_warehouse=comic`，与书源仓彻底隔离。
     final legado = <BookSource>[];
     try {
       for (final s in BookSourceImportParser.parseSources(text)) {
         if (s.raw['bookSourceName'] == null && s.raw['bookSourceUrl'] == null) {
           continue;
         }
-        if (!s.isComicSource) continue;
+        // config 型上面已经收进 defs，别在书源表里再存一份
+        if (s.isConfig) continue;
         legado.add(
-          BookSource(raw: {...s.raw, 'bookSourceType': 2}, id: s.id),
+          BookSource(
+            raw: {...s.raw, 'bookSourceType': 2, '_warehouse': 'comic'},
+            id: s.id,
+          ),
         );
       }
     } catch (_) {}

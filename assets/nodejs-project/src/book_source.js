@@ -33,7 +33,9 @@ import axios from 'axios';
 // 之前用 module.exports 会被塞进 ESM 模块作用域 → 导出为空对象。
 
 
-const HTTP_TIMEOUT_MS = 15000;
+// 2026-10-18：15s → 25s。书源分类/详情经常串行请求多个页面，15s 在弱网下
+// 容易直接超时（日志里的 connect timeout），放宽后成功率明显提高。
+const HTTP_TIMEOUT_MS = 25000;
 
 // 各源的 java.get/put 状态（按源 URL 隔离）
 const sourceState = new Map();
@@ -770,12 +772,23 @@ async function toc({ source, tocUrl }) {
   const input = makeInputSafe(text);
   const vars = buildVars(state);
 
+  if (process.env.BOOK_DEBUG) {
+    console.error('[toc-debug] url=', url, 'textLen=', text.length,
+      'rule=', rule.chapterList, 'inputJson=', input && input.__json ? 'yes' : 'no');
+  }
+
   let items;
   try {
     items = evalList({ rule: rule.chapterList, input, vars, ctx: ruleCtx(url, source) });
   } catch (e) {
     return { ok: false, error: 'chapterList 规则失败：' + e.message };
   }
+  if (process.env.BOOK_DEBUG) {
+    console.error('[toc-debug] items=', Array.isArray(items) ? items.length : typeof items);
+  }
+  // JS 规则可能返回单个对象 / 字符串（而不是数组）；统一包成数组，
+  // 避免 `for (const node of items)` 直接抛 "is not iterable"。
+  if (!Array.isArray(items)) items = items == null ? [] : [items];
 
   const out = [];
   for (const node of items) {
@@ -842,12 +855,21 @@ async function content({ source, chapterUrl }) {
   const vars = buildVars(state);
   const ctx = Object.assign({}, ruleCtx(url, source), { chapterUrl: url });
 
+  if (process.env.BOOK_DEBUG) {
+    console.error('[content-debug] url=', url, 'textLen=', text.length,
+      'ruleHead=', String(contentRule).slice(0, 80).replace(/\n/g, ' '));
+  }
+
   let raw = '';
   try {
     // ⚠️ 必须按**列表**求值：漫画正文规则普遍是
     //   `.comiclist img@data-original` 这种「选择器@属性」——
     //   isList:false 只会取**第一张**图，整章就只剩一页。
     const v = evalRule({ rule: contentRule, input, vars, ctx, isList: true });
+    if (process.env.BOOK_DEBUG) {
+      console.error('[content-debug] resultType=', Array.isArray(v) ? 'array' : typeof v,
+        'len=', Array.isArray(v) ? v.length : 0);
+    }
     if (Array.isArray(v)) {
       const arr = v.map((x) => str(x)).filter((x) => x !== '');
       const imgs = arr.map((u) => absolute(u, base)).filter(Boolean);

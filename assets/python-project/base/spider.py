@@ -63,10 +63,10 @@ def _default_timeout():
       `sock.settimeout(None)` ⇒ socket read **永久阻塞**；而原生 watchdog 的
       `PyThreadState_SetAsyncExc` **只在字节码边界生效**，线程卡在 C 里就永远
       不返回 ⇒ 原生那条串行 workQueue 被永久占住 ⇒ 整个 Python 引擎"卡死"。
-    这里给基类自己的请求补一个默认超时（8s < App 侧 10s watchdog 预算），
+    这里给基类自己的请求补一个默认超时（15s < App 侧 25s watchdog 预算），
     让"没写 timeout"的请求到点自己返回、脚本的 try/except 接住即可。
     """
-    return 8.0
+    return 15.0
 
 
 class _TimeoutSession(object):

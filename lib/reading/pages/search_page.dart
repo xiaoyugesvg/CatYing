@@ -394,6 +394,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     required VoidCallback onTap,
     VoidCallback? onLongPress,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return GestureDetector(
       onTap: onTap,
       onLongPress: onLongPress,
@@ -402,7 +403,10 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
         decoration: BoxDecoration(
           color: selected
               ? JellyTheme.primary
-              : JellyTheme.primary.withValues(alpha: 0.10),
+              // 夜间：primary@10% 在深色面板上几乎看不见 ⇒ 用半透明白底
+              : (isDark
+                    ? Colors.white.withValues(alpha: 0.10)
+                    : JellyTheme.primary.withValues(alpha: 0.10)),
           borderRadius: BorderRadius.circular(18),
         ),
         child: Text(
@@ -411,7 +415,9 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
           style: TextStyle(
             fontSize: AppTheme.fontSubhead,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            color: selected ? Colors.white : JellyTheme.primary,
+            color: selected
+                ? Colors.white
+                : (isDark ? Colors.white70 : JellyTheme.primary),
           ),
         ),
       ),
@@ -1086,18 +1092,34 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
 
   Future<String?> _askGroupName() async {
     final ctrl = TextEditingController();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final name = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: JellyTheme.cardLight,
+        // 夜间模式必须用深色卡片：原来写死 cardLight ⇒ 白底 + 主题白字，
+        // 「取消 / 创建」直接看不见（用户 2026-10-18 截图）。
+        backgroundColor: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(18),
         ),
-        title: const Text('新建分组'),
+        title: Text(
+          '新建分组',
+          style: TextStyle(
+            color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+          ),
+        ),
         content: TextField(
           controller: ctrl,
           autofocus: true,
-          decoration: const InputDecoration(hintText: '分组名称'),
+          style: TextStyle(
+            color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+          ),
+          decoration: InputDecoration(
+            hintText: '分组名称',
+            hintStyle: TextStyle(
+              color: isDark ? Colors.white54 : JellyTheme.textSecondary,
+            ),
+          ),
           onSubmitted: (v) => Navigator.pop(ctx, v),
         ),
         actions: [
@@ -1123,9 +1145,10 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     VoidCallback refresh,
   ) {
     final groups = SourceManager().customGroups;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: JellyTheme.cardLight,
+      backgroundColor: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -1387,8 +1410,15 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
         decoration: BoxDecoration(
           color: selected
               ? JellyTheme.primary
-              : (isDark ? JellyTheme.cardDark : JellyTheme.cardLight),
+              // 夜间：未选中 chip 若用 cardDark（与底部面板同色）几乎看不见，
+              // 改成半透明白底，文字才有对比度（用户 2026-10-18「夜间字体/背景有问题」）。
+              : (isDark
+                    ? Colors.white.withValues(alpha: 0.10)
+                    : JellyTheme.cardLight),
           borderRadius: BorderRadius.circular(16),
+          border: isDark && !selected
+              ? Border.all(color: Colors.white.withValues(alpha: 0.08))
+              : null,
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.05),

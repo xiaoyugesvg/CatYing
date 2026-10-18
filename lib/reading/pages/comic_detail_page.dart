@@ -46,6 +46,10 @@ class ComicDetailPage extends StatefulWidget {
 }
 
 class _ComicDetailPageState extends State<ComicDetailPage> {
+  /// 夜间模式次级文字色：`Colors.white70` 在深色底上偏灰（简介/作者/人气
+  /// 看着发虚），统一提亮到 ~85% 白，保证与标题有层次但不牺牲可读性。
+  static const Color _darkSecondary = Color(0xFFD9D9DE);
+
   final ScrollController _scrollController = ScrollController();
 
   late Comic _comic;
@@ -344,6 +348,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
 
   /// 章节加载中（头部信息已用入参渲染，仅章节区显示加载动画）
   SliverFillRemaining _buildChapterLoading() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return SliverFillRemaining(
       hasScrollBody: false,
       child: Center(
@@ -352,7 +357,12 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
           children: [
             CircularProgressIndicator(color: JellyTheme.primary),
             SizedBox(height: 16),
-            Text('加载中...', style: TextStyle(color: JellyTheme.textSecondary)),
+            Text(
+              '加载中...',
+              style: TextStyle(
+                color: isDark ? _darkSecondary : JellyTheme.textSecondary,
+              ),
+            ),
           ],
         ),
       ),
@@ -361,6 +371,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
 
   /// 章节加载失败
   SliverFillRemaining _buildChapterError() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return SliverFillRemaining(
       hasScrollBody: false,
       child: Center(
@@ -369,7 +380,13 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
           children: [
             const Icon(Icons.error_outline, size: 40, color: Colors.red),
             const SizedBox(height: 16),
-            Text('加载失败: $_error'),
+            Text(
+              '加载失败: $_error',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: isDark ? _darkSecondary : JellyTheme.textPrimaryLight,
+              ),
+            ),
             const SizedBox(height: 16),
             ElevatedButton(onPressed: _loadData, child: const Text('重试')),
           ],
@@ -382,7 +399,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
   SliverToBoxAdapter _buildHeader() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final titleColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
-    final secondaryColor = isDark ? Colors.white70 : JellyTheme.textSecondary;
+    final secondaryColor = isDark ? _darkSecondary : JellyTheme.textSecondary;
 
     return SliverToBoxAdapter(
       child: Padding(
@@ -543,7 +560,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
             : Colors.black.withValues(alpha: 0.10));
     final fg = color != null
         ? Colors.white
-        : (isDark ? Colors.white70 : JellyTheme.textPrimaryLight);
+        : (isDark ? _darkSecondary : JellyTheme.textPrimaryLight);
     return Material(
       color: bg,
       borderRadius: BorderRadius.circular(20),
@@ -693,7 +710,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     if (author.isEmpty) return;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final titleColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
-    final secondaryColor = isDark ? Colors.white70 : JellyTheme.textSecondary;
+    final secondaryColor = isDark ? _darkSecondary : JellyTheme.textSecondary;
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
@@ -915,7 +932,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
               : Colors.black.withValues(alpha: 0.06));
     final fg = ongoing
         ? Colors.white
-        : (isDark ? Colors.white70 : JellyTheme.textSecondary);
+        : (isDark ? _darkSecondary : JellyTheme.textSecondary);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
@@ -943,7 +960,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
         tag,
         style: TextStyle(
           fontSize: AppTheme.fontCaption,
-          color: isDark ? Colors.white70 : JellyTheme.textSecondary,
+          color: isDark ? _darkSecondary : JellyTheme.textSecondary,
         ),
       ),
     );
@@ -1011,7 +1028,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
   SliverToBoxAdapter _buildChapterSummary() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final titleColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
-    final secondaryColor = isDark ? Colors.white70 : JellyTheme.textSecondary;
+    final secondaryColor = isDark ? _darkSecondary : JellyTheme.textSecondary;
     return SliverToBoxAdapter(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -1065,7 +1082,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     Color? color,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final fg = color ?? (isDark ? Colors.white70 : JellyTheme.textSecondary);
+    final fg = color ?? (isDark ? _darkSecondary : JellyTheme.textSecondary);
     return IconButton(
       tooltip: tooltip,
       onPressed: onTap,
@@ -1134,7 +1151,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     side: BorderSide(
-                      color: isDark ? Colors.white70 : Colors.black38,
+                      color: isDark ? _darkSecondary : Colors.black38,
                     ),
                   ),
                   child: Text(
@@ -1247,7 +1264,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                       color: selected
                           ? Colors.white
                           : (isDark
-                                ? Colors.white70
+                                ? _darkSecondary
                                 : JellyTheme.textSecondary),
                     ),
                   ),

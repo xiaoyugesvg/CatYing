@@ -577,12 +577,61 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
           ApiConfig.instance.localVideoSources;
           final list = _sorted;
           if (list.isEmpty) {
+            // 空态：不要只留一行字（用户 2026-10-18：下面像一条长空白条）
             return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 28),
-              child: Center(
-                child: Text(
-                  '还没有本地 Python 源',
-                  style: TextStyle(color: AppTheme.textTertiary),
+              padding: const EdgeInsets.only(top: 12, bottom: 8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 28,
+                ),
+                decoration: BoxDecoration(
+                  color: AppTheme.backgroundSecondary,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.terminal_rounded,
+                      size: 40,
+                      color: AppTheme.textTertiary,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      '还没有本地 Python 源',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: AppTheme.fontSubhead,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '点上面的「导入脚本」选择 .py 文件',
+                      style: TextStyle(
+                        color: AppTheme.textTertiary,
+                        fontSize: AppTheme.fontFootnote,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      onPressed: _busy ? null : _import,
+                      icon: const Icon(Icons.add_rounded, size: 18),
+                      label: const Text('导入脚本'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.accentColor,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 10,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             );

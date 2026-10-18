@@ -990,6 +990,7 @@ class BookSourceService {
         sources.map((s) {
           final m = Map<String, dynamic>.from(s.toJson());
           m.remove('_warehouse');
+          m.remove('_id');
           return m;
         }).toList(),
       );

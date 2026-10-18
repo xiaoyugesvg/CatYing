@@ -36,6 +36,22 @@ library;
 ///
 /// 用 `r"""..."""` 包裹，脚本内部**只用单引号**，避免出现 `"""` 终止符。
 const String legadoJavaPrelude = r"""
+// ════ 兼容垫片：部分书源会对「已经解析好的对象」再 JSON.parse 一次 ════
+// 例：目录规则 `$.data@js:JSON.parse(result).map(...)` —— 走到 JS 时
+// result 已是对象，原生 JSON.parse 会抛 `Unexpected token o in JSON at
+// position 1`（把对象转成了 "[object Object]"）。这里让非字符串参数原样返回。
+(function () {
+  var _origJsonParse = JSON.parse;
+  JSON.parse = function (text, reviver) {
+    if (text === null || text === undefined) return text;
+    if (typeof text !== 'string') return text;
+    // 去掉 UTF-8 BOM：接口原文常带 \uFEFF，原生 JSON.parse 会直接抛
+    // `Unexpected token \uFEFF`（症状：漫画正文接口明明有数据却 0 张图）。
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+    return _origJsonParse(text, reviver);
+  };
+})();
+
 // ════ ② 宿主调用辅助（java 与 source 共用；必须在两者之前定义）════
 function _legadoHostCall(op, args) {
   var a = args || [];

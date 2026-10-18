@@ -56,10 +56,11 @@ class BookSourceImportParser {
           // 解包失败就当普通对象继续
         }
       }
-      // 仓库归属（`_warehouse`）是本机状态，不跟着导入内容走：
-      // 由导入方（书源仓 / 漫源仓库）重新打标，避免分享来的源被判成
-      // "另一个仓"的源而完全不显示。
+      // 仓库归属（`_warehouse`）/ 存储 id（`_id`）都是本机状态，
+      // 不跟着导入内容走：由导入方（书源仓 / 漫源仓库）重新打标，
+      // 避免分享来的副本沿用对方的仓库前缀。
       m.remove('_warehouse');
+      m.remove('_id');
       final s = BookSource.fromJson(m);
       if (s != null) out.add(s);
     }
