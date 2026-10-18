@@ -572,9 +572,15 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
         const SizedBox(height: AppTheme.spacingMD),
         Obx(() {
           // 依赖 localVideoSources，导入/删除后自动刷新。
-          // ⚠️ 空态看**清单**而不是 beans：开关关闭时 list 仍会读取，
-          //    管理页要能继续看到并编辑已导入的脚本（用户 2026-10-18）。
-          ApiConfig.instance.localVideoSources;
+          //
+          // ⚠️ 必须读一个**可观察属性**（如 `.length`）：只写
+          //    `ApiConfig.instance.localVideoSources;` 不会注册依赖 —— Rx 对象
+          //    本身被读取不等于订阅，GetX 会直接抛
+          //    "the improper use of a GetX has been detected"，
+          //    release 下整个区块变成灰色 ErrorWidget（用户截图里的长灰条）。
+          ApiConfig.instance.localVideoSources.length;
+          // 空态看**清单**而不是 beans：开关关闭时 list 仍会读取，
+          // 管理页要能继续看到并编辑已导入的脚本（用户 2026-10-18）。
           final list = _sorted;
           if (list.isEmpty) {
             // 空态：不要只留一行字（用户 2026-10-18：下面像一条长空白条）
