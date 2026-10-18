@@ -81,7 +81,9 @@ class PythonSourcesService {
         {'kind': item.kind, 'key': item.key, 'code': code},
       );
       if (!r.ok) {
-        AppLog.instance.w('[Python] 源注册失败 ${item.kind}/${item.key}: ${r.error}');
+        AppLog.instance.w(
+          '[Python] 源注册失败 ${item.kind}/${item.key}: ${r.error}',
+        );
       } else {
         _registered.add('${item.kind}/${item.key}');
       }
@@ -177,8 +179,56 @@ class PythonSourcesService {
     return (ok: true, message: null);
   }
 
+  /// 只注册进引擎，不写 [Documents]/python-project（本地 Python 源用）。
+  ///
+  /// 本地源的文件本体存在 `<Documents>/local_py/`，这里只做内存注册，
+  /// 避免同一份代码在两个目录各存一份、更新时不同步。
+  Future<({bool ok, String? message})> registerSource(
+    String kind,
+    String key,
+    String code,
+  ) async {
+    if (!PythonManager.instance.isIOS) {
+      return (ok: false, message: 'Python 引擎仅支持 iOS');
+    }
+    final r = await PythonManager.instance.call(
+      'runner',
+      'install_source',
+      {'kind': kind, 'key': key, 'code': code},
+    );
+    if (!r.ok) {
+      return (ok: false, message: r.error ?? '注册失败');
+    }
+    final detail = r.json as Map<String, dynamic>?;
+    if (detail?['ok'] != true) {
+      return (ok: false, message: detail?['message'] as String? ?? '注册失败');
+    }
+    _registered.add('$kind/$key');
+    return (ok: true, message: null);
+  }
+
+  /// 只从引擎卸载，不删 python-project 里的文件（本地 Python 源用）。
+  Future<({bool ok, String? message})> unregisterSource(
+    String kind,
+    String key,
+  ) async {
+    final r = await PythonManager.instance.call(
+      'runner',
+      'remove_source',
+      {'kind': kind, 'key': key},
+    );
+    _registered.remove('$kind/$key');
+    if (!r.ok) {
+      return (ok: false, message: r.error ?? '卸载失败');
+    }
+    return (ok: true, message: null);
+  }
+
   /// 删除并卸载一个 Python 源
-  Future<({bool ok, String? message})> removeSource(String kind, String key) async {
+  Future<({bool ok, String? message})> removeSource(
+    String kind,
+    String key,
+  ) async {
     final root = await _spiderRoot();
     final file = File('${_kindDir(kind, root).path}/$key.py');
     try {

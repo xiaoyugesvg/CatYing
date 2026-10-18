@@ -6,6 +6,7 @@ import 'api_config.dart';
 import 'ad_filter_service.dart';
 import 'app_log.dart';
 import 'nodejs_manager.dart';
+import 'local_python_sources.dart';
 import 'python_manager.dart';
 import 'python_script_sources.dart';
 import 'python_sources_service.dart';
@@ -193,8 +194,7 @@ class AppState extends GetxController {
   void applyLoadedConfigState() {
     isConfigLoaded.value = true;
     configLoadError.value = null;
-    currentSourceKey.value =
-        ApiConfig.instance.homeSourceBean.value?.key ?? '';
+    currentSourceKey.value = ApiConfig.instance.homeSourceBean.value?.key ?? '';
     // 配置加载完成 → 重建视频广告过滤规则（ads / rules）
     unawaited(_reloadAdFilterRules());
     // 不再弹免责声明（用户要求去掉首次打开的责任弹窗）
@@ -274,7 +274,7 @@ class AppState extends GetxController {
     // 按**脚本**判：订阅里有没有 .py 源，或用户单独导入过本地 Python 源
     final hasPySource =
         ApiConfig.instance.sourceBeanList.any((s) => s.isPythonScriptSource) ||
-            ApiConfig.instance.localVideoSources.isNotEmpty;
+        ApiConfig.instance.localVideoSources.isNotEmpty;
     if (!hasPySource) {
       AppLog.instance.log('[AppState] 没有 .py 源（含本地），跳过 Python 引擎启动（按脚本判）');
       return;
@@ -282,7 +282,12 @@ class AppState extends GetxController {
     try {
       final ok = await PythonManager.instance.ensureStarted();
       if (ok) {
+        // 订阅/远端 .py：Documents/python-project 下全量注册
         await PythonSourcesService.instance.syncToEngine();
+        // 本地 Python 源：Documents/local_py 下单独注册（与订阅解耦）
+        if (ApiConfig.instance.localVideoSources.isNotEmpty) {
+          await LocalPythonSources.instance.registerAll();
+        }
       }
     } catch (e) {
       AppLog.instance.w('[AppState] Python 引擎启动异常（可忽略）: $e');
@@ -372,7 +377,9 @@ class AppState extends GetxController {
       final take = urls.length > _kPrewarmMaxPySources
           ? urls.sublist(0, _kPrewarmMaxPySources)
           : urls;
-      AppLog.instance.log('[AppState] 后台预热 ${take.length}/${urls.length} 个 Python 源…');
+      AppLog.instance.log(
+        '[AppState] 后台预热 ${take.length}/${urls.length} 个 Python 源…',
+      );
       var ok = 0;
       for (final u in take) {
         final key = await PythonScriptSources.instance.ensureInstalled(u);
@@ -406,13 +413,14 @@ class AppState extends GetxController {
       if (!portOk) return 'Node 已启动，但 spider 端口未就绪';
 
       // 有主 js/jar spider 源且本次尚未载入 → 载入并刷新线路清单
-      final main = ApiConfig.instance.sourceBeanList.firstWhereOrNull((s) =>
-          s.isSpiderSource &&
-          !s.key.startsWith('app_') &&
-          !s.isPythonScriptSource);
+      final main = ApiConfig.instance.sourceBeanList.firstWhereOrNull(
+        (s) =>
+            s.isSpiderSource &&
+            !s.key.startsWith('app_') &&
+            !s.isPythonScriptSource,
+      );
       if (main != null && main.api.isNotEmpty && !_sourceLoadedThisSession) {
-        final (loadOk, msg) =
-            await NodeJSManager.instance.loadSource(main.api);
+        final (loadOk, msg) = await NodeJSManager.instance.loadSource(main.api);
         if (!loadOk) return 'Node 已就绪，但源加载失败：${msg ?? "未知错误"}';
         SpiderService.instance.mainScriptUrl = main.api;
         _sourceLoadedThisSession = true;
@@ -421,8 +429,10 @@ class AppState extends GetxController {
         final cfgUrlAtRequest = ApiConfig.instance.configUrl.value;
         final cfg = await SpiderService.instance.getCatConfig();
         if (cfg != null) {
-          await ApiConfig.instance
-              .updateSourceBeansFromSpiderConfig(cfg, cfgUrlAtRequest);
+          await ApiConfig.instance.updateSourceBeansFromSpiderConfig(
+            cfg,
+            cfgUrlAtRequest,
+          );
         }
       }
       return 'Node 引擎已就绪（端口 ${NodeJSManager.instance.spiderPort}）';
@@ -504,8 +514,9 @@ class AppState extends GetxController {
     //    同一个订阅里既有 py 也有猫源脚本时，两个引擎都会按需起来（互不影响）。
     // 另外「整表替换线路」只对单 spider 配置生效（见 api_config.dart 里
     // `if (isSingleScriptSpider.value)`），所以这里放开**不会**冲掉聚合配置的线路。
-    final hasSpiderSource = ApiConfig.instance.sourceBeanList
-        .any((s) => s.isSpiderSource && !s.isPythonScriptSource);
+    final hasSpiderSource = ApiConfig.instance.sourceBeanList.any(
+      (s) => s.isSpiderSource && !s.isPythonScriptSource,
+    );
     if (!hasSpiderSource) {
       AppLog.instance.log('[AppState] 无 js/jar spider 源，跳过 Node 启动/加载流程');
       return;
@@ -546,7 +557,11 @@ class AppState extends GetxController {
     // 它们由程序详情页惰性加载（Node 引擎单源架构，全局加载会触发
     // /config 线路替换并覆盖主源），这里只加载主订阅源里的蜘蛛源。
     final spiderSource = ApiConfig.instance.sourceBeanList.firstWhereOrNull(
-        (s) => s.isSpiderSource && !s.key.startsWith('app_') && !s.isPythonScriptSource);
+      (s) =>
+          s.isSpiderSource &&
+          !s.key.startsWith('app_') &&
+          !s.isPythonScriptSource,
+    );
     if (spiderSource == null || spiderSource.api.isEmpty) return;
 
     // **会话级复用**: 本次启动已成功加载过**同一个**源（api 一致）才复用；
@@ -574,11 +589,11 @@ class AppState extends GetxController {
     loadingPhase.value = LoadingPhase.downloadingSource;
     // drpy 标准源（api=drpy2.min.js + ext=站点.js）不能直接 loadSource(api)，
     // 由 SpiderService 分流到 drpy 宿主；其余源行为不变。
-    final (loadSuccess, loadMessage) =
-        await SpiderService.instance.loadSourceSmart(
-      spiderSource.api,
-      spiderSource.ext ?? '',
-    );
+    final (loadSuccess, loadMessage) = await SpiderService.instance
+        .loadSourceSmart(
+          spiderSource.api,
+          spiderSource.ext ?? '',
+        );
 
     if (!loadSuccess) {
       loadingPhase.value = LoadingPhase.failed;
@@ -594,8 +609,7 @@ class AppState extends GetxController {
     //    表现为每次切订阅后的第一次点击白等一次 loadSource（用户 2026-10-14）。
     // ⚠️ drpy 源由 `_ensureDrpyScript` 自己登记 `drpy::<ext>` 标记，
     //    这里再写 api 会把标记覆盖掉（缓存/切源判断都会失效）。
-    if (!SpiderService.isDrpySource(
-        spiderSource.api, spiderSource.ext ?? '')) {
+    if (!SpiderService.isDrpySource(spiderSource.api, spiderSource.ext ?? '')) {
       SpiderService.instance.markScriptLoaded(spiderSource.api);
     }
     AppLog.instance.log('[AppState] Spider 源加载成功');
@@ -637,8 +651,10 @@ class AppState extends GetxController {
         configLoadError.value = '获取线路配置失败';
         return;
       }
-      await ApiConfig.instance
-          .updateSourceBeansFromSpiderConfig(config, cfgUrlAtRequest);
+      await ApiConfig.instance.updateSourceBeansFromSpiderConfig(
+        config,
+        cfgUrlAtRequest,
+      );
 
       // 对应 Swift: 用第一个源设置 currentSpider 并初始化
       final firstSource = ApiConfig.instance.sourceBeanList.firstOrNull;
@@ -655,11 +671,14 @@ class AppState extends GetxController {
         // 对应 Swift try? await - 忽略初始化错误
         try {
           await SpiderService.instance.initSpider(
-              firstSource.key, firstSource.type, firstSource.api,
-              ext: firstSource.ext ?? '');
+            firstSource.key,
+            firstSource.type,
+            firstSource.api,
+            ext: firstSource.ext ?? '',
+          );
         } catch (e) {
-        AppLog.instance.log('[app_state] swallowed: $e');
-      }
+          AppLog.instance.log('[app_state] swallowed: $e');
+        }
       }
     } catch (e) {
       loadingPhase.value = LoadingPhase.failed;
@@ -673,13 +692,11 @@ class AppState extends GetxController {
   // ============================================================
 
   void _setupNetworkRestoredAutoRetry() {
-    _connectivitySubscription = Connectivity()
-        .onConnectivityChanged
-        .listen((List<ConnectivityResult> results) {
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((
+      List<ConnectivityResult> results,
+    ) {
       final isConnected = results.any((r) => r != ConnectivityResult.none);
-      if (isConnected &&
-          !isConfigLoaded.value &&
-          _lastVodUrl.isNotEmpty) {
+      if (isConnected && !isConfigLoaded.value && _lastVodUrl.isNotEmpty) {
         isRetryingConfig.value = true;
         loadConfig(vodUrl: _lastVodUrl).then((_) {
           isRetryingConfig.value = false;
@@ -716,8 +733,9 @@ class AppState extends GetxController {
   /// 用户环境上仍破坏恢复. 79177e1 行为是兜底, 不破坏 notify 链路.
   Future<void> handleSceneActive() async {
     if (!isConfigLoaded.value) return;
-    final hasSpiderSource =
-        ApiConfig.instance.sourceBeanList.any((s) => s.isSpiderSource);
+    final hasSpiderSource = ApiConfig.instance.sourceBeanList.any(
+      (s) => s.isSpiderSource,
+    );
     if (!hasSpiderSource) return;
 
     // **重入 guard**: 避免 lifecycle 抖动 (resumed→inactive→hidden→paused
@@ -727,13 +745,15 @@ class AppState extends GetxController {
     if (_isHandleSceneActiveRunning) {
       // 不丢弃：记一个待补跑标记，本轮结束后补跑一次（见下面的 finally）
       _sceneActiveRerunPending = true;
-      AppLog.instance.entry(LogEntry(
-        category: 'GUARD',
-        action: 'handleSceneActive_skip',
-        level: LogLevel.warn,
-        message: 'handleSceneActive already running, 已记为待补跑',
-        fields: {'reason': 'already running', 'rerunPending': true},
-      ));
+      AppLog.instance.entry(
+        LogEntry(
+          category: 'GUARD',
+          action: 'handleSceneActive_skip',
+          level: LogLevel.warn,
+          message: 'handleSceneActive already running, 已记为待补跑',
+          fields: {'reason': 'already running', 'rerunPending': true},
+        ),
+      );
       return;
     }
     _isHandleSceneActiveRunning = true;

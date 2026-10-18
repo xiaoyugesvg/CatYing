@@ -58,6 +58,7 @@ class ApiConfig extends GetxController {
     if (value is String) return int.tryParse(value) ?? defaultValue;
     return defaultValue;
   }
+
   static const int _maxRedirectCandidates = 20;
   static const int _rawConfigCacheTTL = 20; // 秒
   static const int _maxRawConfigCacheEntries = 24;
@@ -170,8 +171,10 @@ class ApiConfig extends GetxController {
       final key = normalized.toLowerCase();
       final now = DateTime.now();
       final content = await NetworkManager.instance.getString(normalized);
-      _rawConfigCache[key] =
-          _RawConfigCacheEntry(content: content, fetchedAt: now);
+      _rawConfigCache[key] = _RawConfigCacheEntry(
+        content: content,
+        fetchedAt: now,
+      );
       _trimRawConfigCacheIfNeeded();
       AppLog.instance.log('[ApiConfig] 配置预取完成（命中缓存后加载会更快）');
     } catch (_) {
@@ -194,7 +197,9 @@ class ApiConfig extends GetxController {
     Map<String, dynamic>? decoded;
     try {
       decoded = jsonDecode(cleanedJson) as Map<String, dynamic>?;
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      /* ignore */
+    }
 
     if (decoded != null) {
       final config = AppConfigData.fromJson(decoded);
@@ -218,8 +223,9 @@ class ApiConfig extends GetxController {
           );
           final displayName = matchedEntry?.name?.trim();
           final fallbackName = Uri.tryParse(candidate)?.host ?? candidate;
-          final resolvedName =
-              (displayName != null && displayName.isNotEmpty) ? displayName : fallbackName;
+          final resolvedName = (displayName != null && displayName.isNotEmpty)
+              ? displayName
+              : fallbackName;
           options.add(MultiRepoOption(name: resolvedName, url: candidate));
         }
 
@@ -245,7 +251,8 @@ class ApiConfig extends GetxController {
         .toList();
     result.addAll(localVideoSources.where((s) => s.isSearchable));
     AppLog.instance.log(
-        '[ApiConfig] getSearchableSources: 总源数=${sourceBeanList.length}+${localVideoSources.length} 本地源, 可搜索源数=${result.length}');
+      '[ApiConfig] getSearchableSources: 总源数=${sourceBeanList.length}+${localVideoSources.length} 本地源, 可搜索源数=${result.length}',
+    );
     return result;
   }
 
@@ -274,6 +281,9 @@ class ApiConfig extends GetxController {
         if (updated == null) {
           // 删掉的是当前本地源：本地还有别的就切过去，否则回订阅线路第一条
           homeSourceBean.value = list.firstOrNull ?? sourceBeanList.firstOrNull;
+          // 「全局锁定本地源」的键也要清掉，否则下次恢复会指向已删除的 key
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove(_kLocalHomeApi);
         } else if (updated.name != cur.name) {
           homeSourceBean.value = updated;
         }
@@ -290,6 +300,14 @@ class ApiConfig extends GetxController {
   /// 「不管是哪种线路，退出再开应该还是上次退出前的那个源」。
   static const String _kHomeApiMap = 'home_api_map';
 
+  /// 本地 Python 源的主页选择（全局，与订阅地址无关）。
+  ///
+  /// 用户 2026-10-18：「我既然切换本地了，点播地址就应该是本地的，
+  /// 而且一直是第一次导入的那个；订阅里再激活别的线路也不该把它换掉」。
+  /// 所以本地源一旦被选为主页源，就单独记一份全局键，切订阅时优先恢复它；
+  /// 选回订阅线路时再清掉。
+  static const String _kLocalHomeApi = 'local_home_api';
+
   String get _homeScopeKey => configUrl.value.trim();
 
   /// 设置主页源
@@ -298,6 +316,12 @@ class ApiConfig extends GetxController {
     final prefs = await SharedPreferences.getInstance();
     // 仍写一份全局键，兼容旧逻辑/旧数据
     await prefs.setString(AppConstants.homeApi, source.key);
+    // 本地 Python 源：全局锁定，不随订阅切换
+    if (source.key.startsWith('localpy_')) {
+      await prefs.setString(_kLocalHomeApi, source.key);
+    } else {
+      await prefs.remove(_kLocalHomeApi);
+    }
     final scope = _homeScopeKey;
     if (scope.isEmpty) return;
     try {
@@ -361,8 +385,7 @@ class ApiConfig extends GetxController {
       if (v.isEmpty || v == current.trim()) return current;
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(AppConstants.apiUrl, v);
-      AppLog.instance
-          .log('[ApiConfig] 接口地址以文件备份为准修正（prefs 里的值已过期或缺失）');
+      AppLog.instance.log('[ApiConfig] 接口地址以文件备份为准修正（prefs 里的值已过期或缺失）');
       return v;
     } catch (e) {
       AppLog.instance.log('[ApiConfig] 接口地址备份恢复失败: $e');
@@ -439,26 +462,30 @@ class ApiConfig extends GetxController {
           return false;
         }
       });
-      raw.add(jsonEncode({
-        'key': bean.key,
-        'name': bean.name,
-        'api': bean.api,
-        'type': bean.type,
-        'ext': bean.ext,
-        // ── 站点注入留下的扩展字段（写入方已随 Webhtv 模块下线，
-        //    这里保留读写口径：老用户盘上的数据仍会被合并进线路表）──
-        'enabled': enabled,
-        'indexs': bean.indexs, // -1 = 插到最前；0 = 末尾（默认）
-        'searchable': bean.searchable,
-        'quickSearch': bean.quickSearch,
-        'filterable': bean.filterable,
-        'homePage': homePage,
-      }));
+      raw.add(
+        jsonEncode({
+          'key': bean.key,
+          'name': bean.name,
+          'api': bean.api,
+          'type': bean.type,
+          'ext': bean.ext,
+          // ── 站点注入留下的扩展字段（写入方已随 Webhtv 模块下线，
+          //    这里保留读写口径：老用户盘上的数据仍会被合并进线路表）──
+          'enabled': enabled,
+          'indexs': bean.indexs, // -1 = 插到最前；0 = 末尾（默认）
+          'searchable': bean.searchable,
+          'quickSearch': bean.quickSearch,
+          'filterable': bean.filterable,
+          'homePage': homePage,
+        }),
+      );
       await prefs.setStringList(_kUserVideoSources, raw);
       // 🔴 2026-10-14 修（洞 G）：导入自定义线路同样要立刻落盘 + 刷镜像，
       // 否则导入完被硬杀 → 重启线路没了。
       PrefsMirror.snapshotSoon();
-      AppLog.instance.log('[ApiConfig] 已保存用户视频线路 ${bean.key}（共 ${raw.length} 条）');
+      AppLog.instance.log(
+        '[ApiConfig] 已保存用户视频线路 ${bean.key}（共 ${raw.length} 条）',
+      );
     } catch (e) {
       AppLog.instance.log('[ApiConfig] 保存用户视频线路失败: $e');
     }
@@ -553,8 +580,10 @@ class ApiConfig extends GetxController {
   Future<void> _persistInvalid() async {
     try {
       final p = await SharedPreferences.getInstance();
-      await p.setStringList(_kInvalidVideoSources,
-          _invalidVideoSources.values.map((v) => jsonEncode(v)).toList());
+      await p.setStringList(
+        _kInvalidVideoSources,
+        _invalidVideoSources.values.map((v) => jsonEncode(v)).toList(),
+      );
       PrefsMirror.snapshotSoon();
     } catch (e) {
       AppLog.instance.log('[ApiConfig] 保存失效线路失败: $e');
@@ -570,8 +599,11 @@ class ApiConfig extends GetxController {
   List<Map<String, dynamic>> get invalidVideoSourcesForCurrentSub {
     final prefix = _invalidIdPrefix;
     return _invalidVideoSources.entries
-        .where((e) =>
-            prefix.isEmpty ? !e.key.contains('\u0001') : e.key.startsWith(prefix))
+        .where(
+          (e) => prefix.isEmpty
+              ? !e.key.contains('\u0001')
+              : e.key.startsWith(prefix),
+        )
         .map((e) => Map<String, dynamic>.from(e.value))
         .toList();
   }
@@ -588,8 +620,7 @@ class ApiConfig extends GetxController {
     list.removeWhere((s) => isVideoSourceInvalid(s.key));
     final dropped = before - list.length;
     if (dropped > 0) {
-      AppLog.instance.log(
-          '[ApiConfig] 已过滤 $dropped 条失效线路（不加载 / 不显示）');
+      AppLog.instance.log('[ApiConfig] 已过滤 $dropped 条失效线路（不加载 / 不显示）');
     }
   }
 
@@ -615,8 +646,10 @@ class ApiConfig extends GetxController {
       if (first != null) setHomeSource(first);
     }
     await _persistInvalid();
-    AppLog.instance.log('[ApiConfig] 线路 $key 已移入失效'
-        '（当前订阅共 ${invalidVideoSourceCount.value} 条）');
+    AppLog.instance.log(
+      '[ApiConfig] 线路 $key 已移入失效'
+      '（当前订阅共 ${invalidVideoSourceCount.value} 条）',
+    );
   }
 
   /// 把一条失效线路**移回**列表（按 id）
@@ -626,13 +659,15 @@ class ApiConfig extends GetxController {
     if (m == null) return false;
     final key = (m['key'] ?? '').toString().trim();
     if (key.isNotEmpty && !sourceBeanList.any((s) => s.key == key)) {
-      sourceBeanList.add(SourceBean(
-        key: key,
-        name: (m['name'] ?? key).toString(),
-        api: (m['api'] ?? '').toString(),
-        type: (m['type'] as num?)?.toInt() ?? 3,
-        ext: m['ext']?.toString(),
-      ));
+      sourceBeanList.add(
+        SourceBean(
+          key: key,
+          name: (m['name'] ?? key).toString(),
+          api: (m['api'] ?? '').toString(),
+          type: (m['type'] as num?)?.toInt() ?? 3,
+          ext: m['ext']?.toString(),
+        ),
+      );
     }
     await _persistInvalid();
     AppLog.instance.log('[ApiConfig] 失效线路已移回: $key');
@@ -739,19 +774,24 @@ class ApiConfig extends GetxController {
     // （本地已注册模块，不是可下载线路），既不为空也不是 `csp_` —— 只要用户导入过
     // **任何一个 py 源**，这个判定就被打破，上面那条守卫随即误命中。
     // 这正是"加了 py 源之后猫源 / tvbox 就没内容了"的直接原因。
-    final allPlaceholder = sourceBeanList.isNotEmpty &&
-        sourceBeanList.every((s) =>
-            s.api.isEmpty ||
-            s.api.toLowerCase().startsWith('csp_') ||
-            s.isPythonScriptSource);
+    final allPlaceholder =
+        sourceBeanList.isNotEmpty &&
+        sourceBeanList.every(
+          (s) =>
+              s.api.isEmpty ||
+              s.api.toLowerCase().startsWith('csp_') ||
+              s.isPythonScriptSource,
+        );
     if (!wholePackIsSpider && !allPlaceholder) {
       // 把三个判据都打出来：下一次再出现"线路没内容"，一眼就能看出是哪个判据
       // 决定的，不用再靠猜（上面那段注释里的矛盾正是这么发现的）
-      AppLog.instance.log('[ApiConfig] 聚合配置（线路自持），跳过 /config 整表替换'
-          '（isSingleScriptSpider=${isSingleScriptSpider.value}, '
-          'urlIsSpider=${_isSpiderSourceUrl(configUrl.value)}, '
-          'allPlaceholder=$allPlaceholder, '
-          'lines=${sourceBeanList.length}）');
+      AppLog.instance.log(
+        '[ApiConfig] 聚合配置（线路自持），跳过 /config 整表替换'
+        '（isSingleScriptSpider=${isSingleScriptSpider.value}, '
+        'urlIsSpider=${_isSpiderSourceUrl(configUrl.value)}, '
+        'allPlaceholder=$allPlaceholder, '
+        'lines=${sourceBeanList.length}）',
+      );
       return;
     }
 
@@ -762,7 +802,8 @@ class ApiConfig extends GetxController {
     // ⚠️ 调用方必须传"**请求前**的 configUrl 快照"（以前传的是空串，等于没校验）。
     if (spiderUrl.isNotEmpty && configUrl.value != spiderUrl) {
       AppLog.instance.log(
-          '[ApiConfig] /config 回填作废（请求期间源已切换：$spiderUrl → ${configUrl.value}）');
+        '[ApiConfig] /config 回填作废（请求期间源已切换：$spiderUrl → ${configUrl.value}）',
+      );
       return;
     }
 
@@ -792,18 +833,20 @@ class ApiConfig extends GetxController {
 
       if (key.isEmpty) continue;
 
-      newSources.add(SourceBean(
-        key: key,
-        name: name,
-        api: api,
-        searchable: searchable,
-        filterable: filterable,
-        quickSearch: quickSearch,
-        playerType: playerType,
-        type: type,
-        ext: null,
-        indexs: indexs,
-      ));
+      newSources.add(
+        SourceBean(
+          key: key,
+          name: name,
+          api: api,
+          searchable: searchable,
+          filterable: filterable,
+          quickSearch: quickSearch,
+          playerType: playerType,
+          type: type,
+          ext: null,
+          indexs: indexs,
+        ),
+      );
     }
 
     if (newSources.isEmpty) {
@@ -845,28 +888,26 @@ class ApiConfig extends GetxController {
     // 本地 Python 源是独立一套：订阅线路整表替换后重新挂上（不混入 newSources）
     await reloadLocalVideoSources();
 
-    // 关键修复：当前 homeSourceBean 可能是之前 _createSpiderSourceConfig
-    // 临时创建的**占位 SourceBean**（基于 .js URL 派生），它的 key 不在
-    // newSources 中。必须把 homeSourceBean 重置到新列表的真实第一项，
-    // 否则用户在 PopupMenu 中看到的就是"基于源地址的占位线路"。
-    final currentKey = homeSourceBean.value?.key;
-    final isCurrentInNewList = currentKey != null &&
-        (newSources.any((s) => s.key == currentKey) ||
-            localVideoSources.any((s) => s.key == currentKey));
-
     // 优先恢复保存的主页源
     await _restoreHomeSource(newSources);
 
-    if (!isCurrentInNewList) {
-      // 当前 homeSourceBean 是过时占位（key 不在新列表中），重置为新列表第一项
-      // （用户 2026-10-13：按列表第一个来，不跳）
-      homeSourceBean.value = newSources.firstOrNull;
-    } else if (homeSourceBean.value == null) {
-      // _restoreHomeSource 也没找到（保存的 key 在新列表中不存在），兜底第一个
-      homeSourceBean.value = newSources.firstOrNull;
+    // ⚠️ 恢复结果必须**再校验一次**才能兜底：
+    //   原来用「恢复前」的 currentKey 判断，会把 _restoreHomeSource 刚恢复的
+    //   本地 Python 源（或本订阅保存的源）又覆盖成列表第一条 ——
+    //   表现为「切本地后一换订阅就跳回订阅线路 / 引擎没跟着切」。
+    final restored = homeSourceBean.value;
+    final restoredValid =
+        restored != null &&
+        (newSources.any((s) => s.key == restored.key) ||
+            localVideoSources.any((s) => s.key == restored.key));
+    if (!restoredValid) {
+      homeSourceBean.value =
+          newSources.firstOrNull ?? localVideoSources.firstOrNull;
     }
 
-    AppLog.instance.log('[ApiConfig] 从 Spider /config 更新了 ${newSources.length} 个线路，默认 homeSourceBean=${homeSourceBean.value?.key}');
+    AppLog.instance.log(
+      '[ApiConfig] 从 Spider /config 更新了 ${newSources.length} 个线路，默认 homeSourceBean=${homeSourceBean.value?.key}',
+    );
   }
 
   // ============================================================
@@ -881,7 +922,9 @@ class ApiConfig extends GetxController {
     visitedUrls ??= {};
 
     if (depth > _maxConfigResolveDepth) {
-      throw ConfigError.parseError.message('配置跳转层级过深（超过 $_maxConfigResolveDepth 层）');
+      throw ConfigError.parseError.message(
+        '配置跳转层级过深（超过 $_maxConfigResolveDepth 层）',
+      );
     }
 
     final normalizedUrl = normalizeConfigUrl(apiUrl);
@@ -908,7 +951,9 @@ class ApiConfig extends GetxController {
     Map<String, dynamic>? decoded;
     try {
       decoded = jsonDecode(cleanedJson) as Map<String, dynamic>?;
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      /* ignore */
+    }
 
     // 尝试作为正常配置解析
     if (decoded != null) {
@@ -916,8 +961,9 @@ class ApiConfig extends GetxController {
       final moon = MoonTvConverter.tryConvert(decoded);
       if (moon != null) {
         AppLog.instance.log(
-            '[ApiConfig] MoonTV video.json 已转换：${moon.sites.length} 个源'
-            '${moon.warnings.isEmpty ? "" : "（跳过 ${moon.warnings.length} 条）"}');
+          '[ApiConfig] MoonTV video.json 已转换：${moon.sites.length} 个源'
+          '${moon.warnings.isEmpty ? "" : "（跳过 ${moon.warnings.length} 条）"}',
+        );
         return (
           config: AppConfigData.fromJson(moon.toConfig()),
           loadedFrom: normalizedUrl,
@@ -962,7 +1008,11 @@ class ApiConfig extends GetxController {
 
       // 尝试从页面中提取配置跳转候选
       final redirectCandidates = _extractConfigRedirectCandidates(cleanedJson)
-          .where((c) => c.toLowerCase() != visitKey && !nextVisited.contains(c.toLowerCase()))
+          .where(
+            (c) =>
+                c.toLowerCase() != visitKey &&
+                !nextVisited.contains(c.toLowerCase()),
+          )
           .toList();
 
       if (redirectCandidates.isNotEmpty) {
@@ -1018,8 +1068,10 @@ class ApiConfig extends GetxController {
 
     try {
       final content = await _network.getString(normalizedUrl);
-      _rawConfigCache[key] =
-          _RawConfigCacheEntry(content: content, fetchedAt: now);
+      _rawConfigCache[key] = _RawConfigCacheEntry(
+        content: content,
+        fetchedAt: now,
+      );
       _trimRawConfigCacheIfNeeded();
       // 拉到就落一份到本地磁盘（用户 2026-10-13：把源下到本地，切换更稳）。
       // ⚠️ **不 await**（用户 2026-10-14：「接口配置下载好慢」）：
@@ -1033,8 +1085,10 @@ class ApiConfig extends GetxController {
       final cached = await _readDiskCache(normalizedUrl);
       if (cached != null && cached.trim().isNotEmpty) {
         AppLog.instance.log('[ApiConfig] 拉取失败，改用本地缓存配置: $normalizedUrl');
-        _rawConfigCache[key] =
-            _RawConfigCacheEntry(content: cached, fetchedAt: now);
+        _rawConfigCache[key] = _RawConfigCacheEntry(
+          content: cached,
+          fetchedAt: now,
+        );
         return cached;
       }
       rethrow;
@@ -1062,8 +1116,9 @@ class ApiConfig extends GetxController {
   static Future<void> _writeDiskCache(String url, String content) async {
     try {
       final d = await _diskCacheDir();
-      await File('${d.path}/${_diskKey(url)}.json')
-          .writeAsString(content, flush: true);
+      await File(
+        '${d.path}/${_diskKey(url)}.json',
+      ).writeAsString(content, flush: true);
     } catch (e) {
       AppLog.instance.log('[ApiConfig] 写配置缓存失败: $e');
     }
@@ -1122,7 +1177,8 @@ class ApiConfig extends GetxController {
       // 所以：**配置声明了非空 `spider` 字段** 也要走 spider 线路流程（恢复旧行为）。
       // 只有「既不是 js/jar 接口、也没声明 spider」的纯聚合配置（如 huahua.json）
       // 才走新路径：脚本源按需载入、不被 /config 整表替换冲掉。
-      isSingleScriptSpider.value = _isSpiderSourceUrl(apiUrl) ||
+      isSingleScriptSpider.value =
+          _isSpiderSourceUrl(apiUrl) ||
           ((config.spider ?? '').trim().isNotEmpty);
 
       // 🔴 2026-10-14 修（洞 C：错误提示残留）：
@@ -1137,18 +1193,20 @@ class ApiConfig extends GetxController {
       final sources = <SourceBean>[];
       if (config.sites != null) {
         for (final site in config.sites!) {
-          sources.add(SourceBean(
-            key: site.key ?? '',
-            name: site.name ?? '未命名',
-            api: site.api ?? '',
-            searchable: site.searchable?.value ?? 1,
-            filterable: site.filterable?.value ?? 1,
-            quickSearch: site.quickSearch?.value ?? 0,
-            playerType: site.playerType?.value ?? 0,
-            type: site.type?.value ?? 1,
-            ext: site.ext?.stringValue,
-            indexs: site.indexs?.value ?? 0,
-          ));
+          sources.add(
+            SourceBean(
+              key: site.key ?? '',
+              name: site.name ?? '未命名',
+              api: site.api ?? '',
+              searchable: site.searchable?.value ?? 1,
+              filterable: site.filterable?.value ?? 1,
+              quickSearch: site.quickSearch?.value ?? 0,
+              playerType: site.playerType?.value ?? 0,
+              type: site.type?.value ?? 1,
+              ext: site.ext?.stringValue,
+              indexs: site.indexs?.value ?? 0,
+            ),
+          );
         }
       }
       // CatVod 类配置常常 `sites: []`（线路全部由 jar 自己下发）→ 这里先塞一个
@@ -1166,26 +1224,29 @@ class ApiConfig extends GetxController {
       //     ⇒ spider 脚本永远不加载、所有线路没内容（看起来像"订阅空了"）。
       //   现在改成：只要声明了 `spider`、且列表里**没有任何 js 源 bean**，就补一条。
       //   （已有 js 源时不重复补，避免多出一条假线路。）
-      final hasJsBean = sources
-          .any((s) => s.isSpiderSource && !s.isPythonScriptSource);
+      final hasJsBean = sources.any(
+        (s) => s.isSpiderSource && !s.isPythonScriptSource,
+      );
       if (isSingleScriptSpider.value &&
           (config.spider ?? '').trim().isNotEmpty &&
           !hasJsBean) {
         final ph = _createSpiderSourceConfig(config.spider!.trim());
         final ps = ph.sites?.firstOrNull;
         if (ps != null) {
-          sources.add(SourceBean(
-            key: ps.key ?? '',
-            name: ps.name ?? 'Spider源',
-            api: ps.api ?? '',
-            searchable: ps.searchable?.value ?? 1,
-            filterable: ps.filterable?.value ?? 1,
-            quickSearch: ps.quickSearch?.value ?? 0,
-            playerType: ps.playerType?.value ?? 0,
-            type: ps.type?.value ?? 3,
-            ext: ps.ext?.stringValue,
-            indexs: ps.indexs?.value ?? 0,
-          ));
+          sources.add(
+            SourceBean(
+              key: ps.key ?? '',
+              name: ps.name ?? 'Spider源',
+              api: ps.api ?? '',
+              searchable: ps.searchable?.value ?? 1,
+              filterable: ps.filterable?.value ?? 1,
+              quickSearch: ps.quickSearch?.value ?? 0,
+              playerType: ps.playerType?.value ?? 0,
+              type: ps.type?.value ?? 3,
+              ext: ps.ext?.stringValue,
+              indexs: ps.indexs?.value ?? 0,
+            ),
+          );
         }
       }
       // 同上：把用户导入的线路（py 源等）并回列表
@@ -1211,20 +1272,24 @@ class ApiConfig extends GetxController {
             AppLog.instance.log('[ApiConfig] 本地已有直播源，跳过接口 lives 覆盖（不随源切换变化）');
           } else {
             final raw = lives
-                .map((e) => {
-                      'name': e.name,
-                      'url': e.url,
-                      'ua': e.ua,
-                      'type': e.type?.value,
-                      'channels': e.channels
-                          ?.map((ch) => {
-                                'name': ch.name,
-                                'urls': ch.urls,
-                                'group': ch.group,
-                                'logo': ch.logo,
-                              })
-                          .toList(),
-                    })
+                .map(
+                  (e) => {
+                    'name': e.name,
+                    'url': e.url,
+                    'ua': e.ua,
+                    'type': e.type?.value,
+                    'channels': e.channels
+                        ?.map(
+                          (ch) => {
+                            'name': ch.name,
+                            'urls': ch.urls,
+                            'group': ch.group,
+                            'logo': ch.logo,
+                          },
+                        )
+                        .toList(),
+                  },
+                )
                 .toList();
             await LiveService.instance.loadFromLivesJson(raw);
           }
@@ -1250,15 +1315,18 @@ class ApiConfig extends GetxController {
       // 残留的是上一个订阅的 key（非 null），只判 null 不会重置 → 首页继续
       // 指向已不存在的源，表现为「切了订阅但首页还是旧源/空白」。
       final curKey = homeSourceBean.value?.key;
-      final curInList = curKey != null &&
+      final curInList =
+          curKey != null &&
           (sources.any((s) => s.key == curKey) ||
               localVideoSources.any((s) => s.key == curKey));
       if (!curInList) {
         homeSourceBean.value = sources.firstOrNull;
       }
       if (isSingleScriptSpider.value) {
-        AppLog.instance.log('[ApiConfig] 单个 Spider 配置：先给兜底主页源 '
-            '${homeSourceBean.value?.key}，/config 返回后再校正');
+        AppLog.instance.log(
+          '[ApiConfig] 单个 Spider 配置：先给兜底主页源 '
+          '${homeSourceBean.value?.key}，/config 返回后再校正',
+        );
       }
 
       // 解析线路（parses）：**并入本地持久化的 ParseStore**，不再"订阅有就有、
@@ -1266,11 +1334,15 @@ class ApiConfig extends GetxController {
       // 立刻消失，播放器上的「解析」按钮就没线路可切了。
       // 现在：订阅下发的只 merge，本地已有的（含手动添加的）一律保留。
       if (config.parses != null && config.parses!.isNotEmpty) {
-        await ParseStore.instance.absorb(config.parses!.map((p) => ParseBean(
+        await ParseStore.instance.absorb(
+          config.parses!.map(
+            (p) => ParseBean(
               name: p.name ?? '',
               url: p.url ?? '',
               type: p.type?.value ?? 0,
-            )));
+            ),
+          ),
+        );
       }
       parseBeanList.value = ParseStore.instance.list;
 
@@ -1295,6 +1367,20 @@ class ApiConfig extends GetxController {
   Future<void> _restoreHomeSource(List<SourceBean> sources) async {
     try {
       final prefs = await SharedPreferences.getInstance();
+
+      // ① 本地 Python 源是「全局选择」：只要它还存在于 local_py，就永远优先，
+      //    不因切换订阅 / 激活其他线路而改变。
+      final localKey = prefs.getString(_kLocalHomeApi);
+      if (localKey != null && localKey.isNotEmpty) {
+        final local = localVideoSources
+            .where((s) => s.key == localKey)
+            .firstOrNull;
+        if (local != null) {
+          homeSourceBean.value = local;
+          return;
+        }
+      }
+
       String? saved;
       // 先按当前订阅（配置地址）取 —— 每个订阅各记各的主页源
       final scope = _homeScopeKey;
@@ -1314,13 +1400,17 @@ class ApiConfig extends GetxController {
           return;
         }
         // 本地 Python 源不在订阅线路表里，单独找一次
-        final local = localVideoSources.where((s) => s.key == saved).firstOrNull;
+        final local = localVideoSources
+            .where((s) => s.key == saved)
+            .firstOrNull;
         if (local != null) {
           homeSourceBean.value = local;
           return;
         }
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      /* ignore */
+    }
   }
 
   // ============================================================
@@ -1396,7 +1486,8 @@ class ApiConfig extends GetxController {
     final filePath = parts.sublist(4).join('/');
     if (filePath.isEmpty) return null;
 
-    var rawUrl = 'https://raw.githubusercontent.com/$owner/$repo/$branch/$filePath';
+    var rawUrl =
+        'https://raw.githubusercontent.com/$owner/$repo/$branch/$filePath';
     if (uri.hasQuery) rawUrl += '?${uri.query}';
     if (uri.hasFragment) rawUrl += '#${uri.fragment}';
     return rawUrl;
@@ -1507,7 +1598,10 @@ class ApiConfig extends GetxController {
         inString = !inString;
         continue;
       }
-      if (!inString && c == '/' && i + 1 < chars.length && chars[i + 1] == '/') {
+      if (!inString &&
+          c == '/' &&
+          i + 1 < chars.length &&
+          chars[i + 1] == '/') {
         // 找到行内注释，截断
         final before = line.substring(0, i).trimRight();
         if (before.endsWith(',')) {
@@ -1535,7 +1629,10 @@ class ApiConfig extends GetxController {
 
     // data-clipboard-text
     rawCandidates.addAll(
-      _matchCaptureGroup(r'data-clipboard-text\s*=\s*["\x27]([^"\x27]+)["\x27]', content),
+      _matchCaptureGroup(
+        r'data-clipboard-text\s*=\s*["\x27]([^"\x27]+)["\x27]',
+        content,
+      ),
     );
 
     // JSON 中的 url 字段
@@ -1561,7 +1658,11 @@ class ApiConfig extends GetxController {
 
   static List<String> _matchCaptureGroup(String pattern, String content) {
     final regex = RegExp(pattern, caseSensitive: false);
-    return regex.allMatches(content).map((m) => m.group(1) ?? '').where((s) => s.isNotEmpty).toList();
+    return regex
+        .allMatches(content)
+        .map((m) => m.group(1) ?? '')
+        .where((s) => s.isNotEmpty)
+        .toList();
   }
 
   static String _sanitizeExtractedUrl(String value) {
@@ -1570,7 +1671,17 @@ class ApiConfig extends GetxController {
     result = result.replaceAll('\\/', '/');
 
     // 移除尾部标点
-    while (result.isNotEmpty && ['.', ',', ';', ')', ']', '}', '"', "'"].contains(result[result.length - 1])) {
+    while (result.isNotEmpty &&
+        [
+          '.',
+          ',',
+          ';',
+          ')',
+          ']',
+          '}',
+          '"',
+          "'",
+        ].contains(result[result.length - 1])) {
       result = result.substring(0, result.length - 1);
     }
     // 移除首部标点
@@ -1651,7 +1762,7 @@ class _RawConfigCacheEntry {
   DateTime lastAccess;
 
   _RawConfigCacheEntry({required this.content, required this.fetchedAt})
-      : lastAccess = fetchedAt;
+    : lastAccess = fetchedAt;
 
   void touch(DateTime now) {
     lastAccess = now;

@@ -5,6 +5,7 @@ import 'app_log.dart';
 import 'dio_factory.dart';
 import 'drpy_service.dart';
 import 'nodejs_manager.dart';
+import 'local_python_sources.dart';
 import 'python_manager.dart';
 import 'python_script_sources.dart';
 
@@ -109,39 +110,52 @@ class SpiderService {
               // 某些 Spider 响应可能返回数组，包装为对象
               return {'list': decoded};
             }
-            AppLog.instance.log('[SpiderService] 响应不是JSON对象: $url, body类型=${decoded.runtimeType}');
+            AppLog.instance.log(
+              '[SpiderService] 响应不是JSON对象: $url, body类型=${decoded.runtimeType}',
+            );
             return null;
           } catch (e) {
-            AppLog.instance.log('[SpiderService] JSON解析失败: $url, 错误=$e, body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}');
+            AppLog.instance.log(
+              '[SpiderService] JSON解析失败: $url, 错误=$e, body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}',
+            );
             return null;
           }
         } else {
           lastHttpStatus = statusCode;
-          AppLog.instance.log('[SpiderService] HTTP错误 $statusCode: $url, body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}');
+          AppLog.instance.log(
+            '[SpiderService] HTTP错误 $statusCode: $url, body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}',
+          );
           return null;
         }
       } on DioException catch (e) {
         // iOS 后台/锁屏切回前台时，dio 的 socket 可能半死（OS 标记断开但
         // 没收到 RST），重试一次通常能恢复
-        final isRetriable = e.type == DioExceptionType.connectionError ||
+        final isRetriable =
+            e.type == DioExceptionType.connectionError ||
             e.type == DioExceptionType.connectionTimeout ||
             e.type == DioExceptionType.sendTimeout ||
             e.type == DioExceptionType.receiveTimeout ||
             e.type == DioExceptionType.unknown;
         if (attempt < _maxPostRetries && isRetriable) {
-          AppLog.instance.log('[SpiderService] POST $url 第 ${attempt + 1} 次失败，${_postRetryDelay.inMilliseconds}ms 后重试: ${e.type}/${e.message}');
+          AppLog.instance.log(
+            '[SpiderService] POST $url 第 ${attempt + 1} 次失败，${_postRetryDelay.inMilliseconds}ms 后重试: ${e.type}/${e.message}',
+          );
           await Future.delayed(_postRetryDelay);
           // 重试前重建 dio（确保新 socket）
           try {
             _dio.close(force: true);
-          } catch (e) { /* ignore */ }
+          } catch (e) {
+            /* ignore */
+          }
           _dio = _buildDio();
           continue;
         }
         final code = e.response?.statusCode ?? 0;
         lastHttpStatus = code;
         final respBody = e.response?.data?.toString() ?? '';
-        AppLog.instance.log('[SpiderService] POST $url 失败: code=$code, type=${e.type}, message=${e.message}, body=${respBody.length > 500 ? respBody.substring(0, 500) : respBody}');
+        AppLog.instance.log(
+          '[SpiderService] POST $url 失败: code=$code, type=${e.type}, message=${e.message}, body=${respBody.length > 500 ? respBody.substring(0, 500) : respBody}',
+        );
         return null;
       } catch (e) {
         AppLog.instance.log('[SpiderService] POST $url 未知错误: $e');
@@ -399,8 +413,10 @@ class SpiderService {
     if (data is Map<String, dynamic>) {
       if (data['ok'] == false) {
         lastError = 'Python 源报错: ${data['error'] ?? '未知错误'}';
-        AppLog.instance.w('[SpiderService] $lastError'
-            '${data['trace'] != null ? "\n${data['trace']}" : ""}');
+        AppLog.instance.w(
+          '[SpiderService] $lastError'
+          '${data['trace'] != null ? "\n${data['trace']}" : ""}',
+        );
         return null;
       }
       return data;
@@ -415,8 +431,14 @@ class SpiderService {
   /// 抽成独立方法是为了两处复用（洞 D）：初次载入脚本后问一次；如果当时没问到
   /// （`_loadedScriptKey` 仍为空），**下次再进 `_ensureNodeScript` 时还能再问一次**，
   /// 而不是永远退回 fallback。
-  Future<String> _queryEngineScriptKey({int? type, String preferKey = ''}) async {
-    final cands = await _queryEngineScriptCandidates(type: type, preferKey: preferKey);
+  Future<String> _queryEngineScriptKey({
+    int? type,
+    String preferKey = '',
+  }) async {
+    final cands = await _queryEngineScriptCandidates(
+      type: type,
+      preferKey: preferKey,
+    );
     _loadedScriptCandidates = cands;
     return cands.isEmpty ? '' : cands.first;
   }
@@ -440,8 +462,10 @@ class SpiderService {
   /// 就绪等待：新脚本刚载入时，`/config` 可能还没把它注册进来 —— 只在
   /// **"判定依据还没出现"**（既没有 preferKey、也没有 type 匹配）时小退避重试，
   /// 最多 5 次 × 400ms；一旦依据出现就立刻返回，正常源零额外等待。
-  Future<List<String>> _queryEngineScriptCandidates(
-      {int? type, String preferKey = ''}) async {
+  Future<List<String>> _queryEngineScriptCandidates({
+    int? type,
+    String preferKey = '',
+  }) async {
     final ordered = <String>[];
     final seen = <String>{};
     void push(Object? raw) {
@@ -563,8 +587,7 @@ class SpiderService {
       if (r != null) {
         if (mayVary && k != _loadedScriptKey) {
           _loadedScriptKey = k;
-          AppLog.instance
-              .log('[SpiderService] 换 key 命中并记住: $k（$action）');
+          AppLog.instance.log('[SpiderService] 换 key 命中并记住: $k（$action）');
         }
         return r;
       }
@@ -572,11 +595,13 @@ class SpiderService {
       if (lastHttpStatus != 404) return null;
       final next = i + 1 < attempts.length ? attempts[i + 1] : null;
       if (next == null) break;
-      AppLog.instance.log(next.key == k
-          ? '[SpiderService] $action: key=$k type=$t 路由不存在(404)，'
-              '改用引擎声明的 type=${next.type} 再试一次'
-          : '[SpiderService] $action: key=$k 路由不存在(404)，'
-              '换下一个候选 key=${next.key}');
+      AppLog.instance.log(
+        next.key == k
+            ? '[SpiderService] $action: key=$k type=$t 路由不存在(404)，'
+                  '改用引擎声明的 type=${next.type} 再试一次'
+            : '[SpiderService] $action: key=$k 路由不存在(404)，'
+                  '换下一个候选 key=${next.key}',
+      );
     }
     // 单候选且只试过一次（没换过）⇒ 维持原行为：错误文案由 _postJSON 给，
     // 不动缓存（下次进来还能复用，避免把一次偶发 404 放大成"整源作废"）
@@ -584,7 +609,8 @@ class SpiderService {
     // 换过 key / 校正过 type 仍全 404 ⇒ 缓存不可信，作废，下次重新问
     _loadedScriptKey = '';
     _loadedScriptCandidates = [];
-    lastError = '脚本源路由未就绪（已尝试 ${attempts.length} 次；'
+    lastError =
+        '脚本源路由未就绪（已尝试 ${attempts.length} 次；'
         '${cands.length} 个候选 key）';
     AppLog.instance.w('[SpiderService] $action: ${lastError}');
     return null;
@@ -609,9 +635,7 @@ class SpiderService {
       _mainDrpyApi = api.trim();
       _mainDrpyExt = ext;
       final k = await _ensureDrpyScript(api, ext, fallback: 'drpy');
-      return k == null
-          ? (false, lastError ?? 'drpy 源加载失败')
-          : (true, null);
+      return k == null ? (false, lastError ?? 'drpy 源加载失败') : (true, null);
     }
     _mainDrpyApi = '';
     _mainDrpyExt = '';
@@ -643,8 +667,12 @@ class SpiderService {
       AppLog.instance.log('[SpiderService] drpy 正在载入，复用同一次流程: $extUrl');
       return playing;
     }
-    final fut = _ensureDrpyScriptInner(api, extUrl,
-        fallback: fallback, type: type);
+    final fut = _ensureDrpyScriptInner(
+      api,
+      extUrl,
+      fallback: fallback,
+      type: type,
+    );
     _drpyLoadInFlight[extUrl] = fut;
     fut.whenComplete(() {
       if (identical(_drpyLoadInFlight[extUrl], fut)) {
@@ -669,9 +697,11 @@ class SpiderService {
         }
       }
       // 管理端口是 Node 异步通知回来的，最多等 10 秒
-      for (var i = 0;
-          i < 50 && NodeJSManager.instance.managementPort <= 0;
-          i++) {
+      for (
+        var i = 0;
+        i < 50 && NodeJSManager.instance.managementPort <= 0;
+        i++
+      ) {
         await Future<void>.delayed(const Duration(milliseconds: 200));
       }
       if (NodeJSManager.instance.managementPort <= 0) {
@@ -693,9 +723,11 @@ class SpiderService {
       _loadedScriptKey = r.key;
       _loadedScriptCandidates = [r.key];
       // 等 catServerFactory 把 spiderPort 切到**新服务**（旧端口可能还活着）
-      for (var i = 0;
-          i < 50 && r.port > 0 && NodeJSManager.instance.spiderPort != r.port;
-          i++) {
+      for (
+        var i = 0;
+        i < 50 && r.port > 0 && NodeJSManager.instance.spiderPort != r.port;
+        i++
+      ) {
         await Future<void>.delayed(const Duration(milliseconds: 100));
       }
       await NodeJSManager.instance.waitForSpiderPort();
@@ -711,8 +743,11 @@ class SpiderService {
   ///
   /// [type] 只用于"挑候选 key"（站点声明的 type 与本次请求的 type 一致者优先），
   /// 不影响载入行为；不传（如后台预热）时退化为旧行为。
-  Future<String?> _ensureNodeScript(String script,
-      {required String fallback, int? type}) {
+  Future<String?> _ensureNodeScript(
+    String script, {
+    required String fallback,
+    int? type,
+  }) {
     final playing = _scriptLoadInFlight[script];
     if (playing != null) {
       AppLog.instance.log('[SpiderService] 脚本正在载入，复用同一次流程: $script');
@@ -745,8 +780,11 @@ class SpiderService {
   ///
   /// 真实 key 以引擎 `/config` 返回的站点列表为准 —— 聚合配置里写的 key 是 TVBox
   /// 的 key，和 drpy2 模块自报的 key 未必一致；取不到时退回 [fallback]。
-  Future<String?> _ensureNodeScriptInner(String script,
-      {required String fallback, int? type}) async {
+  Future<String?> _ensureNodeScriptInner(
+    String script, {
+    required String fallback,
+    int? type,
+  }) async {
     if (_loadedScriptUrl == script) {
       if (_loadedScriptKey.isNotEmpty) {
         // 缓存命中：候选就按"上次命中的那个 key"起步（404 时会自动作废重问）
@@ -759,12 +797,13 @@ class SpiderService {
       //   而 `_loadedScriptUrl` 已经置位 ⇒ 之后永远走这个分支、**再也不会重试**，
       //   那条线路就一直拿错的 key 去请求（404 / 空），永远恢复不了。
       //   现在补一次"重新问 key"，仍拿不到才退回 fallback。
-      final retried =
-          await _queryEngineScriptKey(type: type, preferKey: fallback);
+      final retried = await _queryEngineScriptKey(
+        type: type,
+        preferKey: fallback,
+      );
       if (retried.isNotEmpty) {
         _loadedScriptKey = retried;
-        AppLog.instance
-            .log('[SpiderService] 补问到引擎真实 key: $retried（$script）');
+        AppLog.instance.log('[SpiderService] 补问到引擎真实 key: $retried（$script）');
         return retried;
       }
       return fallback;
@@ -788,11 +827,15 @@ class SpiderService {
         return null;
       }
       _loadedScriptUrl = script;
-      _loadedScriptKey =
-          await _queryEngineScriptKey(type: type, preferKey: fallback);
-      AppLog.instance.log('[SpiderService] 脚本已载入 $script，'
-          '引擎 key=${_loadedScriptKey.isEmpty ? fallback : _loadedScriptKey}'
-          '（候选 ${_loadedScriptCandidates.length} 个）');
+      _loadedScriptKey = await _queryEngineScriptKey(
+        type: type,
+        preferKey: fallback,
+      );
+      AppLog.instance.log(
+        '[SpiderService] 脚本已载入 $script，'
+        '引擎 key=${_loadedScriptKey.isEmpty ? fallback : _loadedScriptKey}'
+        '（候选 ${_loadedScriptCandidates.length} 个）',
+      );
       return _loadedScriptKey.isNotEmpty ? _loadedScriptKey : fallback;
     } catch (e) {
       AppLog.instance.w('[SpiderService] 脚本载入异常 $script: $e');
@@ -836,8 +879,7 @@ class SpiderService {
           ? await PythonScriptSources.instance.ensureInstalled(script)
           : _pythonModuleKey(script);
       if (moduleKey == null) {
-        lastError =
-            PythonScriptSources.instance.lastError ?? 'Python 源准备失败';
+        lastError = PythonScriptSources.instance.lastError ?? 'Python 源准备失败';
         AppLog.instance.w('[SpiderService] $lastError');
         return null;
       }
@@ -853,11 +895,25 @@ class SpiderService {
       if (r == null &&
           script.startsWith('http') &&
           (lastError?.contains('No module named') ?? false)) {
-        AppLog.instance.w(
-            '[SpiderService] 引擎缺模块 $moduleKey，强制重新注册后重试');
-        final retried =
-            await PythonScriptSources.instance.ensureInstalled(script, force: true);
+        AppLog.instance.w('[SpiderService] 引擎缺模块 $moduleKey，强制重新注册后重试');
+        final retried = await PythonScriptSources.instance.ensureInstalled(
+          script,
+          force: true,
+        );
         if (retried != null) return _pythonCall(retried, action, pyArgs);
+      }
+
+      // 本地 Python 源（Documents/local_py/lp_*.py）：冷启动时首页可能比
+      // 「本地源注册」更早发起请求，此时解释器里还没有这个模块。
+      // 直接从 local_py 重新注册并重试一次，用户不必手动点「重新加载」。
+      if (r == null &&
+          !script.startsWith('http') &&
+          (lastError?.contains('No module named') ?? false)) {
+        AppLog.instance.w('[SpiderService] 本地 Python 源缺模块 $moduleKey，重新注册后重试');
+        final ok = await LocalPythonSources.instance.ensureRegistered(
+          moduleKey,
+        );
+        if (ok) return _pythonCall(moduleKey, action, pyArgs);
       }
       return r;
     }
@@ -894,7 +950,8 @@ class SpiderService {
     // OmniBox 私有协议 `/spider/<key>/<type>`：与 csp_ 同类（脚本已驻留，
     // key 由 sites[] 给出），**必须放行** —— 详见 [_omniBoxProtocolKey] 的说明。
     final omniKey = _omniBoxProtocolKey(script);
-    final isUnsupportedRelative = script.isNotEmpty &&
+    final isUnsupportedRelative =
+        script.isNotEmpty &&
         !script.startsWith('http') &&
         !_isPythonScript(script) &&
         omniKey == null &&
@@ -903,7 +960,8 @@ class SpiderService {
         !RegExp(r'^[a-zA-Z]:[\\/]').hasMatch(script) &&
         !script.startsWith('file://');
     if (isUnsupportedRelative) {
-      lastError = '该线路使用了暂不支持的源协议（$script），'
+      lastError =
+          '该线路使用了暂不支持的源协议（$script），'
           '请换其他线路或改用整包 spider 订阅';
       AppLog.instance.w('[SpiderService] $lastError');
       return null;
@@ -932,10 +990,13 @@ class SpiderService {
       // 若期间被程序脚本源顶替过，这里把主源脚本重新载入。
       // ⚠️ drpy 主源要重新跑 drpy 宿主（api 是运行时，不能当整包脚本载入）。
       final k = _mainDrpyApi.isNotEmpty
-          ? await _ensureDrpyScript(_mainDrpyApi, _mainDrpyExt,
-              fallback: key, type: type)
-          : await _ensureNodeScript(mainScriptUrl,
-              fallback: key, type: type);
+          ? await _ensureDrpyScript(
+              _mainDrpyApi,
+              _mainDrpyExt,
+              fallback: key,
+              type: type,
+            )
+          : await _ensureNodeScript(mainScriptUrl, fallback: key, type: type);
       if (k != null) engineKey = k;
       candidates = List<String>.of(_loadedScriptCandidates);
     }
@@ -981,18 +1042,26 @@ class SpiderService {
           if (decoded is Map<String, dynamic>) {
             return decoded;
           }
-          AppLog.instance.log('[SpiderService] getCatConfig 响应不是JSON对象: body类型=${decoded.runtimeType}');
+          AppLog.instance.log(
+            '[SpiderService] getCatConfig 响应不是JSON对象: body类型=${decoded.runtimeType}',
+          );
           return null;
         } catch (e) {
-          AppLog.instance.log('[SpiderService] getCatConfig JSON解析失败: 错误=$e, body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}');
+          AppLog.instance.log(
+            '[SpiderService] getCatConfig JSON解析失败: 错误=$e, body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}',
+          );
           return null;
         }
       } else {
-        AppLog.instance.log('[SpiderService] getCatConfig HTTP错误 $statusCode: body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}');
+        AppLog.instance.log(
+          '[SpiderService] getCatConfig HTTP错误 $statusCode: body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}',
+        );
         return null;
       }
     } on DioException catch (e) {
-      AppLog.instance.log('[SpiderService] getCatConfig 失败: ${e.type}, ${e.message}');
+      AppLog.instance.log(
+        '[SpiderService] getCatConfig 失败: ${e.type}, ${e.message}',
+      );
       return null;
     }
   }
@@ -1028,8 +1097,12 @@ class SpiderService {
   /// 初始化 Spider - 对应 Swift initSpider
   ///
   /// Python 源没有 init 概念（引擎里注册即就绪）；JS 脚本源把脚本载入引擎即完成 init。
-  Future<Map<String, dynamic>?> initSpider(String key, int type, String api,
-      {String ext = ''}) async {
+  Future<Map<String, dynamic>?> initSpider(
+    String key,
+    int type,
+    String api, {
+    String ext = '',
+  }) async {
     final script = _scriptUrl(api, ext);
     if (script.isNotEmpty && _isPythonScript(script)) return null;
 
@@ -1057,8 +1130,7 @@ class SpiderService {
     final omniKey = _omniBoxProtocolKey(script);
     if (omniKey != null) {
       engineKey = omniKey;
-    } else if (script.isNotEmpty &&
-        !script.toLowerCase().startsWith('csp_')) {
+    } else if (script.isNotEmpty && !script.toLowerCase().startsWith('csp_')) {
       // ⚠️ csp_ 占位源：脚本已随主源驻留引擎，不能当脚本地址去 loadSource
       //    （会 404 白等一次网络往返），直接用配置 key 调引擎即可。
       final k = await _ensureNodeScript(script, fallback: key, type: type);
@@ -1067,10 +1139,13 @@ class SpiderService {
     } else if (_needMainScriptRefresh) {
       // 与 [_dispatchScript] 同一套判断（见 `_needMainScriptRefresh` 说明）
       final k = _mainDrpyApi.isNotEmpty
-          ? await _ensureDrpyScript(_mainDrpyApi, _mainDrpyExt,
-              fallback: key, type: type)
-          : await _ensureNodeScript(mainScriptUrl,
-              fallback: key, type: type);
+          ? await _ensureDrpyScript(
+              _mainDrpyApi,
+              _mainDrpyExt,
+              fallback: key,
+              type: type,
+            )
+          : await _ensureNodeScript(mainScriptUrl, fallback: key, type: type);
       if (k != null) engineKey = k;
       candidates = List<String>.of(_loadedScriptCandidates);
     }
@@ -1088,8 +1163,12 @@ class SpiderService {
   }
 
   /// 获取首页内容 - 对应 Swift getHomeContent
-  Future<Map<String, dynamic>?> getHomeContent(String key, int type, String api,
-      {String ext = ''}) {
+  Future<Map<String, dynamic>?> getHomeContent(
+    String key,
+    int type,
+    String api, {
+    String ext = '',
+  }) {
     return _dispatchScript(
       key: key,
       type: type,
@@ -1134,7 +1213,12 @@ class SpiderService {
 
   /// 获取详情 - 对应 Swift getDetail
   Future<Map<String, dynamic>?> getDetail(
-      String key, int type, String api, String id, {String ext = ''}) {
+    String key,
+    int type,
+    String api,
+    String id, {
+    String ext = '',
+  }) {
     return _dispatchScript(
       key: key,
       type: type,
@@ -1147,8 +1231,14 @@ class SpiderService {
   }
 
   /// 获取播放 URL - 对应 Swift getPlayUrl
-  Future<Map<String, dynamic>?> getPlayUrl(String key, int type, String api,
-      String flag, String id, {String ext = ''}) {
+  Future<Map<String, dynamic>?> getPlayUrl(
+    String key,
+    int type,
+    String api,
+    String flag,
+    String id, {
+    String ext = '',
+  }) {
     return _dispatchScript(
       key: key,
       type: type,
@@ -1161,8 +1251,14 @@ class SpiderService {
   }
 
   /// 搜索 - 对应 Swift search
-  Future<Map<String, dynamic>?> search(String key, int type, String api,
-      String keyword, {int page = 1, String ext = ''}) {
+  Future<Map<String, dynamic>?> search(
+    String key,
+    int type,
+    String api,
+    String keyword, {
+    int page = 1,
+    String ext = '',
+  }) {
     return _dispatchScript(
       key: key,
       type: type,
@@ -1192,7 +1288,9 @@ class SpiderService {
     // 先 init（忽略错误），再 search
     try {
       await initSpider(spiderKey, spiderType, api, ext: ext);
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      /* ignore */
+    }
 
     return search(spiderKey, spiderType, api, keyword, page: page, ext: ext);
   }
@@ -1210,12 +1308,17 @@ class SpiderService {
 
   /// 设置当前 Spider 信息 - 对应 Swift setCurrentSpider
   /// 仅用于非并发场景。[api] 传**原始 api**（可能是远端脚本 URL）。
-  void setCurrentSpider(String key, int type, String? api,
-      {String? ext, String? jar}) {
-    _currentSpider =
-        (key: key, type: type, api: api ?? '', ext: ext ?? '');
+  void setCurrentSpider(
+    String key,
+    int type,
+    String? api, {
+    String? ext,
+    String? jar,
+  }) {
+    _currentSpider = (key: key, type: type, api: api ?? '', ext: ext ?? '');
     AppLog.instance.log(
-        '[SpiderService] setCurrentSpider: key=$key, type=$type, api=$api, ext=$ext');
+      '[SpiderService] setCurrentSpider: key=$key, type=$type, api=$api, ext=$ext',
+    );
   }
 
   /// 获取当前 Spider 的 key/type/api/ext
@@ -1245,7 +1348,9 @@ class SpiderService {
     _loadedScriptCandidates = [];
     try {
       _dio.close(force: true);
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      /* ignore */
+    }
     _dio = _buildDio();
   }
 }

@@ -10,6 +10,7 @@ import 'edit_page.dart';
 import 'moontv_converter_page.dart';
 import 'pin_dialog.dart';
 import '../../widgets/app_toast.dart';
+import '../../reading/widgets/swipe_action_tile.dart';
 
 /// 订阅列表页 —— 多订阅管理
 ///
@@ -25,7 +26,9 @@ class SubscriptionPage extends StatefulWidget {
 class _SubscriptionPageState extends State<SubscriptionPage> {
   final svc = SubscriptionService.instance;
 
-  bool _editing = false;
+  /// 多选模式（长按卡片进入；右上角「编辑」也能进）
+  bool _selectMode = false;
+  final Set<String> _picked = <String>{};
 
   /// 正在激活的订阅 id（空 = 空闲）。
   /// 激活要重新加载整份配置（网络 + 引擎），需要即时反馈并防连点。
@@ -75,15 +78,18 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
             tooltip: '影视仓转换器',
             onPressed: () => Get.to(() => const MoonTvConverterPage()),
           ),
-          // 「编辑」：进入后卡片右侧变成删除按钮
+          // 「编辑」：进入多选模式（长按卡片也能进）
           GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: () => setState(() => _editing = !_editing),
+            onTap: () => setState(() {
+              _selectMode = !_selectMode;
+              if (!_selectMode) _picked.clear();
+            }),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Center(
                 child: Text(
-                  _editing ? '完成' : '编辑',
+                  _selectMode ? '完成' : '编辑',
                   style: TextStyle(
                     color: AppTheme.accentColor,
                     fontSize: AppTheme.fontSubhead,
@@ -94,13 +100,15 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
             ),
           ),
           // 「＋」新增
-          IconButton(
-            icon: Icon(Icons.add, color: AppTheme.accentColor),
-            tooltip: '新增订阅',
-            onPressed: () => _openEdit(null),
-          ),
+          if (!_selectMode)
+            IconButton(
+              icon: Icon(Icons.add, color: AppTheme.accentColor),
+              tooltip: '新增订阅',
+              onPressed: () => _openEdit(null),
+            ),
         ],
       ),
+      bottomNavigationBar: _selectMode ? _buildSelectBar() : null,
       body: Obx(() {
         final list = svc.subscriptions;
         if (list.isEmpty) {
@@ -223,130 +231,158 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   }
 
   Widget _card(Subscription s, bool isActive) {
-    return GestureDetector(
-      onTap: () {
-        if (_editing) return;
-        _openEdit(s);
-      },
-      child: Container(
-        // 内边距加大（14 → spacingLG=16），卡片不再显得挤
-        padding: const EdgeInsets.all(AppTheme.spacingLG),
-        decoration: BoxDecoration(
-          color: isActive
-              ? AppTheme.accentColor.withValues(alpha: 0.10)
-              : AppTheme.backgroundCardElevated,
-          borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
-          // 统一 1px 描边：非激活改用更实的 glassBorder（原来 glassBorderSoft
-          // 透明度只有 0.06/0.12，边几乎看不见，卡片在底上"糊成一片"）
-          border: Border.all(
-            color: isActive
-                ? AppTheme.accentColor.withValues(alpha: 0.6)
-                : AppTheme.glassBorder,
-            width: 1,
-          ),
+    final picked = _picked.contains(s.id);
+    return SwipeActionTile(
+      // 多选模式下关闭左滑，避免与勾选冲突
+      enabled: !_selectMode,
+      backgroundColor: AppTheme.backgroundCardElevated,
+      borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
+      actions: [
+        SwipeAction(
+          icon: Icons.edit_outlined,
+          label: '编辑',
+          color: AppTheme.accentColor,
+          onTap: () => _openEdit(s),
         ),
-        child: Row(
-          children: [
-            // 分类图标
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: AppTheme.accentColor.withValues(alpha: 0.16),
-                borderRadius: BorderRadius.circular(AppTheme.radiusMD),
-              ),
-              child: Icon(s.kindIcon, size: 20, color: AppTheme.accentColor),
+        SwipeAction(
+          icon: Icons.ios_share_rounded,
+          label: '分享',
+          color: const Color(0xFF3AA0FF),
+          onTap: () => _copyUrl(s),
+        ),
+        SwipeAction(
+          icon: Icons.delete_outline_rounded,
+          label: '删除',
+          color: const Color(0xFFFF5A5A),
+          onTap: () => _confirmDelete(s),
+        ),
+      ],
+      child: GestureDetector(
+        onTap: () {
+          if (_selectMode) {
+            _togglePick(s.id);
+            return;
+          }
+          _openEdit(s);
+        },
+        onLongPress: () => _enterSelect(s.id),
+        child: Container(
+          // 内边距加大（14 → spacingLG=16），卡片不再显得挤
+          padding: const EdgeInsets.all(AppTheme.spacingLG),
+          decoration: BoxDecoration(
+            color: isActive
+                ? AppTheme.accentColor.withValues(alpha: 0.10)
+                : AppTheme.backgroundCardElevated,
+            borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
+            // 统一 1px 描边：非激活改用更实的 glassBorder（原来 glassBorderSoft
+            // 透明度只有 0.06/0.12，边几乎看不见，卡片在底上"糊成一片"）
+            border: Border.all(
+              color: picked
+                  ? AppTheme.accentColor
+                  : (isActive
+                        ? AppTheme.accentColor.withValues(alpha: 0.6)
+                        : AppTheme.glassBorder),
+              width: picked ? 1.4 : 1,
             ),
-            const SizedBox(width: AppTheme.spacingMD),
-            // 名称 + 分类徽标 / 地址 / 状态
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          s.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: AppTheme.fontHeadline,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      if (s.locked) ...[
-                        const SizedBox(width: 6),
-                        Icon(
-                          Icons.lock,
-                          size: 13,
-                          color: AppTheme.textTertiary,
-                        ),
-                      ],
-                      const SizedBox(width: AppTheme.spacingSM),
-                      // 右上角：分类徽标
-                      _kindBadge(s.kind),
-                    ],
-                  ),
-                  const SizedBox(height: AppTheme.spacingSM),
-                  // 地址（次要，小字、单行省略、可点击复制）
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => _copyUrl(s),
-                    child: Row(
+          ),
+          child: Row(
+            children: [
+              // 分类图标
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: AppTheme.accentColor.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+                ),
+                child: Icon(s.kindIcon, size: 20, color: AppTheme.accentColor),
+              ),
+              const SizedBox(width: AppTheme.spacingMD),
+              // 名称 + 分类徽标 / 地址 / 状态
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
                       children: [
                         Expanded(
                           child: Text(
-                            s.maskedUrl,
+                            s.name,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: AppTheme.fontCaption,
+                              color: AppTheme.textPrimary,
+                              fontSize: AppTheme.fontHeadline,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                         ),
-                        const SizedBox(width: AppTheme.spacingXS),
-                        Icon(
-                          Icons.copy_rounded,
-                          size: 13,
-                          color: AppTheme.textTertiary,
-                        ),
+                        if (s.locked) ...[
+                          const SizedBox(width: 6),
+                          Icon(
+                            Icons.lock,
+                            size: 13,
+                            color: AppTheme.textTertiary,
+                          ),
+                        ],
+                        const SizedBox(width: AppTheme.spacingSM),
+                        // 右上角：分类徽标
+                        _kindBadge(s.kind),
                       ],
                     ),
-                  ),
-                  const SizedBox(height: AppTheme.spacingSM),
-                  // 状态行：上次更新 / 自动更新 / 已上锁
-                  Text(
-                    _statusText(s),
-                    style: TextStyle(
-                      color: AppTheme.textTertiary,
-                      fontSize: AppTheme.fontCaption,
+                    const SizedBox(height: AppTheme.spacingSM),
+                    // 地址（次要，小字、单行省略、可点击复制）
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => _copyUrl(s),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              s.maskedUrl,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: AppTheme.fontCaption,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: AppTheme.spacingXS),
+                          Icon(
+                            Icons.copy_rounded,
+                            size: 13,
+                            color: AppTheme.textTertiary,
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: AppTheme.spacingSM),
-            // 右侧：编辑模式下是删除；否则是「激活 / 已激活」
-            if (_editing)
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => _confirmDelete(s),
-                child: Padding(
-                  padding: const EdgeInsets.all(6),
-                  child: Icon(
-                    Icons.delete_outline,
-                    size: 20,
-                    color: Colors.redAccent,
-                  ),
+                    const SizedBox(height: AppTheme.spacingSM),
+                    // 状态行：上次更新 / 自动更新 / 已上锁
+                    Text(
+                      _statusText(s),
+                      style: TextStyle(
+                        color: AppTheme.textTertiary,
+                        fontSize: AppTheme.fontCaption,
+                      ),
+                    ),
+                  ],
                 ),
-              )
-            else
-              _activateButton(s, isActive),
-          ],
+              ),
+              const SizedBox(width: AppTheme.spacingSM),
+              // 右侧：多选模式显示勾选框；否则是「激活 / 已激活」
+              if (_selectMode)
+                Icon(
+                  picked
+                      ? Icons.check_box_rounded
+                      : Icons.check_box_outline_blank_rounded,
+                  size: 22,
+                  color: picked ? AppTheme.accentColor : AppTheme.textTertiary,
+                )
+              else
+                _activateButton(s, isActive),
+            ],
+          ),
         ),
       ),
     );
@@ -426,9 +462,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
               const SizedBox(width: 4),
             ],
             Text(
-              busy
-                  ? '切换中'
-                  : (isActive ? '已激活' : '激活'),
+              busy ? '切换中' : (isActive ? '已激活' : '激活'),
               style: TextStyle(
                 color: isActive ? Colors.white : AppTheme.accentColor,
                 fontSize: AppTheme.fontCaption,
@@ -515,6 +549,153 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => SubscriptionEditPage(subscription: s)),
     );
+  }
+
+  // ============================================================
+  // 多选
+  // ============================================================
+
+  void _enterSelect(String id) {
+    setState(() {
+      _selectMode = true;
+      _picked.add(id);
+    });
+  }
+
+  void _togglePick(String id) {
+    setState(() {
+      if (_picked.contains(id)) {
+        _picked.remove(id);
+      } else {
+        _picked.add(id);
+      }
+    });
+  }
+
+  void _toggleAll() {
+    final all = svc.subscriptions.map((e) => e.id).toSet();
+    setState(() {
+      if (_picked.length == all.length) {
+        _picked.clear();
+      } else {
+        _picked
+          ..clear()
+          ..addAll(all);
+      }
+    });
+  }
+
+  Widget _buildSelectBar() {
+    final all = svc.subscriptions;
+    final allPicked = all.isNotEmpty && _picked.length == all.length;
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+        child: Container(
+          height: 56,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            color: AppTheme.backgroundSecondary,
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.12),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Text(
+                '已选 ${_picked.length} 项',
+                style: TextStyle(
+                  fontSize: AppTheme.fontSubhead,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+              const Spacer(),
+              TextButton(
+                onPressed: _toggleAll,
+                child: Text(
+                  allPicked ? '取消全选' : '全选',
+                  style: const TextStyle(fontSize: AppTheme.fontSubhead),
+                ),
+              ),
+              IconButton(
+                tooltip: '复制所选地址',
+                onPressed: _picked.isEmpty
+                    ? null
+                    : () async {
+                        final urls = all
+                            .where((s) => _picked.contains(s.id))
+                            .map((s) => s.url)
+                            .toList();
+                        if (urls.isEmpty) return;
+                        await Clipboard.setData(
+                          ClipboardData(text: urls.join('\n')),
+                        );
+                        AppToast.message('已复制 ${urls.length} 个订阅地址');
+                      },
+                icon: Icon(
+                  Icons.ios_share_rounded,
+                  size: 20,
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+              IconButton(
+                tooltip: '删除所选',
+                onPressed: _picked.isEmpty ? null : _deleteSelected,
+                icon: const Icon(
+                  Icons.delete_outline_rounded,
+                  size: 20,
+                  color: Colors.redAccent,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _deleteSelected() async {
+    final n = _picked.length;
+    if (n == 0) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppTheme.glassRadius),
+        ),
+        title: Text('删除订阅', style: TextStyle(color: AppTheme.textPrimary)),
+        content: Text(
+          '确定删除选中的 $n 个订阅？',
+          style: TextStyle(color: AppTheme.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('取消', style: TextStyle(color: AppTheme.textTertiary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    for (final id in _picked.toList()) {
+      await svc.remove(id);
+    }
+    if (!mounted) return;
+    setState(() {
+      _picked.clear();
+      _selectMode = false;
+    });
   }
 
   Future<void> _confirmDelete(Subscription s) async {

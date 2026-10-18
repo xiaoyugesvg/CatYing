@@ -37,10 +37,9 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
   /// `SettingsController` 不存在 → `Get.find` 抛异常 → 整个第二个分组
   /// 被 ErrorWidget（release 下是一块灰色长板）取代，用户看到的就是
   /// 「订阅管理页下面一大块灰色空白」。
-  SettingsController get controller =>
-      Get.isRegistered<SettingsController>()
-          ? Get.find<SettingsController>()
-          : Get.put(SettingsController());
+  SettingsController get controller => Get.isRegistered<SettingsController>()
+      ? Get.find<SettingsController>()
+      : Get.put(SettingsController());
 
   @override
   Widget build(BuildContext context) {
@@ -81,14 +80,23 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
         SettingsGroup(
           children: [
             Obx(
-              () => SettingsRow(
-                icon: Icons.movie_outlined,
-                title: '点播接口地址',
-                value: controller.vodApiUrl.value.isEmpty
-                    ? '未配置'
-                    : _truncateUrl(controller.vodApiUrl.value),
-                onTap: _showApiEditDialog,
-              ),
+              () {
+                // 主页源是本地 Python 时，「点播接口地址」应显示本地，
+                // 而不是订阅里那条远程地址（用户 2026-10-18）。
+                final home = ApiConfig.instance.homeSourceBean.value;
+                final isLocalHome = home?.key.startsWith('localpy_') ?? false;
+                final value = isLocalHome
+                    ? '本地：${home!.name}'
+                    : (controller.vodApiUrl.value.isEmpty
+                          ? '未配置'
+                          : _truncateUrl(controller.vodApiUrl.value));
+                return SettingsRow(
+                  icon: Icons.movie_outlined,
+                  title: '点播接口地址',
+                  value: value,
+                  onTap: _showApiEditDialog,
+                );
+              },
             ),
             // 「存为订阅」入口已删（用户 2026-10-13：「第一次输入的那个源不要还
             // 他么的存为订阅，而是直接就是存为订阅」）——

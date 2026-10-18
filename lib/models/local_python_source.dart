@@ -19,10 +19,14 @@ class LocalPythonSource {
   /// 导入时间（毫秒）
   final int addedAt;
 
+  /// 使用次数（「频率」排序用）
+  final int usage;
+
   const LocalPythonSource({
     required this.key,
     required this.name,
     this.addedAt = 0,
+    this.usage = 0,
   });
 
   /// 传给 SpiderService 的 api：非 http 的 .py 会走 CPython 引擎
@@ -33,20 +37,21 @@ class LocalPythonSource {
 
   /// 转成 App 内部的 SourceBean（type=3 Spider）
   SourceBean toSourceBean() => SourceBean(
-        key: sourceKey,
-        name: name.isEmpty ? key : name,
-        api: api,
-        type: 3,
-        searchable: 1,
-        filterable: 1,
-        quickSearch: 0,
-      );
+    key: sourceKey,
+    name: name.isEmpty ? key : name,
+    api: api,
+    type: 3,
+    searchable: 1,
+    filterable: 1,
+    quickSearch: 0,
+  );
 
   Map<String, dynamic> toJson() => {
-        'key': key,
-        'name': name,
-        'addedAt': addedAt,
-      };
+    'key': key,
+    'name': name,
+    'addedAt': addedAt,
+    'usage': usage,
+  };
 
   factory LocalPythonSource.fromJson(Map<String, dynamic> json) {
     return LocalPythonSource(
@@ -55,6 +60,9 @@ class LocalPythonSource {
       addedAt: (json['addedAt'] is num)
           ? (json['addedAt'] as num).toInt()
           : int.tryParse('${json['addedAt'] ?? 0}') ?? 0,
+      usage: (json['usage'] is num)
+          ? (json['usage'] as num).toInt()
+          : int.tryParse('${json['usage'] ?? 0}') ?? 0,
     );
   }
 }
