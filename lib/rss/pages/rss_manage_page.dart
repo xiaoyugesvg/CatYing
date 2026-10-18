@@ -27,6 +27,7 @@ import '../../common/theme.dart';
 import '../../reading/pages/book_source_qr_scan_page.dart';
 import '../../reading/source/global_proxy.dart';
 import '../../widgets/app_toast.dart';
+import '../../widgets/card_action_sheet.dart';
 import '../../widgets/common_widgets.dart';
 import '../models/rss_source.dart';
 import '../services/rss_reader.dart';
@@ -833,7 +834,75 @@ class _RssManagePageState extends State<RssManagePage> {
   // ── 源菜单 / 分享 / 清空 ────────────────────────────────────────
 
   Future<void> _showSourceMenu(RssSource s) async {
-    await showModalBottomSheet<void>(
+    await showCardActions(
+      context,
+      title: s.name,
+      subtitle: s.url,
+      actions: [
+        if (s.id != store.selectedId)
+          CardAction(
+            icon: Icons.radio_button_checked,
+            label: '当前',
+            onTap: () async {
+              await store.select(s.id);
+              AppToast.message('已切换到「${s.name}」');
+            },
+          ),
+        CardAction(
+          icon: Icons.edit_rounded,
+          label: '改名',
+          onTap: () async {
+            final n = await _askText(
+              title: '重命名订阅源',
+              hint: '名称',
+              initial: s.name,
+            );
+            if (n != null && n.trim().isNotEmpty) {
+              await store.rename(s.id, n);
+            }
+          },
+        ),
+        CardAction(
+          icon: Icons.ios_share_rounded,
+          label: '分享',
+          onTap: () async {
+            await Clipboard.setData(
+              ClipboardData(text: encodeRssSources([s])),
+            );
+            AppToast.message('已复制，可直接分享给别人');
+          },
+        ),
+        CardAction(
+          icon: Icons.folder_outlined,
+          label: '分组',
+          onTap: () => _pickGroup(s),
+        ),
+        if (s.showWebLog)
+          CardAction(
+            icon: Icons.article_outlined,
+            label: '日志',
+            onTap: () => _showWebLogs(s),
+          ),
+        CardAction(
+          icon: Icons.delete_outline_rounded,
+          label: '删除',
+          danger: true,
+          onTap: () async {
+            final ok = await _confirm('删除订阅源', '确定删除「${s.name}」吗？');
+            if (ok == true) await store.remove(s.id);
+          },
+        ),
+      ],
+    );
+  }
+
+  /// 修改分组（含新建）
+  Future<void> _pickGroup(RssSource s) async {
+    final groups = <String>{
+      for (final e in store.sources)
+        if (e.group.trim().isNotEmpty) e.group.trim(),
+    }.toList()..sort();
+    final picked = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: AppTheme.backgroundSecondary,
       shape: const RoundedRectangleBorder(
@@ -841,87 +910,87 @@ class _RssManagePageState extends State<RssManagePage> {
       ),
       builder: (ctx) => SafeArea(
         top: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 12),
-            const SheetHandle(),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(s.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: AppTheme.fontTitle3,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.textPrimary)),
-                  const SizedBox(height: 3),
-                  Text(s.url,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: AppTheme.fontCaption,
-                          color: AppTheme.textTertiary)),
-                ],
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '移动到分组',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-            ),
-            _sheetItem(Icons.radio_button_checked, '设为当前订阅源',
-                enabled: s.id != store.selectedId, onTap: () async {
-              Navigator.pop(ctx);
-              await store.select(s.id);
-              AppToast.message('已切换到「${s.name}」');
-            }),
-            _sheetItem(Icons.edit_rounded, '重命名', onTap: () async {
-              Navigator.pop(ctx);
-              final n = await _askText(
-                  title: '重命名订阅源', hint: '名称', initial: s.name);
-              if (n != null && n.trim().isNotEmpty) {
-                await store.rename(s.id, n);
-              }
-            }),
-            _sheetItem(Icons.copy_rounded, '复制订阅源', onTap: () async {
-              Navigator.pop(ctx);
-              await Clipboard.setData(
-                  ClipboardData(text: encodeRssSources([s])));
-              AppToast.message('已复制，可直接分享给别人');
-            }),
-            // `showWebLog=true` 的源才给日志入口（排障用）
-            if (s.showWebLog)
-              _sheetItem(Icons.article_outlined, '查看 JS 日志', onTap: () async {
-                Navigator.pop(ctx);
-                await _showWebLogs(s);
-              }),
-            _sheetItem(Icons.delete_outline_rounded, '删除', danger: true,
-                onTap: () async {
-              Navigator.pop(ctx);
-              final ok = await _confirm('删除订阅源', '确定删除「${s.name}」吗？');
-              if (ok == true) await store.remove(s.id);
-            }),
-            const SizedBox(height: 10),
-          ],
+              const SizedBox(height: 14),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 240),
+                child: SingleChildScrollView(
+                  child: Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      _groupChoice(
+                        '未分组',
+                        s.group.trim().isEmpty,
+                        () => Navigator.of(ctx).pop(''),
+                      ),
+                      for (final g in groups)
+                        _groupChoice(
+                          g,
+                          s.group.trim() == g,
+                          () => Navigator.of(ctx).pop(g),
+                        ),
+                      _groupChoice(
+                        '＋ 新建',
+                        false,
+                        () => Navigator.of(ctx).pop('__new__'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
+    if (picked == null || !mounted) return;
+    var target = picked;
+    if (target == '__new__') {
+      final name = await _askText(
+        title: '新建分组',
+        hint: '分组名称',
+        initial: '',
+      );
+      if (name == null || name.trim().isEmpty || !mounted) return;
+      target = name.trim();
+    }
+    await store.setGroup(s.id, target);
+    if (mounted) setState(() {});
   }
 
-  Widget _sheetItem(IconData icon, String text,
-      {bool danger = false, bool enabled = true, required VoidCallback onTap}) {
-    final color = danger ? Colors.redAccent : AppTheme.textPrimary;
-    return ListTile(
-      enabled: enabled,
+  Widget _groupChoice(String label, bool selected, VoidCallback onTap) {
+    return GestureDetector(
       onTap: onTap,
-      leading: Icon(icon,
-          size: 20,
-          color: enabled
-              ? (danger ? Colors.redAccent : AppTheme.textSecondary)
-              : AppTheme.textTertiary),
-      title: Text(text,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.accentColor : AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppTheme.borderLight, width: 0.5),
+        ),
+        child: Text(
+          label,
           style: TextStyle(
-              fontSize: AppTheme.fontSubhead,
-              color: enabled ? color : AppTheme.textTertiary)),
+            color: selected ? Colors.white : AppTheme.textSecondary,
+            fontSize: 13,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+          ),
+        ),
+      ),
     );
   }
 

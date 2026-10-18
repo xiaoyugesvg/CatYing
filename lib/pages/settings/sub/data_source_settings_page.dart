@@ -69,7 +69,16 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
             SettingsRow(
               icon: Icons.terminal_rounded,
               title: '本地爬虫',
+              subtitle: ApiConfig.instance.localSourcesEnabled.value
+                  ? '已启用：本地源会出现在源面板 / 搜索里'
+                  : '已关闭：优先使用订阅激活的源',
               value: '${ApiConfig.instance.localVideoSources.length} 个',
+              trailingSwitch: true,
+              switchValue: ApiConfig.instance.localSourcesEnabled.value,
+              onSwitchChanged: (v) async {
+                await ApiConfig.instance.setLocalSourcesEnabled(v);
+                if (mounted) setState(() {});
+              },
               onTap: () async {
                 await Get.to(() => const LocalPythonSourcesPage());
                 if (mounted) setState(() {});
@@ -131,9 +140,11 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
   // ============================================================
 
   void _showSourcePicker() {
-    // 本地 Python 源单独成组，但这里也一并列出（置顶），方便直接切主页源
+    // 本地 Python 源单独成组，但这里也一并列出（置顶），方便直接切主页源。
+    // 仅在「本地爬虫」开关打开时列出（用户 2026-10-18：默认优先订阅）。
     final sources = <SourceBean>[
-      ...ApiConfig.instance.localVideoSources,
+      if (ApiConfig.instance.localSourcesEnabled.value)
+        ...ApiConfig.instance.localVideoSources,
       ...ApiConfig.instance.sourceBeanList,
     ];
     if (sources.isEmpty) {

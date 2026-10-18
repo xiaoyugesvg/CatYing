@@ -462,6 +462,11 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
 
   Future<void> _select(LocalPythonSource src) async {
     final bean = src.toSourceBean();
+    // 用户在管理页明确点了某个本地源 ⇒ 顺手把「本地爬虫」开关打开，
+    // 否则主页源会被订阅线路覆盖（用户 2026-10-18 的开关语义）。
+    if (!ApiConfig.instance.localSourcesEnabled.value) {
+      await ApiConfig.instance.setLocalSourcesEnabled(true);
+    }
     await ApiConfig.instance.setHomeSource(bean);
     await LocalPythonSources.instance.bumpUsage(src.key);
     if (mounted) setState(() {});
@@ -566,10 +571,12 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
         ),
         const SizedBox(height: AppTheme.spacingMD),
         Obx(() {
-          // 依赖 localVideoSources，导入/删除后自动刷新
-          final beans = ApiConfig.instance.localVideoSources;
+          // 依赖 localVideoSources，导入/删除后自动刷新。
+          // ⚠️ 空态看**清单**而不是 beans：开关关闭时 list 仍会读取，
+          //    管理页要能继续看到并编辑已导入的脚本（用户 2026-10-18）。
+          ApiConfig.instance.localVideoSources;
           final list = _sorted;
-          if (beans.isEmpty) {
+          if (list.isEmpty) {
             return Padding(
               padding: const EdgeInsets.symmetric(vertical: 28),
               child: Center(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../common/theme.dart';
+import '../../widgets/card_action_sheet.dart';
 
 /// 「源切换」面板里的一条源。
 class CardSourceItem {
@@ -71,6 +72,9 @@ class CardSourceSheet extends StatefulWidget {
   /// 长按菜单 / 多选栏「分享」
   final Future<void> Function(List<String> ids)? onShare;
 
+  /// 按住把手拖动排序：回传重排后的完整 id 顺序
+  final Future<void> Function(List<String> ids)? onReorder;
+
   const CardSourceSheet({
     super.key,
     required this.title,
@@ -83,6 +87,7 @@ class CardSourceSheet extends StatefulWidget {
     this.onEdit,
     this.onDelete,
     this.onShare,
+    this.onReorder,
   });
 
   /// 便捷弹出：返回选中的 id（用户没选 / 直接关掉 → null）
@@ -98,6 +103,7 @@ class CardSourceSheet extends StatefulWidget {
     Future<void> Function(String id)? onEdit,
     Future<String?> Function(List<String> ids)? onDelete,
     Future<void> Function(List<String> ids)? onShare,
+    Future<void> Function(List<String> ids)? onReorder,
   }) {
     return showModalBottomSheet<String>(
       context: context,
@@ -114,6 +120,7 @@ class CardSourceSheet extends StatefulWidget {
         onEdit: onEdit,
         onDelete: onDelete,
         onShare: onShare,
+        onReorder: onReorder,
       ),
     );
   }
@@ -297,99 +304,69 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
     });
   }
 
-  /// 长按卡片：多选模式下 = 勾选；否则弹操作菜单
+  /// 长按卡片：多选模式下 = 勾选；否则弹**卡片式**操作菜单（一行两个）
   Future<void> _onLongPress(CardSourceItem item) async {
     if (_selectMode) {
       _togglePick(item.id);
       return;
     }
-    if (widget.onEdit == null && !_canMulti) return;
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => DecoratedBox(
-        decoration: BoxDecoration(
-          color: AppTheme.backgroundSecondary,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          border: Border.all(color: AppTheme.borderLight, width: 0.5),
+    final actions = <CardAction>[];
+    if (widget.onEdit != null) {
+      actions.add(
+        CardAction(
+          icon: Icons.edit_outlined,
+          label: '编辑',
+          onTap: () => widget.onEdit?.call(item.id),
         ),
-        child: SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 10),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
-                child: Text(
-                  item.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: AppTheme.fontBody,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              if (widget.onEdit != null)
-                _menuTile(
-                  Icons.edit_outlined,
-                  '编辑源',
-                  () => Navigator.of(ctx).pop('edit'),
-                ),
-              if (widget.onShare != null)
-                _menuTile(
-                  Icons.ios_share_rounded,
-                  '分享',
-                  () => Navigator.of(ctx).pop('share'),
-                ),
-              if (_canMulti)
-                _menuTile(
-                  Icons.checklist_rounded,
-                  '多选',
-                  () => Navigator.of(ctx).pop('select'),
-                ),
-              if (widget.onDelete != null)
-                _menuTile(
-                  Icons.delete_outline_rounded,
-                  '删除',
-                  () => Navigator.of(ctx).pop('delete'),
-                  danger: true,
-                ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (!mounted) return;
-    if (action == 'edit') {
-      await widget.onEdit?.call(item.id);
-    } else if (action == 'share') {
-      await widget.onShare?.call([item.id]);
-    } else if (action == 'select') {
-      _enterSelectMode(item.id);
-    } else if (action == 'delete') {
-      await _confirmDelete([item]);
+      );
     }
+    if (widget.onShare != null) {
+      actions.add(
+        CardAction(
+          icon: Icons.ios_share_rounded,
+          label: '分享',
+          onTap: () => widget.onShare?.call([item.id]),
+        ),
+      );
+    }
+    if (_canMulti) {
+      actions.add(
+        CardAction(
+          icon: Icons.checklist_rounded,
+          label: '多选',
+          onTap: () => _enterSelectMode(item.id),
+        ),
+      );
+    }
+    if (widget.onDelete != null) {
+      actions.add(
+        CardAction(
+          icon: Icons.delete_outline_rounded,
+          label: '删除',
+          danger: true,
+          onTap: () => _confirmDelete([item]),
+        ),
+      );
+    }
+    if (actions.isEmpty) return;
+    await showCardActions(
+      context,
+      title: item.title,
+      subtitle: item.subtitle,
+      actions: actions,
+    );
   }
 
-  Widget _menuTile(
-    IconData icon,
-    String label,
-    VoidCallback onTap, {
-    bool danger = false,
-  }) {
-    final color = danger ? Colors.redAccent.shade100 : AppTheme.textPrimary;
-    return ListTile(
-      dense: true,
-      leading: Icon(icon, size: 20, color: color),
-      title: Text(
-        label,
-        style: TextStyle(color: color, fontSize: AppTheme.fontBody),
-      ),
-      onTap: onTap,
-    );
+  /// 把手拖到另一张卡片上 → 本地重排 + 回写宿主（[widget.onReorder]）
+  Future<void> _moveItem(String fromId, String toId) async {
+    if (fromId == toId || widget.onReorder == null) return;
+    final from = _items.indexWhere((e) => e.id == fromId);
+    final to = _items.indexWhere((e) => e.id == toId);
+    if (from < 0 || to < 0) return;
+    final item = _items.removeAt(from);
+    _items.insert(to, item);
+    setState(() {});
+    await widget.onReorder!(_items.map((e) => e.id).toList());
   }
 
   /// 多选底栏：全选 / 已选数 / 分享 / 删除 / 完成
@@ -638,20 +615,28 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
                             gridDelegate:
                                 SliverGridDelegateWithFixedCrossAxisCount(
                                   crossAxisCount: 2,
-                                  mainAxisSpacing: 8,
+                                  mainAxisSpacing: 10,
                                   crossAxisSpacing: 10,
-                                  childAspectRatio: hasSub ? 2.9 : 3.4,
+                                  // 卡片式：一排 2 个，给足高度（原来用宽高比会被压成细条）
+                                  mainAxisExtent: hasSub ? 96 : 72,
                                 ),
                             itemCount: list.length,
                             itemBuilder: (_, i) {
                               final item = list[i];
                               final picked = _picked.contains(item.id);
-                              return _CardTile(
+                              final tile = _CardTile(
                                 // 选中项挂 key：弹窗打开时 Scrollable.ensureVisible 用它定位
                                 key: item.selected ? _selectedKey : null,
                                 item: item,
                                 selectMode: _selectMode,
                                 picked: picked,
+                                dragHandle:
+                                    (!_selectMode && widget.onReorder != null)
+                                    ? CardDragHandle(
+                                        data: item.id,
+                                        label: item.title,
+                                      )
+                                    : null,
                                 onTap: () {
                                   if (_selectMode) {
                                     _togglePick(item.id);
@@ -660,6 +645,27 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
                                   }
                                 },
                                 onLongPress: () => _onLongPress(item),
+                              );
+                              if (widget.onReorder == null) return tile;
+                              return DragTarget<String>(
+                                onWillAcceptWithDetails: (d) =>
+                                    d.data != item.id,
+                                onAcceptWithDetails: (d) =>
+                                    _moveItem(d.data, item.id),
+                                builder: (_, candidate, _) => AnimatedContainer(
+                                  duration: const Duration(milliseconds: 120),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: candidate.isEmpty
+                                        ? null
+                                        : Border.all(
+                                            color: AppTheme.accentColor
+                                                .withValues(alpha: 0.6),
+                                            width: 1.4,
+                                          ),
+                                  ),
+                                  child: tile,
+                                ),
                               );
                             },
                           ),
@@ -707,6 +713,9 @@ class _CardTile extends StatelessWidget {
   /// 多选模式：左侧图标变成复选框，高亮看 [picked] 而不是当前源
   final bool selectMode;
   final bool picked;
+
+  /// 右上角拖动把手（长按它排序）；null = 不显示
+  final Widget? dragHandle;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
@@ -717,6 +726,7 @@ class _CardTile extends StatelessWidget {
     required this.onLongPress,
     this.selectMode = false,
     this.picked = false,
+    this.dragHandle,
   });
 
   @override
@@ -727,7 +737,7 @@ class _CardTile extends StatelessWidget {
       onTap: onTap,
       onLongPress: onLongPress,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
         decoration: BoxDecoration(
           color: active
               ? AppTheme.accentColor.withValues(alpha: 0.12)
@@ -740,53 +750,65 @@ class _CardTile extends StatelessWidget {
             width: active ? 1 : 0.5,
           ),
         ),
-        child: Row(
+        child: Stack(
           children: [
-            Icon(
-              selectMode
-                  ? (picked
-                        ? Icons.check_box_rounded
-                        : Icons.check_box_outline_blank_rounded)
-                  : (item.selected
-                        ? Icons.check_circle
-                        : Icons.radio_button_unchecked),
-              size: 16,
-              color: active ? AppTheme.accentColor : AppTheme.textTertiary,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    item.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: active
-                          ? AppTheme.textPrimary
-                          : AppTheme.textSecondary,
-                      fontSize: AppTheme.fontSubhead,
-                      fontWeight: active ? FontWeight.w600 : FontWeight.normal,
-                    ),
-                  ),
-                  if (sub.isNotEmpty)
+            // 卡片主体：名称 + 副标题都居中（用户 2026-10-18：卡片式、一排 2 个）
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                     Text(
-                      sub,
-                      maxLines: 1,
+                      item.title,
+                      maxLines: sub.isEmpty ? 2 : 1,
                       overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: item.warn
-                            ? Colors.orange.shade400
-                            : AppTheme.textTertiary,
-                        fontSize: AppTheme.fontCaption,
+                        color: active
+                            ? AppTheme.textPrimary
+                            : AppTheme.textSecondary,
+                        fontSize: AppTheme.fontSubhead,
+                        fontWeight: active ? FontWeight.w600 : FontWeight.w500,
                       ),
                     ),
-                ],
+                    if (sub.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        sub,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: item.warn
+                              ? Colors.orange.shade400
+                              : AppTheme.textTertiary,
+                          fontSize: AppTheme.fontCaption,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ),
+            // 拖动把手（左上角）：长按它移动排序
+            if (dragHandle != null)
+              Positioned(top: -2, left: -2, child: dragHandle!),
+            // 选中/多选标记放右上角，不挤占居中的文字
+            if (selectMode || item.selected)
+              Positioned(
+                top: 0,
+                right: 0,
+                child: Icon(
+                  selectMode
+                      ? (picked
+                            ? Icons.check_box_rounded
+                            : Icons.check_box_outline_blank_rounded)
+                      : Icons.check_circle,
+                  size: 16,
+                  color: active ? AppTheme.accentColor : AppTheme.textTertiary,
+                ),
+              ),
           ],
         ),
       ),

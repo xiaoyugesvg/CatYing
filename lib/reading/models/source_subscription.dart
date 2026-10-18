@@ -15,14 +15,17 @@ enum SourceSubscriptionKind {
   /// （直接跑源脚本，不转成 Legado 规则）。
   bool get supported => true;
 
-  /// 这条订阅会喂给哪个"仓"：小说 / 漫画 / 两者。
+  /// 这条订阅会喂给哪个"仓"：**一条订阅只属于一个仓**。
+  ///
+  /// 用户 2026-10-18：「我从哪个仓订阅就用哪个，书源仓库和漫源仓库的订阅
+  /// 也不通用」—— 旧的 `legado` 综合源也归书源仓（书源仓本身也能收漫画源），
+  /// 不再同时出现在两个仓。
   bool get feedsNovel =>
       this == SourceSubscriptionKind.novel ||
       this == SourceSubscriptionKind.legado;
 
   bool get feedsComic =>
       this == SourceSubscriptionKind.comic ||
-      this == SourceSubscriptionKind.legado ||
       this == SourceSubscriptionKind.venera;
 }
 

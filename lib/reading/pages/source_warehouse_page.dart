@@ -10,6 +10,7 @@ import '../../common/theme.dart';
 import '../../widgets/app_toast.dart';
 import '../models/book_source.dart';
 import '../models/source_subscription.dart';
+import '../services/book_source_import_parser.dart';
 import '../services/comic_source_importer.dart';
 import '../services/source_subscription_store.dart';
 import '../source/manga_source.dart';
@@ -63,14 +64,11 @@ enum _SortMode {
   final String label;
 }
 
-/// 视图：列表 / 卡片 / 网格 / 一行 2·3·4 个
+/// 视图：列表 / 卡片 / 一行两个（用户 2026-10-18：只保留这三种）
 enum _ViewMode {
   list('列表', Icons.view_list_rounded, 1),
   card('卡片', Icons.view_agenda_rounded, 1),
-  grid('网格', Icons.grid_view_rounded, 2),
-  two('一行两个', Icons.apps_rounded, 2),
-  three('一行三个', Icons.view_module_rounded, 3),
-  four('一行四个', Icons.grid_on_rounded, 4);
+  two('一行两个', Icons.apps_rounded, 2);
 
   const _ViewMode(this.label, this.icon, this.columns);
   final String label;
@@ -248,11 +246,14 @@ class _WarehouseTabState extends State<_WarehouseTab>
     return null;
   }
 
-  // 判据统一用 isComicSource（兼容没写 bookSourceType 的漫画脚本），
-  // 保证「漫画仓」与「书源仓」不混（用户 2026-10-18）。
-  List<BookSource> get _allSources => _sourceStore.all
-      .where((s) => widget.comic ? s.isComicSource : !s.isComicSource)
-      .toList();
+  // 两个仓按**源自己的归属标记**分：
+  //   · 书源仓：书源 + 漫画源都收（漫画源在书源阅读器里用图片模式看）；
+  //   · 漫源仓库：只收漫画源。
+  // 老数据没有 `_warehouse` 标记 ⇒ BookSource.warehouse 按类型推断。
+  //（用户 2026-10-18：「我从哪个仓订阅就用哪个」）
+  List<BookSource> get _allSources => widget.comic
+      ? _sourceStore.all.where((s) => s.belongsToComic).toList()
+      : _sourceStore.all.where((s) => s.belongsToBook).toList();
 
   /// Venera JS 源（直接跑 ComicSource 脚本，不进 BookSourceStore）
   List<MangaSource> get _allVenera => widget.comic
@@ -549,10 +550,10 @@ class _WarehouseTabState extends State<_WarehouseTab>
     var name = nameCtl.text.trim();
     if (name.isEmpty) name = Uri.tryParse(url)?.host ?? url;
 
-    // Venera 索引属于漫画仓；书源仓加了也不会显示，直接拦住并说明
+    // Venera 索引属于漫源仓库；书源仓加了也不会显示，直接拦住并说明
     final lower = url.toLowerCase();
     if (!widget.comic && lower.contains('venera')) {
-      _toast('这是 Venera 漫画源，请在「漫画仓」添加');
+      _toast('这是 Venera 漫画源，请在「漫源仓库」添加');
       return;
     }
     // 两个仓彻底分开：漫画仓的订阅只喂漫画仓，书源仓只喂书源仓。
@@ -1160,13 +1161,19 @@ class _WarehouseTabState extends State<_WarehouseTab>
       return;
     }
     Object payload;
+    // 分享时去掉本机的仓库归属标记（`_warehouse`）：它是本机状态，
+    // 带着分享出去再导入会被误判成"另一个仓"的源而不显示。
+    List<Map<String, dynamic>> clean(List<BookSource> list) => [
+      for (final b in list)
+        (Map<String, dynamic>.from(b.raw)..remove('_warehouse')),
+    ];
     if (books.isNotEmpty && defs.isEmpty) {
-      payload = books.map((b) => b.raw).toList();
+      payload = clean(books);
     } else if (books.isEmpty) {
       payload = SourceConfigFile(version: 1, sources: defs).toJson();
     } else {
       payload = {
-        'bookSources': books.map((b) => b.raw).toList(),
+        'bookSources': clean(books),
         'sources': SourceConfigFile(
           version: 1,
           sources: defs,
@@ -1273,8 +1280,11 @@ class _WarehouseTabState extends State<_WarehouseTab>
     if (from < 0 || to < 0 || from == to) return;
     final moved = ids.removeAt(from);
     ids.insert(to, moved);
-    await _sourceStore.reorder(ids);
-    if (mounted) setState(() {});
+    // 只重排这批源占的坑位（不影响另一个仓 / 搜索时隐藏的源）
+    await _sourceStore.reorderWithin(ids);
+    if (mounted) {
+      setState(() => _sort = _SortMode.custom);
+    }
   }
 
   /// 网格 / 卡片长按：编辑、分享、删除、多选
@@ -1363,7 +1373,9 @@ class _WarehouseTabState extends State<_WarehouseTab>
         elevation: 0,
         iconTheme: IconThemeData(color: titleColor),
         title: Text(
-          _selectMode ? '已选 ${_picked.length}' : (widget.comic ? '漫画仓' : '书源仓'),
+          _selectMode
+              ? '已选 ${_picked.length}'
+              : (widget.comic ? '漫源仓库' : '书源仓'),
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.w700,
@@ -1431,12 +1443,20 @@ class _WarehouseTabState extends State<_WarehouseTab>
                           )
                         : const Icon(Icons.health_and_safety_rounded),
                   ),
-                if (widget.comic)
-                  IconButton(
-                    tooltip: '导入源',
-                    onPressed: _showComicImportDialog,
-                    icon: const Icon(Icons.file_open_rounded),
-                  ),
+                // 多选（列表长按改成拖动排序后，多选入口放这里）
+                IconButton(
+                  tooltip: '多选',
+                  onPressed: _visibleIds.isEmpty
+                      ? null
+                      : () => setState(() => _selectMode = true),
+                  icon: const Icon(Icons.checklist_rounded),
+                ),
+                // 导入入口：两个仓都有（书源仓也能导入书源 / 漫画源）
+                IconButton(
+                  tooltip: widget.comic ? '导入源' : '导入书源 / 漫画源',
+                  onPressed: _showComicImportDialog,
+                  icon: const Icon(Icons.file_open_rounded),
+                ),
                 IconButton(
                   tooltip: '添加订阅',
                   onPressed: _add,
@@ -1659,7 +1679,9 @@ class _WarehouseTabState extends State<_WarehouseTab>
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                '支持漫画配置源、Legado 漫画脚本、Venera index.json 或单个 .js 脚本',
+                widget.comic
+                    ? '支持漫画配置源、Legado 漫画脚本、Venera index.json 或单个 .js 脚本'
+                    : '支持 Legado 书源 / 漫画源 JSON；漫画源在阅读器里自动用图片模式',
                 style: TextStyle(
                   fontSize: 12,
                   color: JellyTheme.textSecondary,
@@ -1761,7 +1783,9 @@ class _WarehouseTabState extends State<_WarehouseTab>
           controller: ctrl,
           autofocus: true,
           keyboardType: TextInputType.url,
-          decoration: _inputDeco('漫画源 JSON 地址'),
+          decoration: _inputDeco(
+            widget.comic ? '漫画源 JSON 地址' : '书源 JSON 地址（Legado）',
+          ),
           style: TextStyle(color: _label),
           onSubmitted: (v) => Navigator.pop(ctx, v),
         ),
@@ -1809,7 +1833,9 @@ class _WarehouseTabState extends State<_WarehouseTab>
             expands: true,
             textAlignVertical: TextAlignVertical.top,
             style: TextStyle(color: _label, fontSize: 12),
-            decoration: _inputDeco('粘贴漫画源 JSON'),
+            decoration: _inputDeco(
+              widget.comic ? '粘贴漫画源 JSON' : '粘贴 Legado 书源 / 漫画源 JSON',
+            ),
           ),
         ),
         actions: [
@@ -1853,7 +1879,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
           errors.addAll(r.$2);
           continue;
         }
-        final r = await importComicSourcesText(
+        final r = await _importTextForWarehouse(
           utf8.decode(bytes, allowMalformed: true),
         );
         if (r.ok) {
@@ -1883,10 +1909,15 @@ class _WarehouseTabState extends State<_WarehouseTab>
     for (final f in archive.files) {
       if (!f.isFile) continue;
       final name = f.name.toLowerCase();
-      if (!(name.endsWith('.js') || name.endsWith('.json'))) continue;
+      // 漫画仓：.js / .json；书源仓：.json / .txt（Legado 书源导出）
+      if (widget.comic
+          ? !(name.endsWith('.js') || name.endsWith('.json'))
+          : !(name.endsWith('.json') || name.endsWith('.txt'))) {
+        continue;
+      }
       final data = f.content;
       if (data is! List) continue;
-      final r = await importComicSourcesText(
+      final r = await _importTextForWarehouse(
         utf8.decode(List<int>.from(data), allowMalformed: true),
       );
       if (r.ok) {
@@ -1907,6 +1938,47 @@ class _WarehouseTabState extends State<_WarehouseTab>
     await _applyComicImport(text);
   }
 
+  /// 书源仓的导入：同时接受 Legado 书源与漫画源（一律打 `book` 归属）。
+  ///
+  /// 漫画源（bookSourceType=2 / 图片规则）在书源阅读器里会自动走图片模式。
+  Future<({bool ok, String message})> _importBookText(String text) async {
+    try {
+      final parsed = BookSourceImportParser.parseSources(text);
+      final wanted = <BookSource>[];
+      for (final s in parsed) {
+        if (s.raw['bookSourceName'] == null && s.raw['bookSourceUrl'] == null) {
+          continue;
+        }
+        wanted.add(s.withWarehouse('book'));
+      }
+      if (wanted.isEmpty) {
+        final low = text.toLowerCase();
+        if (low.contains('extends comicsource') ||
+            text.contains('"fileName"')) {
+          return (ok: false, message: '这是 Venera 漫画源，请在「漫源仓库」导入');
+        }
+        if (text.contains('"sources"') && text.contains('"config"')) {
+          return (ok: false, message: '这是漫画配置源，请在「漫源仓库」导入');
+        }
+        return (ok: false, message: '没解析出书源（支持 Legado 书源 JSON）');
+      }
+      final r = await _sourceStore.addAll(wanted);
+      await SourceManager().reload();
+      return (ok: true, message: '书源新增 ${r.added} 个、更新 ${r.updated} 个');
+    } catch (e) {
+      return (ok: false, message: '导入失败：$e');
+    }
+  }
+
+  Future<({bool ok, String message})> _importTextForWarehouse(
+    String text, {
+    String baseUrl = '',
+  }) {
+    return widget.comic
+        ? importComicSourcesText(text, baseUrl: baseUrl)
+        : _importBookText(text);
+  }
+
   Future<void> _applyComicImport(String text, {String baseUrl = ''}) async {
     var body = text;
     var base = baseUrl;
@@ -1923,7 +1995,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
         return;
       }
     }
-    final r = await importComicSourcesText(body, baseUrl: base);
+    final r = await _importTextForWarehouse(body, baseUrl: base);
     if (!mounted) return;
     setState(() {});
     if (r.ok) {
@@ -1938,7 +2010,8 @@ class _WarehouseTabState extends State<_WarehouseTab>
     final subs = _sortedSubs;
     if (subs.isEmpty) return const SizedBox.shrink();
     return SizedBox(
-      height: 100,
+      // 卡片 104 + 上下各 2 的间距（用户 2026-10-18：文字放大、卡片同步变大）
+      height: 108,
       child: ReorderableListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.only(left: 14, right: 14),
@@ -1966,7 +2039,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
     }
   }
 
-  /// 订阅卡片（正方形 96×96）：
+  /// 订阅卡片（正方形 104×104）：
   ///   左上刷新 / 右上开关 / 中间名称 / 左下更新日期 / 右下源数。
   /// 点击 = 直接打开编辑页（不再弹「修改 / 复制 / 删除」菜单）；
   /// 长按 = 拖动排序。
@@ -1982,8 +2055,8 @@ class _WarehouseTabState extends State<_WarehouseTab>
           _editSub(s);
         },
         child: Container(
-          width: 96,
-          height: 96,
+          width: 104,
+          height: 104,
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
             color: active
@@ -2050,7 +2123,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
                     textAlign: TextAlign.center,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: 13.5,
                       height: 1.2,
                       fontWeight: FontWeight.w700,
                       color: _label,
@@ -2067,7 +2140,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 9,
+                        fontSize: 9.5,
                         color: JellyTheme.textSecondary,
                       ),
                     ),
@@ -2076,7 +2149,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
                     '${s.count} 个源',
                     maxLines: 1,
                     style: TextStyle(
-                      fontSize: 9,
+                      fontSize: 9.5,
                       color: JellyTheme.textSecondary,
                     ),
                   ),
@@ -2288,37 +2361,36 @@ class _WarehouseTabState extends State<_WarehouseTab>
               ),
             ),
           ),
-          PopupMenuButton<_ViewMode>(
-            tooltip: '切换视图',
-            initialValue: _view,
-            color: _isDark ? JellyTheme.cardDark : Colors.white,
-            onSelected: _setViewMode,
-            itemBuilder: (_) => [
-              for (final v in _ViewMode.values)
-                PopupMenuItem(
-                  value: v,
-                  child: Row(
-                    children: [
-                      Icon(
-                        v == _view ? Icons.check_rounded : v.icon,
-                        size: 17,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(v.label, style: const TextStyle(fontSize: 13)),
-                    ],
-                  ),
-                ),
-            ],
-            child: Padding(
-              padding: const EdgeInsets.all(8),
-              child: Icon(
-                _view.icon,
-                size: 20,
-                color: JellyTheme.textSecondary,
-              ),
-            ),
-          ),
+          // 视图切换：与「影视源切换」面板同款的小圆底按钮，
+          // 点一下按 列表 → 卡片 → 一行两个 → 列表 轮换（用户 2026-10-18）
+          _viewToggleButton(),
         ],
+      ),
+    );
+  }
+
+  /// 视图切换按钮 —— 与影视「源切换」面板同款：
+  /// 30×30 圆淡底 + 15px 图标，**点一下直接切下一个视图**（不是弹菜单）。
+  Widget _viewToggleButton() {
+    final next = _ViewMode.values[(_view.index + 1) % _ViewMode.values.length];
+    return Tooltip(
+      message: '视图：${_view.label}（点击切换为${next.label}）',
+      child: GestureDetector(
+        onTap: () => _setViewMode(next),
+        child: Container(
+          width: 30,
+          height: 30,
+          margin: const EdgeInsets.symmetric(horizontal: 4),
+          decoration: BoxDecoration(
+            color: AppTheme.backgroundTertiary,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            next.icon,
+            size: 15,
+            color: AppTheme.textSecondary,
+          ),
+        ),
       ),
     );
   }
@@ -2381,9 +2453,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
         children.add(_sourceListCard(sources));
       } else {
         final columns = _view.columns;
-        final ratio = _view == _ViewMode.grid
-            ? 1.05
-            : (_view == _ViewMode.card ? 4.2 : 2.25);
+        final ratio = _view == _ViewMode.card ? 4.2 : 2.25;
         children.add(
           GridView.builder(
             shrinkWrap: true,
@@ -2426,6 +2496,9 @@ class _WarehouseTabState extends State<_WarehouseTab>
     );
   }
 
+  /// 书源列表（列表视图）：**长按整行拖动排序**（用户 2026-10-18）。
+  ///
+  /// 长按不再进多选（多选改到顶栏的 checklist 按钮），否则和拖动冲突。
   Widget _sourceListCard(List<BookSource> sources) {
     return Container(
       clipBehavior: Clip.antiAlias,
@@ -2433,71 +2506,105 @@ class _WarehouseTabState extends State<_WarehouseTab>
         color: _card,
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Column(
-        children: [
-          for (var i = 0; i < sources.length; i++) ...[
-            if (i > 0)
-              Divider(
-                height: 1,
-                indent: 14,
-                endIndent: 14,
-                color: JellyTheme.textSecondary.withValues(alpha: 0.12),
+      child: ReorderableListView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        padding: EdgeInsets.zero,
+        buildDefaultDragHandles: false,
+        itemCount: sources.length,
+        onReorder: (o, n) => _reorderBookSources(sources, o, n),
+        proxyDecorator: (child, i, animation) =>
+            Material(color: Colors.transparent, child: child),
+        itemBuilder: (_, i) {
+          Widget row = Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (i > 0)
+                Divider(
+                  height: 1,
+                  indent: 14,
+                  endIndent: 14,
+                  color: JellyTheme.textSecondary.withValues(alpha: 0.12),
+                ),
+              SwipeActionTile(
+                enabled: !_selectMode,
+                backgroundColor: _card,
+                borderRadius: BorderRadius.zero,
+                actions: [
+                  SwipeAction(
+                    icon: Icons.edit_outlined,
+                    label: '编辑',
+                    color: const Color(0xFF5B8DEF),
+                    onTap: () => _editEntry(sources[i].id),
+                  ),
+                  SwipeAction(
+                    icon: Icons.ios_share_rounded,
+                    label: '分享',
+                    color: const Color(0xFF3AAE8C),
+                    onTap: () => _shareIds([sources[i].id]),
+                  ),
+                  SwipeAction(
+                    icon: Icons.delete_outline_rounded,
+                    label: '删除',
+                    color: Colors.redAccent,
+                    onTap: () => _deleteSource(sources[i]),
+                  ),
+                ],
+                child: _SourceRow(
+                  source: sources[i],
+                  selectMode: _selectMode,
+                  picked: _picked.contains(sources[i].id),
+                  onTap: () {
+                    if (_selectMode) {
+                      _togglePick(sources[i].id);
+                    } else {
+                      // 点源 = 直接进编辑（Legado 书源就是脚本编辑页）
+                      _editEntry(sources[i].id);
+                    }
+                  },
+                  onToggle: (v) async {
+                    await _sourceStore.setEnabled(sources[i].id, v);
+                    if (mounted) setState(() {});
+                  },
+                ),
               ),
-            SwipeActionTile(
-              enabled: !_selectMode,
-              backgroundColor: _card,
-              borderRadius: BorderRadius.zero,
-              actions: [
-                SwipeAction(
-                  icon: Icons.edit_outlined,
-                  label: '编辑',
-                  color: const Color(0xFF5B8DEF),
-                  onTap: () => _editEntry(sources[i].id),
-                ),
-                SwipeAction(
-                  icon: Icons.ios_share_rounded,
-                  label: '分享',
-                  color: const Color(0xFF3AAE8C),
-                  onTap: () => _shareIds([sources[i].id]),
-                ),
-                SwipeAction(
-                  icon: Icons.delete_outline_rounded,
-                  label: '删除',
-                  color: Colors.redAccent,
-                  onTap: () => _deleteSource(sources[i]),
-                ),
-              ],
-              child: _SourceRow(
-                source: sources[i],
-                selectMode: _selectMode,
-                picked: _picked.contains(sources[i].id),
-                onTap: () {
-                  if (_selectMode) {
-                    _togglePick(sources[i].id);
-                  } else {
-                    // 点源 = 直接进编辑（Legado 书源就是脚本编辑页）
-                    _editEntry(sources[i].id);
-                  }
-                },
-                onLongPress: () => _enterSelect(sources[i].id),
-                onToggle: (v) async {
-                  await _sourceStore.setEnabled(sources[i].id, v);
-                  if (mounted) setState(() {});
-                },
-              ),
-            ),
-          ],
-        ],
+            ],
+          );
+          if (!_selectMode) {
+            row = ReorderableDelayedDragStartListener(
+              index: i,
+              child: row,
+            );
+          }
+          return KeyedSubtree(
+            key: ValueKey('book-${sources[i].id}'),
+            child: row,
+          );
+        },
       ),
     );
+  }
+
+  Future<void> _reorderBookSources(
+    List<BookSource> visible,
+    int oldIndex,
+    int newIndex,
+  ) async {
+    if (newIndex > oldIndex) newIndex -= 1;
+    final ids = visible.map((e) => e.id).toList();
+    if (oldIndex < 0 || oldIndex >= ids.length) return;
+    final moved = ids.removeAt(oldIndex);
+    ids.insert(newIndex.clamp(0, ids.length), moved);
+    await _sourceStore.reorderWithin(ids);
+    if (mounted) setState(() => _sort = _SortMode.custom);
   }
 
   Widget _emptyHint() {
     final sub = _selectedSub;
     final text = sub == null
         ? (widget.comic
-              ? '还没有漫画源。点右上角 ＋ 添加订阅，或从漫画源仓库导入。'
-              : '还没有小说源。点右上角 ＋ 添加订阅，或从书源仓库导入。')
+              ? '还没有漫画源。点右上角 ＋ 添加订阅，或点右上角导入源。'
+              : '还没有书源。点右上角 ＋ 添加订阅，或点右上角导入书源 / 漫画源。')
         : (sub.count == 0
               ? '「${sub.name}」还没有加载过，点卡片上的刷新按钮拉取。'
               : '「${sub.name}」没有可显示的源，点刷新重新拉取。');
@@ -2557,7 +2664,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
                       ? (picked
                             ? Icons.check_box_rounded
                             : Icons.check_box_outline_blank_rounded)
-                      : (widget.comic
+                      : (s.isComicSource
                             ? Icons.collections_bookmark_rounded
                             : Icons.auto_stories_rounded),
                   size: 16,
@@ -2682,97 +2789,148 @@ class _WarehouseTabState extends State<_WarehouseTab>
         color: _card,
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Column(
-        children: [
-          for (var i = 0; i < list.length; i++) ...[
-            if (i > 0)
-              Divider(
-                height: 1,
-                indent: 14,
-                endIndent: 14,
-                color: JellyTheme.textSecondary.withValues(alpha: 0.12),
-              ),
-            SwipeActionTile(
-              enabled: !_selectMode,
-              backgroundColor: _card,
-              borderRadius: BorderRadius.zero,
-              actions: [
-                SwipeAction(
-                  icon: Icons.edit_outlined,
-                  label: '编辑',
-                  color: const Color(0xFF5B8DEF),
-                  onTap: () => _editEntry(list[i].id),
+      child: ReorderableListView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        padding: EdgeInsets.zero,
+        buildDefaultDragHandles: false,
+        itemCount: list.length,
+        onReorder: (o, n) => _reorderMangaSources(list, o, n),
+        proxyDecorator: (child, i, animation) =>
+            Material(color: Colors.transparent, child: child),
+        itemBuilder: (_, i) {
+          Widget row = Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (i > 0)
+                Divider(
+                  height: 1,
+                  indent: 14,
+                  endIndent: 14,
+                  color: JellyTheme.textSecondary.withValues(alpha: 0.12),
                 ),
-                SwipeAction(
-                  icon: Icons.ios_share_rounded,
-                  label: '分享',
-                  color: const Color(0xFF3AAE8C),
-                  onTap: () => _shareIds([list[i].id]),
-                ),
-                SwipeAction(
-                  icon: Icons.delete_outline_rounded,
-                  label: '删除',
-                  color: Colors.redAccent,
-                  onTap: () => _deleteIds([list[i].id]),
-                ),
-              ],
-              child: GestureDetector(
-                onTap: () {
-                  if (_selectMode) {
-                    _togglePick(list[i].id);
-                  } else {
-                    _editEntry(list[i].id);
-                  }
-                },
-                onLongPress: () => _enterSelect(list[i].id),
-                child: SwitchListTile(
-                  dense: true,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14),
-                  selected: _picked.contains(list[i].id),
-                  selectedTileColor: JellyTheme.primary.withValues(alpha: 0.08),
-                  secondary: _selectMode
-                      ? Icon(
-                          _picked.contains(list[i].id)
-                              ? Icons.check_box_rounded
-                              : Icons.check_box_outline_blank_rounded,
-                          size: 20,
-                          color: _picked.contains(list[i].id)
-                              ? JellyTheme.primary
-                              : JellyTheme.textSecondary,
-                        )
-                      : null,
-                  title: Text(
-                    list[i].name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
+              SwipeActionTile(
+                enabled: !_selectMode,
+                backgroundColor: _card,
+                borderRadius: BorderRadius.zero,
+                actions: [
+                  SwipeAction(
+                    icon: Icons.edit_outlined,
+                    label: '编辑',
+                    color: const Color(0xFF5B8DEF),
+                    onTap: () => _editEntry(list[i].id),
                   ),
-                  subtitle: Text(
-                    list[i].id.startsWith('venera:')
-                        ? 'JS ComicSource · ${_veneraScriptInfo(list[i].id)} · ${list[i].id}'
-                        : list[i].id,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: JellyTheme.textSecondary,
-                    ),
+                  SwipeAction(
+                    icon: Icons.ios_share_rounded,
+                    label: '分享',
+                    color: const Color(0xFF3AAE8C),
+                    onTap: () => _shareIds([list[i].id]),
                   ),
-                  value: SourceManager().isEnabled(list[i].id),
-                  onChanged: (v) async {
-                    await SourceManager().setEnabled(list[i].id, v);
-                    if (mounted) setState(() {});
+                  SwipeAction(
+                    icon: Icons.delete_outline_rounded,
+                    label: '删除',
+                    color: Colors.redAccent,
+                    onTap: () => _deleteIds([list[i].id]),
+                  ),
+                ],
+                child: GestureDetector(
+                  onTap: () {
+                    if (_selectMode) {
+                      _togglePick(list[i].id);
+                    } else {
+                      _editEntry(list[i].id);
+                    }
                   },
+                  child: SwitchListTile(
+                    dense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+                    selected: _picked.contains(list[i].id),
+                    selectedTileColor: JellyTheme.primary.withValues(
+                      alpha: 0.08,
+                    ),
+                    secondary: _selectMode
+                        ? Icon(
+                            _picked.contains(list[i].id)
+                                ? Icons.check_box_rounded
+                                : Icons.check_box_outline_blank_rounded,
+                            size: 20,
+                            color: _picked.contains(list[i].id)
+                                ? JellyTheme.primary
+                                : JellyTheme.textSecondary,
+                          )
+                        : null,
+                    title: Text(
+                      list[i].name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    subtitle: Text(
+                      list[i].id.startsWith('venera:')
+                          ? 'JS ComicSource · ${_veneraScriptInfo(list[i].id)} · ${list[i].id}'
+                          : list[i].id,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: JellyTheme.textSecondary,
+                      ),
+                    ),
+                    value: SourceManager().isEnabled(list[i].id),
+                    onChanged: (v) async {
+                      await SourceManager().setEnabled(list[i].id, v);
+                      if (mounted) setState(() {});
+                    },
+                  ),
                 ),
               ),
-            ),
-          ],
-        ],
+            ],
+          );
+          if (!_selectMode) {
+            row = ReorderableDelayedDragStartListener(
+              index: i,
+              child: row,
+            );
+          }
+          return KeyedSubtree(
+            key: ValueKey('manga-${list[i].id}'),
+            child: row,
+          );
+        },
       ),
     );
+  }
+
+  Future<void> _reorderMangaSources(
+    List<MangaSource> visible,
+    int oldIndex,
+    int newIndex,
+  ) async {
+    if (newIndex > oldIndex) newIndex -= 1;
+    final ids = visible.map((e) => e.id).toList();
+    if (oldIndex < 0 || oldIndex >= ids.length) return;
+    final moved = ids.removeAt(oldIndex);
+    ids.insert(newIndex.clamp(0, ids.length), moved);
+    SourceManager().reorderVisible(ids);
+    if (mounted) setState(() => _sort = _SortMode.custom);
+  }
+
+  void _moveMangaWithin(
+    List<MangaSource> visible,
+    String dragId,
+    String targetId,
+  ) {
+    final ids = visible.map((e) => e.id).toList();
+    final from = ids.indexOf(dragId);
+    final to = ids.indexOf(targetId);
+    if (from < 0 || to < 0 || from == to) return;
+    final moved = ids.removeAt(from);
+    ids.insert(to, moved);
+    SourceManager().reorderVisible(ids);
+    if (mounted) setState(() => _sort = _SortMode.custom);
   }
 
   /// 卡片 / 网格 / 一行 2·3·4 个：Venera / 配置源也要跟着视图切换。
@@ -2781,14 +2939,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
   /// 看起来完全没反应（用户 2026-10-18）。
   Widget _mangaGrid(List<MangaSource> list) {
     final columns = _view.columns;
-    final ratio = switch (_view) {
-      _ViewMode.card => 4.2,
-      _ViewMode.grid => 1.2,
-      _ViewMode.two => 1.5,
-      _ViewMode.three => 1.15,
-      _ViewMode.four => 0.95,
-      _ViewMode.list => 4.2,
-    };
+    final ratio = _view == _ViewMode.card ? 4.2 : 2.25;
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -2799,11 +2950,18 @@ class _WarehouseTabState extends State<_WarehouseTab>
         childAspectRatio: ratio,
       ),
       itemCount: list.length,
-      itemBuilder: (_, i) => _mangaGridCard(list[i]),
+      itemBuilder: (_, i) => DragTarget<String>(
+        onWillAcceptWithDetails: (d) => d.data != list[i].id,
+        onAcceptWithDetails: (d) => _moveMangaWithin(list, d.data, list[i].id),
+        builder: (_, candidate, __) => _mangaGridCard(
+          list[i],
+          highlight: candidate.isNotEmpty,
+        ),
+      ),
     );
   }
 
-  Widget _mangaGridCard(MangaSource src) {
+  Widget _mangaGridCard(MangaSource src, {bool highlight = false}) {
     final picked = _picked.contains(src.id);
     final enabled = SourceManager().isEnabled(src.id);
     return GestureDetector(
@@ -2823,7 +2981,10 @@ class _WarehouseTabState extends State<_WarehouseTab>
           border: Border.all(
             color: picked
                 ? JellyTheme.primary
-                : JellyTheme.textSecondary.withValues(alpha: 0.10),
+                : (highlight
+                      ? JellyTheme.primary.withValues(alpha: 0.45)
+                      : JellyTheme.textSecondary.withValues(alpha: 0.10)),
+            width: picked || highlight ? 1.2 : 0.5,
           ),
         ),
         child: Column(
@@ -2843,6 +3004,44 @@ class _WarehouseTabState extends State<_WarehouseTab>
                       : JellyTheme.primary,
                 ),
                 const Spacer(),
+                // 拖动把手：长按把手换位（长按卡片 = 多选）
+                if (!_selectMode)
+                  LongPressDraggable<String>(
+                    data: src.id,
+                    feedback: Material(
+                      color: Colors.transparent,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _card,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: JellyTheme.primary),
+                        ),
+                        child: Text(
+                          src.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12, color: _label),
+                        ),
+                      ),
+                    ),
+                    childWhenDragging: Opacity(
+                      opacity: 0.35,
+                      child: Icon(
+                        Icons.drag_indicator_rounded,
+                        size: 16,
+                        color: JellyTheme.textSecondary,
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.drag_indicator_rounded,
+                      size: 16,
+                      color: JellyTheme.textSecondary,
+                    ),
+                  ),
                 SizedBox(
                   height: 20,
                   child: FittedBox(
@@ -2922,7 +3121,9 @@ class _SourceRow extends StatelessWidget {
                   ? (picked
                         ? Icons.check_box_rounded
                         : Icons.check_box_outline_blank_rounded)
-                  : Icons.auto_stories_rounded,
+                  : (source.isComicSource
+                        ? Icons.collections_bookmark_rounded
+                        : Icons.auto_stories_rounded),
               size: selectMode ? 19 : 16,
               color: selectMode
                   ? (picked ? JellyTheme.primary : JellyTheme.textSecondary)

@@ -981,11 +981,18 @@ class BookSourceService {
     return out;
   }
 
-  /// 导出书源为 JSON（分享用）
+  /// 导出书源 JSON（去掉本机的仓库归属标记，否则分享出去再导入
+  /// 会被判成"另一个仓"的源而不显示）。
   String exportSources(List<BookSource> sources) =>
       const JsonEncoder.withIndent(
         '  ',
-      ).convert(sources.map((s) => s.toJson()).toList());
+      ).convert(
+        sources.map((s) {
+          final m = Map<String, dynamic>.from(s.toJson());
+          m.remove('_warehouse');
+          return m;
+        }).toList(),
+      );
 
   // ============================================================
   // 书源登录（V2.0.7 的「书源登录」）

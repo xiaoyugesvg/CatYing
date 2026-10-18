@@ -113,9 +113,9 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
     return _ItemState.parseFail;
   }
 
-  /// 只体检/展示**书源**：漫画源统一归漫画模块（用户 2026-10-18 分离）。
+  /// 只体检/展示**书源仓**名下的源（书源 + 从书源仓导入的漫画源）。
   List<BookSource> get _bookSources =>
-      store.all.where((s) => !s.isComicSource).toList();
+      store.all.where((s) => s.belongsToBook).toList();
 
   int get _total => _bookSources.length;
   int get _usable =>

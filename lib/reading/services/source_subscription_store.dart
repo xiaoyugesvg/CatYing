@@ -69,6 +69,11 @@ class SourceSubscriptionStore extends ChangeNotifier {
         } else if (u.contains('novel') || u.contains('book')) {
           _items[i] = s.copyWith(kind: SourceSubscriptionKind.novel);
           kindMigrated = true;
+        } else {
+          // 仍认不出的旧「综合源」：统一归书源仓（书源仓本身也收漫画源），
+          // 保证一条订阅只出现在一个仓（用户 2026-10-18）。
+          _items[i] = s.copyWith(kind: SourceSubscriptionKind.novel);
+          kindMigrated = true;
         }
       }
       if (kindMigrated) await _persist();
@@ -216,15 +221,15 @@ class SourceSubscriptionStore extends ChangeNotifier {
       // SourceConfigStore；以前误走 BookSourceStore，结果漫画源出现在书源仓库。
       final configDefs = _parseConfigDefs(text);
       if (sub.kind != SourceSubscriptionKind.comic && configDefs.isNotEmpty) {
-        throw Exception('这是漫画配置源，请在「漫画仓」添加订阅');
+        throw Exception('这是漫画配置源，请在「漫源仓库」添加订阅');
       }
 
       var all = BookSourceImportParser.parseSources(text);
       var wanted = all.where((s) {
         // 统一判据：兼容没写 bookSourceType 的漫画脚本
         if (sub.kind == SourceSubscriptionKind.comic) return s.isComicSource;
-        if (sub.kind == SourceSubscriptionKind.novel) return !s.isComicSource;
-        // legado 综合源：小说 + 漫画都收，更新后两个仓同时有内容
+        // 书源仓的订阅：**书源 + 漫画源都收**（用户 2026-10-18：
+        // 「书源既要能导入书源，也要能导入漫画源并用图片模式」）。
         return true;
       }).toList();
       // 漫画仓的订阅：一律按漫画源入库，避免没有 bookSourceType 的脚本
@@ -235,6 +240,10 @@ class SourceSubscriptionStore extends ChangeNotifier {
             BookSource(raw: {...s.raw, 'bookSourceType': 2}, id: s.id),
         ];
       }
+      // 打仓库归属（用户 2026-10-18：「从哪个仓订阅就用哪个」）：
+      //   书源仓的订阅（含旧「综合源」）→ book；漫源仓库的订阅 → comic。
+      final side = sub.kind.feedsComic ? 'comic' : 'book';
+      wanted = [for (final s in wanted) s.withWarehouse(side)];
       if (wanted.isEmpty && configDefs.isEmpty) {
         throw Exception('没有解析到${sub.kind.label}（共 ${all.length} 条）');
       }

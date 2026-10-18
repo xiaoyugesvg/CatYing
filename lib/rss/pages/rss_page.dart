@@ -10,6 +10,7 @@
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -18,6 +19,7 @@ import '../../services/ad_block_service.dart';
 import '../../services/nav_feature_service.dart';
 import '../../widgets/ad_block_bubble.dart';
 import '../../widgets/app_toast.dart';
+import '../../widgets/card_action_sheet.dart';
 import '../../widgets/common_widgets.dart';
 import '../models/rss_article.dart';
 import '../models/rss_source.dart';
@@ -815,6 +817,13 @@ class _RssSourceSwitchSheetState extends State<_RssSourceSwitchSheet> {
   /// false=单列列表 / true=双排网格（默认双排，与影视面板一致）
   bool _grid = true;
 
+  /// 面板内的源列表 —— 删除/排序后要原地生效，所以用可变副本
+  late final List<RssSource> _items = List.of(widget.sources);
+
+  /// 多选模式（长按菜单 / 顶栏 checklist 进入）
+  bool _selectMode = false;
+  final Set<String> _picked = <String>{};
+
   @override
   void dispose() {
     _search.dispose();
@@ -823,9 +832,266 @@ class _RssSourceSwitchSheetState extends State<_RssSourceSwitchSheet> {
   }
 
   List<RssSource> get _list {
-    if (_kw.isEmpty) return widget.sources;
+    if (_kw.isEmpty) return _items;
     final k = _kw.toLowerCase();
-    return widget.sources.where((s) => s.name.toLowerCase().contains(k)).toList();
+    return _items.where((s) => s.name.toLowerCase().contains(k)).toList();
+  }
+
+  String get _selectedId => widget.selectedId;
+
+  // ── 多选 ──────────────────────────────────────────────
+
+  void _togglePick(String id) {
+    setState(() {
+      if (!_picked.remove(id)) _picked.add(id);
+      if (_picked.isEmpty) _selectMode = false;
+    });
+  }
+
+  void _enterSelectMode([String? first]) {
+    setState(() {
+      _selectMode = true;
+      _picked.clear();
+      if (first != null) _picked.add(first);
+    });
+  }
+
+  void _exitSelectMode() {
+    setState(() {
+      _selectMode = false;
+      _picked.clear();
+    });
+  }
+
+  // ── 长按菜单（卡片式，一行两个）：分享 / 删除 / 分组 / 多选 ──
+
+  Future<void> _onLongPress(RssSource s) async {
+    if (_selectMode) {
+      _togglePick(s.id);
+      return;
+    }
+    await showCardActions(
+      context,
+      title: s.name,
+      subtitle: s.url,
+      actions: [
+        CardAction(
+          icon: Icons.ios_share_rounded,
+          label: '分享',
+          onTap: () => _share([s]),
+        ),
+        CardAction(
+          icon: Icons.delete_outline_rounded,
+          label: '删除',
+          danger: true,
+          onTap: () => _confirmDelete([s]),
+        ),
+        CardAction(
+          icon: Icons.folder_outlined,
+          label: '分组',
+          onTap: () => _pickGroup(s),
+        ),
+        CardAction(
+          icon: Icons.checklist_rounded,
+          label: '多选',
+          onTap: () => _enterSelectMode(s.id),
+        ),
+      ],
+    );
+  }
+
+  /// 分享 = 复制 Legado RSS 源 JSON（对方可直接导入）
+  Future<void> _share(List<RssSource> list) async {
+    if (list.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: encodeRssSources(list)));
+    AppToast.message(list.length > 1 ? '已复制 ${list.length} 个源' : '已复制源');
+  }
+
+  Future<void> _confirmDelete(List<RssSource> targets) async {
+    if (targets.isEmpty) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        title: Text(
+          targets.length > 1 ? '删除 ${targets.length} 个源？' : '删除这个源？',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontHeadline,
+          ),
+        ),
+        content: Text(
+          targets.length > 1
+              ? '删除后需要重新导入才能恢复。'
+              : '「${targets.first.name}」删除后需要重新导入才能恢复。',
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: AppTheme.fontBody,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text('取消', style: TextStyle(color: AppTheme.textSecondary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(
+              '删除',
+              style: TextStyle(color: Colors.redAccent.shade100),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final ids = targets.map((e) => e.id).toSet();
+    await RssStore.instance.removeAll(ids);
+    if (!mounted) return;
+    setState(() {
+      _items.removeWhere((e) => ids.contains(e.id));
+      _picked.removeAll(ids);
+      if (_picked.isEmpty) _selectMode = false;
+    });
+  }
+
+  Future<void> _pickGroup(RssSource s) async {
+    final groups = <String>{
+      for (final e in _items)
+        if (e.group.trim().isNotEmpty) e.group.trim(),
+      if (s.group.trim().isNotEmpty) s.group.trim(),
+    }.toList()..sort();
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '移动到分组',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 14),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 240),
+                child: SingleChildScrollView(
+                  child: Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      _groupChipOf(
+                        '未分组',
+                        s.group.trim().isEmpty,
+                        () => Navigator.of(ctx).pop(''),
+                      ),
+                      for (final g in groups)
+                        _groupChipOf(
+                          g,
+                          s.group.trim() == g,
+                          () => Navigator.of(ctx).pop(g),
+                        ),
+                      _groupChipOf('＋ 新建', false, () => Navigator.of(ctx).pop('__new__')),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    var target = picked;
+    if (target == '__new__') {
+      final name = await _askGroupName();
+      if (name == null || name.isEmpty || !mounted) return;
+      target = name;
+    }
+    await RssStore.instance.setGroup(s.id, target);
+    if (!mounted) return;
+    setState(() {
+      final i = _items.indexWhere((e) => e.id == s.id);
+      if (i >= 0) _items[i] = _items[i].copyWith(group: target);
+    });
+  }
+
+  Future<String?> _askGroupName() async {
+    final ctrl = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppTheme.radiusLG),
+        ),
+        title: Text('新建分组', style: TextStyle(color: AppTheme.textPrimary)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          style: TextStyle(color: AppTheme.textPrimary),
+          decoration: const InputDecoration(hintText: '分组名称'),
+          onSubmitted: (v) => Navigator.of(ctx).pop(v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text('取消', style: TextStyle(color: AppTheme.textTertiary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(ctrl.text),
+            child: const Text('创建'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    return (name ?? '').trim();
+  }
+
+  Widget _groupChipOf(String label, bool selected, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.accentColor : AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppTheme.borderLight, width: 0.5),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? Colors.white : AppTheme.textSecondary,
+            fontSize: 13,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 拖动排序：只重排可见项占的坑位并落盘
+  Future<void> _moveItem(String fromId, String toId) async {
+    if (fromId == toId) return;
+    final from = _items.indexWhere((e) => e.id == fromId);
+    final to = _items.indexWhere((e) => e.id == toId);
+    if (from < 0 || to < 0) return;
+    final item = _items.removeAt(from);
+    _items.insert(to, item);
+    setState(() {});
+    await RssStore.instance.reorderWithin(_items.map((e) => e.id).toList());
   }
 
   /// 定位到当前选中的源（与影视面板同款功能）。
@@ -891,8 +1157,12 @@ class _RssSourceSwitchSheetState extends State<_RssSourceSwitchSheet> {
                           fontSize: AppTheme.fontHeadline,
                           fontWeight: FontWeight.w700)),
                   const Spacer(),
-                  _circleBtn(Icons.my_location_rounded, _locate),
-                  const SizedBox(width: 8),
+                  if (!_selectMode) ...[
+                    _circleBtn(Icons.checklist_rounded, _enterSelectMode),
+                    const SizedBox(width: 8),
+                    _circleBtn(Icons.my_location_rounded, _locate),
+                    const SizedBox(width: 8),
+                  ],
                   _circleBtn(
                     _grid ? Icons.view_list_outlined : Icons.grid_view_outlined,
                     () => setState(() => _grid = !_grid),
@@ -960,17 +1230,60 @@ class _RssSourceSwitchSheetState extends State<_RssSourceSwitchSheet> {
                               childAspectRatio: 3.4,
                             ),
                             itemCount: list.length,
-                            itemBuilder: (c, i) => _tile(list[i]),
+                            itemBuilder: (c, i) => DragTarget<String>(
+                              onWillAcceptWithDetails: (d) =>
+                                  d.data != list[i].id,
+                              onAcceptWithDetails: (d) =>
+                                  _moveItem(d.data, list[i].id),
+                              builder: (_, candidate, _) {
+                                final tile = _tile(list[i]);
+                                if (candidate.isEmpty) return tile;
+                                return DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: AppTheme.accentColor.withValues(
+                                        alpha: 0.6,
+                                      ),
+                                      width: 1.4,
+                                    ),
+                                  ),
+                                  child: tile,
+                                );
+                              },
+                            ),
                           )
                         else
                           for (final s in list)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 6),
-                              child: _row(s),
+                              child: DragTarget<String>(
+                                onWillAcceptWithDetails: (d) => d.data != s.id,
+                                onAcceptWithDetails: (d) =>
+                                    _moveItem(d.data, s.id),
+                                builder: (_, candidate, _) {
+                                  final row = _row(s);
+                                  if (candidate.isEmpty) return row;
+                                  return DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: AppTheme.accentColor.withValues(
+                                          alpha: 0.6,
+                                        ),
+                                        width: 1.4,
+                                      ),
+                                    ),
+                                    child: row,
+                                  );
+                                },
+                              ),
                             ),
                       ],
                     ),
             ),
+            // 多选底栏：全选 / 已选数 / 分享 / 删除 / 完成
+            if (_selectMode) _selectBar(),
             // 底部入口：去管理页导入 / 排序 / 删除
             GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -1007,54 +1320,168 @@ class _RssSourceSwitchSheetState extends State<_RssSourceSwitchSheet> {
   }
 
   void _pick(RssSource s) {
+    if (_selectMode) {
+      _togglePick(s.id);
+      return;
+    }
     Navigator.pop(context);
     widget.onPick(s.id);
   }
 
-  /// 网格卡片：首字头像 + 源名 + 地址
+  /// 多选底栏：全选 / 已选数 / 分享 / 删除 / 完成
+  Widget _selectBar() {
+    final list = _list;
+    final allPicked =
+        list.isNotEmpty && list.every((e) => _picked.contains(e.id));
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: AppTheme.borderLight, width: 0.5),
+        ),
+      ),
+      child: Row(
+        children: [
+          TextButton(
+            onPressed: () => setState(() {
+              if (allPicked) {
+                _picked.clear();
+                _selectMode = false;
+              } else {
+                _picked.addAll(list.map((e) => e.id));
+              }
+            }),
+            child: Text(
+              allPicked ? '取消全选' : '全选',
+              style: TextStyle(
+                color: AppTheme.accentOnSurface,
+                fontSize: AppTheme.fontSubhead,
+              ),
+            ),
+          ),
+          Text(
+            '已选 ${_picked.length}',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: AppTheme.fontSubhead,
+            ),
+          ),
+          const Spacer(),
+          IconButton(
+            tooltip: '分享',
+            onPressed: _picked.isEmpty ? null : _sharePicked,
+            icon: Icon(
+              Icons.ios_share_rounded,
+              size: 20,
+              color: _picked.isEmpty
+                  ? AppTheme.textTertiary
+                  : AppTheme.accentOnSurface,
+            ),
+          ),
+          IconButton(
+            tooltip: '删除',
+            onPressed: _picked.isEmpty ? null : _deletePicked,
+            icon: Icon(
+              Icons.delete_outline_rounded,
+              size: 20,
+              color: _picked.isEmpty
+                  ? AppTheme.textTertiary
+                  : Colors.redAccent.shade100,
+            ),
+          ),
+          TextButton(
+            onPressed: _exitSelectMode,
+            child: Text(
+              '完成',
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: AppTheme.fontSubhead,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _sharePicked() async {
+    final targets = _items.where((e) => _picked.contains(e.id)).toList();
+    await _share(targets);
+  }
+
+  Future<void> _deletePicked() async {
+    final targets = _items.where((e) => _picked.contains(e.id)).toList();
+    await _confirmDelete(targets);
+  }
+
+  /// 网格卡片：首字头像 + 源名 + 地址（长按 = 菜单 / 左上把手拖动）
   Widget _tile(RssSource s) {
-    final on = s.id == widget.selectedId;
+    final on = s.id == _selectedId;
+    final picked = _picked.contains(s.id);
+    final active = _selectMode ? picked : on;
     return GestureDetector(
       onTap: () => _pick(s),
+      onLongPress: () => _onLongPress(s),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: on
+          color: active
               ? AppTheme.accentColor.withValues(alpha: 0.12)
               : AppTheme.backgroundTertiary,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: on
+            color: active
                 ? AppTheme.accentColor.withValues(alpha: 0.5)
                 : AppTheme.borderLight,
-            width: on ? 1 : 0.5,
+            width: active ? 1 : 0.5,
           ),
         ),
-        child: Row(
+        child: Stack(
           children: [
-            CardGridAvatar(s.name, selected: on),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(s.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: AppTheme.fontSubhead,
-                          fontWeight: on ? FontWeight.w600 : FontWeight.w400,
-                          color: AppTheme.textPrimary)),
-                  const SizedBox(height: 2),
-                  Text(s.url,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: AppTheme.fontCaption,
-                          color: AppTheme.textTertiary)),
-                ],
-              ),
+            Row(
+              children: [
+                CardGridAvatar(s.name, selected: active),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(s.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: AppTheme.fontSubhead,
+                              fontWeight:
+                                  active ? FontWeight.w600 : FontWeight.w400,
+                              color: AppTheme.textPrimary)),
+                      const SizedBox(height: 2),
+                      Text(s.group.trim().isEmpty ? s.url : s.group.trim(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: AppTheme.fontCaption,
+                              color: AppTheme.textTertiary)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            // 右上角：多选 = 复选框；否则 = 拖动把手（长按它排序）
+            Positioned(
+              top: -2,
+              right: -2,
+              child: _selectMode
+                  ? Icon(
+                      picked
+                          ? Icons.check_box_rounded
+                          : Icons.check_box_outline_blank_rounded,
+                      size: 16,
+                      color: picked
+                          ? AppTheme.accentColor
+                          : AppTheme.textTertiary,
+                    )
+                  : CardDragHandle(data: s.id, label: s.name),
             ),
           ],
         ),
@@ -1064,39 +1491,64 @@ class _RssSourceSwitchSheetState extends State<_RssSourceSwitchSheet> {
 
   /// 单列行
   Widget _row(RssSource s) {
-    final on = s.id == widget.selectedId;
+    final on = s.id == _selectedId;
+    final picked = _picked.contains(s.id);
+    final active = _selectMode ? picked : on;
     return GestureDetector(
       onTap: () => _pick(s),
+      onLongPress: () => _onLongPress(s),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: on
+          color: active
               ? AppTheme.accentColor.withValues(alpha: 0.12)
               : AppTheme.backgroundTertiary,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: on
+            color: active
                 ? AppTheme.accentColor.withValues(alpha: 0.5)
                 : AppTheme.borderLight,
-            width: on ? 1 : 0.5,
+            width: active ? 1 : 0.5,
           ),
         ),
         child: Row(
           children: [
-            CardGridAvatar(s.name, selected: on),
+            CardGridAvatar(s.name, selected: active),
             const SizedBox(width: 10),
             Expanded(
-              child: Text(s.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: AppTheme.fontSubhead,
-                      fontWeight: on ? FontWeight.w600 : FontWeight.w400,
-                      color: AppTheme.textPrimary)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(s.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: AppTheme.fontSubhead,
+                          fontWeight:
+                              active ? FontWeight.w600 : FontWeight.w400,
+                          color: AppTheme.textPrimary)),
+                  if (s.group.trim().isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(s.group.trim(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: AppTheme.fontCaption,
+                            color: AppTheme.textTertiary)),
+                  ],
+                ],
+              ),
             ),
-            if (on)
-              Icon(Icons.check_circle_rounded,
-                  size: 16, color: AppTheme.accentColor),
+            if (_selectMode)
+              Icon(
+                picked
+                    ? Icons.check_box_rounded
+                    : Icons.check_box_outline_blank_rounded,
+                size: 16,
+                color: picked ? AppTheme.accentColor : AppTheme.textTertiary,
+              )
+            else
+              CardDragHandle(data: s.id, label: s.name),
           ],
         ),
       ),

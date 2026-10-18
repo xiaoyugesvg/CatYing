@@ -1077,6 +1077,13 @@ function looksLikeJunkItem(it) {
   const col = String(it.colType || it.col_type || '').trim();
   const t = normTitleForJunk(title);
 
+  // 没有标题的条目（用户 2026-10-18）：「这种没有标题的就不要抓取了，
+  // 几乎都是广告」。真实内容不可能连标题都没有 ⇒ 列表页直接清掉，
+  // 避免留下「（无标题）」空卡片（点进去还会触发规则抓空地址的报错）。
+  // 注：这里只作用于 home/category/search；详情/内联规则不过本函数，
+  //     所以"详情规则返回一条纯地址"的写法不受影响。
+  if (!title) return true;
+
   // 占位链接
   if (url && /^(javascript:;?|#|hiker:\/\/empty)$/i.test(url)) return true;
 

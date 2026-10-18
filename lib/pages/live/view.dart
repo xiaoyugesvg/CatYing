@@ -28,6 +28,7 @@ import 'controller.dart';
 import '../../services/audio_focus.dart';
 import '../../widgets/app_empty_view.dart';
 import '../../widgets/app_toast.dart';
+import '../../widgets/card_action_sheet.dart';
 import '../../music/services/route_observer.dart' show MusicRouteObserver;
 
 /// 直播主界面（对照参考图）
@@ -1979,6 +1980,143 @@ class _LivePageState extends State<LivePage> {
     }
   }
 
+  /// 长按直播源 → **卡片式**菜单（一行两个）：编辑 / 分享 / 刷新 / 删除
+  Future<void> _liveSourceMenu(int index, VoidCallback refresh) async {
+    final svc = LiveService.instance;
+    if (index < 0 || index >= svc.sources.length) return;
+    final src = svc.sources[index];
+    final url = svc.sourceUrlAt(index);
+    await showCardActions(
+      context,
+      title: src.name,
+      subtitle: url,
+      actions: [
+        CardAction(
+          icon: Icons.edit_outlined,
+          label: '编辑',
+          onTap: () => _editLiveSource(index, refresh),
+        ),
+        CardAction(
+          icon: Icons.ios_share_rounded,
+          label: '分享',
+          onTap: () async {
+            if (url.isEmpty) {
+              AppToast.message('这条源没有地址');
+              return;
+            }
+            await Clipboard.setData(ClipboardData(text: url));
+            AppToast.message('已复制源地址');
+          },
+        ),
+        CardAction(
+          icon: Icons.refresh_rounded,
+          label: '刷新',
+          onTap: () async {
+            await svc.reloadSource(index);
+            refresh();
+            AppToast.message('正在刷新直播源…', duration: const Duration(seconds: 1));
+          },
+        ),
+        CardAction(
+          icon: Icons.delete_outline_rounded,
+          label: '删除',
+          danger: true,
+          onTap: () => _deleteLiveSource(index, refresh),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _editLiveSource(int index, VoidCallback refresh) async {
+    final svc = LiveService.instance;
+    if (index < 0 || index >= svc.sources.length) return;
+    final nameCtrl = TextEditingController(text: svc.sources[index].name);
+    final urlCtrl = TextEditingController(text: svc.sourceUrlAt(index));
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        title: Text('编辑直播源', style: TextStyle(color: AppTheme.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              style: TextStyle(color: AppTheme.textPrimary),
+              decoration: const InputDecoration(labelText: '名称'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: urlCtrl,
+              style: TextStyle(color: AppTheme.textPrimary),
+              minLines: 1,
+              maxLines: 3,
+              decoration: const InputDecoration(labelText: '地址'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text('取消', style: TextStyle(color: AppTheme.textTertiary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    final name = nameCtrl.text.trim();
+    final url = urlCtrl.text.trim();
+    nameCtrl.dispose();
+    urlCtrl.dispose();
+    if (ok != true || !mounted) return;
+    await svc.updateSourceMeta(index, name: name, url: url);
+    refresh();
+  }
+
+  Future<void> _deleteLiveSource(int index, VoidCallback refresh) async {
+    final svc = LiveService.instance;
+    if (index < 0 || index >= svc.sources.length) return;
+    final name = svc.sources[index].name;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        title: Text('删除直播源', style: TextStyle(color: AppTheme.textPrimary)),
+        content: Text(
+          '删除「$name」？',
+          style: TextStyle(color: AppTheme.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text('取消', style: TextStyle(color: AppTheme.textTertiary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text('删除', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await svc.removeSource(index);
+    if (!mounted) return;
+    refresh();
+    AppToast.message('已删除');
+  }
+
+  /// 拖动排序（把手拖到另一张卡片上）
+  Future<void> _moveLiveSource(int from, int to) async {
+    if (from == to || from < 0 || to < 0) return;
+    final svc = LiveService.instance;
+    if (from >= svc.sources.length || to >= svc.sources.length) return;
+    // reorderSource 遵循 ReorderableListView 约定：向下拖时插槽要 +1
+    await svc.reorderSource(from, from < to ? to + 1 : to);
+  }
+
   /// 显示直播源选择弹窗 — 居中、不透明、过高可滚动
   ///
   /// ⚠️ 用户 2026-10-16：「只有这个，直播「选择直播源」这个不变」——
@@ -2061,18 +2199,29 @@ class _LivePageState extends State<LivePage> {
                               itemBuilder: (_, i) {
                                 final src = srcs[i];
                                 final isActive = c.selectedSourceIndex == i;
-                                return Material(
-                                  color: isActive
-                                      ? AppTheme.accentColor.withValues(
-                                          alpha: 0.12,
-                                        )
-                                      : AppTheme.backgroundTertiary.withValues(
-                                          alpha: 0.55,
-                                        ),
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: InkWell(
+                                return DragTarget<int>(
+                                  onWillAcceptWithDetails: (d) => d.data != i,
+                                  onAcceptWithDetails: (d) async {
+                                    await _moveLiveSource(d.data, i);
+                                    setModalState(() {});
+                                  },
+                                  builder: (_, candidate, _) => Material(
+                                    color: isActive
+                                        ? AppTheme.accentColor.withValues(
+                                            alpha: 0.12,
+                                          )
+                                        : AppTheme.backgroundTertiary.withValues(
+                                            alpha: 0.55,
+                                          ),
                                     borderRadius: BorderRadius.circular(12),
-                                    onTap: () async {
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(12),
+                                      onLongPress: () =>
+                                          _liveSourceMenu(
+                                            i,
+                                            () => setModalState(() {}),
+                                          ),
+                                      onTap: () async {
                                       Navigator.pop(ctx);
                                       await c.selectSource(i);
                                       if (mounted) _autoplayCurrent();
@@ -2151,6 +2300,10 @@ class _LivePageState extends State<LivePage> {
                                               ],
                                             ),
                                           ),
+                                          CardDragHandle(
+                                            data: i,
+                                            label: src.name,
+                                          ),
                                           Icon(
                                             isActive
                                                 ? Icons.check_circle_rounded
@@ -2164,10 +2317,11 @@ class _LivePageState extends State<LivePage> {
                                       ),
                                     ),
                                   ),
+                                    ),
                                 );
                               },
                             )
-                          : _sourceGrid(srcs, c, view, ctx),
+                          : _sourceGrid(srcs, c, view, ctx, () => setModalState(() {})),
                     ),
                   const SizedBox(height: 10),
                 ],
@@ -2180,11 +2334,14 @@ class _LivePageState extends State<LivePage> {
   }
 
   /// 直播源弹窗的网格视图（两列 / 三列，卡片式）
+  ///
+  /// 长按卡片 = 卡片式菜单；按住左上角把手 = 拖动排序（[refresh] 用于刷新弹窗）。
   Widget _sourceGrid(
     List<LiveSource> srcs,
     LiveController c,
     int view,
     BuildContext dialogCtx,
+    VoidCallback refresh,
   ) {
     final twoCol = view == 1;
     final accent = AppTheme.accentColor;
@@ -2203,13 +2360,20 @@ class _LivePageState extends State<LivePage> {
       itemBuilder: (_, i) {
         final src = srcs[i];
         final isActive = c.selectedSourceIndex == i;
-        return Material(
+        return DragTarget<int>(
+          onWillAcceptWithDetails: (d) => d.data != i,
+          onAcceptWithDetails: (d) async {
+            await _moveLiveSource(d.data, i);
+            refresh();
+          },
+          builder: (_, candidate, _) => Material(
           color: isActive
               ? accent.withValues(alpha: 0.12)
               : AppTheme.backgroundCard,
           borderRadius: BorderRadius.circular(14),
           child: InkWell(
             borderRadius: BorderRadius.circular(14),
+            onLongPress: () => _liveSourceMenu(i, refresh),
             onTap: () async {
               Navigator.pop(dialogCtx);
               await c.selectSource(i);
@@ -2313,9 +2477,16 @@ class _LivePageState extends State<LivePage> {
                         color: accent,
                       ),
                     ),
+                  // 拖动把手（左上角）：长按它移动排序
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    child: CardDragHandle(data: i, label: src.name),
+                  ),
                 ],
               ),
             ),
+          ),
           ),
         );
       },

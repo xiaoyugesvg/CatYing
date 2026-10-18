@@ -515,7 +515,8 @@ jobs:
           MISSING=0
           for P in bonsoir_darwin file_picker_darwin flutter_pdfview permission_handler_apple \
                    sqflite_darwin url_launcher_ios webview_flutter_wkwebview \
-                   media_kit_video media_kit_libs_ios_video video_player_avfoundation; do
+                   media_kit_video media_kit_libs_ios_video video_player_avfoundation \
+                   quickjs_engine; do
             if grep -qE "^  - $P " "$MANIFEST"; then
               echo "  ✅ $P"
             else
@@ -546,6 +547,28 @@ jobs:
           echo "APP_PATH=$APP_PATH" >> "$GITHUB_OUTPUT"
           echo "📦 App bundle: $APP_PATH"
           ls -la "$APP_PATH"
+
+      - name: Verify QuickJS native bridge symbols
+        # quickjs_engine 的 Dart FFI 用 dlsym(RTLD_DEFAULT) 查 C 符号：
+        # 插件没被 pod install 接入、或符号被 dead-strip，运行时就报
+        # `Failed to lookup symbol 'jsNewRuntime'`（Venera / 书源 JS 全部失效）。
+        # 实测根因：quickjs_engine 只写在 dependency_overrides 里 ⇒ Flutter 不认插件。
+        run: |
+          set -e
+          APP_PATH=${{ steps.locate.outputs.APP_PATH }}
+          FOUND=""
+          for BIN in "$APP_PATH/Frameworks/quickjs_engine.framework/quickjs_engine" "$APP_PATH/$BUNDLE_NAME"; do
+            if [ -f "$BIN" ] && nm -gU "$BIN" 2>/dev/null | grep -q '_jsNewRuntime'; then
+              FOUND="$BIN"
+              break
+            fi
+          done
+          if [ -z "$FOUND" ]; then
+            echo "❌ 找不到 jsNewRuntime 导出 —— quickjs native bridge 没链接或被 strip"
+            find "$APP_PATH" -maxdepth 3 -name 'quickjs*' -print || true
+            exit 1
+          fi
+          echo "✅ QuickJS native bridge 已链接：$FOUND"
 
       - name: Embed NodeMobile.xcframework + main.js + python-home
         # 关键步骤：把 framework 和 main.js 塞进 Runner.app bundle

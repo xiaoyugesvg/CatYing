@@ -56,10 +56,11 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
   final _ctrl = TextEditingController();
   final store = BookSourceStore.instance;
 
-  /// 只包含**小说书源**：漫画源归漫画模块（用户 2026-10-18 要求彻底分开），
-  /// 不再出现在书源搜索 / 快速源列表 / 换源里。
+  /// 书源仓名下的源：书源 + 从书源仓导入的漫画源（漫画源用图片模式阅读）。
+  /// 漫源仓库里的源不会出现在书源搜索 / 快速源列表 / 换源里
+  ///（用户 2026-10-18：「我从哪个仓订阅就用哪个」）。
   List<BookSource> get _enabledBooks =>
-      store.enabled.where((s) => !s.isComicSource).toList();
+      store.enabled.where((s) => s.belongsToBook).toList();
 
   /// 「搜索源」筛选框（快速书源列表弹窗用）
   final TextEditingController _sourceFilter = TextEditingController();
@@ -149,7 +150,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
     //   上次选过的源若后来关了发现，也跳过——否则进来就是"没有配置分类浏览"。
     final enabled = store
         .sorted()
-        .where((s) => s.enabled && s.enabledExplore && !s.isComicSource)
+        .where((s) => s.enabled && s.enabledExplore && s.belongsToBook)
         .toList();
     if (enabled.isEmpty) return;
     String? last;
@@ -844,7 +845,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
     //   聚搜/单源搜索不受影响（enabledExplore 只管发现）。
     final sources = store
         .sorted()
-        .where((s) => s.enabled && s.enabledExplore && !s.isComicSource)
+        .where((s) => s.enabled && s.enabledExplore && s.belongsToBook)
         .toList();
     return SizedBox(
       height: 40,
@@ -990,7 +991,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
   Future<void> _reorderBookSources() async {
     final sources = store
         .sorted()
-        .where((s) => s.enabled && s.enabledExplore && !s.isComicSource)
+        .where((s) => s.enabled && s.enabledExplore && s.belongsToBook)
         .toList();
     if (sources.length < 2) {
       _toast('可发现的源不足 2 个，无需排序');
@@ -1049,7 +1050,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
   Future<void> _showQuickSources() async {
     // ✅ 与源 chips 同一过滤：关闭「发现」的源不在书源页展示（2026-10-11）
     final sources = store.all
-        .where((s) => s.enabled && s.enabledExplore && !s.isComicSource)
+        .where((s) => s.enabled && s.enabledExplore && s.belongsToBook)
         .toList();
     // 当前书源是否仍在这个弹窗的可见列表里（停用/关发现后会不在）
     final hasCurrent =

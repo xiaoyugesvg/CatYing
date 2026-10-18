@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'common_widgets.dart';
 import 'package:get/get.dart';
 import '../common/theme.dart';
@@ -6,6 +7,7 @@ import '../models/source_bean.dart';
 import '../services/api_config.dart';
 import '../services/source_kind.dart';
 import 'app_toast.dart';
+import 'card_action_sheet.dart';
 import 'source_kind_badge.dart';
 
 /// 源切换面板（2026-10-02 二次重构：**三分之一屏**）
@@ -60,21 +62,30 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.backgroundSecondary,
-        title: Text('移入失效线路？',
-            style: TextStyle(
-                fontSize: AppTheme.fontHeadline, color: AppTheme.textPrimary)),
+        title: Text(
+          '移入失效线路？',
+          style: TextStyle(
+            fontSize: AppTheme.fontHeadline,
+            color: AppTheme.textPrimary,
+          ),
+        ),
         content: Text(
-            '「${source.name}」将不再加载、也不显示在列表里；\n'
-            '随时可以在顶部「失效」里移回。',
-            style: TextStyle(
-                fontSize: AppTheme.fontSubhead, color: AppTheme.textSecondary)),
+          '「${source.name}」将不再加载、也不显示在列表里；\n'
+          '随时可以在顶部「失效」里移回。',
+          style: TextStyle(
+            fontSize: AppTheme.fontSubhead,
+            color: AppTheme.textSecondary,
+          ),
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
           TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('移入失效')),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('移入失效'),
+          ),
         ],
       ),
     );
@@ -82,6 +93,53 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
     await ApiConfig.instance.markVideoSourceInvalid(source);
     if (!mounted) return;
     AppToast.message('「${source.name}」已移入失效线路');
+  }
+
+  /// 长按线路 → **卡片式**菜单（一行两个）：分享 / 失效
+  ///
+  /// 影视线路本身没有"编辑 / 分组 / 批量删除"的接口（线路表以订阅下发为准），
+  /// 所以只给实际存在的两个动作。
+  Future<void> _sourceMenu(SourceBean source) async {
+    await showCardActions(
+      context,
+      title: source.name,
+      subtitle: source.api,
+      actions: [
+        CardAction(
+          icon: Icons.ios_share_rounded,
+          label: '分享',
+          onTap: () {
+            Clipboard.setData(
+              ClipboardData(text: '${source.name}\n${source.api}'),
+            );
+            AppToast.message('已复制线路地址');
+          },
+        ),
+        CardAction(
+          icon: Icons.block_rounded,
+          label: '失效',
+          danger: true,
+          onTap: () => _markInvalid(source),
+        ),
+      ],
+    );
+  }
+
+  /// 按住把手拖到另一条线路上 → 重排并落盘
+  Future<void> _moveSource(String fromKey, String toKey) async {
+    if (fromKey == toKey) return;
+    final all = List<SourceBean>.of(
+      // ignore: invalid_use_of_protected_member
+      ApiConfig.instance.sourceBeanList.value,
+    );
+    final from = all.indexWhere((s) => s.key == fromKey);
+    final to = all.indexWhere((s) => s.key == toKey);
+    if (from < 0 || to < 0) return;
+    final item = all.removeAt(from);
+    all.insert(to, item);
+    await ApiConfig.instance.reorderVideoSources(
+      all.map((s) => s.key).toList(),
+    );
   }
 
   /// 「失效」分类的列表：已移出的线路，可逐条 / 全部移回
@@ -92,8 +150,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
     final items = api.invalidVideoSourcesForCurrentSub;
     if (items.isEmpty) {
       return Center(
-        child: Text('没有失效线路',
-            style: TextStyle(color: AppTheme.textTertiary)),
+        child: Text('没有失效线路', style: TextStyle(color: AppTheme.textTertiary)),
       );
     }
     return ListView(
@@ -102,10 +159,13 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
         Row(
           children: [
             Expanded(
-              child: Text('已移出 ${items.length} 条（不加载、不显示）',
-                  style: TextStyle(
-                      fontSize: AppTheme.fontCaption,
-                      color: AppTheme.textTertiary)),
+              child: Text(
+                '已移出 ${items.length} 条（不加载、不显示）',
+                style: TextStyle(
+                  fontSize: AppTheme.fontCaption,
+                  color: AppTheme.textTertiary,
+                ),
+              ),
             ),
             TextButton(
               onPressed: () async {
@@ -138,14 +198,16 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                          fontSize: AppTheme.fontBody,
-                          color: AppTheme.textSecondary),
+                        fontSize: AppTheme.fontBody,
+                        color: AppTheme.textSecondary,
+                      ),
                     ),
                   ),
                   TextButton(
                     onPressed: () async {
                       final ok = await api.restoreInvalidVideoSource(
-                          (m['id'] ?? '').toString());
+                        (m['id'] ?? '').toString(),
+                      );
                       if (!mounted || !ok) return;
                       AppToast.message('已移回');
                     },
@@ -195,8 +257,10 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
       offset = 4 + idx * 56.0;
     }
     final pos = _scrollController.position;
-    final target = (offset - pos.viewportDimension / 3)
-        .clamp(0.0, pos.maxScrollExtent);
+    final target = (offset - pos.viewportDimension / 3).clamp(
+      0.0,
+      pos.maxScrollExtent,
+    );
     _scrollController.animateTo(
       target,
       duration: const Duration(milliseconds: 260),
@@ -294,13 +358,15 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                                 setState(() => _showInvalid = !_showInvalid),
                             child: Container(
                               height: 30,
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 10),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                              ),
                               alignment: Alignment.center,
                               decoration: BoxDecoration(
                                 color: _showInvalid
-                                    ? AppTheme.accentColor
-                                        .withValues(alpha: 0.15)
+                                    ? AppTheme.accentColor.withValues(
+                                        alpha: 0.15,
+                                      )
                                     : AppTheme.backgroundTertiary,
                                 borderRadius: BorderRadius.circular(15),
                               ),
@@ -325,7 +391,9 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                         // ignore: invalid_use_of_protected_member
                         final all = ApiConfig.instance.sourceBeanList.value;
                         _locateSelected(
-                            _filteredSourcesFrom(all), _selectedKey);
+                          _filteredSourcesFrom(all),
+                          _selectedKey,
+                        );
                       },
                       child: Container(
                         width: 30,
@@ -381,11 +449,14 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                   final all = ApiConfig.instance.sourceBeanList.value;
                   final selectedKey = _selectedKey;
                   final list = _filteredSourcesFrom(all);
-                  // 本地 Python 源：单独一组（用户 2026-10-17），不跟订阅线路混排
-                  final local = _filteredSourcesFrom(
-                    // ignore: invalid_use_of_protected_member
-                    ApiConfig.instance.localVideoSources.value,
-                  );
+                  // 本地 Python 源：单独一组（用户 2026-10-17），不跟订阅线路混排。
+                  // 仅在「本地爬虫」开关打开时显示（用户 2026-10-18：默认优先订阅）。
+                  final local = ApiConfig.instance.localSourcesEnabled.value
+                      ? _filteredSourcesFrom(
+                          // ignore: invalid_use_of_protected_member
+                          ApiConfig.instance.localVideoSources.value,
+                        )
+                      : const <SourceBean>[];
                   if (list.isEmpty && local.isEmpty) {
                     return Padding(
                       padding: EdgeInsets.symmetric(vertical: 32),
@@ -412,11 +483,11 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                             physics: const NeverScrollableScrollPhysics(),
                             gridDelegate:
                                 const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 2,
-                              mainAxisSpacing: 8,
-                              crossAxisSpacing: 10,
-                              childAspectRatio: 3.4,
-                            ),
+                                  crossAxisCount: 2,
+                                  mainAxisSpacing: 8,
+                                  crossAxisSpacing: 10,
+                                  childAspectRatio: 3.4,
+                                ),
                             itemCount: local.length,
                             itemBuilder: (context, index) {
                               final source = local[index];
@@ -449,31 +520,81 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                           physics: const NeverScrollableScrollPhysics(),
                           gridDelegate:
                               const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                            mainAxisSpacing: 8,
-                            crossAxisSpacing: 10,
-                            childAspectRatio: 3.4,
-                          ),
+                                crossAxisCount: 2,
+                                mainAxisSpacing: 8,
+                                crossAxisSpacing: 10,
+                                childAspectRatio: 3.4,
+                              ),
                           itemCount: list.length,
                           itemBuilder: (context, index) {
                             final source = list[index];
-                            return _SourceTile(
-                              name: source.name,
-                              api: source.api,
-                              selected: source.key == selectedKey,
-                              onTap: () => _selectSource(source),
-                              onLongPress: () => _markInvalid(source),
+                            return DragTarget<String>(
+                              onWillAcceptWithDetails: (d) =>
+                                  d.data != source.key,
+                              onAcceptWithDetails: (d) =>
+                                  _moveSource(d.data, source.key),
+                              builder: (_, candidate, _) {
+                                final tile = _SourceTile(
+                                  name: source.name,
+                                  api: source.api,
+                                  selected: source.key == selectedKey,
+                                  onTap: () => _selectSource(source),
+                                  onLongPress: () => _sourceMenu(source),
+                                  dragHandle: CardDragHandle(
+                                    data: source.key,
+                                    label: source.name,
+                                  ),
+                                );
+                                if (candidate.isEmpty) return tile;
+                                return DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: AppTheme.accentColor.withValues(
+                                        alpha: 0.6,
+                                      ),
+                                      width: 1.4,
+                                    ),
+                                  ),
+                                  child: tile,
+                                );
+                              },
                             );
                           },
                         )
                       else
                         for (final source in list)
-                          _SourceRow(
-                            name: source.name,
-                            api: source.api,
-                            selected: source.key == selectedKey,
-                            onTap: () => _selectSource(source),
-                            onLongPress: () => _markInvalid(source),
+                          DragTarget<String>(
+                            onWillAcceptWithDetails: (d) =>
+                                d.data != source.key,
+                            onAcceptWithDetails: (d) =>
+                                _moveSource(d.data, source.key),
+                            builder: (_, candidate, _) {
+                              final row = _SourceRow(
+                                name: source.name,
+                                api: source.api,
+                                selected: source.key == selectedKey,
+                                onTap: () => _selectSource(source),
+                                onLongPress: () => _sourceMenu(source),
+                                dragHandle: CardDragHandle(
+                                  data: source.key,
+                                  label: source.name,
+                                ),
+                              );
+                              if (candidate.isEmpty) return row;
+                              return DecoratedBox(
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: AppTheme.accentColor.withValues(
+                                      alpha: 0.6,
+                                    ),
+                                    width: 1.4,
+                                  ),
+                                ),
+                                child: row,
+                              );
+                            },
                           ),
                     ],
                   );
@@ -493,8 +614,12 @@ class _SourceRow extends StatelessWidget {
   final String api;
   final bool selected;
   final VoidCallback onTap;
-  /// 长按 = 移入「失效线路」（可移回，见 [_SourceSwitchSheetState._markInvalid]）
+
+  /// 长按 = 卡片式菜单（分享 / 失效）
   final VoidCallback? onLongPress;
+
+  /// 拖动把手（长按它排序）；null = 不显示（本地 Python 源）
+  final Widget? dragHandle;
 
   const _SourceRow({
     required this.name,
@@ -502,6 +627,7 @@ class _SourceRow extends StatelessWidget {
     required this.selected,
     required this.onTap,
     this.onLongPress,
+    this.dragHandle,
   });
 
   @override
@@ -554,13 +680,13 @@ class _SourceRow extends StatelessWidget {
                         ? AppTheme.textPrimary
                         : AppTheme.textSecondary,
                     fontSize: AppTheme.fontBody,
-                    fontWeight:
-                        selected ? FontWeight.w600 : FontWeight.normal,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (dragHandle != null) dragHandle!,
             ],
           ),
         ),
@@ -641,8 +767,11 @@ class _ExpandableSearchFieldState extends State<_ExpandableSearchField> {
               },
               child: Padding(
                 padding: const EdgeInsets.all(5),
-                child: Icon(Icons.cancel,
-                    color: AppTheme.textTertiary, size: 13),
+                child: Icon(
+                  Icons.cancel,
+                  color: AppTheme.textTertiary,
+                  size: 13,
+                ),
               ),
             ),
           const SizedBox(width: 6),
@@ -658,8 +787,12 @@ class _SourceTile extends StatelessWidget {
   final String api;
   final bool selected;
   final VoidCallback onTap;
-  /// 长按 = 移入「失效线路」（可移回，见 [_SourceSwitchSheetState._markInvalid]）
+
+  /// 长按 = 卡片式菜单（分享 / 失效）
   final VoidCallback? onLongPress;
+
+  /// 拖动把手（长按它排序）；null = 不显示（本地 Python 源）
+  final Widget? dragHandle;
 
   const _SourceTile({
     required this.name,
@@ -667,6 +800,7 @@ class _SourceTile extends StatelessWidget {
     required this.selected,
     required this.onTap,
     this.onLongPress,
+    this.dragHandle,
   });
 
   @override
@@ -691,13 +825,9 @@ class _SourceTile extends StatelessWidget {
         child: Row(
           children: [
             Icon(
-              selected
-                  ? Icons.check_circle
-                  : Icons.radio_button_unchecked,
+              selected ? Icons.check_circle : Icons.radio_button_unchecked,
               size: 16,
-              color: selected
-                  ? AppTheme.accentColor
-                  : AppTheme.textTertiary,
+              color: selected ? AppTheme.accentColor : AppTheme.textTertiary,
             ),
             const SizedBox(width: 8),
             SourceKindBadge(kind: inferMediaKind(name, api: api)),
@@ -710,17 +840,19 @@ class _SourceTile extends StatelessWidget {
                       ? AppTheme.textPrimary
                       : AppTheme.textSecondary,
                   fontSize: AppTheme.fontSubhead,
-                  fontWeight:
-                      selected ? FontWeight.w600 : FontWeight.normal,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
+            if (dragHandle != null) ...[
+              const SizedBox(width: 2),
+              dragHandle!,
+            ],
           ],
         ),
       ),
     );
   }
 }
-

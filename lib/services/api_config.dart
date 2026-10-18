@@ -71,6 +71,17 @@ class ApiConfig extends GetxController {
   /// 不放进 [sourceBeanList]：那张表是"以接口下发的 sites 为准整表替换"的，
   /// 本地源混进去会被 /config 覆盖/污染；这里单独一份，源面板单独成组。
   final localVideoSources = <SourceBean>[].obs;
+
+  /// 「本地 Python 源」总开关（用户 2026-10-18）。
+  ///
+  /// 默认 **false**：启动时只加载订阅激活的线路，本地源不参与
+  /// 主页源恢复 / 搜索 / 源面板 / Python 引擎启动；
+  /// 打开后本地源才和以前一样全部可用。清单本身仍会读取，
+  /// 所以「订阅管理 → 本地爬虫」里依旧能看到、管理已导入的脚本。
+  final localSourcesEnabled = false.obs;
+
+  /// 保存开关的 prefs 键
+  static const String _kLocalSourcesEnabled = 'local_sources_enabled_v1';
   final parseBeanList = <ParseBean>[].obs;
   final dohList = <(String, String)>[].obs;
   final isLoaded = false.obs;
@@ -239,9 +250,13 @@ class ApiConfig extends GetxController {
   }
 
   /// 获取指定 key 的源（订阅线路 + 本地 Python 源）
+  ///
+  /// 本地源只在「本地爬虫」开关打开时参与（用户 2026-10-18：默认优先订阅激活的源）。
   SourceBean? getSource(String key) {
     return sourceBeanList.firstWhereOrNull((s) => s.key == key) ??
-        localVideoSources.firstWhereOrNull((s) => s.key == key);
+        (localSourcesEnabled.value
+            ? localVideoSources.firstWhereOrNull((s) => s.key == key)
+            : null);
   }
 
   /// 获取可搜索的源列表（本地 Python 源也参与搜索）
@@ -249,9 +264,13 @@ class ApiConfig extends GetxController {
     final result = sourceBeanList
         .where((s) => s.isSearchable && s.key != 'douban' && s.key != 'baseset')
         .toList();
-    result.addAll(localVideoSources.where((s) => s.isSearchable));
+    if (localSourcesEnabled.value) {
+      result.addAll(localVideoSources.where((s) => s.isSearchable));
+    }
     AppLog.instance.log(
-      '[ApiConfig] getSearchableSources: 总源数=${sourceBeanList.length}+${localVideoSources.length} 本地源, 可搜索源数=${result.length}',
+      '[ApiConfig] getSearchableSources: 总源数=${sourceBeanList.length}'
+      '+${localSourcesEnabled.value ? localVideoSources.length : 0} 本地源, '
+      '可搜索源数=${result.length}',
     );
     return result;
   }
@@ -261,35 +280,63 @@ class ApiConfig extends GetxController {
   /// 只更新 [localVideoSources]，**不动** [sourceBeanList] —— 订阅线路与本地源是两套。
   Future<void> reloadLocalVideoSources() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      // 每次都同步一次开关（默认关）：保证冷启动 / 切订阅时口径一致
+      localSourcesEnabled.value = prefs.getBool(_kLocalSourcesEnabled) ?? false;
       await LocalPythonSources.instance.load(force: true);
       final list = LocalPythonSources.instance.sources
           .map((e) => e.toSourceBean())
           .toList();
       localVideoSources.assignAll(list);
 
-      // 当前主页源就是被删掉的那个 → 回退到订阅线路第一条；
-      // 只是改名/重新导入 → 换成新的 bean（否则标题栏还是旧名字）
+      // 当前主页源是本地源：开关关闭 ⇒ 立刻回到订阅激活的第一条线路
       final cur = homeSourceBean.value;
       if (cur != null && cur.key.startsWith('localpy_')) {
-        SourceBean? updated;
-        for (final s in list) {
-          if (s.key == cur.key) {
-            updated = s;
-            break;
-          }
-        }
-        if (updated == null) {
-          // 删掉的是当前本地源：本地还有别的就切过去，否则回订阅线路第一条
-          homeSourceBean.value = list.firstOrNull ?? sourceBeanList.firstOrNull;
-          // 「全局锁定本地源」的键也要清掉，否则下次恢复会指向已删除的 key
-          final prefs = await SharedPreferences.getInstance();
+        if (!localSourcesEnabled.value) {
+          homeSourceBean.value = sourceBeanList.firstOrNull;
           await prefs.remove(_kLocalHomeApi);
-        } else if (updated.name != cur.name) {
-          homeSourceBean.value = updated;
+          AppLog.instance.log('[ApiConfig] 本地源开关已关闭，主页源切回订阅线路');
+        } else {
+          SourceBean? updated;
+          for (final s in list) {
+            if (s.key == cur.key) {
+              updated = s;
+              break;
+            }
+          }
+          if (updated == null) {
+            // 删掉的是当前本地源：本地还有别的就切过去，否则回订阅线路第一条
+            homeSourceBean.value =
+                list.firstOrNull ?? sourceBeanList.firstOrNull;
+            // 「全局锁定本地源」的键也要清掉，否则下次恢复会指向已删除的 key
+            await prefs.remove(_kLocalHomeApi);
+          } else if (updated.name != cur.name) {
+            homeSourceBean.value = updated;
+          }
         }
       }
     } catch (e) {
       AppLog.instance.w('[ApiConfig] 读取本地 Python 源失败: $e');
+    }
+  }
+
+  /// 「本地 Python 源」开关（用户 2026-10-18）。
+  ///
+  /// 关闭时：主页源若是本地源立刻切回订阅激活的第一条，并清掉本地源锁定键；
+  /// 打开时：重新挂上本地源并注册进 Python 引擎（点开关就能直接用）。
+  Future<void> setLocalSourcesEnabled(bool value) async {
+    if (localSourcesEnabled.value == value) return;
+    localSourcesEnabled.value = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kLocalSourcesEnabled, value);
+    PrefsMirror.snapshotSoon();
+    await reloadLocalVideoSources();
+    if (!value) return;
+    // 打开：把脚本注册进引擎（registerAll 内部会按需启动 Python）
+    try {
+      await LocalPythonSources.instance.registerAll();
+    } catch (e) {
+      AppLog.instance.w('[ApiConfig] 本地源注册失败: $e');
     }
   }
 
@@ -415,6 +462,9 @@ class ApiConfig extends GetxController {
   /// （用户 2026-10-13）。所以用户线路单独落盘，并在每次整表替换后合并回来
   /// （同 key 以接口下发的为准，避免和接口线路打架）。
   static const String _kUserVideoSources = 'user_video_sources';
+
+  /// 「源切换」里用户自定义的线路顺序（JSON：`{订阅前缀: [key, ...]}`）
+  static const String _kVideoSourceOrder = 'video_source_order';
 
   /// 「失效线路」落盘键。
   ///
@@ -589,6 +639,91 @@ class ApiConfig extends GetxController {
       AppLog.instance.log('[ApiConfig] 保存失效线路失败: $e');
     }
     _syncInvalidCount();
+  }
+
+  // ============================================================
+  // 线路顺序（用户 2026-10-18：源切换里可以按住把手拖动排序）
+  // ============================================================
+
+  /// `{订阅前缀: [key, ...]}` 的 JSON
+  final Map<String, List<String>> _videoSourceOrder = {};
+  bool _orderLoaded = false;
+
+  Future<void> _ensureOrderLoaded() async {
+    if (_orderLoaded) return;
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString(_kVideoSourceOrder) ?? '';
+      if (raw.isNotEmpty) {
+        final d = jsonDecode(raw);
+        if (d is Map) {
+          d.forEach((k, v) {
+            if (v is List) {
+              _videoSourceOrder[k.toString()] = v
+                  .map((e) => e.toString())
+                  .where((e) => e.isNotEmpty)
+                  .toList();
+            }
+          });
+        }
+      }
+    } catch (_) {
+      // 读失败按"没有自定义顺序"起步
+    }
+    _orderLoaded = true;
+  }
+
+  Future<void> _persistOrder() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setString(_kVideoSourceOrder, jsonEncode(_videoSourceOrder));
+      PrefsMirror.snapshotSoon();
+    } catch (e) {
+      AppLog.instance.log('[ApiConfig] 保存线路顺序失败: $e');
+    }
+  }
+
+  /// 按用户自定义顺序排一遍（没记录的 key 保持原来的相对位置，排在后面）
+  Future<void> _applyVideoSourceOrder(List<SourceBean> list) async {
+    if (list.length < 2) return;
+    await _ensureOrderLoaded();
+    final order = _videoSourceOrder[_invalidIdPrefix];
+    if (order == null || order.isEmpty) return;
+    final byKey = {for (final s in list) s.key: s};
+    final sorted = <SourceBean>[];
+    for (final k in order) {
+      final hit = byKey.remove(k);
+      if (hit != null) sorted.add(hit);
+    }
+    sorted.addAll(list.where((s) => byKey.containsKey(s.key)));
+    list
+      ..clear()
+      ..addAll(sorted);
+  }
+
+  /// 源切换面板按住把手拖动后回写顺序（只动传进来的这些 key 占的坑位）
+  Future<void> reorderVideoSources(List<String> visibleKeys) async {
+    if (visibleKeys.isEmpty) return;
+    await _ensureOrderLoaded();
+    final list = List<SourceBean>.of(sourceBeanList);
+    if (list.isEmpty) return;
+    final wanted = visibleKeys.toSet();
+    final byKey = {for (final s in list) s.key: s};
+    final queue = List<String>.from(visibleKeys);
+    final next = <SourceBean>[];
+    var qi = 0;
+    for (final s in list) {
+      if (wanted.contains(s.key)) {
+        final moved = byKey[queue[qi++]];
+        if (moved != null) next.add(moved);
+      } else {
+        next.add(s);
+      }
+    }
+    sourceBeanList.assignAll(next);
+    _videoSourceOrder[_invalidIdPrefix] = next.map((s) => s.key).toList();
+    await _persistOrder();
+    AppLog.instance.log('[ApiConfig] 已保存线路顺序（${next.length} 条）');
   }
 
   void _syncInvalidCount() {
@@ -881,6 +1016,8 @@ class ApiConfig extends GetxController {
     // 补回的 app_ 程序源），否则漏掉的那些又会被灌回来。
     await _ensureInvalidLoaded();
     _dropInvalidSources(newSources);
+    // 用户手动拖过的顺序：重建线路表后照样生效
+    await _applyVideoSourceOrder(newSources);
     // 订阅刚换过 ⇒ 失效条数是"当前订阅维度"的，要跟着一起刷新（顶部「失效 N」）
     _syncInvalidCount();
 
@@ -899,10 +1036,12 @@ class ApiConfig extends GetxController {
     final restoredValid =
         restored != null &&
         (newSources.any((s) => s.key == restored.key) ||
-            localVideoSources.any((s) => s.key == restored.key));
+            (localSourcesEnabled.value &&
+                localVideoSources.any((s) => s.key == restored.key)));
     if (!restoredValid) {
       homeSourceBean.value =
-          newSources.firstOrNull ?? localVideoSources.firstOrNull;
+          newSources.firstOrNull ??
+          (localSourcesEnabled.value ? localVideoSources.firstOrNull : null);
     }
 
     AppLog.instance.log(
@@ -1254,6 +1393,7 @@ class ApiConfig extends GetxController {
       // 失效线路：移出的那些不再灌回来（与 /config 整表替换同一套过滤）
       await _ensureInvalidLoaded();
       _dropInvalidSources(sources);
+      await _applyVideoSourceOrder(sources);
       _syncInvalidCount();
       sourceBeanList.value = sources;
       // 本地 Python 源单独一组：每次配置解析后重新读取（切订阅不丢）
@@ -1318,7 +1458,8 @@ class ApiConfig extends GetxController {
       final curInList =
           curKey != null &&
           (sources.any((s) => s.key == curKey) ||
-              localVideoSources.any((s) => s.key == curKey));
+              (localSourcesEnabled.value &&
+                  localVideoSources.any((s) => s.key == curKey)));
       if (!curInList) {
         homeSourceBean.value = sources.firstOrNull;
       }
@@ -1370,8 +1511,11 @@ class ApiConfig extends GetxController {
 
       // ① 本地 Python 源是「全局选择」：只要它还存在于 local_py，就永远优先，
       //    不因切换订阅 / 激活其他线路而改变。
+      //    ⚠️ 仅在「本地爬虫」开关打开时生效（用户 2026-10-18：优先订阅激活的源）。
       final localKey = prefs.getString(_kLocalHomeApi);
-      if (localKey != null && localKey.isNotEmpty) {
+      if (localSourcesEnabled.value &&
+          localKey != null &&
+          localKey.isNotEmpty) {
         final local = localVideoSources
             .where((s) => s.key == localKey)
             .firstOrNull;
@@ -1399,13 +1543,15 @@ class ApiConfig extends GetxController {
           homeSourceBean.value = found;
           return;
         }
-        // 本地 Python 源不在订阅线路表里，单独找一次
-        final local = localVideoSources
-            .where((s) => s.key == saved)
-            .firstOrNull;
-        if (local != null) {
-          homeSourceBean.value = local;
-          return;
+        // 本地 Python 源不在订阅线路表里，单独找一次（开关打开时才认）
+        if (localSourcesEnabled.value) {
+          final local = localVideoSources
+              .where((s) => s.key == saved)
+              .firstOrNull;
+          if (local != null) {
+            homeSourceBean.value = local;
+            return;
+          }
         }
       }
     } catch (e) {

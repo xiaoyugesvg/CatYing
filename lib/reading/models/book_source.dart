@@ -180,6 +180,27 @@ class BookSource {
     return RegExp(r'[话話]').hasMatch(tocName);
   }
 
+  /// 这条源属于哪个仓：`book`（书源仓） / `comic`（漫源仓库）。
+  ///
+  /// 用户 2026-10-18：「我从哪个仓订阅就用哪个，书源仓库和漫源仓库的订阅
+  /// 也不通用」—— 导入 / 订阅更新时会给源打 `_warehouse` 标记；
+  /// 老数据没有标记 ⇒ 按类型推断（漫画源归漫源仓库，其余归书源仓）。
+  String get warehouse {
+    final v = (raw['_warehouse'] ?? '').toString().trim();
+    if (v == 'book' || v == 'comic') return v;
+    return isComicSource ? 'comic' : 'book';
+  }
+
+  bool get belongsToBook => warehouse == 'book';
+  bool get belongsToComic => warehouse == 'comic';
+
+  /// 打上仓库标记（不动 id / 其它字段）。
+  BookSource withWarehouse(String w) {
+    if (w != 'book' && w != 'comic') return this;
+    if ((raw['_warehouse'] ?? '').toString() == w) return this;
+    return BookSource(raw: {...raw, '_warehouse': w}, id: id);
+  }
+
   /// 是否只用于搜索（Legado 的 enabledExplore 之类）
   String get comment {
     final c = _configBody;
@@ -534,6 +555,39 @@ class BookSourceStore {
       if (idx >= 0) _items[idx] = _items[idx].copyWith(order: i);
     }
     _items.sort((a, b) => a.order.compareTo(b.order));
+    await _persist();
+  }
+
+  /// 只重排 [visibleIds] 这批源（仓库页拖动排序用）。
+  ///
+  /// 与 [reorder] 的区别：未传入的源（另一个仓 / 被搜索筛选隐藏的）
+  /// **保持原位置**，只在它们占的坑位里按新顺序填充 —— 否则拖一次会把
+  /// 另一个仓的顺序一起打乱。
+  Future<void> reorderWithin(List<String> visibleIds) async {
+    if (visibleIds.isEmpty) return;
+    final wanted = visibleIds.toSet();
+    final byId = {for (final s in _items) s.id: s};
+    final queue = List<String>.from(visibleIds);
+    final ordered = <BookSource>[];
+    var qi = 0;
+    // 以**当前显示顺序**（_items，仓库页 custom 模式直接用它）为基准，
+    // 不用 sorted()：某些源可能还带着旧的 customOrder，混用会在第一次拖动时跳位。
+    for (final s in List<BookSource>.of(_items)) {
+      if (wanted.contains(s.id)) {
+        final id = queue[qi++];
+        final moved = byId[id];
+        if (moved != null) ordered.add(moved);
+      } else {
+        ordered.add(s);
+      }
+    }
+    // 统一重写 customOrder = 当前显示顺序
+    for (var i = 0; i < ordered.length; i++) {
+      if (ordered[i].order != i) ordered[i] = ordered[i].copyWith(order: i);
+    }
+    _items
+      ..clear()
+      ..addAll(ordered);
     await _persist();
   }
 

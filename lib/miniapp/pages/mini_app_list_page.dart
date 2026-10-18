@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../common/theme.dart';
 import '../../services/prefs_mirror.dart';
 import '../../widgets/app_toast.dart';
+import '../../widgets/card_action_sheet.dart';
 import '../../widgets/home_search_bar.dart';
 import '../models/mini_app.dart';
 import '../services/market_subscription_store.dart';
@@ -324,6 +325,11 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
   // ── 主体：已装程序（网格/列表、可搜索/排序）────────
   Widget _buildBody() {
     final apps = _visibleApps();
+    // 只有「自定义顺序 + 无搜索/无分组过滤」时才能直接拖动排序
+    final canDrag =
+        _sort == _AppSort.custom &&
+        _query.trim().isEmpty &&
+        _groupFilter == null;
     if (apps.isEmpty) {
       final noQuery = _query.trim().isEmpty;
       final inGroup = _groupFilter != null;
@@ -429,12 +435,27 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
         ),
         children: [
           for (final a in apps)
-            _listRow(
-              title: a.name,
-              subtitle: _appTag(a),
-              onTap: () => _openApp(a),
-              onLongPress: () => _showAppMenu(a),
-            ),
+            canDrag
+                ? DragTarget<String>(
+                    onWillAcceptWithDetails: (d) => d.data != a.id,
+                    onAcceptWithDetails: (d) => _moveApp(d.data, a.id),
+                    builder: (_, candidate, _) => _listRow(
+                      title: a.name,
+                      subtitle: _appTag(a),
+                      onTap: () => _openApp(a),
+                      onLongPress: () => _showAppMenu(a),
+                      dragHandle: CardDragHandle(
+                        data: a.id,
+                        label: a.name,
+                      ),
+                    ),
+                  )
+                : _listRow(
+                    title: a.name,
+                    subtitle: _appTag(a),
+                    onTap: () => _openApp(a),
+                    onLongPress: () => _showAppMenu(a),
+                  ),
         ],
       );
     }
@@ -463,12 +484,39 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
       itemCount: apps.length,
       itemBuilder: (context, index) {
         final app = apps[index];
-        return _MiniAppCard(
+        final card = _MiniAppCard(
           app: app,
           // 稳定随机色：按 id（不是 name —— 同名不同来源要能区分）取色
           tint: _tintFor(app.id.isNotEmpty ? app.id : app.name),
           onTap: () => _openApp(app),
           onLongPress: () => _showAppMenu(app),
+          dragHandle: canDrag
+              ? CardDragHandle(
+                  data: app.id,
+                  label: app.name,
+                  background: _tintFor(app.id.isNotEmpty ? app.id : app.name),
+                  foreground: Colors.white,
+                  iconColor: Colors.white.withValues(alpha: 0.85),
+                )
+              : null,
+        );
+        if (!canDrag) return card;
+        return DragTarget<String>(
+          onWillAcceptWithDetails: (d) => d.data != app.id,
+          onAcceptWithDetails: (d) => _moveApp(d.data, app.id),
+          builder: (_, candidate, _) {
+            if (candidate.isEmpty) return card;
+            return DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: AppTheme.accentColor.withValues(alpha: 0.8),
+                  width: 2,
+                ),
+              ),
+              child: card,
+            );
+          },
         );
       },
     );
@@ -519,6 +567,7 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     required String subtitle,
     required VoidCallback onTap,
     VoidCallback? onLongPress,
+    Widget? dragHandle,
   }) {
     // 行式卡片对齐参考图与「市场」Tab：**彩色首字图标 + 标题 + 副标题 + 右侧箭头**
     final tint = _tintFor(title);
@@ -588,6 +637,7 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
                     ),
                   ),
                   const SizedBox(width: 8),
+                  if (dragHandle != null) dragHandle,
                   Icon(
                     Icons.chevron_right_rounded,
                     size: 18,
@@ -999,96 +1049,47 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     if (mounted) setState(() {});
   }
 
-  // ── 长按菜单：分享 / 移动 / 删除 ──────────────────────────────
+  // ── 长按菜单：分享 / 分组 / 排序 / 删除（卡片式，一行 2 个）──────
   void _showAppMenu(MiniApp app) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.backgroundSecondary,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        top: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      app.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            ListTile(
-              leading: Icon(
-                Icons.share_outlined,
-                color: AppTheme.textSecondary,
-              ),
-              title: Text('分享', style: TextStyle(color: AppTheme.textPrimary)),
-              onTap: () {
-                Get.back();
-                _shareApp(app);
-              },
-            ),
-            ListTile(
-              leading: Icon(
-                Icons.folder_outlined,
-                color: AppTheme.textSecondary,
-              ),
-              title: Text(
-                '移动到分组',
-                style: TextStyle(color: AppTheme.textPrimary),
-              ),
-              onTap: () {
-                Get.back();
-                _showGroupPicker(app);
-              },
-            ),
-            ListTile(
-              leading: Icon(
-                Icons.reorder_rounded,
-                color: AppTheme.textSecondary,
-              ),
-              title: Text(
-                '调整顺序',
-                style: TextStyle(color: AppTheme.textPrimary),
-              ),
-              onTap: () {
-                Get.back();
-                _showReorderSheet();
-              },
-            ),
-            ListTile(
-              leading: const Icon(
-                Icons.delete_outline,
-                color: Colors.redAccent,
-              ),
-              title: const Text(
-                '删除',
-                style: TextStyle(color: Colors.redAccent),
-              ),
-              onTap: () {
-                Get.back();
-                _confirmRemove(app);
-              },
-            ),
-            const SizedBox(height: 10),
-          ],
+    showCardActions(
+      context,
+      title: app.name,
+      subtitle: _appTag(app),
+      actions: [
+        CardAction(
+          icon: Icons.ios_share_rounded,
+          label: '分享',
+          onTap: () => _shareApp(app),
         ),
-      ),
+        CardAction(
+          icon: Icons.folder_outlined,
+          label: '分组',
+          onTap: () => _showGroupPicker(app),
+        ),
+        CardAction(
+          icon: Icons.reorder_rounded,
+          label: '排序',
+          onTap: _showReorderSheet,
+        ),
+        CardAction(
+          icon: Icons.delete_outline_rounded,
+          label: '删除',
+          danger: true,
+          onTap: () => _confirmRemove(app),
+        ),
+      ],
     );
+  }
+
+  /// 把手拖到另一张卡片上 → 重排（自定义顺序落盘）
+  Future<void> _moveApp(String fromId, String toId) async {
+    if (fromId == toId) return;
+    final apps = service.apps;
+    final from = apps.indexWhere((a) => a.id == fromId);
+    final to = apps.indexWhere((a) => a.id == toId);
+    if (from < 0 || to < 0) return;
+    await service.reorder(from, from < to ? to + 1 : to);
+    if (mounted) setState(() {});
   }
 
   /// 分享：复制程序链接/配置到剪贴板（应用内没有分享 SDK，统一走复制）
@@ -1516,11 +1517,15 @@ class _MiniAppCard extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
+  /// 拖动把手（长按它排序）；null = 不显示
+  final Widget? dragHandle;
+
   const _MiniAppCard({
     required this.app,
     required this.tint,
     required this.onTap,
     required this.onLongPress,
+    this.dragHandle,
   });
 
   @override
@@ -1592,6 +1597,13 @@ class _MiniAppCard extends StatelessWidget {
                 ),
               ),
             ),
+            // 拖动把手（右上角）：长按它移动排序
+            if (dragHandle != null)
+              Positioned(
+                top: 4,
+                right: 4,
+                child: dragHandle!,
+              ),
             // 首字：略往上挪，给底部名称留出位置，别挤在一起
             Align(
               alignment: const Alignment(0, -0.18),

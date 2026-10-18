@@ -83,6 +83,12 @@ dependencies:
   xml: ^6.5.0
   # [PATCH-5] 同步 HTTP：java.ajax 的同步抓取用（纯 Dart，无原生插件）
   sync_http: ^0.3.0
+  # [PATCH-5] 书源 / Venera 的 JS 引擎（quickjs-ng）。
+  # ⚠️ 必须声明为**直接依赖**：只写在 dependency_overrides 里时 Flutter 不会
+  #   把它识别为插件 ⇒ iOS 不编译 native bridge ⇒ 运行时报
+  #   `Failed to lookup symbol 'jsNewRuntime'`（Venera/书源 JS 全部失效）。
+  quickjs_engine:
+    path: packages/quickjs_engine
   mobile_scanner: ^7.4.2
   # cached_network_image 3.3.1 已移除（A2）：它与 cached_network_image_ce
   # 是**两条平行的完整实现**（各带 platform_interface / web 子包），

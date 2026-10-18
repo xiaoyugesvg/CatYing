@@ -783,6 +783,8 @@ class _HikerHomePageState extends State<HikerHomePage> {
       onEdit: _editSourceConfig,
       onDelete: _deleteSources,
       onShare: _shareSources,
+      // 长按卡片左上角把手 → 直接拖动排序（落盘，重启保持）
+      onReorder: (ids) => _store.reorder(ids),
       items: [
         for (final s in list)
           CardSourceItem(

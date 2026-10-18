@@ -215,7 +215,10 @@ class SourceManager extends ChangeNotifier {
     //   这里复用同一判据 [BookSource.isComicSource]，保证"书源能看 → 漫画源也有"。
     try {
       for (final bs in BookSourceStore.instance.all) {
-        if (!bs.isComicSource) continue;
+        // 只注册「漫源仓库」名下的漫画源。书源仓里也能导入漫画源（用图片
+        // 模式在书源阅读器里看），但那条属于书源仓，不该再出现在漫画模块
+        //（用户 2026-10-18：「我从哪个仓订阅就用哪个」）。
+        if (!bs.belongsToComic) continue;
         try {
           _register(LegadoComicMangaSource.fromRaw(bs.raw));
         } catch (e) {
@@ -435,6 +438,33 @@ class SourceManager extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 只重排 [visibleIds] 这批源（漫源仓库拖动排序用）。
+  ///
+  /// 与 [reorder] 的区别：未传入的源（其它类型 / 被筛选隐藏的）**保持原位置**，
+  /// 只在它们占的坑位里按新顺序填充，避免拖一次把整个漫画模块的顺序打乱。
+  void reorderVisible(List<String> visibleIds) {
+    if (visibleIds.isEmpty) return;
+    final wanted = visibleIds.toSet();
+    final byId = {for (final e in _sources.entries) e.key: e.value};
+    final queue = List<String>.from(visibleIds);
+    final next = <String, MangaSource>{};
+    var qi = 0;
+    for (final e in _sources.entries) {
+      if (wanted.contains(e.key)) {
+        final id = queue[qi++];
+        final moved = byId[id];
+        if (moved != null) next[id] = moved;
+      } else {
+        next[e.key] = e.value;
+      }
+    }
+    _sources
+      ..clear()
+      ..addAll(next);
+    SettingsService().setMangaSourceOrder(_sources.keys.toList());
+    notifyListeners();
+  }
+
   /// 从源列表里移除（双击源标签删除用；不做落盘，调用方负责删源本体）。
   void dropSource(String id) {
     _sources.remove(id);
@@ -475,7 +505,7 @@ class SourceManager extends ChangeNotifier {
 class _NoSource extends MangaSource {
   _NoSource();
 
-  static const _msg = '暂无可用漫画源，请到「漫画源仓库」添加云端地址并更新';
+  static const _msg = '暂无可用漫画源，请到「漫源仓库」添加订阅或导入源';
 
   @override
   String get id => '__none__';

@@ -223,6 +223,37 @@ class RssStore {
     await _persist();
   }
 
+  /// 只重排传入 id 所在的坑位（源切换面板里按住拖动用）。
+  ///
+  /// 面板可能只显示「已启用 + 搜索命中」的子集，直接按绝对下标重排会动到
+  /// 看不见的源；这里与书源仓/海阔同一套做法：可见的按新顺序填回原坑位。
+  Future<void> reorderWithin(List<String> visibleIds) async {
+    if (visibleIds.isEmpty) return;
+    final wanted = visibleIds.toSet();
+    final byId = {for (final s in _sources) s.id: s};
+    final queue = List<String>.from(visibleIds);
+    final next = <RssSource>[];
+    var qi = 0;
+    for (final s in _sources) {
+      if (wanted.contains(s.id)) {
+        final moved = byId[queue[qi++]];
+        if (moved != null) next.add(moved);
+      } else {
+        next.add(s);
+      }
+    }
+    _sources = next;
+    await _persist();
+  }
+
+  /// 修改分组（`sourceGroup`）
+  Future<void> setGroup(String id, String group) async {
+    final i = _sources.indexWhere((s) => s.id == id);
+    if (i < 0) return;
+    _sources[i] = _sources[i].copyWith(group: group.trim());
+    await _persist();
+  }
+
   /// 恢复内置源（已存在的按 url 去重补回）。返回补回条数。
   Future<int> restoreBuiltins() async {
     var added = 0;

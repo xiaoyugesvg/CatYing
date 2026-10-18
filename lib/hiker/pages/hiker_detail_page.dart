@@ -207,6 +207,16 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
   /// （用户 2026-10-17：自动获取的是"列表"，播放仍由用户点）。
   Future<void> _resolve({bool auto = false}) async {
     if (_busy) return;
+    // 条目没有地址（广告位 / 空卡片）：直接给明确提示。
+    // 否则会拿空地址去跑详情规则 → 「只支持 http(s) 地址，规则要的是「（空）」」
+    // 这种看不懂的异常（用户 2026-10-18 的截图）。
+    if (widget.item.url.trim().isEmpty) {
+      setState(() {
+        _error = '这个条目没有地址（可能是广告位）';
+        _candidates = const [];
+      });
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;

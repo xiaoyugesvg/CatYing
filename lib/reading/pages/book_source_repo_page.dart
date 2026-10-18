@@ -139,11 +139,10 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
 
   /// 搜索过滤结果。
   ///
-  /// ⚠️ 漫画源不在这里出现（用户 2026-10-18：「漫画源就是漫画源，
-  /// 不要出现在书源里面」）—— 漫画源统一在「漫画源仓库 / 漫画页」管理，
-  /// 判据与 SourceManager 注册时完全一致（BookSource.isComicSource）。
+  /// 只显示**书源仓**名下的源：书源 + 从书源仓导入的漫画源（图片模式阅读）。
+  /// 漫源仓库里的源不会出现在这里（用户 2026-10-18：「从哪个仓订阅就用哪个」）。
   List<BookSource> get _visible {
-    final all = store.sorted().where((s) => !s.isComicSource).toList();
+    final all = store.sorted().where((s) => s.belongsToBook).toList();
     if (_keyword.isEmpty) return all;
     final k = _keyword.toLowerCase();
     return all
@@ -167,8 +166,9 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
         listenable: store.revision,
         builder: (context, _) {
           final list = _visible;
-          // 「有没有书源」只看非漫画源，避免只剩漫画源时误显示「无匹配」
-          final noBooks = store.sorted().every((s) => s.isComicSource);
+          // 「有没有书源」只看本仓（书源 + 从书源仓导入的漫画源）；
+          // 漫源仓库的源不参与，避免只剩另一边时误显示「无匹配」。
+          final noBooks = store.sorted().every((s) => !s.belongsToBook);
           return Column(
             children: [
               // 搜索 + 分组操作固定在顶栏下面（不随列表滚动）
@@ -317,8 +317,8 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
 
   /// 分享全部书源：复制 JSON 到剪贴板（并提示可粘贴给他人）
   Future<void> _shareAll() async {
-    // 漫画源归漫画模块管，不混进书源分享
-    final books = store.sorted().where((s) => !s.isComicSource).toList();
+    // 只分享书源仓名下的源（含书源仓导入的漫画源）
+    final books = store.sorted().where((s) => s.belongsToBook).toList();
     final json = BookSourceService.instance.exportSources(books);
     await Clipboard.setData(ClipboardData(text: json));
     await showDialog<void>(
@@ -347,7 +347,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   /// 分享选中的书源：只导出多选勾选的源（JSON 到剪贴板）
   Future<void> _shareSelected() async {
     final selected = store.all
-        .where((s) => _selected.contains(s.id) && !s.isComicSource)
+        .where((s) => _selected.contains(s.id) && s.belongsToBook)
         .toList();
     if (selected.isEmpty) return;
     final json = BookSourceService.instance.exportSources(selected);
@@ -2110,16 +2110,12 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
     final r = await store.addAll(parsed);
     await _reloadComicSourcesIfNeeded(parsed);
     final comics = parsed.where((s) => s.isComicSource).length;
+    final base = r.added > 0 && r.updated > 0
+        ? '新增 ${r.added} 个、更新 ${r.updated} 个书源'
+        : (r.added > 0 ? '已导入 ${r.added} 个书源' : '已更新 ${r.updated} 个书源');
+    // 书源仓现在也会展示漫画源（阅读器自动走图片模式）
     _toast(
-      comics > 0
-          // 漫画源不显示在本页（用户 2026-10-18：书源/漫画源分开）→
-          // 必须明确告诉用户去哪里找，否则会以为"导入失败"。
-          ? '已导入 $comics 个漫画源（书源列表不显示，请到「漫画源仓库」查看）'
-          : (r.added > 0 && r.updated > 0
-                ? '新增 ${r.added} 个、更新 ${r.updated} 个书源'
-                : (r.added > 0
-                      ? '已导入 ${r.added} 个书源'
-                      : '已更新 ${r.updated} 个书源')),
+      comics > 0 ? '$base（含 $comics 个漫画源，图片模式阅读）' : base,
     );
     await _showCompatReport(parsed);
   }
@@ -2215,8 +2211,12 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
 
   /// 解析书源 JSON（兼容 4 种形态 + 脏 JSON）。
   /// 实现收敛到 [BookSourceImportParser]，订阅更新与本页导入共用一份。
-  List<BookSource> _parseSources(String text) =>
-      BookSourceImportParser.parseSources(text);
+  /// 解析导入内容并**打上书源仓归属**：书源仓也能导入漫画源
+  ///（漫画源在阅读器里自动走图片模式）。漫源仓库的导入不走这里。
+  List<BookSource> _parseSources(String text) => [
+    for (final s in BookSourceImportParser.parseSources(text))
+      s.withWarehouse('book'),
+  ];
 
   // ============================================================
   // 详情 / 删除

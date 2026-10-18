@@ -894,8 +894,8 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     return JellyExpandableSearch(
       controller: _searchController,
       hintText: '搜索漫画',
-      // 胶囊高约 40（与右上叠图标同高，对齐参考图）
-      height: 40,
+      // 与图书页统一：默认 32 高（原来写死 40 ⇒ 搜索框/图标都比图书页大）
+      // 用户 2026-10-18：「漫画页的文字和搜索图标以及搜索框是不是比图书的大呢？」
       // 用户 2026-10-07：宽度改成原来的三分之二（160 → 107）
       maxWidth: 107,
       onFocusChange: (f) => setState(() {
@@ -1872,7 +1872,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                     ),
                     JellyIconDeckItem(
                       icon: Icons.local_mall_rounded,
-                      tooltip: '漫画源仓库',
+                      tooltip: '漫源仓库',
                       onTap: () => Navigator.push(
                         context,
                         MaterialPageRoute(
@@ -1996,7 +1996,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                   ),
                                   JellyIconDeckItem(
                                     icon: Icons.local_mall_rounded,
-                                    tooltip: '漫画源仓库',
+                                    tooltip: '漫源仓库',
                                     onTap: () => Navigator.push(
                                       context,
                                       MaterialPageRoute(
@@ -2087,7 +2087,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             Text(
               hasConfigured
                   ? '漫画源已锁定：未能连接密钥服务器，请检查网络后重启软件'
-                  : '请到「漫画源仓库」填入云端地址并更新',
+                  : '请到「漫源仓库」填入云端地址并更新',
               style: TextStyle(
                 fontSize: AppTheme.fontSubhead,
                 color: JellyTheme.textSecondary,
@@ -2108,7 +2108,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                     : Icons.add_circle_outline_rounded,
                 size: 18,
               ),
-              label: Text(hasConfigured ? '去漫画源仓库' : '去添加漫画源'),
+              label: Text(hasConfigured ? '去漫源仓库' : '去添加漫画源'),
             ),
           ],
         ),

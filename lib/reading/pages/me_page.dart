@@ -74,342 +74,350 @@ class _MePageState extends State<MePage> {
       backgroundColor: Colors.transparent,
       body: SafeArea(
         bottom: false,
-        child: ListView(
-          padding: EdgeInsets.only(
-            left: 12,
-            right: 12,
-            top: 0,
-            bottom: 8 + JellyNavBar.contentBottomAvoid,
-          ),
+        child: Column(
           children: [
-            // 顶栏（「我的」标题 / 扫码 / 帮助 / 明暗切换）已按用户要求去掉，
-            // 页面直接从账号卡开始；留一点上边距不让灰色色带贴住状态栏。
-            const SizedBox(height: 8),
-            // ── 我的笔记 / 阅读经历 / 阅读计划 ─────────────────────
-            //    原来是登录卡下方**独立一行**（图标 + 常驻文字 label）。
-            //    用户 2026 反馈：「那三个（我的笔记、阅读经历、阅读计划**只留图标**）
-            //    图标**并排放在那个登录（也就是第一个卡片）的右上角**」✓
-            //    ⇒ 三个入口已**只留图标**、去掉文字，并搬进 [ _buildAccountCard ]
-            //      的**同一张账号卡**右上角（卡片内首行），
-            //      实现在 `widgets/me_account_quick_entries.dart`。
-            //    这里删掉的正是原来那一整块 `Padding + Row + _iconEntry×3`。
-            _buildAccountCard(isDark),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final cols = _adaptiveCols(constraints.maxWidth);
-                const spacing = 12.0;
-                final itemWidth =
-                    (constraints.maxWidth - spacing * (cols - 1)) / cols;
-                return Wrap(
-                  spacing: spacing,
-                  runSpacing: spacing,
-                  children: [
-                    // 用户 2026-10-13：把「图书使用内置账号」「主题跟随系统」
-                    // 两张开关卡挪到「主题风格」**前面**。
-                    // 0. 图书使用内置账号
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_0'),
-                      index: 0,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: ListenableBuilder(
-                          listenable: SettingsService(),
-                          builder: (context, _) => _buildSwitchTile(
-                            isDark,
-                            icon: Icons.lock_person_rounded,
-                            iconBg: JellyTheme.primary,
-                            title: '图书使用内置账号',
-                            subtitle: '关闭后需登录才能下载',
-                            value: SettingsService().useBuiltinAccount,
-                            onChanged: SettingsService().setUseBuiltinAccount,
-                          ),
-                        ),
-                      ),
-                    ),
-                    // 1. 主题跟随系统
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_theme_follow'),
-                      index: 1,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: ListenableBuilder(
-                          listenable: SettingsService(),
-                          builder: (context, _) => _buildSwitchTile(
-                            isDark,
-                            icon: Icons.brightness_auto_rounded,
-                            iconBg: JellyTheme.primary,
-                            title: '主题跟随系统',
-                            subtitle: '随系统明暗自动切换',
-                            value: SettingsService().themeFollowSystem,
-                            onChanged: SettingsService().setThemeFollowSystem,
-                          ),
-                        ),
-                      ),
-                    ),
-                    // 2. 主题风格
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_theme_style'),
-                      index: 2,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: ListenableBuilder(
-                          listenable: SettingsService(),
-                          builder: (context, _) => _buildMenuItem(
-                            isDark,
-                            icon: Icons.palette_rounded,
-                            iconBg: JellyTheme.primary,
-                            title: '主题风格',
-                            subtitle:
-                                '当前：${SettingsService().currentThemeInfo.name}',
-                            onTap: _showThemePresetSheet,
-                          ),
-                        ),
-                      ),
-                    ),
-                    // 3. 显示设置
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_5'),
-                      index: 3,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.tune_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: '显示设置',
-                          subtitle: '搜索页视图 · 默认首页 · 封面与书架样式',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const DisplaySettingsPage(),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    // 4. 阅读设置
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_4'),
-                      index: 4,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.auto_stories_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: '阅读设置',
-                          subtitle: '漫画 / 图书阅读模式：翻页 · 上下',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const ReadingSettingsPage(),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    // 5. 漫画源仓库 —— 服务**漫画**（SiteConfig 网页源，取图片）
-                    // 与下面的「书源仓库」是两个独立体系，别合并
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_source_repo'),
-                      index: 5,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.local_mall_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: '漫画仓',
-                          subtitle: '订阅 · 源管理',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  const SourceWarehousePage(comic: true),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    // 6. 书源仓库 —— 服务**小说**（Legado BookSource，取文字）
-                    //
-                    // 与「漫画源仓库」是**两套独立体系**：
-                    //   漫画源 = SiteConfig（取图片）
-                    //   书源   = Legado BookSource（取文字，一个 JSON 描述一个小说站）
-                    // 老桌面版也是分开的两项，这里保持一致。
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_book_source_repo'),
-                      index: 6,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.storefront_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: '书源仓库',
-                          subtitle: '导入书源 · 口令 · 排序',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const BookSourceRepoPage(),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    // 6.1 书源仓 / 漫画仓已移到各自仓库页的**右上角图标**
-                    //     （用户 2026-10-18：「不需要单独在我的页面弄」）：
-                    //       · 书源仓 → 书源仓库右上角
-                    //       · 漫画仓 → 漫画源仓库右上角
-                    // 7. 下载设置
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_2'),
-                      index: 7,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.download_for_offline_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: '下载设置',
-                          subtitle: '通用 · 图书 · 书源 · 漫画',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const DownloadSettingsPage(),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    // 8. 下载记录
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_download_record'),
-                      index: 8,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.download_done_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: '下载记录',
-                          subtitle: '漫画 & 图书下载管理',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const DownloadPage(
-                                isActive: true,
-                                showBackButton: true,
+            // ── 登录 / 账号卡：**固定在顶部**，不随下方内容滚动 ──────
+            //（用户 2026-10-18：「滑动的时候登录卡片位置固定不动，其余的滑动」）
+            //  我的笔记 / 阅读经历 / 阅读计划三个图标已收进这张卡的右上角，
+            //  实现在 `widgets/me_account_quick_entries.dart`。
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: _buildAccountCard(isDark),
+            ),
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.only(
+                  left: 12,
+                  right: 12,
+                  top: 12,
+                  bottom: 8 + JellyNavBar.contentBottomAvoid,
+                ),
+                children: [
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final cols = _adaptiveCols(constraints.maxWidth);
+                      const spacing = 12.0;
+                      final itemWidth =
+                          (constraints.maxWidth - spacing * (cols - 1)) / cols;
+                      return Wrap(
+                        spacing: spacing,
+                        runSpacing: spacing,
+                        children: [
+                          // 用户 2026-10-13：把「图书使用内置账号」「主题跟随系统」
+                          // 两张开关卡挪到「主题风格」**前面**。
+                          // 0. 图书使用内置账号
+                          StaggeredEntrance(
+                            key: ValueKey('${_session}_0'),
+                            index: 0,
+                            child: SizedBox(
+                              width: itemWidth,
+                              child: ListenableBuilder(
+                                listenable: SettingsService(),
+                                builder: (context, _) => _buildSwitchTile(
+                                  isDark,
+                                  icon: Icons.lock_person_rounded,
+                                  iconBg: JellyTheme.primary,
+                                  title: '图书使用内置账号',
+                                  subtitle: '关闭后需登录才能下载',
+                                  value: SettingsService().useBuiltinAccount,
+                                  onChanged:
+                                      SettingsService().setUseBuiltinAccount,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ),
-                    ),
-                    // 9. 阅读历程（原「浏览记录/足迹」入口，跳转不变）
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_browse_history'),
-                      index: 9,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.history_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: '阅读历程',
-                          subtitle: '漫画 & 图书阅读历史',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const BrowseHistoryPage(),
+                          // 1. 主题跟随系统
+                          StaggeredEntrance(
+                            key: ValueKey('${_session}_theme_follow'),
+                            index: 1,
+                            child: SizedBox(
+                              width: itemWidth,
+                              child: ListenableBuilder(
+                                listenable: SettingsService(),
+                                builder: (context, _) => _buildSwitchTile(
+                                  isDark,
+                                  icon: Icons.brightness_auto_rounded,
+                                  iconBg: JellyTheme.primary,
+                                  title: '主题跟随系统',
+                                  subtitle: '随系统明暗自动切换',
+                                  value: SettingsService().themeFollowSystem,
+                                  onChanged:
+                                      SettingsService().setThemeFollowSystem,
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                    ),
-                    // 10. 阅读统计（时长 / 连续天数 / 7 天图 / 读完本数 / 书源可用率）
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_reading_stats'),
-                      index: 10,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.bar_chart_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: '阅读统计',
-                          subtitle: '时长 · 连续天数 · 7 天趋势',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const ReadingStatsPage(),
+                          // 2. 主题风格
+                          StaggeredEntrance(
+                            key: ValueKey('${_session}_theme_style'),
+                            index: 2,
+                            child: SizedBox(
+                              width: itemWidth,
+                              child: ListenableBuilder(
+                                listenable: SettingsService(),
+                                builder: (context, _) => _buildMenuItem(
+                                  isDark,
+                                  icon: Icons.palette_rounded,
+                                  iconBg: JellyTheme.primary,
+                                  title: '主题风格',
+                                  subtitle:
+                                      '当前：${SettingsService().currentThemeInfo.name}',
+                                  onTap: _showThemePresetSheet,
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                    ),
-                    // 桌宠管理已移到「显示设置」里（用户 2026-10-18），
-                    // 「我的」页不再单独占一格。
-                    // AI 听书：多角色配音（easyVoice），音源/引擎管理
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_ai_tts'),
-                      index: 10,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.record_voice_over_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: 'AI 听书',
-                          subtitle: '多角色配音 · 音源管理',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const TtsEnginePage(),
+                          // 3. 显示设置
+                          StaggeredEntrance(
+                            key: ValueKey('${_session}_5'),
+                            index: 3,
+                            child: SizedBox(
+                              width: itemWidth,
+                              child: _buildMenuItem(
+                                isDark,
+                                icon: Icons.tune_rounded,
+                                iconBg: JellyTheme.primary,
+                                title: '显示设置',
+                                subtitle: '搜索页视图 · 默认首页 · 封面与书架样式',
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const DisplaySettingsPage(),
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                    ),
-                    // 通用设置（软件日志 / 缓存清理 / 同步与备份）
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_general'),
-                      index: 11,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.settings_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: '通用设置',
-                          subtitle: '软件日志 · 缓存清理 · 同步与备份',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const GeneralSettingsPage(),
+                          // 4. 阅读设置
+                          StaggeredEntrance(
+                            key: ValueKey('${_session}_4'),
+                            index: 4,
+                            child: SizedBox(
+                              width: itemWidth,
+                              child: _buildMenuItem(
+                                isDark,
+                                icon: Icons.auto_stories_rounded,
+                                iconBg: JellyTheme.primary,
+                                title: '阅读设置',
+                                subtitle: '漫画 / 图书阅读模式：翻页 · 上下',
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const ReadingSettingsPage(),
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                    ),
-                    // 被隐藏导航 tab 入口（导航栏关闭某 tab 时，依次补在这里）
-                    for (var i = 0; i < hiddenTabs.length; i++)
-                      StaggeredEntrance(
-                        key: ValueKey(
-                          '${_session}_hidden_${hiddenTabs[i].name}',
-                        ),
-                        index: 12 + i,
-                        child: SizedBox(
-                          width: itemWidth,
-                          child: _buildHiddenTabItem(isDark, hiddenTabs[i]),
-                        ),
-                      ),
-                  ],
-                );
-              },
+                          // 5. 漫画源仓库 —— 服务**漫画**（SiteConfig 网页源，取图片）
+                          // 与下面的「书源仓库」是两个独立体系，别合并
+                          StaggeredEntrance(
+                            key: ValueKey('${_session}_source_repo'),
+                            index: 5,
+                            child: SizedBox(
+                              width: itemWidth,
+                              child: _buildMenuItem(
+                                isDark,
+                                icon: Icons.local_mall_rounded,
+                                iconBg: JellyTheme.primary,
+                                title: '漫源仓库',
+                                subtitle: '订阅 · 源管理',
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        const SourceWarehousePage(comic: true),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          // 6. 书源仓库 —— 服务**小说**（Legado BookSource，取文字）
+                          //
+                          // 与「漫画源仓库」是**两套独立体系**：
+                          //   漫画源 = SiteConfig（取图片）
+                          //   书源   = Legado BookSource（取文字，一个 JSON 描述一个小说站）
+                          // 老桌面版也是分开的两项，这里保持一致。
+                          StaggeredEntrance(
+                            key: ValueKey('${_session}_book_source_repo'),
+                            index: 6,
+                            child: SizedBox(
+                              width: itemWidth,
+                              child: _buildMenuItem(
+                                isDark,
+                                icon: Icons.storefront_rounded,
+                                iconBg: JellyTheme.primary,
+                                title: '书源仓库',
+                                subtitle: '导入书源 · 口令 · 排序',
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const BookSourceRepoPage(),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          // 6.1 书源仓 / 漫画仓已移到各自仓库页的**右上角图标**
+                          //     （用户 2026-10-18：「不需要单独在我的页面弄」）：
+                          //       · 书源仓 → 书源仓库右上角
+                          //       · 漫画仓 → 漫画源仓库右上角
+                          // 7. 下载设置
+                          StaggeredEntrance(
+                            key: ValueKey('${_session}_2'),
+                            index: 7,
+                            child: SizedBox(
+                              width: itemWidth,
+                              child: _buildMenuItem(
+                                isDark,
+                                icon: Icons.download_for_offline_rounded,
+                                iconBg: JellyTheme.primary,
+                                title: '下载设置',
+                                subtitle: '通用 · 图书 · 书源 · 漫画',
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        const DownloadSettingsPage(),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          // 8. 下载记录
+                          StaggeredEntrance(
+                            key: ValueKey('${_session}_download_record'),
+                            index: 8,
+                            child: SizedBox(
+                              width: itemWidth,
+                              child: _buildMenuItem(
+                                isDark,
+                                icon: Icons.download_done_rounded,
+                                iconBg: JellyTheme.primary,
+                                title: '下载记录',
+                                subtitle: '漫画 & 图书下载管理',
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const DownloadPage(
+                                      isActive: true,
+                                      showBackButton: true,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          // 9. 阅读历程（原「浏览记录/足迹」入口，跳转不变）
+                          StaggeredEntrance(
+                            key: ValueKey('${_session}_browse_history'),
+                            index: 9,
+                            child: SizedBox(
+                              width: itemWidth,
+                              child: _buildMenuItem(
+                                isDark,
+                                icon: Icons.history_rounded,
+                                iconBg: JellyTheme.primary,
+                                title: '阅读历程',
+                                subtitle: '漫画 & 图书阅读历史',
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const BrowseHistoryPage(),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          // 10. 阅读统计（时长 / 连续天数 / 7 天图 / 读完本数 / 书源可用率）
+                          StaggeredEntrance(
+                            key: ValueKey('${_session}_reading_stats'),
+                            index: 10,
+                            child: SizedBox(
+                              width: itemWidth,
+                              child: _buildMenuItem(
+                                isDark,
+                                icon: Icons.bar_chart_rounded,
+                                iconBg: JellyTheme.primary,
+                                title: '阅读统计',
+                                subtitle: '时长 · 连续天数 · 7 天趋势',
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const ReadingStatsPage(),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          // 桌宠管理已移到「显示设置」里（用户 2026-10-18），
+                          // 「我的」页不再单独占一格。
+                          // AI 听书：多角色配音（easyVoice），音源/引擎管理
+                          StaggeredEntrance(
+                            key: ValueKey('${_session}_ai_tts'),
+                            index: 10,
+                            child: SizedBox(
+                              width: itemWidth,
+                              child: _buildMenuItem(
+                                isDark,
+                                icon: Icons.record_voice_over_rounded,
+                                iconBg: JellyTheme.primary,
+                                title: 'AI 听书',
+                                subtitle: '多角色配音 · 音源管理',
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const TtsEnginePage(),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          // 通用设置（软件日志 / 缓存清理 / 同步与备份）
+                          StaggeredEntrance(
+                            key: ValueKey('${_session}_general'),
+                            index: 11,
+                            child: SizedBox(
+                              width: itemWidth,
+                              child: _buildMenuItem(
+                                isDark,
+                                icon: Icons.settings_rounded,
+                                iconBg: JellyTheme.primary,
+                                title: '通用设置',
+                                subtitle: '软件日志 · 缓存清理 · 同步与备份',
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const GeneralSettingsPage(),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          // 被隐藏导航 tab 入口（导航栏关闭某 tab 时，依次补在这里）
+                          for (var i = 0; i < hiddenTabs.length; i++)
+                            StaggeredEntrance(
+                              key: ValueKey(
+                                '${_session}_hidden_${hiddenTabs[i].name}',
+                              ),
+                              index: 12 + i,
+                              child: SizedBox(
+                                width: itemWidth,
+                                child: _buildHiddenTabItem(
+                                  isDark,
+                                  hiddenTabs[i],
+                                ),
+                              ),
+                            ),
+                        ],
+                      );
+                    },
+                  ),
+                  // 底部附注：三项可点文字链接（同步与备份 · 软件日志 · 缓存清理）
+                  _buildFooterLinks(isDark),
+                ],
+              ),
             ),
-            // 底部附注：三项可点文字链接（同步与备份 · 软件日志 · 缓存清理）
-            _buildFooterLinks(isDark),
           ],
         ),
       ),

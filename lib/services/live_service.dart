@@ -593,6 +593,17 @@ class LiveService extends GetxService {
     }
   }
 
+  /// 某条直播源的地址（源切换面板「分享 / 编辑」用）。
+  ///
+  /// 单源模式（`_rawLives == null`）返回当前持久化的那一条地址。
+  String sourceUrlAt(int index) {
+    final raw = _rawLives;
+    if (raw != null && index >= 0 && index < raw.length) {
+      return (raw[index]['url']?.toString() ?? '').trim();
+    }
+    return (_persistedUrl ?? '').trim();
+  }
+
   /// 删除单个直播源（设置页）：多源从 lives 移除并重建，自定义单源清空全部
   Future<void> removeSource(int index) async {
     if (index < 0 || index >= sources.length) return;

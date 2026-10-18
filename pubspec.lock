@@ -968,7 +968,7 @@ packages:
     source: hosted
     version: "2.2.1"
   quickjs_engine:
-    dependency: "direct overridden"
+    dependency: "direct main"
     description:
       path: "packages/quickjs_engine"
       relative: true

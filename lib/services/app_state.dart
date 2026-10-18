@@ -271,10 +271,13 @@ class AppState extends GetxController {
     if (!PythonManager.instance.isIOS) return;
     // 先把本地 Python 源清单挂到 ApiConfig（即使配置加载失败也能在源面板看到）
     await ApiConfig.instance.reloadLocalVideoSources();
-    // 按**脚本**判：订阅里有没有 .py 源，或用户单独导入过本地 Python 源
+    // 按**脚本**判：订阅里有没有 .py 源，或用户单独导入过本地 Python 源。
+    // ⚠️ 本地源只在「本地爬虫」开关打开时才算数（用户 2026-10-18：
+    //    默认优先订阅激活的源，不为本地源白启 Python）。
+    final localEnabled = ApiConfig.instance.localSourcesEnabled.value;
     final hasPySource =
         ApiConfig.instance.sourceBeanList.any((s) => s.isPythonScriptSource) ||
-        ApiConfig.instance.localVideoSources.isNotEmpty;
+        (localEnabled && ApiConfig.instance.localVideoSources.isNotEmpty);
     if (!hasPySource) {
       AppLog.instance.log('[AppState] 没有 .py 源（含本地），跳过 Python 引擎启动（按脚本判）');
       return;
@@ -285,7 +288,7 @@ class AppState extends GetxController {
         // 订阅/远端 .py：Documents/python-project 下全量注册
         await PythonSourcesService.instance.syncToEngine();
         // 本地 Python 源：Documents/local_py 下单独注册（与订阅解耦）
-        if (ApiConfig.instance.localVideoSources.isNotEmpty) {
+        if (localEnabled && ApiConfig.instance.localVideoSources.isNotEmpty) {
           await LocalPythonSources.instance.registerAll();
         }
       }
