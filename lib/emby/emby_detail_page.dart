@@ -39,6 +39,9 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
   String? _error;
   bool _overviewExpanded = false;
 
+  /// 选集区域的 GlobalKey（用于"选集"按钮滚动定位）
+  final _episodeSectionKey = GlobalKey();
+
   @override
   void initState() {
     super.initState();
@@ -215,122 +218,131 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
   Widget _buildHero() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 竖版海报
-          Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.45),
-                  blurRadius: 22,
-                  offset: const Offset(0, 10),
-                ),
-              ],
+          // 大标题
+          Text(
+            _item.name,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 28,
+              fontWeight: FontWeight.w800,
+              height: 1.15,
             ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: SizedBox(
-                width: 112,
-                height: 168,
-                child: CachedNetworkImage(
-                  imageUrl: _api.imageUrl(_item.id, tag: _item.imageTag),
-                  httpHeaders: _api.imageHeaders,
-                  fit: BoxFit.cover,
-                  placeholder: (_, _) =>
-                      const ColoredBox(color: Color(0xFF1E1E22)),
-                  errorWidget: (_, _, _) => const ColoredBox(
-                    color: Color(0xFF1E1E22),
-                    child: Icon(Icons.movie_outlined, color: Colors.white38),
+          ),
+          // 刮削到的宣传语（Tagline）
+          if (_item.tagline.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              _item.tagline,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.72),
+                fontSize: 13,
+                height: 1.35,
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          // 元数据胶囊行
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (_item.year != null) _MetaPill(text: '${_item.year}'),
+              if (_item.rating != null && _item.rating! > 0)
+                _MetaPill(
+                  text: '★ ${_item.rating!.toStringAsFixed(1)}',
+                  highlighted: true,
+                ),
+              if (_item.officialRating.isNotEmpty)
+                _MetaPill(text: _item.officialRating),
+              if (_item.durationText.isNotEmpty)
+                _MetaPill(text: _item.durationText),
+              if (_item.type.isNotEmpty)
+                _MetaPill(
+                  text: _item.isSeries
+                      ? '剧集'
+                      : _item.isEpisode
+                      ? '单集'
+                      : '电影',
+                ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          // 两个按钮：立即播放 + 选集
+          Row(
+            children: [
+              // 立即播放（蓝色主按钮）
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => _play(_item.isEpisode ? _item : _episodes.isNotEmpty ? _episodes.first : _item),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      color: _libAccent,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.play_arrow_rounded,
+                          size: 22,
+                          color: Colors.white,
+                        ),
+                        SizedBox(width: 6),
+                        Text(
+                          '立即播放',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _item.name,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
-                    height: 1.15,
-                  ),
-                ),
-                // 刮削到的宣传语（Tagline）
-                if (_item.tagline.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    _item.tagline,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.72),
-                      fontSize: 12,
-                      height: 1.35,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    if (_item.year != null) _MetaPill(text: '${_item.year}'),
-                    if (_item.rating != null && _item.rating! > 0)
-                      _MetaPill(
-                        text: '★ ${_item.rating!.toStringAsFixed(1)}',
-                        highlighted: true,
-                      ),
-                    if (_item.officialRating.isNotEmpty)
-                      _MetaPill(text: _item.officialRating),
-                    if (_item.durationText.isNotEmpty)
-                      _MetaPill(text: _item.durationText),
-                    if (_item.type.isNotEmpty)
-                      _MetaPill(
-                        text: _item.isSeries
-                            ? '剧集'
-                            : _item.isEpisode
-                            ? '单集'
-                            : '电影',
-                      ),
-                  ],
-                ),
-                if (!_item.isSeries && !_item.isEpisode) ...[
-                  const SizedBox(height: 16),
-                  GestureDetector(
-                    onTap: () => _play(_item),
+              const SizedBox(width: 12),
+              // 选集（透明边框按钮）
+              if (_item.isSeries)
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      // 滚动到选集区域
+                      Scrollable.ensureVisible(
+                        _episodeSectionKey.currentContext!,
+                        duration: const Duration(milliseconds: 400),
+                        alignment: 0.1,
+                      );
+                    },
                     child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 9,
-                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
                       decoration: BoxDecoration(
-                        color: _libAccent,
-                        borderRadius: BorderRadius.circular(999),
+                        color: Colors.white.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.3), width: 1.5),
                       ),
                       child: const Row(
-                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(
-                            Icons.play_arrow_rounded,
-                            size: 20,
+                            Icons.list_alt_rounded,
+                            size: 22,
                             color: Colors.white,
                           ),
-                          SizedBox(width: 4),
+                          SizedBox(width: 6),
                           Text(
-                            '播放',
+                            '选集',
                             style: TextStyle(
                               color: Colors.white,
-                              fontSize: 14,
+                              fontSize: 15,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
@@ -338,9 +350,8 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                       ),
                     ),
                   ),
-                ],
-              ],
-            ),
+                ),
+            ],
           ),
         ],
       ),
@@ -455,6 +466,7 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
 
   Widget _buildEpisodes() {
     return Column(
+      key: _episodeSectionKey,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _sectionTitle('选集', trailing: '${_episodes.length} 集'),
@@ -476,119 +488,124 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
             ),
           )
         else
-          for (final ep in _episodes) ...[
-            _episodeTile(ep),
-            const SizedBox(height: 8),
-          ],
+          // 横向滚动剧集卡片列表
+          SizedBox(
+            height: 140,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              itemCount: _episodes.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 12),
+              itemBuilder: (context, index) {
+                final ep = _episodes[index];
+                return _episodeCard(ep);
+              },
+            ),
+          ),
       ],
     );
   }
 
-  Widget _episodeTile(EmbyItem ep) {
-    final radius = BorderRadius.circular(14);
-    return Material(
-      color: _libCard,
-      borderRadius: radius,
-      child: InkWell(
-        borderRadius: radius,
-        onTap: () => _play(ep),
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: Row(
-            children: [
-              // 单集缩略图（16:9）+ 集号角标
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: SizedBox(
-                  width: 104,
-                  height: 60,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      CachedNetworkImage(
-                        imageUrl: _api.imageUrl(
-                          ep.id,
-                          tag: ep.imageTag,
-                          maxHeight: 240,
-                        ),
-                        httpHeaders: _api.imageHeaders,
-                        fit: BoxFit.cover,
-                        placeholder: (_, _) =>
-                            const ColoredBox(color: Color(0xFF1A1A20)),
-                        errorWidget: (_, _, _) => const ColoredBox(
-                          color: Color(0xFF1A1A20),
-                          child: Icon(
-                            Icons.play_circle_outline_rounded,
-                            color: Colors.white38,
-                            size: 22,
-                          ),
-                        ),
-                      ),
-                      if (ep.episodeLabel.isNotEmpty)
-                        Positioned(
-                          left: 4,
-                          bottom: 4,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 5,
-                              vertical: 1,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.72),
-                              borderRadius: BorderRadius.circular(5),
-                            ),
-                            child: Text(
-                              ep.episodeLabel,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
+  /// 横向剧集卡片（缩略图 + 集名 + 时长）
+  Widget _episodeCard(EmbyItem ep) {
+    return GestureDetector(
+      onTap: () => _play(ep),
+      child: SizedBox(
+        width: 160,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 缩略图（16:9）
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: SizedBox(
+                width: 160,
+                height: 90,
+                child: Stack(
+                  fit: StackFit.expand,
                   children: [
-                    Text(
-                      ep.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: _libText,
-                        fontSize: AppTheme.fontSubhead,
-                        fontWeight: FontWeight.w600,
-                        height: 1.25,
+                    CachedNetworkImage(
+                      imageUrl: _api.imageUrl(
+                        ep.id,
+                        tag: ep.imageTag,
+                        maxHeight: 240,
+                      ),
+                      httpHeaders: _api.imageHeaders,
+                      fit: BoxFit.cover,
+                      placeholder: (_, _) =>
+                          const ColoredBox(color: Color(0xFF1A1A20)),
+                      errorWidget: (_, _, _) => const ColoredBox(
+                        color: Color(0xFF1A1A20),
+                        child: Icon(
+                          Icons.play_circle_outline_rounded,
+                          color: Colors.white38,
+                          size: 28,
+                        ),
                       ),
                     ),
-                    if (ep.durationText.isNotEmpty) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        ep.durationText,
-                        style: const TextStyle(
-                          color: _libSub,
-                          fontSize: AppTheme.fontCaption,
+                    // 播放按钮叠加
+                    const Positioned(
+                      right: 6,
+                      bottom: 6,
+                      child: Icon(
+                        Icons.play_circle_fill_rounded,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                    ),
+                    // 集号角标
+                    if (ep.episodeLabel.isNotEmpty)
+                      Positioned(
+                        left: 6,
+                        bottom: 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.72),
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          child: Text(
+                            ep.episodeLabel,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                         ),
                       ),
-                    ],
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              Icon(
-                Icons.play_circle_fill_rounded,
-                size: 24,
-                color: _libAccent.withValues(alpha: 0.95),
+            ),
+            const SizedBox(height: 8),
+            // 集名
+            Text(
+              ep.name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: _libText,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                height: 1.3,
+              ),
+            ),
+            // 时长
+            if (ep.durationText.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(
+                ep.durationText,
+                style: const TextStyle(
+                  color: _libSub,
+                  fontSize: 11,
+                ),
               ),
             ],
-          ),
+          ],
         ),
       ),
     );
