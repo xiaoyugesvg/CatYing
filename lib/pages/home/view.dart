@@ -944,6 +944,8 @@ class _HomePageState extends State<HomePage> {
       final selectedSortId = _controller.selectedSort.value?.id;
       final hasMore = _controller.hasMore.value;
       final source = ApiConfig.instance.homeSourceBean.value;
+      // Python 源（type=3 且脚本是 .py）：home/category 空列表要给出明确提示
+      final isPySource = source?.isPythonScriptSource ?? false;
 
       if (isLoading && videos.isEmpty) {
         return const AppLoading();
@@ -1077,59 +1079,76 @@ class _HomePageState extends State<HomePage> {
                       return _buildInlineFilters();
                     }),
                   ),
-                  SliverPadding(
-                    // 底部 padding 改为 0：内容区下探到底，一屏显示更多卡片
-                    //（用户要求对齐参考图"内容贴底"；原本 80 是给悬浮导航让位，现按用户指示取消）
-                    padding: const EdgeInsets.fromLTRB(
-                      AppTheme.spacingXL,
-                      AppTheme.spacingMD,
-                      AppTheme.spacingXL,
-                      0,
-                    ),
-                    sliver: SliverGrid(
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: crossAxisCount,
-                        childAspectRatio: ratio,
-                        crossAxisSpacing: AppTheme.cardSpacing,
-                        mainAxisSpacing: AppTheme.cardSpacing,
+                  // Python 源 home/category 返回空 list 时原来是一片纯白。
+                  // 空列表既不抛异常也没有 errorMessage，用户只会以为 App 坏了；
+                  // 这里明确说明"暂无内容 + 常见原因"并给重试。
+                  if (isPySource &&
+                      !isLoading &&
+                      videos.isEmpty &&
+                      errorMsg == null)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 40),
+                        child: AppError(
+                          message: '该源暂无内容（站点不可达 / 反爬或已改版）',
+                          onRetry: () => _controller.refresh(),
+                        ),
                       ),
-                      delegate: SliverChildBuilderDelegate(
-                        (context, index) {
-                          if (index >= videos.length) {
-                            if (hasMore && selectedSortId != null) {
-                              WidgetsBinding.instance.addPostFrameCallback((_) {
-                                _controller.loadMore();
-                              });
-                              return Center(
-                                child: Padding(
-                                  padding: EdgeInsets.all(8.0),
-                                  child: SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: AppTheme.accentColor,
+                    )
+                  else
+                    SliverPadding(
+                      // 底部 padding 改为 0：内容区下探到底，一屏显示更多卡片
+                      //（用户要求对齐参考图"内容贴底"；原本 80 是给悬浮导航让位，现按用户指示取消）
+                      padding: const EdgeInsets.fromLTRB(
+                        AppTheme.spacingXL,
+                        AppTheme.spacingMD,
+                        AppTheme.spacingXL,
+                        0,
+                      ),
+                      sliver: SliverGrid(
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: crossAxisCount,
+                          childAspectRatio: ratio,
+                          crossAxisSpacing: AppTheme.cardSpacing,
+                          mainAxisSpacing: AppTheme.cardSpacing,
+                        ),
+                        delegate: SliverChildBuilderDelegate(
+                          (context, index) {
+                            if (index >= videos.length) {
+                              if (hasMore && selectedSortId != null) {
+                                WidgetsBinding.instance.addPostFrameCallback((_) {
+                                  _controller.loadMore();
+                                });
+                                return Center(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(8.0),
+                                    child: SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: AppTheme.accentColor,
+                                      ),
                                     ),
                                   ),
-                                ),
-                              );
+                                );
+                              }
+                              return const SizedBox.shrink();
                             }
-                            return const SizedBox.shrink();
-                          }
-                          final vid = videos[index];
-                          return VodCard(
-                            video: vid,
-                            // 与上面的 posterRatio 配套（首页卡片高度 ×2）
-                            posterHeightRatio: 1.44,
-                            onTap: () => Get.toNamed('/detail', arguments: vid),
-                          );
-                        },
-                        childCount:
-                            videos.length +
-                            ((hasMore && selectedSortId != null) ? 1 : 0),
+                            final vid = videos[index];
+                            return VodCard(
+                              video: vid,
+                              // 与上面的 posterRatio 配套（首页卡片高度 ×2）
+                              posterHeightRatio: 1.44,
+                              onTap: () => Get.toNamed('/detail', arguments: vid),
+                            );
+                          },
+                          childCount:
+                              videos.length +
+                              ((hasMore && selectedSortId != null) ? 1 : 0),
+                        ),
                       ),
                     ),
-                  ),
                 ],
               );
             },
