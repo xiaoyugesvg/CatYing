@@ -139,7 +139,8 @@ class VeneraMangaSource extends MangaSource {
       throw Exception('Venera 源脚本加载失败: ${loaded.stringResult}');
     }
     final created = runtime.evaluate(
-      'globalThis.__veneraSrc = new globalThis.__veneraSourceClass();',
+      'globalThis.__veneraSrc = new globalThis.__veneraSourceClass();'
+      'globalThis.__veneraCaptureDefaults();',
     );
     if (created.isError) {
       throw Exception('Venera 源实例化失败: ${created.stringResult}');

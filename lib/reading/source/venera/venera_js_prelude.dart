@@ -492,9 +492,17 @@ const String veneraJsPrelude = r'''
   };
   ComicSource.prototype.loadSetting = function (k) {
     var v = host({ method: 'load_setting', key: this.key, setting_key: k });
-    if ((v === null || v === undefined) && this.settings &&
-        this.settings[k] && this.settings[k]['default'] !== undefined) {
-      return this.settings[k]['default'];
+    if (v !== null && v !== undefined) return v;
+    // 默认值在实例创建后立刻快照（__veneraSettingDefaults）。
+    // 不能只看 this.settings[k]：很多源（如 copy_manga 的 refreshAppApi）
+    // 会把 `settings.base_url = "xxx"` 直接改成字符串，原对象就没了 ——
+    // 这时再读 ['default'] 得到 undefined，apiUrl 变成 `https://null`，
+    // 全部请求失败、页面一片空白。
+    var d = globalThis.__veneraSettingDefaults;
+    if (d && d[k] !== undefined) return d[k];
+    var cur = this.settings && this.settings[k];
+    if (cur && typeof cur === 'object' && cur['default'] !== undefined) {
+      return cur['default'];
     }
     return v;
   };
@@ -514,6 +522,23 @@ const String veneraJsPrelude = r'''
   ComicSource.prototype.init = function () {};
 
   // ────────────────────────── 杂项 ──────────────────────────
+  // 快照 settings 的默认值（实例创建后调用，避免源把 settings 改坏后丢默认值）
+  globalThis.__veneraCaptureDefaults = function () {
+    var out = {};
+    var s = globalThis.__veneraSrc;
+    var st = s && s.settings;
+    if (st) {
+      for (var k in st) {
+        var v = st[k];
+        if (v && typeof v === 'object' && v['default'] !== undefined) {
+          out[k] = v['default'];
+        }
+      }
+    }
+    globalThis.__veneraSettingDefaults = out;
+    return Object.keys(out).length;
+  };
+
   globalThis.APP = { version: '9.9.9', locale: 'zh_CN', isDebug: false };
 
   globalThis.log = function (level, title, content) {
