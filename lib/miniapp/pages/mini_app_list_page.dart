@@ -73,6 +73,9 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
   /// 排序（自定义 = 按存储顺序，可拖动调整）
   _AppSort _sort = _AppSort.custom;
 
+  /// 当前分组 tab：null = 全部
+  String? _groupFilter;
+
   /// 顶栏搜索（输入框由 `HomeSearchBar` 自己持有展开态，这里只跟着它过滤）
   final _searchCtrl = TextEditingController();
   String _query = '';
@@ -121,9 +124,12 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     super.dispose();
   }
 
-  /// 过滤 + 排序后的「已安装」程序（内置那几张卡不参与）
+  /// 过滤 + 排序后的程序（内置那几张卡不参与）
   List<MiniApp> _visibleApps() {
     var list = service.apps.toList();
+    if (_groupFilter != null) {
+      list = list.where((a) => a.group == _groupFilter).toList();
+    }
     final q = _query.trim().toLowerCase();
     if (q.isNotEmpty) {
       list = list
@@ -188,32 +194,45 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
             ),
             const SizedBox(height: AppTheme.spacingSM),
 
-            // ── 已安装 N + 视图切换（用户 2026-10-18：视图按钮放到明面上）──
+            // ── 分组 tab：全部 / 自定义分组 / ＋新建分组 ───────────
             Obx(() {
-              final count = service.apps.length;
-              return Padding(
-                padding: const EdgeInsets.fromLTRB(16, 2, 12, 8),
+              final tabs = <String>['全部', ...service.groups];
+              return SizedBox(
+                height: 42,
                 child: Row(
                   children: [
-                    Text(
-                      '已安装',
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: AppTheme.fontHeadline,
-                        fontWeight: FontWeight.w700,
+                    Expanded(
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.only(left: 16, right: 8),
+                        itemCount: tabs.length + 1,
+                        separatorBuilder: (_, _) => const SizedBox(width: 8),
+                        itemBuilder: (context, i) {
+                          if (i == tabs.length) {
+                            return _groupTab(
+                              label: '＋ 新建分组',
+                              selected: false,
+                              onTap: _createGroupDialog,
+                            );
+                          }
+                          final name = tabs[i];
+                          final selected = name == '全部'
+                              ? _groupFilter == null
+                              : _groupFilter == name;
+                          return _groupTab(
+                            label: name,
+                            selected: selected,
+                            onTap: () => setState(
+                              () => _groupFilter = name == '全部' ? null : name,
+                            ),
+                          );
+                        },
                       ),
                     ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '$count',
-                      style: TextStyle(
-                        color: AppTheme.textTertiary,
-                        fontSize: AppTheme.fontCaption,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: _viewModeButton(),
                     ),
-                    const Spacer(),
-                    _viewModeButton(),
                   ],
                 ),
               );
@@ -306,7 +325,13 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
   Widget _buildBody() {
     final apps = _visibleApps();
     if (apps.isEmpty) {
-      final empty = _query.trim().isEmpty;
+      final noQuery = _query.trim().isEmpty;
+      final inGroup = _groupFilter != null;
+      final empty = noQuery && !inGroup;
+      final title = noQuery ? (inGroup ? '该分组还没有程序' : '还没有程序') : '没有匹配的程序';
+      final subtitle = noQuery
+          ? (inGroup ? '长按程序 → 移动到分组' : '导入 TVBox 配置，或从小程序市场安装')
+          : '换个关键词再试试';
       return Center(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -321,14 +346,18 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
-                  empty ? Icons.widgets_outlined : Icons.search_off_rounded,
+                  noQuery
+                      ? (inGroup
+                            ? Icons.folder_open_rounded
+                            : Icons.widgets_outlined)
+                      : Icons.search_off_rounded,
                   size: 30,
                   color: AppTheme.accentOnSurface,
                 ),
               ),
               const SizedBox(height: 14),
               Text(
-                empty ? '还没有程序' : '没有匹配的程序',
+                title,
                 style: TextStyle(
                   color: AppTheme.textPrimary,
                   fontSize: AppTheme.fontHeadline,
@@ -337,7 +366,7 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
               ),
               const SizedBox(height: 6),
               Text(
-                empty ? '导入 TVBox 配置，或从小程序市场安装' : '换个关键词再试试',
+                subtitle,
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: AppTheme.textTertiary,
@@ -790,6 +819,186 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     );
   }
 
+  /// 一个分组 tab（「全部」/自定义分组/新建分组）
+  Widget _groupTab({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.accentColor : AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? Colors.transparent : AppTheme.borderLight,
+            width: 0.6,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? Colors.white : AppTheme.textSecondary,
+            fontSize: 13,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 新建分组
+  Future<void> _createGroupDialog() async {
+    final ctrl = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppTheme.radiusLG),
+        ),
+        title: Text('新建分组', style: TextStyle(color: AppTheme.textPrimary)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          style: TextStyle(color: AppTheme.textPrimary),
+          decoration: const InputDecoration(hintText: '分组名称'),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('取消', style: TextStyle(color: AppTheme.textTertiary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text),
+            child: const Text('创建'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    final n = (name ?? '').trim();
+    if (n.isEmpty) return;
+    final ok = await service.createGroup(n);
+    if (!mounted) return;
+    if (!ok) {
+      AppToast.message('分组「$n」已存在');
+      return;
+    }
+    setState(() => _groupFilter = n);
+  }
+
+  /// 选择某个程序的分组
+  void _showGroupPicker(MiniApp app) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '移动到分组',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                app.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: 12,
+                ),
+              ),
+              const SizedBox(height: 14),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 240),
+                child: SingleChildScrollView(
+                  child: Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      _sheetChip('未分组', app.group.isEmpty, () async {
+                        Navigator.pop(ctx);
+                        await service.setGroup(app, '');
+                        if (mounted) setState(() {});
+                      }),
+                      for (final g in service.groups)
+                        _sheetChip(g, app.group == g, () async {
+                          Navigator.pop(ctx);
+                          await service.setGroup(app, g);
+                          if (mounted) setState(() {});
+                        }),
+                      _sheetChip('＋ 新建分组', false, () async {
+                        Navigator.pop(ctx);
+                        await _createGroupForApp(app);
+                      }),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 给某个程序新建分组并直接移进去
+  Future<void> _createGroupForApp(MiniApp app) async {
+    final ctrl = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppTheme.radiusLG),
+        ),
+        title: Text('新建分组', style: TextStyle(color: AppTheme.textPrimary)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          style: TextStyle(color: AppTheme.textPrimary),
+          decoration: const InputDecoration(hintText: '分组名称'),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('取消', style: TextStyle(color: AppTheme.textTertiary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text),
+            child: const Text('创建'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    final n = (name ?? '').trim();
+    if (n.isEmpty) return;
+    await service.createGroup(n);
+    await service.setGroup(app, n);
+    if (mounted) setState(() {});
+  }
+
   // ── 长按菜单：分享 / 移动 / 删除 ──────────────────────────────
   void _showAppMenu(MiniApp app) {
     showModalBottomSheet(
@@ -835,10 +1044,27 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
             ),
             ListTile(
               leading: Icon(
+                Icons.folder_outlined,
+                color: AppTheme.textSecondary,
+              ),
+              title: Text(
+                '移动到分组',
+                style: TextStyle(color: AppTheme.textPrimary),
+              ),
+              onTap: () {
+                Get.back();
+                _showGroupPicker(app);
+              },
+            ),
+            ListTile(
+              leading: Icon(
                 Icons.reorder_rounded,
                 color: AppTheme.textSecondary,
               ),
-              title: Text('移动', style: TextStyle(color: AppTheme.textPrimary)),
+              title: Text(
+                '调整顺序',
+                style: TextStyle(color: AppTheme.textPrimary),
+              ),
               onTap: () {
                 Get.back();
                 _showReorderSheet();

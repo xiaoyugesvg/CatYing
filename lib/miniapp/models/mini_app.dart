@@ -30,6 +30,9 @@ class MiniApp {
   /// 创建时间（epoch ms）
   final int createdAt;
 
+  /// 所属分组（空 = 未分组）
+  final String group;
+
   const MiniApp({
     required this.id,
     required this.name,
@@ -37,6 +40,7 @@ class MiniApp {
     required this.source,
     required this.rawJson,
     required this.createdAt,
+    this.group = '',
   });
 
   /// 是否为麦优直播订阅应用
@@ -48,23 +52,36 @@ class MiniApp {
   /// 解析后的内容（每次从 rawJson 现算，不缓存——避免过期脏数据）
   MiniAppParsed get parsed => MiniAppParsed.parse(rawJson);
 
+  /// 复制并替换分组
+  MiniApp withGroup(String group) => MiniApp(
+    id: id,
+    name: name,
+    type: type,
+    source: source,
+    rawJson: rawJson,
+    createdAt: createdAt,
+    group: group,
+  );
+
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'type': type,
-        'source': source,
-        'rawJson': rawJson,
-        'createdAt': createdAt,
-      };
+    'id': id,
+    'name': name,
+    'type': type,
+    'source': source,
+    'rawJson': rawJson,
+    'createdAt': createdAt,
+    'group': group,
+  };
 
   factory MiniApp.fromJson(Map<String, dynamic> json) => MiniApp(
-        id: json['id'] as String? ?? '',
-        name: json['name'] as String? ?? '程序',
-        type: json['type'] as String? ?? 'tvbox',
-        source: json['source'] as String? ?? '',
-        rawJson: json['rawJson'] as String? ?? '{}',
-        createdAt: json['createdAt'] as int? ?? 0,
-      );
+    id: json['id'] as String? ?? '',
+    name: json['name'] as String? ?? '程序',
+    type: json['type'] as String? ?? 'tvbox',
+    source: json['source'] as String? ?? '',
+    rawJson: json['rawJson'] as String? ?? '{}',
+    createdAt: json['createdAt'] as int? ?? 0,
+    group: json['group'] as String? ?? '',
+  );
 }
 
 /// 「小程序市场」清单里的一项（顶层 `{"apps":[…]}`，ant-video 市场格式）。
@@ -118,7 +135,9 @@ class MiniAppMarketEntry {
 bool looksLikeMiniAppMarket(String raw) {
   try {
     final decoded = jsonDecode(raw);
-    return decoded is Map && decoded['apps'] is List && (decoded['apps'] as List).isNotEmpty;
+    return decoded is Map &&
+        decoded['apps'] is List &&
+        (decoded['apps'] as List).isNotEmpty;
   } catch (_) {
     return false;
   }
@@ -195,13 +214,17 @@ class MiniAppParsed {
             if (spider is String && spider.trim().isNotEmpty) {
               final ext = spider.trim();
               final uri = Uri.tryParse(ext);
-              final isUrl = uri != null &&
+              final isUrl =
+                  uri != null &&
                   (uri.scheme == 'http' || uri.scheme == 'https');
               if (isUrl) {
-                spiderSites.add(MiniAppSpiderSite(
+                spiderSites.add(
+                  MiniAppSpiderSite(
                     name: siteName.isEmpty ? name : siteName,
                     api: api,
-                    ext: ext));
+                    ext: ext,
+                  ),
+                );
               } else {
                 hasInlineSpider = true;
               }
@@ -210,8 +233,12 @@ class MiniAppParsed {
             final type = _toInt(s['type'], 1);
             // CMS：type 0(XML)/1(JSON)；api 指向 api.php/provide/vod
             if (type == 0 || type == 1) {
-              cmsSites.add(MiniAppCmsSite(
-                  name: siteName.isEmpty ? name : siteName, api: api));
+              cmsSites.add(
+                MiniAppCmsSite(
+                  name: siteName.isEmpty ? name : siteName,
+                  api: api,
+                ),
+              );
               continue;
             }
             // type 3 脚本源（TVBox spider）：api 可能是
@@ -227,10 +254,13 @@ class MiniAppParsed {
                   (lowerApi.endsWith('.py') ||
                       lowerApi.endsWith('.js') ||
                       extStr.isNotEmpty)) {
-                spiderSites.add(MiniAppSpiderSite(
+                spiderSites.add(
+                  MiniAppSpiderSite(
                     name: siteName.isEmpty ? name : siteName,
                     api: api,
-                    ext: extStr));
+                    ext: extStr,
+                  ),
+                );
               }
               continue;
             }
@@ -256,19 +286,25 @@ class MiniAppParsed {
             final urls = <String>[];
             final rawUrls = l['urls'];
             if (rawUrls is List) {
-              urls.addAll(rawUrls
-                  .map((e) => e?.toString() ?? '')
-                  .where((u) => u.trim().isNotEmpty));
+              urls.addAll(
+                rawUrls
+                    .map((e) => e?.toString() ?? '')
+                    .where((u) => u.trim().isNotEmpty),
+              );
             } else if (rawUrls is String && rawUrls.trim().isNotEmpty) {
               urls.add(rawUrls.trim());
             }
             if (chName.isEmpty || urls.isEmpty) continue;
-            groupMap.putIfAbsent(group, () => []).add(LiveChannel(
-                  name: chName,
-                  urls: urls,
-                  group: group,
-                  logo: logo,
-                ));
+            groupMap
+                .putIfAbsent(group, () => [])
+                .add(
+                  LiveChannel(
+                    name: chName,
+                    urls: urls,
+                    group: group,
+                    logo: logo,
+                  ),
+                );
           }
           groupMap.forEach((g, channels) {
             liveGroups.add(LiveGroup(name: g, channels: channels));
@@ -313,10 +349,16 @@ class MiniAppCmsSite {
 /// Spider 影视源（`spider` / `api` 为 http(s) 脚本 URL，type 3）
 class MiniAppSpiderSite {
   final String name;
+
   /// 原始 api：脚本 URL（.js / .py / drpy2 运行时）
   final String api;
+
   /// 站点脚本（drpy2 模式的 `ext`；普通脚本源为空）
   final String ext;
 
-  const MiniAppSpiderSite({required this.name, required this.api, this.ext = ''});
+  const MiniAppSpiderSite({
+    required this.name,
+    required this.api,
+    this.ext = '',
+  });
 }

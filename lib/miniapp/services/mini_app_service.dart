@@ -35,6 +35,9 @@ class MiniAppService extends GetxService {
 
   static const String _key = 'miniapp_list_v1';
 
+  /// 程序分组名列表（允许空分组；顺序即 tab 顺序）
+  static const String _kGroups = 'miniapp_groups_v1';
+
   /// 文件级备份（Documents，独立于 prefs plist）。
   /// 与订阅同理：进程被硬打断时整个 plist 可能丢失 ⇒ 小程序列表也一起没。
   static const String _backupName = 'miniapp_list.bak';
@@ -63,6 +66,9 @@ class MiniAppService extends GetxService {
   /// 已安装程序列表
   final apps = <MiniApp>[].obs;
 
+  /// 程序分组（tab 栏用；「全部」不在这里）
+  final groups = <String>[].obs;
+
   bool _loaded = false;
 
   String _marketUrl = '';
@@ -85,6 +91,11 @@ class MiniAppService extends GetxService {
     _loaded = true;
     final prefs = await SharedPreferences.getInstance();
     _marketUrl = prefs.getString(_kMarketUrl) ?? '';
+    groups.assignAll(
+      (prefs.getStringList(_kGroups) ?? const <String>[])
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty),
+    );
     var raw = prefs.getString(_key) ?? '';
     // prefs 空/损坏 → 用文件备份兜底（整域丢失后的自救）
     if (raw.trim().isEmpty) {
@@ -101,12 +112,18 @@ class MiniAppService extends GetxService {
     try {
       final list = jsonDecode(raw);
       if (list is List) {
-        apps.assignAll(list
-            .whereType<Map>()
-            .map((e) => MiniApp.fromJson(Map<String, dynamic>.from(e)))
-            .toList());
+        apps.assignAll(
+          list
+              .whereType<Map>()
+              .map((e) => MiniApp.fromJson(Map<String, dynamic>.from(e)))
+              .toList(),
+        );
         // 重启后把已装程序的影视源重新注册进视频源列表
         for (final app in apps) {
+          // 老数据里可能只有 app.group、没有分组清单：补进 tab 列表
+          if (app.group.isNotEmpty && !groups.contains(app.group)) {
+            groups.add(app.group);
+          }
           _registerVideoSources(app);
         }
       }
@@ -119,6 +136,9 @@ class MiniAppService extends GetxService {
     final prefs = await SharedPreferences.getInstance();
     final body = jsonEncode(apps.map((a) => a.toJson()).toList());
     await prefs.setString(_key, body);
+    try {
+      await prefs.setStringList(_kGroups, groups.toList());
+    } catch (_) {}
     // 文件备份（独立于 plist，进程被硬打断也能救回来）
     try {
       final f = await _backupFile();
@@ -177,7 +197,7 @@ class MiniAppService extends GetxService {
   /// - 内容是市场清单 `{"apps":[…]}` → 返回 [market]，由 UI 打开市场页（列出 + 安装）
   /// - 否则按普通 TVBox 配置导入
   Future<({bool ok, String? error, List<MiniAppMarketEntry>? market})>
-      importUrlSmart(String url) async {
+  importUrlSmart(String url) async {
     final trimmed = url.trim();
     if (trimmed.isEmpty) return (ok: false, error: '地址不能为空', market: null);
     try {
@@ -219,8 +239,9 @@ class MiniAppService extends GetxService {
       //   `sources.json`、`api_config` 的 `api_url.bak`、`prefs_mirror.json`。
       //   这里把目标路径规范化（吃掉 `..` / `.`）后强制校验仍在解包目录内，
       //   越界条目直接丢弃。（不用引 package:path：Uri.normalizePath 就够。）
-      final outPath =
-          Uri.file('$basePath${f.name}').normalizePath().toFilePath();
+      final outPath = Uri.file(
+        '$basePath${f.name}',
+      ).normalizePath().toFilePath();
       if (!outPath.startsWith(basePath)) {
         continue; // 越界条目：静默丢弃（这是攻击/坏包场景，不是用户操作）
       }
@@ -256,7 +277,10 @@ class MiniAppService extends GetxService {
   }
 
   /// 下载 zip（bytes）或 manifest（String），带 GitHub 镜像回退
-  Future<Object> _downloadWithMirrors(String url, {required bool asBytes}) async {
+  Future<Object> _downloadWithMirrors(
+    String url, {
+    required bool asBytes,
+  }) async {
     final original = url.trim();
     final raw = _stripGhMirror(original);
     final candidates = <String>[original];
@@ -298,7 +322,10 @@ class MiniAppService extends GetxService {
       final bytes = await file.readAsBytes();
       if (bytes.isEmpty) return (ok: false, error: '文件为空');
       // appId 先用文件名占位，读到 manifest 再纠正为真实 appId
-      final fallbackId = path.split(RegExp(r'[/\\]')).last.replaceAll('.zip', '');
+      final fallbackId = path
+          .split(RegExp(r'[/\\]'))
+          .last
+          .replaceAll('.zip', '');
       var manifestBody = await _unpackZipToDir(bytes, fallbackId);
       final realId = _manifestAppId(manifestBody) ?? fallbackId;
       if (realId != fallbackId) {
@@ -315,7 +342,16 @@ class MiniAppService extends GetxService {
       );
       final idx = apps.indexWhere((a) => a.id == app.id);
       if (idx >= 0) {
-        apps[idx] = app;
+        // 重复安装 = 升级，保留原分组
+        apps[idx] = MiniApp(
+          id: app.id,
+          name: app.name,
+          type: app.type,
+          source: app.source,
+          rawJson: app.rawJson,
+          createdAt: app.createdAt,
+          group: apps[idx].group,
+        );
       } else {
         apps.add(app);
       }
@@ -335,15 +371,16 @@ class MiniAppService extends GetxService {
   /// - `url` 指向 **zip**：下载解包到 `<Documents>/miniapps/<appId>/`，
   ///   按目录内的 manifest 打开本地页面。
   Future<({bool ok, String? error})> installMarketEntry(
-      MiniAppMarketEntry e) async {
+    MiniAppMarketEntry e,
+  ) async {
     try {
       var name = e.name;
       late String source;
       var manifestBody = '{}';
 
       if (e.isZip) {
-        final bytes = await _downloadWithMirrors(e.url, asBytes: true)
-            as List<int>;
+        final bytes =
+            await _downloadWithMirrors(e.url, asBytes: true) as List<int>;
         if (bytes.isEmpty) return (ok: false, error: '下载内容为空');
         manifestBody = await _unpackZipToDir(bytes, e.appId);
         name = _manifestName(manifestBody) ?? e.name;
@@ -366,7 +403,16 @@ class MiniAppService extends GetxService {
       );
       final idx = apps.indexWhere((a) => a.id == app.id);
       if (idx >= 0) {
-        apps[idx] = app;
+        // 重复安装 = 升级，保留原分组
+        apps[idx] = MiniApp(
+          id: app.id,
+          name: app.name,
+          type: app.type,
+          source: app.source,
+          rawJson: app.rawJson,
+          createdAt: app.createdAt,
+          group: apps[idx].group,
+        );
       } else {
         apps.add(app);
       }
@@ -466,6 +512,7 @@ class MiniAppService extends GetxService {
       source: trimmed,
       rawJson: jsonEncode({'type': 'maiyou', 'url': trimmed}),
       createdAt: app.createdAt,
+      group: app.group,
     );
     await _persist();
     return (ok: true, error: null);
@@ -564,7 +611,8 @@ class MiniAppService extends GetxService {
 
     // 清理该程序旧的注册（避免重复导入叠加）
     ApiConfig.instance.sourceBeanList.removeWhere(
-        (s) => s.key.startsWith('${app.id}_'));
+      (s) => s.key.startsWith('${app.id}_'),
+    );
 
     // ── CMS 站点（type 0/1，key `app_<id>_<i>`）────────────
     if (parsed.cmsSites.isNotEmpty) {
@@ -574,14 +622,16 @@ class MiniAppService extends GetxService {
             ? '${app.id}_0'
             : '${app.id}_$i';
         ApiConfig.instance.sourceBeanList.removeWhere((s) => s.key == key);
-        ApiConfig.instance.sourceBeanList.add(SourceBean(
-              key: key,
-              name: site.name,
-              api: site.api,
-              searchable: 1,
-              filterable: 1,
-              type: 1, // JSON CMS
-            ));
+        ApiConfig.instance.sourceBeanList.add(
+          SourceBean(
+            key: key,
+            name: site.name,
+            api: site.api,
+            searchable: 1,
+            filterable: 1,
+            type: 1, // JSON CMS
+          ),
+        );
       }
     }
 
@@ -595,17 +645,41 @@ class MiniAppService extends GetxService {
         final site = parsed.spiderSites[i];
         final key = '${app.id}_s$i';
         ApiConfig.instance.sourceBeanList.removeWhere((s) => s.key == key);
-        ApiConfig.instance.sourceBeanList.add(SourceBean(
-              key: key,
-              name: site.name,
-              api: site.api.isNotEmpty ? site.api : site.ext,
-              ext: site.ext,
-              searchable: 1,
-              filterable: 1,
-              type: 3, // Spider（JS/Python 脚本）
-            ));
+        ApiConfig.instance.sourceBeanList.add(
+          SourceBean(
+            key: key,
+            name: site.name,
+            api: site.api.isNotEmpty ? site.api : site.ext,
+            ext: site.ext,
+            searchable: 1,
+            filterable: 1,
+            type: 3, // Spider（JS/Python 脚本）
+          ),
+        );
       }
     }
+  }
+
+  /// 新建分组（允许空分组，tab 始终可见）
+  Future<bool> createGroup(String name) async {
+    final n = name.trim();
+    if (n.isEmpty) return false;
+    if (groups.contains(n)) return false;
+    groups.add(n);
+    await _persist();
+    return true;
+  }
+
+  /// 把某个程序移到指定分组（空字符串 = 未分组）
+  Future<void> setGroup(MiniApp app, String group) async {
+    final idx = apps.indexWhere((a) => a.id == app.id);
+    if (idx < 0) return;
+    final g = group.trim();
+    apps[idx] = apps[idx].withGroup(g);
+    if (g.isNotEmpty && !groups.contains(g)) {
+      groups.add(g);
+    }
+    await _persist();
   }
 
   /// 拖动排序后落盘（列表顺序即自定义顺序）
@@ -622,8 +696,9 @@ class MiniAppService extends GetxService {
   /// 删除程序（同时从视频源列表移除其注册的源）
   Future<void> remove(MiniApp app) async {
     apps.removeWhere((a) => a.id == app.id);
-    ApiConfig.instance.sourceBeanList
-        .removeWhere((s) => s.key.startsWith('${app.id}_'));
+    ApiConfig.instance.sourceBeanList.removeWhere(
+      (s) => s.key.startsWith('${app.id}_'),
+    );
     // 一并移除该程序注册的解析接口（按 url 精确匹配，避免误删用户自建的）
     _removeRegisteredParses(app);
     // 网页型小程序（zip 装到本地的）：把解包目录也删掉，别留垃圾
