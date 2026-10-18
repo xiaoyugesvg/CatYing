@@ -8,7 +8,7 @@ import '../../common/theme.dart';
 import '../../miniapp/pages/mini_app_player_page.dart';
 import '../../pages/detail/simple_image_reader_page.dart';
 import '../../pages/detail/simple_text_reader_page.dart';
-import '../../pages/play/webview_player_page.dart';
+import '../../pages/play/sniff_player_page.dart';
 import '../../services/app_log.dart';
 import '../../services/sniff_filter.dart';
 import '../../widgets/app_toast.dart';
@@ -18,6 +18,7 @@ import '../services/hiker_prefs.dart';
 import '../services/hiker_route.dart';
 import '../services/hiker_store.dart';
 import '../widgets/hiker_blocks.dart' show hikerPlainText, hikerRichSpans;
+import 'hiker_search_page.dart';
 
 /// 海阔条目详情 + 打开。
 ///
@@ -45,8 +46,8 @@ class HikerDetailPage extends StatefulWidget {
   ///
   /// [lazyInput] 对应海阔的「条目地址 + lazyRule」写法（如 kinostream 的
   /// `pd(…,'a&&href') + lazy`）：规则 fn 里的 `input` 就是前面那截真实地址。
-  final Future<HikerResult> Function(List<String> lazyIds,
-      {String lazyInput})? replayLazy;
+  final Future<HikerResult> Function(List<String> lazyIds, {String lazyInput})?
+  replayLazy;
 
   /// 「打开一个新页面」——`nextPage` 不是 lazy 时用它：宿主用**同一个源**按那个地址
   /// 跑一次 `find_rule`，等价于海阔里点「下一页」。（见 `_loadNextChapterImages`）
@@ -76,7 +77,10 @@ const String kHikerLazyPrefix = 'hiker://lazy#';
 ({String input, String id})? splitHikerLazyUrl(String url) {
   final i = url.indexOf(kHikerLazyPrefix);
   if (i < 0) return null;
-  return (input: url.substring(0, i), id: url.substring(i + kHikerLazyPrefix.length));
+  return (
+    input: url.substring(0, i),
+    id: url.substring(i + kHikerLazyPrefix.length),
+  );
 }
 
 /// 一条候选播放地址
@@ -174,12 +178,19 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
     final codes = List<String>.from(_onClose);
     if (codes.isEmpty) return;
     final src = widget.source;
-    final vars = _lastVars.isEmpty ? HikerStore.instance.varsOf(src.id) : _lastVars;
+    final vars = _lastVars.isEmpty
+        ? HikerStore.instance.varsOf(src.id)
+        : _lastVars;
     unawaited(() async {
       try {
-        final r = await HikerEngine.instance
-            .runEvents(src, codes, vars: vars, url: widget.item.url);
-        if (r.ok) await HikerStore.instance.saveVarsIfChanged(src.id, vars, r.vars);
+        final r = await HikerEngine.instance.runEvents(
+          src,
+          codes,
+          vars: vars,
+          url: widget.item.url,
+        );
+        if (r.ok)
+          await HikerStore.instance.saveVarsIfChanged(src.id, vars, r.vars);
       } catch (e) {
         AppLog.instance.log('[Hiker] onClose 回放失败: $e');
       }
@@ -210,8 +221,11 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
       if (lazySplit != null) {
         // 延迟规则（分类/详情/选集/立即播放几乎都是它）：解一层，拿到候选
         final next = await _resolveLazy(
-            '${kHikerLazyPrefix}${lazySplit.id}', widget.item.title,
-            widget.lazyChain, input: lazySplit.input);
+          '${kHikerLazyPrefix}${lazySplit.id}',
+          widget.item.title,
+          widget.lazyChain,
+          input: lazySplit.input,
+        );
         if (!mounted) return;
         setState(() {
           _candidates = next;
@@ -280,7 +294,11 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
 
       if (src.detailFindRule.isNotEmpty) {
         final vars = HikerStore.instance.varsOf(src.id);
-        final r = await HikerEngine.instance.detail(src, widget.item.url, vars: vars);
+        final r = await HikerEngine.instance.detail(
+          src,
+          widget.item.url,
+          vars: vars,
+        );
         await HikerStore.instance.saveVarsIfChanged(src.id, vars, r.vars);
         _lastVars = r.vars;
         // 详情规则也能给「下一页」（漫画源常把下一章挂在这儿）
@@ -309,15 +327,18 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
           // 而且永远解不出第二层地址（2026-10-17 修）。
           final sp = splitHikerLazyUrl(it.url);
           final lazy = sp != null;
-          out.add(_Candidate(
-            it.url,
-            it.title.isEmpty ? (lazy ? '延迟规则' : '详情规则') : it.title,
-            lazy: lazy,
-            chain: widget.lazyChain,
-            input: sp?.input ?? '',
-          ));
+          out.add(
+            _Candidate(
+              it.url,
+              it.title.isEmpty ? (lazy ? '延迟规则' : '详情规则') : it.title,
+              lazy: lazy,
+              chain: widget.lazyChain,
+              input: sp?.input ?? '',
+            ),
+          );
         }
-        _resolvedNote = '抓取 ${r.requests} 次 · ${(r.elapsedMs / 1000).toStringAsFixed(1)}s';
+        _resolvedNote =
+            '抓取 ${r.requests} 次 · ${(r.elapsedMs / 1000).toStringAsFixed(1)}s';
       }
 
       // 条目自身地址也作为候选（详情规则给不出地址时就是它）
@@ -342,8 +363,11 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
   ///
   /// 条目地址里带 `hiker://lazy#id` 的标记成 lazy（点它时再解一层）；
   /// 其余原样展示。`note` 是产出来源（目录 / 详情规则 / 选集 …）。
-  List<_Candidate> _candidatesOf(HikerResult r, String note,
-      {List<String> chain = const []}) {
+  List<_Candidate> _candidatesOf(
+    HikerResult r,
+    String note, {
+    List<String> chain = const [],
+  }) {
     final out = <_Candidate>[];
     if (r.playUrl.isNotEmpty) {
       out.add(_Candidate(r.playUrl, note, headers: r.playHeaders));
@@ -355,13 +379,15 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
       if (it.url.isEmpty) continue;
       final sp = splitHikerLazyUrl(it.url);
       final lazy = sp != null;
-      out.add(_Candidate(
-        it.url,
-        it.title.isEmpty ? (lazy ? '选集' : note) : it.title,
-        lazy: lazy,
-        chain: chain,
-        input: sp?.input ?? '',
-      ));
+      out.add(
+        _Candidate(
+          it.url,
+          it.title.isEmpty ? (lazy ? '选集' : note) : it.title,
+          lazy: lazy,
+          chain: chain,
+          input: sp?.input ?? '',
+        ),
+      );
     }
     return out;
   }
@@ -370,13 +396,15 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
   /// 把 **父链 + 自己** 交给宿主去重跑（见 hiker_engine.js 的 lazyRuleImpl），
   /// 产出的候选里可能还有 lazy（海阔的"详情→选集→立即播放"就是链条）。
   Future<List<_Candidate>> _resolveLazy(
-      String lazyUrl, String label, List<String> chain,
-      {String input = ''}) async {
+    String lazyUrl,
+    String label,
+    List<String> chain, {
+    String input = '',
+  }) async {
     // `lazyUrl` 可能是 `真实地址 + hiker://lazy#id`：拆出 id 与 input
     final sp = splitHikerLazyUrl(lazyUrl);
     final id = sp != null ? sp.id : lazyUrl;
-    final realInput =
-        (sp != null && sp.input.isNotEmpty) ? sp.input : input;
+    final realInput = (sp != null && sp.input.isNotEmpty) ? sp.input : input;
     final full = [...chain, id];
     _lastInput = realInput;
 
@@ -386,8 +414,9 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
       // ⚠️ 内联规则的 lazy 定义在**那一次执行的作用域**里，宿主的
       //    home/category 重放根本没有这段 JS ⇒ 必须带同样的 code 再跑一趟。
       //    实测漫小肆：目录→章节→`pics://` 全靠这条。
-      final vars =
-          _lastVars.isEmpty ? HikerStore.instance.varsOf(widget.source.id) : _lastVars;
+      final vars = _lastVars.isEmpty
+          ? HikerStore.instance.varsOf(widget.source.id)
+          : _lastVars;
       r = await HikerEngine.instance.inline(
         widget.source,
         url: inline.base,
@@ -396,8 +425,11 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
         lazyIds: full,
         lazyInput: realInput,
       );
-      await HikerStore.instance
-          .saveVarsIfChanged(widget.source.id, vars, r.vars);
+      await HikerStore.instance.saveVarsIfChanged(
+        widget.source.id,
+        vars,
+        r.vars,
+      );
     } else {
       final replay = widget.replayLazy;
       if (replay == null) {
@@ -420,9 +452,13 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
     }
     final out = <_Candidate>[];
     if (r.playUrl.isNotEmpty) {
-      out.add(_Candidate(r.playUrl,
+      out.add(
+        _Candidate(
+          r.playUrl,
           label.isEmpty ? '播放地址' : label,
-          headers: r.playHeaders));
+          headers: r.playHeaders,
+        ),
+      );
     }
     for (final u in r.playUrlExtra) {
       out.add(_Candidate(u, '备用清晰度', headers: r.playHeaders));
@@ -431,13 +467,15 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
       if (it.url.isEmpty) continue;
       final sp = splitHikerLazyUrl(it.url);
       final lazy = sp != null;
-      out.add(_Candidate(
-        it.url,
-        it.title.isEmpty ? (lazy ? '选集' : '地址') : it.title,
-        lazy: lazy,
-        chain: full,
-        input: sp?.input ?? '',
-      ));
+      out.add(
+        _Candidate(
+          it.url,
+          it.title.isEmpty ? (lazy ? '选集' : '地址') : it.title,
+          lazy: lazy,
+          chain: full,
+          input: sp?.input ?? '',
+        ),
+      );
     }
     return out;
   }
@@ -530,12 +568,14 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
         }
         // 源给的 header 作补充；调用方（详情规则 / 解析接口）给的**优先**
         final pjHeaders = <String, String>{...pj.headers, ...c.headers};
-        final direct = pj.urls.firstWhere(SniffFilter.isDirectMedia,
-            orElse: () => pj.urls.first);
+        final direct = pj.urls.firstWhere(
+          SniffFilter.isDirectMedia,
+          orElse: () => pj.urls.first,
+        );
         if (SniffFilter.isDirectMedia(direct)) {
           await _pushPlayer(direct, pjHeaders);
         } else {
-          await _pushWeb(direct);
+          await _pushWeb(direct, headers: pjHeaders);
         }
         return;
 
@@ -545,7 +585,7 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
         if (SniffFilter.isDirectMedia(real)) {
           await _pushPlayer(real, c.headers);
         } else {
-          await _pushWeb(real);
+          await _pushWeb(real, headers: c.headers);
         }
         return;
 
@@ -569,6 +609,13 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
         AppToast.message('下载地址已复制（本模块不做下载）');
         return;
 
+      case HikerLinkKind.search:
+        // 官方「在某个源里搜索」深链（`hiker://search?rule=<源名>&s=<词>`）：
+        // 聚合源/短剧惯例——详情规则给不出直链时，让你跳到对应源里搜片名。
+        // 以前一律当内部页弹「不支持」，用户看到的就是「给了个搜索链接没法用」。
+        await _openHikerSearch(url);
+        return;
+
       case HikerLinkKind.hikerPage:
         // `hiker://…` 是海阔 App 的内部页面/二级页面，本模块没有对应功能
         AppToast.message('这个条目跳的是海阔内部页面，当前不支持：${_short(url)}');
@@ -584,13 +631,12 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
       case HikerLinkKind.web:
       case HikerLinkKind.videoSniff:
         // 都是"在网页里打开"：X5 全屏、强制网页、自动提取视频。
-        // 自动提取视频官方是进播放器嗅探；本模块与嗅探开关解耦，降级为网页，
-        // 用户可在内嵌网页里自己点播放（至少不是非法 scheme 导致的空白页）。
-        await _pushWeb(hikerStripScheme(url));
+        // 一律进**嗅探页**：抓到 m3u8/mp4 自动切原生播放器，抓不到仍留在网页里。
+        await _pushWeb(hikerStripScheme(url), headers: c.headers);
         return;
 
       case HikerLinkKind.http:
-        await _pushWeb(url);
+        await _pushWeb(url, headers: c.headers);
         return;
 
       case HikerLinkKind.unknown:
@@ -607,16 +653,20 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
       _error = null;
     });
     try {
-      final vars =
-          _lastVars.isEmpty ? HikerStore.instance.varsOf(widget.source.id) : _lastVars;
+      final vars = _lastVars.isEmpty
+          ? HikerStore.instance.varsOf(widget.source.id)
+          : _lastVars;
       final r = await HikerEngine.instance.inline(
         widget.source,
         url: inline.base,
         code: inline.code,
         vars: vars,
       );
-      await HikerStore.instance
-          .saveVarsIfChanged(widget.source.id, vars, r.vars);
+      await HikerStore.instance.saveVarsIfChanged(
+        widget.source.id,
+        vars,
+        r.vars,
+      );
       _lastVars = r.vars;
     } catch (e) {
       if (mounted) {
@@ -633,6 +683,45 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
     await _resolve();
   }
 
+  /// 打开「海阔内置搜索」深链（`hiker://search?rule=<源名>&s=<关键词>`）。
+  ///
+  /// `rule` 是官方里的**源标题**（实测「聚阅√」的搜索框/条目地址都是它）。
+  /// 找不到同名源就退回当前源；关键词为空时只是打开搜索页让用户输入。
+  Future<void> _openHikerSearch(String url) async {
+    final sp = parseHikerSearchUrl(url);
+    if (sp == null) return;
+    final src = _findSourceForSearch(sp.rule) ?? widget.source;
+    if (sp.keyword.isNotEmpty && src.searchFind.trim().isEmpty) {
+      AppToast.error('「${src.title}」没有搜索规则（searchFind）');
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => HikerSearchPage(
+          source: src,
+          initialKeyword: sp.keyword,
+        ),
+      ),
+    );
+  }
+
+  /// 按源标题找源（官方 `rule=` 传的就是标题）；容忍结尾的 `√` 与空白差异
+  static HikerSource? _findSourceForSearch(String rule) {
+    final name = rule.trim();
+    if (name.isEmpty) return null;
+    final all = HikerStore.instance.sources;
+    for (final s in all) {
+      if (s.title == name) return s;
+    }
+    String norm(String v) => v.replaceAll(RegExp(r'[√\s]+$'), '').trim();
+    final target = norm(name);
+    if (target.isEmpty) return null;
+    for (final s in all) {
+      if (norm(s.title) == target) return s;
+    }
+    return null;
+  }
+
   /// 进原生播放器
   Future<void> _pushPlayer(String url, Map<String, String> headers) {
     return Navigator.of(context).push(
@@ -646,11 +735,20 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
     );
   }
 
-  /// 进内嵌网页
-  Future<void> _pushWeb(String url) {
+  /// 进内嵌网页：**自动嗅探**网页里的 m3u8/mp4（不依赖全局嗅探开关）。
+  ///
+  /// 海阔源经常只给网页、不给直链；进嗅探页后：
+  /// 抓到直链 → 自动切原生播放器；抓不到 → 仍留在网页里可手动看。
+  /// 嗅探期间保持**竖屏**（站点页面不是播放器，横屏只露一半）。
+  Future<void> _pushWeb(String url, {Map<String, String> headers = const {}}) {
     return Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => WebviewPlayerPage(url: url, title: widget.item.title),
+        builder: (_) => SniffPlayerPage(
+          url: url,
+          title: widget.item.title,
+          headers: headers.isEmpty ? null : headers,
+          forceLandscape: false,
+        ),
       ),
     );
   }
@@ -681,16 +779,17 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
         ? explicitReferer
         : (needPageReferer ? _lastInput : '');
     if (referer.isNotEmpty) h.putIfAbsent('Referer', () => referer);
-    AppLog.instance.log('[Hiker] 图片列表 → 看图阅读器（${clean.length} 张）'
-        '${referer.isEmpty ? '' : ' · Referer=$referer'}'
-        '${_nextPage.isEmpty ? '' : ' · 有下一页，支持自动续章'}');
+    AppLog.instance.log(
+      '[Hiker] 图片列表 → 看图阅读器（${clean.length} 张）'
+      '${referer.isEmpty ? '' : ' · Referer=$referer'}'
+      '${_nextPage.isEmpty ? '' : ' · 有下一页，支持自动续章'}',
+    );
     SimpleImageReaderPage.open(
       title: widget.item.title,
       images: clean,
       chapterName: widget.source.title,
       headers: h,
-      onLoadNextChapter:
-          _nextPage.isEmpty ? null : _loadNextChapterImages,
+      onLoadNextChapter: _nextPage.isEmpty ? null : _loadNextChapterImages,
     );
   }
 
@@ -799,15 +898,20 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: AppTheme.fontTitle3,
-              fontWeight: FontWeight.bold),
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontTitle3,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         actions: [
           IconButton(
             tooltip: '复制条目地址',
             onPressed: it.url.isEmpty ? null : () => _copy(it.url),
-            icon: Icon(Icons.copy_rounded, size: 18, color: AppTheme.textSecondary),
+            icon: Icon(
+              Icons.copy_rounded,
+              size: 18,
+              color: AppTheme.textSecondary,
+            ),
           ),
         ],
       ),
@@ -827,7 +931,8 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
                     style: FilledButton.styleFrom(
                       backgroundColor: AppTheme.accentColor,
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                     onPressed: _busy ? null : _playPrimary,
                     icon: _busy
@@ -835,7 +940,9 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
                             width: 15,
                             height: 15,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
                           )
                         : const Icon(Icons.play_arrow_rounded, size: 20),
                     label: Text(_busy ? '解析中…' : '播放'),
@@ -849,13 +956,17 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
                   style: OutlinedButton.styleFrom(
                     side: BorderSide(color: AppTheme.borderMedium),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
                   onPressed: _busy ? null : _resolve,
-                  child: Text('取地址',
-                      style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: AppTheme.fontSubhead)),
+                  child: Text(
+                    '取地址',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: AppTheme.fontSubhead,
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -863,9 +974,13 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
           if (_resolvedNote != null)
             Padding(
               padding: const EdgeInsets.only(top: 8),
-              child: Text('解析：$_resolvedNote',
-                  style: TextStyle(
-                      color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption)),
+              child: Text(
+                '解析：$_resolvedNote',
+                style: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontCaption,
+                ),
+              ),
             ),
 
           if (_error != null) ...[
@@ -878,15 +993,21 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.error_outline_rounded,
-                      size: 18, color: Colors.orange.shade400),
+                  Icon(
+                    Icons.error_outline_rounded,
+                    size: 18,
+                    color: Colors.orange.shade400,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(_error!,
-                        style: TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: AppTheme.fontFootnote,
-                            height: 1.5)),
+                    child: Text(
+                      _error!,
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: AppTheme.fontFootnote,
+                        height: 1.5,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -897,26 +1018,35 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
           // 先看简介再决定点哪条解析地址，顺序更自然。
           if (it.desc.isNotEmpty) ...[
             const SizedBox(height: 18),
-            Text('简介',
-                style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: AppTheme.fontSubhead,
-                    fontWeight: FontWeight.bold)),
+            Text(
+              '简介',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: AppTheme.fontSubhead,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             const SizedBox(height: 6),
-            Text(it.desc,
-                style: TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: AppTheme.fontSubhead,
-                    height: 1.6)),
+            Text(
+              it.desc,
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: AppTheme.fontSubhead,
+                height: 1.6,
+              ),
+            ),
           ],
 
           if (_candidates.isNotEmpty) ...[
             const SizedBox(height: 18),
-            Text('解析结果（${_candidates.length}）',
-                style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: AppTheme.fontSubhead,
-                    fontWeight: FontWeight.bold)),
+            Text(
+              '解析结果（${_candidates.length}）',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: AppTheme.fontSubhead,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             const SizedBox(height: 8),
             _candidateArea(),
           ],
@@ -940,8 +1070,10 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
       return;
     }
     // 优先挑"直接能播"的那个；全是 lazy 就先解第一个（会再解一层）
-    final pick = _candidates.firstWhere((c) => !c.lazy,
-        orElse: () => _candidates.first);
+    final pick = _candidates.firstWhere(
+      (c) => !c.lazy,
+      orElse: () => _candidates.first,
+    );
     await _play(pick);
   }
 
@@ -957,14 +1089,21 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
             color: AppTheme.backgroundTertiary,
             child: it.pic.isEmpty
                 ? Center(
-                    child: Icon(Icons.movie_outlined,
-                        size: 26, color: AppTheme.textTertiary))
+                    child: Icon(
+                      Icons.movie_outlined,
+                      size: 26,
+                      color: AppTheme.textTertiary,
+                    ),
+                  )
                 : CachedNetworkImage(
                     imageUrl: it.pic,
                     fit: BoxFit.cover,
                     errorBuilder: (_, __, ___) => Center(
-                      child: Icon(Icons.broken_image_outlined,
-                          size: 22, color: AppTheme.textTertiary),
+                      child: Icon(
+                        Icons.broken_image_outlined,
+                        size: 22,
+                        color: AppTheme.textTertiary,
+                      ),
                     ),
                   ),
           ),
@@ -975,20 +1114,25 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                  it.title.isEmpty ? '(无标题)' : hikerPlainText(it.title),
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: AppTheme.fontHeadline,
-                      fontWeight: FontWeight.bold)),
+                it.title.isEmpty ? '(无标题)' : hikerPlainText(it.title),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontHeadline,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               const SizedBox(height: 8),
               _infoRow('来源', widget.source.title),
               if (it.desc.isNotEmpty) _infoRow('备注', it.desc),
               if (it.colType.isNotEmpty) _infoRow('类型', it.colType),
               // 不再裸露 `hiker://lazy#14uwff4` 这种中间态地址 —— 翻成
               // 「延迟规则 · 点一次才算得出真地址」这样看得懂的话
-              _infoRow('地址', it.url.isEmpty ? '(空)' : describeHikerLinkText(it.url)),
+              _infoRow(
+                '地址',
+                it.url.isEmpty ? '(空)' : describeHikerLinkText(it.url),
+              ),
             ],
           ),
         ),
@@ -997,23 +1141,31 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
   }
 
   Widget _infoRow(String k, String v) => Padding(
-        padding: const EdgeInsets.only(bottom: 4),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('$k：',
-                style: TextStyle(
-                    color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption)),
-            Expanded(
-              child: Text(v,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      color: AppTheme.textSecondary, fontSize: AppTheme.fontCaption)),
-            ),
-          ],
+    padding: const EdgeInsets.only(bottom: 4),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '$k：',
+          style: TextStyle(
+            color: AppTheme.textTertiary,
+            fontSize: AppTheme.fontCaption,
+          ),
         ),
-      );
+        Expanded(
+          child: Text(
+            v,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: AppTheme.fontCaption,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 
   /// 候选区：**一行三个卡片**（用户 2026-10-16：卡片上是名称、点击直接播/开）。
   ///
@@ -1029,22 +1181,24 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
         final n = pending.length >= 3 ? 3 : pending.length;
         final slice = pending.sublist(0, n);
         pending.removeRange(0, n);
-        rows.add(Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (var i = 0; i < 3; i++) ...[
-                if (i > 0) const SizedBox(width: 8),
-                Expanded(
-                  child: i < slice.length
-                      ? _candidateCard(slice[i])
-                      : const SizedBox.shrink(),
-                ),
+        rows.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var i = 0; i < 3; i++) ...[
+                  if (i > 0) const SizedBox(width: 8),
+                  Expanded(
+                    child: i < slice.length
+                        ? _candidateCard(slice[i])
+                        : const SizedBox.shrink(),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
-        ));
+        );
       }
     }
 
@@ -1069,12 +1223,15 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
       padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
       child: Text.rich(
         TextSpan(
-            children: hikerRichSpans(
-                c.note,
-                TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: AppTheme.fontSubhead,
-                    fontWeight: FontWeight.w600))),
+          children: hikerRichSpans(
+            c.note,
+            TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: AppTheme.fontSubhead,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
         textAlign: TextAlign.center,
       ),
     );
@@ -1102,9 +1259,10 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
               style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: AppTheme.fontFootnote,
-                  fontWeight: FontWeight.w600),
+                color: AppTheme.textPrimary,
+                fontSize: AppTheme.fontFootnote,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 6),
             Row(
@@ -1113,12 +1271,15 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
                 Icon(icon, size: 13, color: AppTheme.accentOnSurface),
                 const SizedBox(width: 3),
                 Flexible(
-                  child: Text(label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          color: AppTheme.accentOnSurface,
-                          fontSize: AppTheme.fontCaption)),
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: AppTheme.accentOnSurface,
+                      fontSize: AppTheme.fontCaption,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -1132,8 +1293,9 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                    color: AppTheme.textTertiary,
-                    fontSize: AppTheme.fontCaption),
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontCaption,
+                ),
               ),
             ],
           ],
@@ -1151,18 +1313,18 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
     return switch (hikerLinkKind(c.url)) {
       HikerLinkKind.media ||
       HikerLinkKind.playJson ||
-      HikerLinkKind.x5Play =>
-        ('播放', Icons.play_arrow_rounded),
-      HikerLinkKind.pics || HikerLinkKind.image => ('看图', Icons.photo_library_rounded),
+      HikerLinkKind.x5Play => ('播放', Icons.play_arrow_rounded),
+      HikerLinkKind.pics ||
+      HikerLinkKind.image => ('看图', Icons.photo_library_rounded),
       HikerLinkKind.novel => ('阅读', Icons.menu_book_rounded),
+      HikerLinkKind.search => ('搜索', Icons.search_rounded),
       HikerLinkKind.toast ||
       HikerLinkKind.copyLink ||
       HikerLinkKind.external ||
       HikerLinkKind.download ||
       HikerLinkKind.apk ||
       HikerLinkKind.hikerPage ||
-      HikerLinkKind.unknown =>
-        ('提示', Icons.info_outline_rounded),
+      HikerLinkKind.unknown => ('提示', Icons.info_outline_rounded),
       _ => ('网页', Icons.language_rounded),
     };
   }
@@ -1179,13 +1341,21 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(k,
-              style: TextStyle(
-                  color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption)),
+          Text(
+            k,
+            style: TextStyle(
+              color: AppTheme.textTertiary,
+              fontSize: AppTheme.fontCaption,
+            ),
+          ),
           const SizedBox(height: 4),
-          SelectableText(v,
-              style: TextStyle(
-                  color: AppTheme.textSecondary, fontSize: AppTheme.fontFootnote)),
+          SelectableText(
+            v,
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: AppTheme.fontFootnote,
+            ),
+          ),
         ],
       ),
     );
@@ -1195,6 +1365,7 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
   static String _stripUrlFlags(String url) =>
       url.replaceFirst(RegExp(r'#+$'), '').trim();
 
-  static String _short(String url) =>
-      url.length <= 70 ? url : '${url.substring(0, 34)}…${url.substring(url.length - 30)}';
+  static String _short(String url) => url.length <= 70
+      ? url
+      : '${url.substring(0, 34)}…${url.substring(url.length - 30)}';
 }

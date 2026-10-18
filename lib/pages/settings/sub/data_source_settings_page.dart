@@ -3,13 +3,11 @@ import 'package:get/get.dart';
 
 import '../../../common/theme.dart';
 import '../../../models/source_bean.dart';
-import '../../../models/subscription.dart';
 import '../../../services/api_config.dart';
 import '../../../services/source_kind.dart';
-import '../../../rss/services/rss_store.dart';
-import '../../../rss/pages/rss_manage_page.dart';
 import '../../subscription/view.dart';
 import '../../subscription/moontv_converter_page.dart';
+import '../../../widgets/app_toast.dart';
 import '../../../widgets/common_widgets.dart';
 import '../../../widgets/source_kind_badge.dart';
 import '../controller.dart';
@@ -20,8 +18,10 @@ import 'settings_shared.dart';
 
 /// 设置 → 订阅管理
 ///
-/// 从原 settings/view.dart 拆出：订阅列表、点播接口地址（含历史切换/长按移除）、
-/// 主页数据源、引擎管理、重置配置。
+/// 从原 settings/view.dart 拆出：订阅列表、主页数据、本地爬虫、解析线路、
+/// 引擎管理、影视转换、重置配置。
+/// （用户 2026-10-18：去掉「点播接口地址」与「RSS 管理」卡片；
+///  每一项单独一张卡片，顺序按上面排列。）
 class DataSourceSettingsPage extends StatefulWidget {
   const DataSourceSettingsPage({super.key});
 
@@ -44,395 +44,85 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
   @override
   Widget build(BuildContext context) {
     return SettingsSubPage(
-      // 用户 2026-10-13：顶栏「数据源」→「订阅管理」
       title: '订阅管理',
       children: [
-        SettingsGroup(
-          title: '订阅',
-          children: [
-            Obx(() {
-              final svc = SubscriptionService.instance;
-              final a = svc.active;
-              return SettingsRow(
-                icon: Icons.rss_feed,
-                title: '订阅管理',
-                // 显示当前激活的订阅名 + 条数，一眼知道在用哪个
-                value: a == null
-                    ? '未添加'
-                    : '${a.name}（${svc.subscriptions.length} 个）',
-                onTap: () => Get.to(() => const SubscriptionPage()),
-              );
-            }),
-            // 影视仓转换器：MoonTV / LunaTV 的 video.json → TVBox 站点
-            SettingsRow(
-              icon: Icons.swap_horiz_rounded,
-              title: '影视仓转换器',
-              value: 'MoonTV video.json',
-              onTap: () => Get.to(() => const MoonTvConverterPage()),
-            ),
-          ],
+        // 每一项都是**独立卡片**（不再是一整张大卡片里塞多行）
+        _card(
+          SettingsRow(
+            icon: Icons.rss_feed,
+            title: '订阅管理',
+            onTap: () => Get.to(() => const SubscriptionPage()),
+          ),
         ),
-        // 分组之间留出一整段空白：SettingsGroup 自身只在**有 title 时**加 10+6px 内边距，
-        // 第二组没 title ⇒ 两块卡片会直接贴在一起、圆角叠成一个怪形状。
-        // ⚠️ 只给 16(spacingLG) 用户仍嫌不够（2026-10-13：「距离还他么没加大吗」）
-        //    ⇒ 用 24(spacingXXL)，与订阅管理页「组与组之间留一整段空白」同一取值。
-        const SizedBox(height: AppTheme.spacingXXL),
-        SettingsGroup(
-          children: [
-            Obx(
-              () {
-                // 主页源是本地 Python 时，「点播接口地址」应显示本地，
-                // 而不是订阅里那条远程地址（用户 2026-10-18）。
-                final home = ApiConfig.instance.homeSourceBean.value;
-                final isLocalHome = home?.key.startsWith('localpy_') ?? false;
-                final value = isLocalHome
-                    ? '本地：${home!.name}'
-                    : (controller.vodApiUrl.value.isEmpty
-                          ? '未配置'
-                          : _truncateUrl(controller.vodApiUrl.value));
-                return SettingsRow(
-                  icon: Icons.movie_outlined,
-                  title: '点播接口地址',
-                  value: value,
-                  onTap: _showApiEditDialog,
-                );
-              },
-            ),
-            // 「存为订阅」入口已删（用户 2026-10-13：「第一次输入的那个源不要还
-            // 他么的存为订阅，而是直接就是存为订阅」）——
-            // 现在**输入/加载地址就等于存订阅**，见 _autoSaveAsSubscription()。
-            Obx(
-              () => SettingsRow(
-                icon: Icons.dns_outlined,
-                title: '主页数据源',
-                value: ApiConfig.instance.homeSourceBean.value?.name ?? '未选择',
-                onTap: _showSourcePicker,
-              ),
-            ),
-            // 本地 Python 源（用户 2026-10-17）：单独导入 .py、单独成组、可删可改；
-            // 不写进订阅 sites，切订阅也不丢。
-            Obx(
-              () => SettingsRow(
-                icon: Icons.terminal_rounded,
-                title: '本地 Python 源',
-                value: '${ApiConfig.instance.localVideoSources.length} 个',
-                onTap: () async {
-                  await Get.to(() => const LocalPythonSourcesPage());
-                  if (mounted) setState(() {});
-                },
-              ),
-            ),
-            // 解析线路管理（用户 2026-10-14）：从订阅拉到的解析线路会**落盘**，
-            // 换订阅不再清空；播放器底栏「解析」按钮切的线路也是这里选的。
-            Obx(
-              () => SettingsRow(
-                icon: Icons.link_rounded,
-                title: '解析线路管理',
-                value: '${ApiConfig.instance.parseBeanList.length} 条',
-                onTap: () => Get.to(() => const ParseSettingsPage()),
-              ),
-            ),
-            // RSS 管理（用户 2026-10-15）：订阅源导入（JSON / OPML / 本地文件）、
-            // 启用停用、删除 —— 与「RSS」页顶栏右边的 ⚙ 是同一页。
-            // ⚠️ `RssStore.sources` 不是 Rx，别用 `Obx`。
+        Obx(
+          () => _card(
             SettingsRow(
-              icon: Icons.rss_feed_outlined,
-              title: 'RSS 管理',
-              value: '${RssStore.instance.sources.length} 个订阅源',
+              icon: Icons.dns_outlined,
+              title: '主页数据',
+              value: ApiConfig.instance.homeSourceBean.value?.name ?? '未选择',
+              onTap: _showSourcePicker,
+            ),
+          ),
+        ),
+        Obx(
+          () => _card(
+            SettingsRow(
+              icon: Icons.terminal_rounded,
+              title: '本地爬虫',
+              value: '${ApiConfig.instance.localVideoSources.length} 个',
               onTap: () async {
-                await Get.to(() => const RssManagePage());
+                await Get.to(() => const LocalPythonSourcesPage());
                 if (mounted) setState(() {});
               },
             ),
-            // 引擎管理（Node / Python 手动加载）—— 用户 2026-10-13：
-            // 从「通用设置」挪到这里（订阅管理页）
+          ),
+        ),
+        Obx(
+          () => _card(
             SettingsRow(
-              icon: Icons.memory_outlined,
-              title: '引擎管理',
-              value: 'Node / Python 手动加载',
-              onTap: () => Get.to(() => const EngineSettingsPage()),
+              icon: Icons.link_rounded,
+              title: '解析线路',
+              value: '${ApiConfig.instance.parseBeanList.length} 条',
+              onTap: () => Get.to(() => const ParseSettingsPage()),
             ),
-            SettingsRow(
-              icon: Icons.restart_alt,
-              iconColor: Colors.redAccent,
-              title: '重置配置',
-              titleColor: Colors.redAccent,
-              value: '回到初始',
-              onTap: _showResetConfigDialog,
-            ),
-          ],
+          ),
+        ),
+        _card(
+          SettingsRow(
+            icon: Icons.memory_outlined,
+            title: '引擎管理',
+            value: 'Node / Python',
+            onTap: () => Get.to(() => const EngineSettingsPage()),
+          ),
+        ),
+        // 影视仓转换器：MoonTV / LunaTV 的 video.json → TVBox 站点
+        _card(
+          SettingsRow(
+            icon: Icons.swap_horiz_rounded,
+            title: '影视转换',
+            value: 'MoonTV video.json',
+            onTap: () => Get.to(() => const MoonTvConverterPage()),
+          ),
+        ),
+        _card(
+          SettingsRow(
+            icon: Icons.restart_alt,
+            iconColor: Colors.redAccent,
+            title: '重置配置',
+            titleColor: Colors.redAccent,
+            value: '回到初始',
+            onTap: _showResetConfigDialog,
+          ),
         ),
       ],
     );
   }
 
-  // ============================================================
-  // 自动存为订阅
-  // ============================================================
-
-  /// 输入/加载接口地址 = **自动存为订阅**（不再需要单独的「存为订阅」按钮）。
-  ///
-  /// 幂等：地址已在订阅列表里就只切激活，不重复添加。
-  Future<void> _autoSaveAsSubscription() async {
-    final url = controller.vodApiUrl.value.trim();
-    if (url.isEmpty) return;
-    final svc = SubscriptionService.instance;
-    Subscription? exist;
-    for (final s in svc.subscriptions) {
-      if (s.url.trim() == url) {
-        exist = s;
-        break;
-      }
-    }
-    if (exist != null) {
-      if (svc.activeId.value != exist.id) await svc.setActive(exist.id);
-      return;
-    }
-    // 分类按地址保守推断（.py → PY源；.js/.js.md5/.jar → CatVod 猫源；其余未分类）
-    final s = await svc.add(url: url, kind: SubscriptionKind.inferKind(url));
-    await svc.setActive(s.id);
-  }
-
-  // ============================================================
-  // 点播接口地址编辑（含历史记录）
-  // ============================================================
-
-  void _showApiEditDialog() {
-    final vodController = TextEditingController(
-      text: controller.vodApiUrl.value,
-    );
-
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setDialogState) {
-            final history = controller.apiHistory.toList();
-            return AlertDialog(
-              backgroundColor: AppTheme.backgroundSecondary,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppTheme.radiusLG),
-              ),
-              title: Text(
-                '点播接口地址',
-                style: TextStyle(color: AppTheme.textPrimary),
-              ),
-              content: SizedBox(
-                width: double.maxFinite,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (history.isNotEmpty) ...[
-                      Text(
-                        '切换数据源',
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: AppTheme.fontCaption,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxHeight: 180),
-                        child: ListView.builder(
-                          shrinkWrap: true,
-                          itemCount: history.length,
-                          itemBuilder: (_, i) {
-                            final url = history[i];
-                            final selected = url == controller.vodApiUrl.value;
-                            return InkWell(
-                              borderRadius: BorderRadius.circular(
-                                AppTheme.radiusSM,
-                              ),
-                              onTap: () {
-                                vodController.text = url;
-                                setDialogState(() {});
-                              },
-                              onLongPress: () async {
-                                final ok = await SettingsDialogs.confirm(
-                                  context: context,
-                                  title: '移除数据源',
-                                  message: _truncateUrl(url),
-                                  confirmText: '移除',
-                                );
-                                if (ok) {
-                                  await controller.removeApiHistory(url);
-                                  setDialogState(() {});
-                                }
-                              },
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 6,
-                                  horizontal: 4,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      selected
-                                          ? Icons.radio_button_checked
-                                          : Icons.radio_button_off,
-                                      size: 18,
-                                      color: selected
-                                          ? AppTheme.accentColor
-                                          : AppTheme.textTertiary,
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Text(
-                                        _truncateUrl(url),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: selected
-                                              ? AppTheme.accentColor
-                                              : AppTheme.textPrimary,
-                                          fontSize: AppTheme.fontSubhead,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Divider(color: AppTheme.borderLight, height: 1),
-                      const SizedBox(height: 12),
-                      Text(
-                        '手动输入 / 修改',
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: AppTheme.fontCaption,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                    TextField(
-                      controller: vodController,
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: AppTheme.fontSubhead,
-                      ),
-                      decoration: InputDecoration(
-                        hintText: '输入点播接口地址',
-                        hintStyle: TextStyle(
-                          color: AppTheme.textTertiary,
-                          fontSize: AppTheme.fontSubhead,
-                        ),
-                        filled: true,
-                        fillColor: AppTheme.backgroundTertiary,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(
-                            AppTheme.radiusSM,
-                          ),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        isDense: true,
-                        prefixIcon: Icon(
-                          Icons.movie_outlined,
-                          size: 18,
-                          color: AppTheme.textTertiary,
-                        ),
-                      ),
-                    ),
-                    Obx(() {
-                      if (controller.isLoadingConfig.value) {
-                        return Padding(
-                          padding: const EdgeInsets.only(
-                            top: AppTheme.spacingSM,
-                          ),
-                          child: Row(
-                            children: [
-                              SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: AppTheme.accentColor,
-                                ),
-                              ),
-                              const SizedBox(width: AppTheme.spacingSM),
-                              Text(
-                                '正在加载配置...',
-                                style: TextStyle(
-                                  color: AppTheme.textSecondary,
-                                  fontSize: AppTheme.fontCaption,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }
-                      if (controller.configError.value != null) {
-                        return Padding(
-                          padding: const EdgeInsets.only(
-                            top: AppTheme.spacingSM,
-                          ),
-                          child: Text(
-                            controller.configError.value!,
-                            style: const TextStyle(
-                              color: Colors.red,
-                              fontSize: AppTheme.fontCaption,
-                            ),
-                          ),
-                        );
-                      }
-                      if (controller.configSuccess.value) {
-                        return Padding(
-                          padding: const EdgeInsets.only(
-                            top: AppTheme.spacingSM,
-                          ),
-                          child: Text(
-                            '配置加载成功',
-                            style: TextStyle(
-                              color: AppTheme.accentColor,
-                              fontSize: AppTheme.fontCaption,
-                            ),
-                          ),
-                        );
-                      }
-                      return const SizedBox.shrink();
-                    }),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: Text(
-                    '取消',
-                    style: TextStyle(color: AppTheme.textTertiary),
-                  ),
-                ),
-                Obx(
-                  () => TextButton(
-                    onPressed: controller.isLoadingConfig.value
-                        ? null
-                        : () {
-                            controller.vodApiUrl.value = vodController.text
-                                .trim();
-                            // 用户 2026-10-13：输入地址即订阅（不再要点「存为订阅」）
-                            _autoSaveAsSubscription();
-                            controller.loadConfig();
-                            Navigator.pop(ctx);
-                          },
-                    child: Text(
-                      '加载',
-                      style: TextStyle(color: AppTheme.accentColor),
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
+  /// 单项卡片（卡片之间留 10px，视觉上是一条条独立的）
+  Widget _card(Widget child) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: AppCard(dense: true, child: child),
     );
   }
 
@@ -447,7 +137,7 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
       ...ApiConfig.instance.sourceBeanList,
     ];
     if (sources.isEmpty) {
-      _showApiEditDialog();
+      AppToast.message('还没有可用源，请先在「订阅管理」里添加并加载订阅');
       return;
     }
 
@@ -458,7 +148,7 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppTheme.radiusLG),
         ),
-        title: Text('主页数据源', style: TextStyle(color: AppTheme.textPrimary)),
+        title: Text('主页数据', style: TextStyle(color: AppTheme.textPrimary)),
         content: Obx(() {
           final homeKey = ApiConfig.instance.homeSourceBean.value?.key;
           return ConstrainedBox(
@@ -528,7 +218,7 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
       context: context,
       title: '重置配置',
       message:
-          '将清除已保存的点播接口地址、接口历史以及已下载的源缓存。\n\n'
+          '将清除已保存的接口配置、接口历史以及已下载的源缓存。\n\n'
           '播放器、主题、字体等本地设置会保留。\n\n'
           '重置后请重启应用，下次打开将回到初始设置界面。',
       confirmText: '重置',
@@ -560,7 +250,7 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
             ),
             const SizedBox(height: 8),
             Text(
-              '请退出应用后重新打开，\n将进入初始设置界面。',
+              '请退出应用后重新打开，\n配置将从零开始重新加载。',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: AppTheme.textSecondary,
@@ -578,10 +268,5 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
         ],
       ),
     );
-  }
-
-  String _truncateUrl(String url) {
-    if (url.length <= 30) return url;
-    return '${url.substring(0, 27)}...';
   }
 }

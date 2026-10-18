@@ -22,6 +22,7 @@ import '../widgets/swipe_action_tile.dart';
 import 'book_source_editor_page.dart';
 import 'book_source_qr_scan_page.dart';
 import 'comic_source_edit_page.dart';
+import 'venera_source_edit_page.dart';
 
 /// 阅读模块的「书源仓 / 漫画仓」（两个独立页面，不再用 Tab 合并）。
 ///
@@ -107,6 +108,22 @@ class _WarehouseTabState extends State<_WarehouseTab>
   /// 多选：长按条目进入；勾选后底部出现操作栏
   bool _selectMode = false;
   final Set<String> _picked = <String>{};
+
+  /// 源搜索（放在 tab 栏下面的通长胶囊）
+  final TextEditingController _searchCtl = TextEditingController();
+  String _query = '';
+
+  bool _matchQuery(String name, String id) {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    return name.toLowerCase().contains(q) || id.toLowerCase().contains(q);
+  }
+
+  @override
+  void dispose() {
+    _searchCtl.dispose();
+    super.dispose();
+  }
 
   String get _viewKey => widget.comic
       ? 'reading_warehouse_view_comic'
@@ -506,15 +523,6 @@ class _WarehouseTabState extends State<_WarehouseTab>
                 ),
                 const SizedBox(height: 6),
                 _intervalChips(hours, (v) => setDlg(() => hours = v)),
-                const SizedBox(height: 10),
-                Text(
-                  '订阅一次就会加载一次，源会全部保存；重名时可选择替换或加序号。',
-                  style: TextStyle(
-                    color: JellyTheme.textSecondary,
-                    fontSize: 11,
-                    height: 1.45,
-                  ),
-                ),
               ],
             ),
           ),
@@ -686,9 +694,12 @@ class _WarehouseTabState extends State<_WarehouseTab>
   // ── 多选 / 源操作 ───────────────────────────────────────
 
   List<String> get _visibleIds => [
-    for (final s in _sortedSources) s.id,
-    for (final s in _tabConfig) s.id,
-    for (final s in _tabVenera) s.id,
+    for (final s in _sortedSources)
+      if (_matchQuery(s.name, s.id)) s.id,
+    for (final s in _tabConfig)
+      if (_matchQuery(s.name, s.id)) s.id,
+    for (final s in _tabVenera)
+      if (_matchQuery(s.name, s.id)) s.id,
   ];
 
   bool get _allPicked {
@@ -752,7 +763,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
     }
     final def = hit.first;
     if (def.type == 'venera') {
-      await _showVeneraInfo(def);
+      await _openVeneraEditor(def);
       return;
     }
     if (!mounted) return;
@@ -767,90 +778,89 @@ class _WarehouseTabState extends State<_WarehouseTab>
     if (mounted) setState(() {});
   }
 
-  /// Venera 源是 JS 脚本，不能像配置源那样逐项编辑：
-  /// 这里展示真实入库信息（确认脚本确实在），并提供「重新下载脚本」。
-  Future<void> _showVeneraInfo(SourceDefinition def) async {
-    final script = '${def.config['script'] ?? ''}';
-    final scriptUrl = '${def.config['scriptUrl'] ?? ''}'.trim();
-    final rows = <(String, String)>[
-      ('名称', '${def.config['name'] ?? ''}'),
-      ('标识', '${def.config['key'] ?? ''}'),
-      (
-        '版本',
-        '${def.config['version'] ?? ''}'.isEmpty
-            ? '—'
-            : '${def.config['version']}',
+  /// Venera 源：进**脚本编辑页**（名称 / JS 全文都能改）。
+  ///
+  /// 以前这里只弹一个只读信息框，用户看到的就是"只有一个名称"。
+  /// 编辑页菜单里的「测试源 / 源设置 / 重新下载脚本」回来后再执行
+  ///（用刚保存过的最新定义）。
+  Future<void> _openVeneraEditor(SourceDefinition def) async {
+    final action = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => VeneraSourceEditPage(definition: def),
       ),
-      ('脚本', script.isEmpty ? '缺失（无法运行）' : '${script.length} 字节'),
-      if (scriptUrl.isNotEmpty) ('来源', scriptUrl),
-    ];
-    final refresh = await showDialog<Object?>(
+    );
+    if (!mounted) return;
+    await SourceManager().reload();
+    if (!mounted) return;
+    setState(() {});
+    if (action == null || action == 'saved') return;
+    final defs = await SourceConfigStore().loadLocal();
+    final hit = defs.where((d) => d.id == def.id).toList();
+    final cur = hit.isEmpty ? def : hit.first;
+    switch (action) {
+      case 'test':
+        await _testVeneraSource(cur);
+        break;
+      case 'settings':
+        await _openVeneraSettings(cur);
+        break;
+      case 'refresh':
+        final url = '${cur.config['scriptUrl'] ?? ''}'.trim();
+        if (url.isEmpty) {
+          _toast('这个源没有记录脚本地址，无法重新下载');
+        } else {
+          await _refreshVeneraScript(cur, url);
+        }
+        break;
+    }
+  }
+
+  /// 真跑一次 `getPopular()`，把结果 / 真实报错展示出来。
+  ///
+  /// Venera 源出错时首页只会空白（异常被页面吞掉），加这个入口方便定位：
+  /// 是脚本报错、HTTP 403、还是域名不可达。
+  Future<void> _testVeneraSource(SourceDefinition def) async {
+    final src = SourceManager().unwrappedSource(def.id);
+    if (src is! VeneraMangaSource) {
+      _toast('源还没加载好，请稍后再试');
+      return;
+    }
+    _toast('正在测试 ${src.name} …');
+    String title;
+    String body;
+    try {
+      final page = await src.getPopular();
+      title = '源可用';
+      body = '首页返回 ${page.items.length} 条';
+      if (page.items.isNotEmpty) {
+        body += '\n\n示例：\n${page.items.take(3).map((e) => e.title).join('\n')}';
+      }
+    } catch (e) {
+      title = '测试失败';
+      body = '$e';
+    }
+    if (!mounted) return;
+    if (body.length > 800) body = '${body.substring(0, 800)}…';
+    await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: _card,
-        title: Text('Venera 源', style: TextStyle(color: _label)),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (final r in rows)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(
-                        width: 48,
-                        child: Text(
-                          r.$1,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: JellyTheme.textSecondary,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: Text(
-                          r.$2,
-                          style: TextStyle(fontSize: 12, color: _label),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              const SizedBox(height: 8),
-              Text(
-                '脚本由源作者维护；「更新订阅」或「重新下载脚本」即可升级，无需手动编辑。',
-                style: TextStyle(
-                  fontSize: 11.5,
-                  height: 1.45,
-                  color: JellyTheme.textSecondary,
-                ),
-              ),
-            ],
+        title: Text(title, style: TextStyle(color: _label)),
+        content: SingleChildScrollView(
+          child: SelectableText(
+            body,
+            style: TextStyle(fontSize: 12, height: 1.5, color: _label),
           ),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('关闭'),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('知道了'),
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, 'settings'),
-            child: const Text('源设置'),
-          ),
-          if (scriptUrl.isNotEmpty)
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, 'refresh'),
-              child: const Text('重新下载脚本'),
-            ),
         ],
       ),
     );
-    if (refresh == 'refresh') await _refreshVeneraScript(def, scriptUrl);
-    if (refresh == 'settings') await _openVeneraSettings(def);
   }
 
   /// Venera 源设置面板（select / input / switch）。
@@ -1396,6 +1406,18 @@ class _WarehouseTabState extends State<_WarehouseTab>
                 const SizedBox(width: 4),
               ]
             : [
+                // 刷新放在最左（用户 2026-10-18：刷新 → 体检 → 导入 → ＋）
+                IconButton(
+                  tooltip: '全部更新',
+                  onPressed: _busy.isEmpty ? _updateAll : null,
+                  icon: _busy.contains('__all__')
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.sync_rounded),
+                ),
                 // 漫画仓已替代「漫画源仓库」：把它的体检 / 导入入口搬到这里
                 if (widget.comic)
                   IconButton(
@@ -1413,39 +1435,12 @@ class _WarehouseTabState extends State<_WarehouseTab>
                   IconButton(
                     tooltip: '导入源',
                     onPressed: _showComicImportDialog,
-                    icon: const Icon(Icons.input_rounded),
+                    icon: const Icon(Icons.file_open_rounded),
                   ),
-                IconButton(
-                  tooltip: '全部更新',
-                  onPressed: _busy.isEmpty ? _updateAll : null,
-                  icon: _busy.contains('__all__')
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.sync_rounded),
-                ),
                 IconButton(
                   tooltip: '添加订阅',
                   onPressed: _add,
                   icon: const Icon(Icons.add_rounded),
-                ),
-                PopupMenuButton<String>(
-                  tooltip: '更多',
-                  color: _card,
-                  onSelected: (v) {
-                    if (v == 'clear') _clearAll();
-                  },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(
-                      value: 'clear',
-                      child: Text(
-                        '清空已导入源',
-                        style: TextStyle(color: Colors.redAccent),
-                      ),
-                    ),
-                  ],
                 ),
                 const SizedBox(width: 4),
               ],
@@ -1470,9 +1465,73 @@ class _WarehouseTabState extends State<_WarehouseTab>
         _subCards(),
         const SizedBox(height: 8),
         _tabsRow(),
-        const SizedBox(height: 4),
+        const SizedBox(height: 6),
+        _searchBar(),
+        const SizedBox(height: 2),
         Expanded(child: _content()),
       ],
+    );
+  }
+
+  /// tab 栏下面的通长搜索胶囊：按名称 / id 过滤当前仓的源
+  Widget _searchBar() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      child: Container(
+        height: 36,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: _card,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: JellyTheme.textSecondary.withValues(alpha: 0.12),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.search_rounded,
+              size: 17,
+              color: JellyTheme.textSecondary,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                controller: _searchCtl,
+                textInputAction: TextInputAction.search,
+                onChanged: (v) => setState(() => _query = v),
+                style: TextStyle(fontSize: 13, color: _label),
+                decoration: InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
+                  hintText: '搜索源名称',
+                  hintStyle: TextStyle(
+                    fontSize: 13,
+                    color: JellyTheme.textSecondary,
+                  ),
+                ),
+              ),
+            ),
+            if (_query.isNotEmpty)
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  _searchCtl.clear();
+                  setState(() => _query = '');
+                },
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 6),
+                  child: Icon(
+                    Icons.cancel_rounded,
+                    size: 16,
+                    color: JellyTheme.textSecondary,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1888,7 +1947,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
         onReorder: _reorderSubs,
         itemBuilder: (_, i) => Padding(
           key: ValueKey('sub-${subs[i].id}'),
-          padding: const EdgeInsets.only(right: 8),
+          padding: const EdgeInsets.fromLTRB(0, 2, 8, 2),
           child: _subCard(subs[i], i),
         ),
       ),
@@ -1907,23 +1966,25 @@ class _WarehouseTabState extends State<_WarehouseTab>
     }
   }
 
-  /// 订阅卡片：与原来的「添加订阅」卡片同尺寸（88 宽）。
-  ///
-  /// 只保留：名称 / 开关 / 源数 / 更新日期 / 刷新。
-  /// 点击 = 打开编辑菜单（修改 / 删除 / 复制源链接）；
-  /// 长按 = 拖动排序（不再放拖拽把手）。
+  /// 订阅卡片（正方形 96×96）：
+  ///   左上刷新 / 右上开关 / 中间名称 / 左下更新日期 / 右下源数。
+  /// 点击 = 直接打开编辑页（不再弹「修改 / 复制 / 删除」菜单）；
+  /// 长按 = 拖动排序。
   Widget _subCard(SourceSubscription s, int index) {
     final active = s.id == _selectedSubId;
     final busy = _busy.contains(s.id);
-    final date = _timeText(s.lastUpdated);
+    final date = _timeText(s.lastUpdated).split(' ').first;
     return ReorderableDelayedDragStartListener(
       index: index,
       child: GestureDetector(
-        // 点击 = 进入编辑模式（修改 / 删除 / 复制源链接）
-        onTap: () => _editSubMenu(s),
+        onTap: () {
+          setState(() => _selectedSubId = s.id);
+          _editSub(s);
+        },
         child: Container(
-          width: 88,
-          padding: const EdgeInsets.fromLTRB(8, 7, 8, 6),
+          width: 96,
+          height: 96,
+          padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
             color: active
                 ? JellyTheme.primary.withValues(alpha: _isDark ? 0.16 : 0.10)
@@ -1936,54 +1997,14 @@ class _WarehouseTabState extends State<_WarehouseTab>
             ),
           ),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                s.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: _label,
-                ),
-              ),
-              SizedBox(
-                height: 22,
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Switch(
-                    value: s.enabled,
-                    onChanged: (v) => _subStore.setEnabled(s.id, v),
-                  ),
-                ),
-              ),
-              Text(
-                '${s.count} 个源',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 10,
-                  color: JellyTheme.textSecondary,
-                ),
-              ),
-              Text(
-                date.split(' ').first,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 9.5,
-                  color: JellyTheme.textSecondary,
-                ),
-              ),
-              const Spacer(),
               Row(
                 children: [
+                  // 左上：刷新
                   if (busy)
                     const SizedBox(
-                      width: 18,
-                      height: 18,
+                      width: 16,
+                      height: 16,
                       child: Center(
                         child: SizedBox(
                           width: 12,
@@ -1993,25 +2014,72 @@ class _WarehouseTabState extends State<_WarehouseTab>
                       ),
                     )
                   else
-                    InkWell(
-                      borderRadius: BorderRadius.circular(6),
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
                       onTap: () => _update(s),
                       child: Padding(
-                        padding: const EdgeInsets.all(3),
+                        padding: const EdgeInsets.all(1),
                         child: Icon(
                           Icons.sync_rounded,
-                          size: 15,
+                          size: 16,
                           color: JellyTheme.textSecondary,
                         ),
                       ),
                     ),
                   const Spacer(),
-                  if (active)
-                    Icon(
-                      Icons.check_circle_rounded,
-                      size: 13,
-                      color: JellyTheme.primary,
+                  // 右上：开关（缩小，避免撑爆卡片）
+                  SizedBox(
+                    width: 36,
+                    height: 20,
+                    child: FittedBox(
+                      fit: BoxFit.contain,
+                      child: Switch(
+                        value: s.enabled,
+                        onChanged: (v) => _subStore.setEnabled(s.id, v),
+                      ),
                     ),
+                  ),
+                ],
+              ),
+              // 中间：名称
+              Expanded(
+                child: Center(
+                  child: Text(
+                    s.name,
+                    maxLines: 2,
+                    textAlign: TextAlign.center,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.2,
+                      fontWeight: FontWeight.w700,
+                      color: _label,
+                    ),
+                  ),
+                ),
+              ),
+              // 左下日期 / 右下源数
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      date,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 9,
+                        color: JellyTheme.textSecondary,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '${s.count} 个源',
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: JellyTheme.textSecondary,
+                    ),
+                  ),
                 ],
               ),
             ],
@@ -2019,83 +2087,6 @@ class _WarehouseTabState extends State<_WarehouseTab>
         ),
       ),
     );
-  }
-
-  /// 点击订阅卡片后的编辑模式：修改 / 复制源链接 / 删除
-  Future<void> _editSubMenu(SourceSubscription s) async {
-    setState(() => _selectedSubId = s.id);
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: _card,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        top: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      s.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: _label,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            ListTile(
-              leading: Icon(Icons.tune_rounded, color: _label),
-              title: Text('修改', style: TextStyle(color: _label)),
-              subtitle: Text(
-                '名称 / 链接 / 自动更新',
-                style: TextStyle(
-                  fontSize: 11.5,
-                  color: JellyTheme.textSecondary,
-                ),
-              ),
-              onTap: () => Navigator.pop(ctx, 'edit'),
-            ),
-            ListTile(
-              leading: Icon(Icons.copy_rounded, color: _label),
-              title: Text('复制源链接', style: TextStyle(color: _label)),
-              onTap: () => Navigator.pop(ctx, 'copy'),
-            ),
-            ListTile(
-              leading: const Icon(
-                Icons.delete_outline_rounded,
-                color: Colors.redAccent,
-              ),
-              title: const Text(
-                '删除',
-                style: TextStyle(color: Colors.redAccent),
-              ),
-              onTap: () => Navigator.pop(ctx, 'delete'),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-    if (!mounted || action == null) return;
-    switch (action) {
-      case 'edit':
-        await _editSub(s);
-      case 'copy':
-        await _copyLink(s);
-      case 'delete':
-        await _deleteSub(s);
-    }
   }
 
   /// 长按 / 编辑按钮：改名称、链接、更新间隔（也可以直接删除）
@@ -2150,25 +2141,55 @@ class _WarehouseTabState extends State<_WarehouseTab>
               ],
             ),
           ),
+          actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, 'delete'),
-              style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
-              child: const Text('删除'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, 'save'),
-              child: const Text('保存'),
+            // 复制 / 删除 / 取消 / 保存：一行四个、均匀分布
+            SizedBox(
+              width: double.maxFinite,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(ctx, 'copy'),
+                      child: const Text('复制'),
+                    ),
+                  ),
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(ctx, 'delete'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.redAccent,
+                      ),
+                      child: const Text('删除'),
+                    ),
+                  ),
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('取消'),
+                    ),
+                  ),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () => Navigator.pop(ctx, 'save'),
+                      style: FilledButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                      ),
+                      child: const Text('保存'),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
       ),
     );
     if (!mounted || action == null) return;
+    if (action == 'copy') {
+      await _copyLink(s);
+      return;
+    }
     if (action == 'delete') {
       await _deleteSub(s);
       return;
@@ -2222,6 +2243,19 @@ class _WarehouseTabState extends State<_WarehouseTab>
                   const SizedBox(width: 8),
                 ],
               ],
+            ),
+          ),
+          // 清空已导入源：从右上角「…」挪到排序按钮左边（用户 2026-10-18）
+          IconButton(
+            tooltip: '清空已导入源',
+            visualDensity: VisualDensity.compact,
+            onPressed: _visibleIds.isEmpty ? null : _clearAll,
+            icon: Icon(
+              Icons.delete_outline_rounded,
+              size: 20,
+              color: _visibleIds.isEmpty
+                  ? JellyTheme.textSecondary.withValues(alpha: 0.4)
+                  : Colors.redAccent,
             ),
           ),
           PopupMenuButton<_SortMode>(
@@ -2318,10 +2352,27 @@ class _WarehouseTabState extends State<_WarehouseTab>
   }
 
   Widget _content() {
-    final sources = _sortedSources;
-    final config = _sortedManga(_tabConfig);
-    final venera = _sortedManga(_tabVenera);
+    final sources = _sortedSources
+        .where((s) => _matchQuery(s.name, s.id))
+        .toList();
+    final config = _sortedManga(
+      _tabConfig,
+    ).where((s) => _matchQuery(s.name, s.id)).toList();
+    final venera = _sortedManga(
+      _tabVenera,
+    ).where((s) => _matchQuery(s.name, s.id)).toList();
     if (sources.isEmpty && config.isEmpty && venera.isEmpty) {
+      if (_query.trim().isNotEmpty) {
+        return Center(
+          child: Text(
+            '没有找到「${_query.trim()}」相关的源',
+            style: TextStyle(
+              fontSize: 13,
+              color: JellyTheme.textSecondary,
+            ),
+          ),
+        );
+      }
       return _emptyHint();
     }
     final children = <Widget>[];
@@ -2421,7 +2472,12 @@ class _WarehouseTabState extends State<_WarehouseTab>
                 selectMode: _selectMode,
                 picked: _picked.contains(sources[i].id),
                 onTap: () {
-                  if (_selectMode) _togglePick(sources[i].id);
+                  if (_selectMode) {
+                    _togglePick(sources[i].id);
+                  } else {
+                    // 点源 = 直接进编辑（Legado 书源就是脚本编辑页）
+                    _editEntry(sources[i].id);
+                  }
                 },
                 onLongPress: () => _enterSelect(sources[i].id),
                 onToggle: (v) async {
@@ -2610,6 +2666,15 @@ class _WarehouseTabState extends State<_WarehouseTab>
     ),
   );
 
+  /// Venera 源的脚本大小（让用户一眼确认"脚本确实导入进来了"，不是只剩一个名称）
+  String _veneraScriptInfo(String id) {
+    final s = SourceManager().unwrappedSource(id);
+    if (s is! VeneraMangaSource) return '脚本未加载';
+    final n = s.script.length;
+    if (n <= 0) return '脚本缺失';
+    return n >= 1024 ? '脚本 ${(n / 1024).toStringAsFixed(1)} KB' : '脚本 $n 字节';
+  }
+
   Widget _mangaList(List<MangaSource> list) {
     return Container(
       clipBehavior: Clip.antiAlias,
@@ -2632,13 +2697,12 @@ class _WarehouseTabState extends State<_WarehouseTab>
               backgroundColor: _card,
               borderRadius: BorderRadius.zero,
               actions: [
-                if (!list[i].id.startsWith('venera:'))
-                  SwipeAction(
-                    icon: Icons.edit_outlined,
-                    label: '编辑',
-                    color: const Color(0xFF5B8DEF),
-                    onTap: () => _editEntry(list[i].id),
-                  ),
+                SwipeAction(
+                  icon: Icons.edit_outlined,
+                  label: '编辑',
+                  color: const Color(0xFF5B8DEF),
+                  onTap: () => _editEntry(list[i].id),
+                ),
                 SwipeAction(
                   icon: Icons.ios_share_rounded,
                   label: '分享',
@@ -2653,7 +2717,13 @@ class _WarehouseTabState extends State<_WarehouseTab>
                 ),
               ],
               child: GestureDetector(
-                onTap: _selectMode ? () => _togglePick(list[i].id) : null,
+                onTap: () {
+                  if (_selectMode) {
+                    _togglePick(list[i].id);
+                  } else {
+                    _editEntry(list[i].id);
+                  }
+                },
                 onLongPress: () => _enterSelect(list[i].id),
                 child: SwitchListTile(
                   dense: true,
@@ -2682,7 +2752,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
                   ),
                   subtitle: Text(
                     list[i].id.startsWith('venera:')
-                        ? 'JS ComicSource · ${list[i].id}'
+                        ? 'JS ComicSource · ${_veneraScriptInfo(list[i].id)} · ${list[i].id}'
                         : list[i].id,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -2737,7 +2807,13 @@ class _WarehouseTabState extends State<_WarehouseTab>
     final picked = _picked.contains(src.id);
     final enabled = SourceManager().isEnabled(src.id);
     return GestureDetector(
-      onTap: _selectMode ? () => _togglePick(src.id) : null,
+      onTap: () {
+        if (_selectMode) {
+          _togglePick(src.id);
+        } else {
+          _editEntry(src.id);
+        }
+      },
       onLongPress: () => _enterSelect(src.id),
       child: Container(
         padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
@@ -2795,7 +2871,9 @@ class _WarehouseTabState extends State<_WarehouseTab>
             ),
             const SizedBox(height: 2),
             Text(
-              src.id.startsWith('venera:') ? 'JS · ${src.id}' : src.id,
+              src.id.startsWith('venera:')
+                  ? 'JS · ${_veneraScriptInfo(src.id)}'
+                  : src.id,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(

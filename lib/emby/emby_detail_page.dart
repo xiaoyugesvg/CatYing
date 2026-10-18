@@ -10,8 +10,9 @@ import 'emby_player_page.dart';
 
 /// Emby 条目详情：电影显示简介 + 播放；剧集显示分集列表。
 ///
-/// 视觉与「媒体库详情页」统一：全屏 Backdrop 头图 + 底部压暗 + 浮层大标题，
-/// 下方接一块圆角内容底板（简介 / 选集），返回键悬浮在头图上。
+/// 视觉与「媒体库详情页」（TMDB 刮削）统一：固定深色 + 蓝色强调色，
+/// 全屏 Backdrop 头图 + 大标题 + 元信息胶囊，内容直接浮在暗底上
+/// （简介 / 选集 / 演职人员 / 影片信息），返回键悬浮在头图上。
 class EmbyDetailPage extends StatefulWidget {
   const EmbyDetailPage({super.key, required this.item, required this.server});
 
@@ -23,6 +24,14 @@ class EmbyDetailPage extends StatefulWidget {
 }
 
 class _EmbyDetailPageState extends State<EmbyDetailPage> {
+  // 媒体库详情页同款「固定深色」视觉：与全局明暗解耦，
+  // 蓝强调色 + 白色文字 + 白色低透明度卡片（参照 media_library_detail_page）。
+  static const Color _libAccent = Color(0xFF3B82F6);
+  static const Color _libText = Colors.white;
+  static const Color _libSub = Color(0xB3FFFFFF); // white70
+  static const Color _libCard = Color(0x14FFFFFF); // white8
+  static const Color _libBorder = Color(0x1FFFFFFF); // white12
+
   late final EmbyApi _api = EmbyApi(widget.server);
   late EmbyItem _item = widget.item;
   List<EmbyItem> _episodes = const [];
@@ -92,15 +101,22 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
               children: [
                 SizedBox(height: MediaQuery.paddingOf(context).top + 58),
                 _buildHero(),
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
+                // 壁纸 → 内容底的过渡（固定高度渐变，避免随内容长度拉伸）
                 Container(
-                  decoration: BoxDecoration(
-                    color: AppTheme.backgroundPrimary,
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(28),
+                  height: 32,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Color(0x000D0D12), Color(0xFF0D0D12)],
                     ),
                   ),
-                  padding: const EdgeInsets.fromLTRB(20, 22, 20, 44),
+                ),
+                Container(
+                  // 媒体库同款：内容直接浮在深色壁纸上（不再垫浅色圆角底板）
+                  color: const Color(0xFF0D0D12),
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 44),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -186,7 +202,7 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                 Color(0x8C000000),
                 Color(0x33000000),
                 Color(0x66000000),
-                Color(0xCC000000),
+                Color(0xF0000000),
               ],
               stops: [0, 0.35, 0.7, 1],
             ),
@@ -298,7 +314,7 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                         vertical: 9,
                       ),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: _libAccent,
                         borderRadius: BorderRadius.circular(999),
                       ),
                       child: const Row(
@@ -307,13 +323,13 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                           Icon(
                             Icons.play_arrow_rounded,
                             size: 20,
-                            color: Colors.black,
+                            color: Colors.white,
                           ),
                           SizedBox(width: 4),
                           Text(
                             '播放',
                             style: TextStyle(
-                              color: Colors.black,
+                              color: Colors.white,
                               fontSize: 14,
                               fontWeight: FontWeight.w700,
                             ),
@@ -341,15 +357,15 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
           width: 3,
           height: 14,
           decoration: BoxDecoration(
-            color: AppTheme.accentColor,
+            color: _libAccent,
             borderRadius: BorderRadius.circular(2),
           ),
         ),
         const SizedBox(width: 8),
         Text(
           title,
-          style: TextStyle(
-            color: AppTheme.textPrimary,
+          style: const TextStyle(
+            color: _libText,
             fontSize: AppTheme.fontHeadline,
             fontWeight: FontWeight.w700,
           ),
@@ -358,8 +374,8 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
           const SizedBox(width: 8),
           Text(
             trailing,
-            style: TextStyle(
-              color: AppTheme.textTertiary,
+            style: const TextStyle(
+              color: _libSub,
               fontSize: AppTheme.fontCaption,
             ),
           ),
@@ -377,14 +393,14 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
             decoration: BoxDecoration(
-              color: AppTheme.backgroundSecondary,
+              color: _libCard,
               borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: AppTheme.borderLight, width: 0.5),
+              border: Border.all(color: _libBorder, width: 0.5),
             ),
             child: Text(
               g,
-              style: TextStyle(
-                color: AppTheme.textSecondary,
+              style: const TextStyle(
+                color: _libSub,
                 fontSize: AppTheme.fontCaption,
                 fontWeight: FontWeight.w500,
               ),
@@ -407,8 +423,8 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
           overflow: _overviewExpanded
               ? TextOverflow.clip
               : TextOverflow.ellipsis,
-          style: TextStyle(
-            color: AppTheme.textSecondary,
+          style: const TextStyle(
+            color: _libSub,
             fontSize: AppTheme.fontFootnote,
             height: 1.65,
           ),
@@ -423,6 +439,7 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                 minimumSize: const Size(0, 30),
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                foregroundColor: _libText,
               ),
               child: Text(
                 _overviewExpanded ? '收起' : '展开',
@@ -452,8 +469,8 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
             padding: const EdgeInsets.symmetric(vertical: 16),
             child: Text(
               '没有分集信息',
-              style: TextStyle(
-                color: AppTheme.textTertiary,
+              style: const TextStyle(
+                color: _libSub,
                 fontSize: AppTheme.fontFootnote,
               ),
             ),
@@ -470,7 +487,7 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
   Widget _episodeTile(EmbyItem ep) {
     final radius = BorderRadius.circular(14);
     return Material(
-      color: AppTheme.backgroundSecondary,
+      color: _libCard,
       borderRadius: radius,
       child: InkWell(
         borderRadius: radius,
@@ -496,18 +513,13 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                         ),
                         httpHeaders: _api.imageHeaders,
                         fit: BoxFit.cover,
-                        placeholder: (_, _) => ColoredBox(
-                          color: AppTheme.backgroundPrimary.withValues(
-                            alpha: 0.5,
-                          ),
-                        ),
-                        errorWidget: (_, _, _) => ColoredBox(
-                          color: AppTheme.backgroundPrimary.withValues(
-                            alpha: 0.5,
-                          ),
+                        placeholder: (_, _) =>
+                            const ColoredBox(color: Color(0xFF1A1A20)),
+                        errorWidget: (_, _, _) => const ColoredBox(
+                          color: Color(0xFF1A1A20),
                           child: Icon(
                             Icons.play_circle_outline_rounded,
-                            color: AppTheme.textTertiary,
+                            color: Colors.white38,
                             size: 22,
                           ),
                         ),
@@ -549,8 +561,8 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                       ep.name,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
+                      style: const TextStyle(
+                        color: _libText,
                         fontSize: AppTheme.fontSubhead,
                         fontWeight: FontWeight.w600,
                         height: 1.25,
@@ -560,8 +572,8 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                       const SizedBox(height: 3),
                       Text(
                         ep.durationText,
-                        style: TextStyle(
-                          color: AppTheme.textTertiary,
+                        style: const TextStyle(
+                          color: _libSub,
                           fontSize: AppTheme.fontCaption,
                         ),
                       ),
@@ -573,7 +585,7 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
               Icon(
                 Icons.play_circle_fill_rounded,
                 size: 24,
-                color: AppTheme.accentColor.withValues(alpha: 0.9),
+                color: _libAccent.withValues(alpha: 0.95),
               ),
             ],
           ),
@@ -620,8 +632,8 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
             width: 56,
             child: Text(
               label,
-              style: TextStyle(
-                color: AppTheme.textTertiary,
+              style: const TextStyle(
+                color: Color(0x8CFFFFFF),
                 fontSize: AppTheme.fontCaption,
                 height: 1.45,
               ),
@@ -630,8 +642,8 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
           Expanded(
             child: Text(
               value,
-              style: TextStyle(
-                color: AppTheme.textSecondary,
+              style: const TextStyle(
+                color: _libSub,
                 fontSize: AppTheme.fontFootnote,
                 height: 1.45,
               ),
@@ -660,9 +672,8 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                       ),
                       httpHeaders: _api.imageHeaders,
                       fit: BoxFit.cover,
-                      placeholder: (_, _) => ColoredBox(
-                        color: AppTheme.backgroundSecondary,
-                      ),
+                      placeholder: (_, _) =>
+                          const ColoredBox(color: Color(0xFF1A1A20)),
                       errorWidget: (_, _, _) => _personPlaceholder(),
                     )
                   : _personPlaceholder(),
@@ -674,8 +685,8 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppTheme.textPrimary,
+            style: const TextStyle(
+              color: _libText,
               fontSize: 12,
               fontWeight: FontWeight.w500,
             ),
@@ -687,8 +698,8 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
-              style: TextStyle(
-                color: AppTheme.textTertiary,
+              style: const TextStyle(
+                color: _libSub,
                 fontSize: 11,
               ),
             ),
@@ -699,11 +710,11 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
   }
 
   Widget _personPlaceholder() {
-    return ColoredBox(
-      color: AppTheme.backgroundSecondary,
+    return const ColoredBox(
+      color: Color(0xFF1A1A20),
       child: Icon(
         Icons.person_outline_rounded,
-        color: AppTheme.textTertiary,
+        color: Colors.white38,
         size: 28,
       ),
     );

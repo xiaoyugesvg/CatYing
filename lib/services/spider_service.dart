@@ -1238,8 +1238,8 @@ class SpiderService {
     String flag,
     String id, {
     String ext = '',
-  }) {
-    return _dispatchScript(
+  }) async {
+    final r = await _dispatchScript(
       key: key,
       type: type,
       api: api,
@@ -1248,6 +1248,30 @@ class SpiderService {
       nodeArgs: <String, dynamic>{'flag': flag, 'id': id},
       pyArgs: <String, dynamic>{'flag': flag, 'id': id},
     );
+    return _normalizePlayResult(r);
+  }
+
+  /// 统一 `playerContent` 的返回：
+  ///
+  /// 很多 catvod / TVBox 源把 `header` 写成 **JSON 字符串**
+  /// （如 NO视频：`"header": json.dumps({...})`），而播放器/嗅探页要的是
+  /// Map —— 不转的话请求头会被静默丢掉，表现为"解析成功却 403/黑屏"。
+  Map<String, dynamic>? _normalizePlayResult(Map<String, dynamic>? r) {
+    if (r == null) return null;
+    final h = r['header'];
+    if (h is String && h.trim().isNotEmpty) {
+      try {
+        final m = jsonDecode(h);
+        if (m is Map) {
+          r['header'] = m.map((k, v) => MapEntry('$k', '$v'));
+        }
+      } catch (_) {
+        // 不是 JSON 就保持原样（少数源确实给的是别的文本）
+      }
+    } else if (h is Map) {
+      r['header'] = h.map((k, v) => MapEntry('$k', '$v'));
+    }
+    return r;
   }
 
   /// 搜索 - 对应 Swift search

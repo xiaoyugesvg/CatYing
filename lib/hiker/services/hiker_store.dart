@@ -27,6 +27,7 @@ class HikerStore extends ChangeNotifier {
   static const String _kCurrent = 'hiker_current_v1';
   static const String _kDisabled = 'hiker_disabled_v1';
   static const String _kVars = 'hiker_vars_v1';
+
   /// 每个源的**用户配置**（海阔里的 `config`）—— 规则里 `config.xxx` 读的就是它。
   /// 这是让"依赖源配置的规则"能跑起来的唯一办法（海阔里也是用户手填）。
   static const String _kConfigs = 'hiker_configs_v1';
@@ -137,7 +138,9 @@ class HikerStore extends ChangeNotifier {
     final bak = File('${f.path}.bak');
     final fromBak = await _tryReadSources(bak);
     if (fromBak != null) {
-      AppLog.instance.log('[Hiker] sources.json 损坏/不可读，已从 .bak 恢复 ${fromBak.length} 个源');
+      AppLog.instance.log(
+        '[Hiker] sources.json 损坏/不可读，已从 .bak 恢复 ${fromBak.length} 个源',
+      );
       return fromBak;
     }
     return null;
@@ -221,7 +224,8 @@ class HikerStore extends ChangeNotifier {
         added++;
       }
     }
-    if (_currentId.isEmpty && _sources.isNotEmpty) _currentId = _sources.first.id;
+    if (_currentId.isEmpty && _sources.isNotEmpty)
+      _currentId = _sources.first.id;
     await _saveFile();
     await _savePrefs();
     notifyListeners();
@@ -239,6 +243,34 @@ class HikerStore extends ChangeNotifier {
     }
     await _saveFile();
     await _savePrefs();
+    notifyListeners();
+  }
+
+  /// 按 [visibleIds] 的新顺序重排（长按拖动后调用）。
+  ///
+  /// 只动传入的这些源：它们在列表里占的**坑位**不变，坑内按新顺序填充；
+  /// 未传入的（被筛选/搜索隐藏的）保持原位置 —— 这样搜索状态下拖动
+  /// 也不会打乱其它源。
+  Future<void> reorder(List<String> visibleIds) async {
+    if (visibleIds.isEmpty) return;
+    final wanted = visibleIds.toSet();
+    final byId = {for (final s in _sources) s.id: s};
+    final queue = List<String>.from(visibleIds);
+    final next = <HikerSource>[];
+    var qi = 0;
+    for (final s in _sources) {
+      if (wanted.contains(s.id)) {
+        final id = queue[qi++];
+        final moved = byId[id];
+        if (moved != null) next.add(moved);
+      } else {
+        next.add(s);
+      }
+    }
+    _sources
+      ..clear()
+      ..addAll(next);
+    await _saveFile();
     notifyListeners();
   }
 
@@ -327,7 +359,8 @@ class HikerStore extends ChangeNotifier {
   }
 
   /// 某个源的**用户配置**（对应规则里的 `config.xxx`）
-  Map<String, dynamic> configOf(String sourceId) => _configs[sourceId] ?? const {};
+  Map<String, dynamic> configOf(String sourceId) =>
+      _configs[sourceId] ?? const {};
 
   Future<void> saveConfig(String sourceId, Map<String, dynamic> cfg) async {
     if (sourceId.isEmpty) return;
@@ -366,7 +399,10 @@ class HikerStore extends ChangeNotifier {
   }
 
   /// 分组 + 启用筛选后的源（管理页列表用）
-  List<HikerSource> filterSources({String group = '', bool enabledOnly = false}) {
+  List<HikerSource> filterSources({
+    String group = '',
+    bool enabledOnly = false,
+  }) {
     return sortedSources
         .where((s) => group.isEmpty || s.groupLabel == group)
         .where((s) => !enabledOnly || isEnabled(s))

@@ -17,15 +17,23 @@ import 'package:webview_flutter/webview_flutter.dart';
 class WebviewPlayerPage extends StatefulWidget {
   final String url;
   final String? title;
+
   /// 内嵌模式：详情页播放器区域内嵌显示（4:3 固定高度，不强制横屏）。
   /// 默认 false = 全屏独立页（Scaffold + 横屏 + 浮动返回）。
   final bool embedded;
+
+  /// 全屏页是否跟随「网页播放强制横屏」设置。
+  ///
+  /// 兜底打开的**普通网页**（海阔条目里的网页、站点首页/搜索页等）不该横屏：
+  /// 那些页面是按竖屏排版的，横过来只露出一半（用户 2026-10-18 反馈）。
+  final bool forceLandscape;
 
   const WebviewPlayerPage({
     super.key,
     required this.url,
     this.title,
     this.embedded = false,
+    this.forceLandscape = true,
   });
 
   @override
@@ -44,7 +52,9 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
   void initState() {
     super.initState();
     // 网页播放页强制横屏（仅全屏页；内嵌模式保持竖屏布局）
-    if (!widget.embedded && PlayerPrefs.instance.webviewForceLandscape.value) {
+    if (!widget.embedded &&
+        widget.forceLandscape &&
+        PlayerPrefs.instance.webviewForceLandscape.value) {
       SystemUiController.enter(
         'webviewPlayer',
         mode: SystemUiMode.edgeToEdge,
@@ -63,11 +73,13 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
     final enableJs = PlayerPrefs.instance.webviewEnableJs.value;
     _controller = WebViewController()
       ..setJavaScriptMode(
-          enableJs ? JavaScriptMode.unrestricted : JavaScriptMode.disabled)
+        enableJs ? JavaScriptMode.unrestricted : JavaScriptMode.disabled,
+      )
       ..setBackgroundColor(const Color(0x00000000))
       // 移动端 UA，部分解析站按 UA 下发 HTML5 播放器
       ..setUserAgent(
-          'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1')
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+      )
       ..setNavigationDelegate(
         NavigationDelegate(
           onProgress: (progress) {
@@ -97,7 +109,8 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
             // ⚠️ 原来这里只打日志 ⇒ 解析返回的网页打不开时，4:3 播放区是
             //    一块纯黑：不转圈、不报错、没有重试入口（用户以为"卡死了"）。
             AppLog.instance.log(
-                '[WebviewPlayer] 资源错误: ${error.errorCode} ${error.description} url=${error.url}');
+              '[WebviewPlayer] 资源错误: ${error.errorCode} ${error.description} url=${error.url}',
+            );
             if (error.isForMainFrame == true && mounted) {
               setState(() {
                 _failed = true;
@@ -131,11 +144,14 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
     // 停掉页面媒体，避免 WebView 被销毁后声音残留
     try {
       _controller.runJavaScript(
-          'try{document.querySelectorAll("video,audio").forEach(function(m){m.pause&&m.pause();});}catch(e){}');
+        'try{document.querySelectorAll("video,audio").forEach(function(m){m.pause&&m.pause();});}catch(e){}',
+      );
     } catch (_) {}
     // 恢复**进入前**的方向（原来无条件写死"竖屏+左右横屏"，
     // 会把别的页面设定的方向锁覆盖掉）
-    if (!widget.embedded && PlayerPrefs.instance.webviewForceLandscape.value) {
+    if (!widget.embedded &&
+        widget.forceLandscape &&
+        PlayerPrefs.instance.webviewForceLandscape.value) {
       SystemUiController.exit('webviewPlayer');
     }
     super.dispose();
@@ -182,22 +198,32 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.public_off_rounded,
-                                size: 34, color: Colors.white54),
+                            const Icon(
+                              Icons.public_off_rounded,
+                              size: 34,
+                              color: Colors.white54,
+                            ),
                             const SizedBox(height: 10),
-                            const Text('这个网页打不开',
-                                style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold)),
+                            const Text(
+                              '这个网页打不开',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                             if (_failDesc.isNotEmpty) ...[
                               const SizedBox(height: 6),
-                              Text(_failDesc,
-                                  maxLines: 2,
-                                  textAlign: TextAlign.center,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                      color: Colors.white38, fontSize: 11.5)),
+                              Text(
+                                _failDesc,
+                                maxLines: 2,
+                                textAlign: TextAlign.center,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white38,
+                                  fontSize: 11.5,
+                                ),
+                              ),
                             ],
                             const SizedBox(height: 14),
                             TextButton(

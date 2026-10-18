@@ -226,8 +226,21 @@ Future<({bool ok, String message})> importComicSourcesText(
       );
     }
     if (veneraDefs.isNotEmpty) {
+      final nameList = veneraDefs
+          .map((d) => '${d.config['name'] ?? ''}'.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+      final label = nameList.isEmpty
+          ? ''
+          : '（${nameList.take(3).join('、')}'
+                '${nameList.length > 3 ? ' 等' : ''}）';
+      final bytes = veneraDefs.fold<int>(
+        0,
+        (sum, d) => sum + '${d.config['script'] ?? ''}'.length,
+      );
       parts.add(
-        'Venera 源 ${veneraDefs.length} 个'
+        'Venera 源 ${veneraDefs.length} 个$label'
+        '，脚本共 $bytes 字节已入库'
         '${veneraFailed > 0 ? '（$veneraFailed 个下载失败）' : ''}',
       );
     }

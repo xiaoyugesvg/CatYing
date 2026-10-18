@@ -34,11 +34,19 @@ class SniffPlayerPage extends StatefulWidget {
   /// 解析接口自己的 header 优先级更高（更针对这次解析出的地址）。
   final Map<String, String>? headers;
 
+  /// 嗅探期间（网页还在屏上）是否跟随「网页播放强制横屏」设置。
+  ///
+  /// 默认 true 保持影视链路原行为；海阔这类**普通网页兜底**传 false ——
+  /// 站点页面是竖屏排版的，横过来只露一半（用户 2026-10-18）。
+  /// 嗅探到直链切原生播放器后，方向由播放器自己接管。
+  final bool forceLandscape;
+
   const SniffPlayerPage({
     super.key,
     required this.url,
     this.title,
     this.headers,
+    this.forceLandscape = true,
   });
 
   /// 详情页在**已有嗅探页在栈中**时，用它把新地址推给当前这一页重载
@@ -236,7 +244,8 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
   @override
   void initState() {
     super.initState();
-    if (PlayerPrefs.instance.webviewForceLandscape.value) {
+    if (widget.forceLandscape &&
+        PlayerPrefs.instance.webviewForceLandscape.value) {
       SystemUiController.enter(
         'sniffPlayer',
         mode: SystemUiMode.edgeToEdge,
@@ -295,10 +304,12 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
         },
       )
       ..setJavaScriptMode(
-          enableJs ? JavaScriptMode.unrestricted : JavaScriptMode.disabled)
+        enableJs ? JavaScriptMode.unrestricted : JavaScriptMode.disabled,
+      )
       ..setBackgroundColor(const Color(0xFF000000))
       ..setUserAgent(
-          'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1')
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+      )
       ..setNavigationDelegate(
         NavigationDelegate(
           onProgress: (progress) {
@@ -332,7 +343,8 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
           },
           onWebResourceError: (error) {
             AppLog.instance.log(
-                '[SniffPlayer] 资源错误: ${error.errorCode} ${error.description} url=${error.url}');
+              '[SniffPlayer] 资源错误: ${error.errorCode} ${error.description} url=${error.url}',
+            );
           },
         ),
       )
@@ -358,57 +370,61 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
     // 页面自身脚本在 onPageFinished 之后发起的请求都能劫持到（2026-10-15）。
     _controller.runJavaScript(_hookJs);
     // 再注入嗅探脚本，脚本内部会立即扫一轮 + 轮询
-    _controller.runJavaScript(_sniffJs).then((_) {
-      _sniffTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
-        _pollSniff();
-      });
-    }).catchError((_) {
-      _sniffing = false;
-      if (mounted) {
-        setState(() {
-          _hint = '嗅探脚本注入失败，可试试换解析接口或在网页内直接观看';
+    _controller
+        .runJavaScript(_sniffJs)
+        .then((_) {
+          _sniffTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
+            _pollSniff();
+          });
+        })
+        .catchError((_) {
+          _sniffing = false;
+          if (mounted) {
+            setState(() {
+              _hint = '嗅探脚本注入失败，可试试换解析接口或在网页内直接观看';
+            });
+          }
         });
-      }
-    });
   }
 
   void _pollSniff() {
     _controller
         .runJavaScriptReturningResult('window.__sniff.all()')
         .then((result) {
-      if (!mounted) return;
-      // 一次拿全部候选，在原生侧过 SniffFilter（后缀 + 黑/白名单）：
-      // 第一个可能是广告，必须跳过广告继续挑正片，不能见一个就上。
-      final candidates = _candidatesOf(result);
-      _lastCandidates = candidates;
-      for (final u in candidates) {
-        if (SniffFilter.acceptSniffUrl(u)) {
-          _onSniffed(u);
-          return;
-        }
-      }
-      _sniffTries++;
-      // 第 5 轮（约 7.5 秒）还没结果 → 大概率播放器躲在**跨域 iframe** 里
-      // （WebView 注入不到子 frame）。转"网络层兜底"：Dart 直接取页面与
-      // iframe 的 HTML 扫媒体地址，Dart 发 HTTP 不受同源策略限制。
-      if (_sniffTries == 5) {
-        unawaited(_httpSniffFallback());
-        // 顺带对"有 video 元素但地址没有后缀"的候选做一次 MIME 复核
-        unawaited(_probeLastCandidates());
-      }
-      // 16 轮 × 1.5 秒 = 24 秒：慢页面 / 慢加载 / 需点播放才起播的站点
-      // 之前 8 轮（12 秒）经常还没等到地址就放弃（2026-10-15）。
-      if (_sniffTries >= 16) {
-        _stopSniffing();
-        if (mounted) {
-          setState(() {
-            _hint = '未嗅探到可播放的影视地址（可能被过滤规则排除），可在播放设置 → 嗅探设置里调整';
-          });
-        }
-      }
-    }).catchError((_) {
-      _stopSniffing();
-    });
+          if (!mounted) return;
+          // 一次拿全部候选，在原生侧过 SniffFilter（后缀 + 黑/白名单）：
+          // 第一个可能是广告，必须跳过广告继续挑正片，不能见一个就上。
+          final candidates = _candidatesOf(result);
+          _lastCandidates = candidates;
+          for (final u in candidates) {
+            if (SniffFilter.acceptSniffUrl(u)) {
+              _onSniffed(u);
+              return;
+            }
+          }
+          _sniffTries++;
+          // 第 5 轮（约 7.5 秒）还没结果 → 大概率播放器躲在**跨域 iframe** 里
+          // （WebView 注入不到子 frame）。转"网络层兜底"：Dart 直接取页面与
+          // iframe 的 HTML 扫媒体地址，Dart 发 HTTP 不受同源策略限制。
+          if (_sniffTries == 5) {
+            unawaited(_httpSniffFallback());
+            // 顺带对"有 video 元素但地址没有后缀"的候选做一次 MIME 复核
+            unawaited(_probeLastCandidates());
+          }
+          // 16 轮 × 1.5 秒 = 24 秒：慢页面 / 慢加载 / 需点播放才起播的站点
+          // 之前 8 轮（12 秒）经常还没等到地址就放弃（2026-10-15）。
+          if (_sniffTries >= 16) {
+            _stopSniffing();
+            if (mounted) {
+              setState(() {
+                _hint = '未嗅探到可播放的影视地址（可能被过滤规则排除），可在播放设置 → 嗅探设置里调整';
+              });
+            }
+          }
+        })
+        .catchError((_) {
+          _stopSniffing();
+        });
   }
 
   /// 把 JS `__sniff.all()` 的返回（iOS/Android 可能是 List 或 JSON 字符串）
@@ -450,8 +466,10 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
     if (SniffFilter.isDirectMedia(u)) return;
     if (!_mimeProbing.add(u)) return;
     AppLog.instance.log('[SniffPlayer] 无后缀候选，MIME 复核: $u');
-    final ok =
-        await WebSniffService.instance.looksLikeMediaByMime(u, referer: _currentUrl);
+    final ok = await WebSniffService.instance.looksLikeMediaByMime(
+      u,
+      referer: _currentUrl,
+    );
     _mimeProbing.remove(u);
     if (!ok || !mounted || _autoSwitched) return;
     if (!SniffFilter.acceptSniffUrl(u, mediaVerified: true)) return;
@@ -471,8 +489,14 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
         .toList();
     if (batch.isEmpty) return;
     AppLog.instance.log('[SniffPlayer] MIME 兜底复核 ${batch.length} 个无后缀候选');
-    final checks = await Future.wait(batch.map(
-        (u) => WebSniffService.instance.looksLikeMediaByMime(u, referer: _currentUrl)));
+    final checks = await Future.wait(
+      batch.map(
+        (u) => WebSniffService.instance.looksLikeMediaByMime(
+          u,
+          referer: _currentUrl,
+        ),
+      ),
+    );
     for (var i = 0; i < checks.length; i++) {
       if (!checks[i] || !mounted || _autoSwitched) continue;
       final u = batch[i];
@@ -504,17 +528,21 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
     // **双份出声**（用户 2026-10-15「嗅探容易影响播放」）。
     _pauseWebMedia();
     // 切原生播放器（本页留在栈里，返回可继续看网页）
-    Get.to(() => MiniAppPlayerPage(
+    Get.to(
+      () => MiniAppPlayerPage(
         url: url,
         title: widget.title ?? '嗅探播放',
-        headers: _playHeaders()));
+        headers: _playHeaders(),
+      ),
+    );
   }
 
   /// 暂停并静音 WebView 里的所有 video/audio（切原生播放器前调用，防双声）
   void _pauseWebMedia() {
     try {
       _controller.runJavaScript(
-          'try{document.querySelectorAll("video,audio").forEach(function(m){try{m.pause();m.muted=true;}catch(e){}});}catch(e){}');
+        'try{document.querySelectorAll("video,audio").forEach(function(m){try{m.pause();m.muted=true;}catch(e){}});}catch(e){}',
+      );
     } catch (_) {}
   }
 
@@ -543,8 +571,10 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
     _httpSniffStarted = true;
     AppLog.instance.log('[SniffPlayer] 转网络层兜底嗅探: $_currentUrl');
     try {
-      final hit = await WebSniffService.instance
-          .findMediaUrl(_currentUrl, referer: _currentUrl);
+      final hit = await WebSniffService.instance.findMediaUrl(
+        _currentUrl,
+        referer: _currentUrl,
+      );
       if (hit == null || !mounted) return;
       if (mounted) {
         setState(() => _hint = '已从页面 / iframe 里找到视频地址，正在播放');
@@ -603,10 +633,13 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
         });
         _pauseWebMedia(); // 同上：防网页与原生播放器双份出声
         // 解析接口自带的请求头 + 按开关补的 Referer 一并带上（防盗链）
-        Get.to(() => MiniAppPlayerPage(
+        Get.to(
+          () => MiniAppPlayerPage(
             url: outcome.url,
             title: widget.title ?? '解析播放',
-            headers: _playHeaders(outcome.headers)));
+            headers: _playHeaders(outcome.headers),
+          ),
+        );
       } else {
         _autoSwitched = false;
         setState(() {
@@ -640,9 +673,11 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
     _stopSniffing();
     try {
       _controller.runJavaScript(
-          'try{document.querySelectorAll("video,audio").forEach(function(m){m.pause&&m.pause();});}catch(e){}');
+        'try{document.querySelectorAll("video,audio").forEach(function(m){m.pause&&m.pause();});}catch(e){}',
+      );
     } catch (_) {}
-    if (PlayerPrefs.instance.webviewForceLandscape.value) {
+    if (widget.forceLandscape &&
+        PlayerPrefs.instance.webviewForceLandscape.value) {
       SystemUiController.exit('sniffPlayer');
     }
     super.dispose();
@@ -693,11 +728,16 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
                       borderRadius: BorderRadius.circular(8),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                         child: Row(
                           children: [
-                            const Icon(Icons.movie_outlined,
-                                color: Colors.white70, size: 18),
+                            const Icon(
+                              Icons.movie_outlined,
+                              color: Colors.white70,
+                              size: 18,
+                            ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
@@ -705,19 +745,26 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
-                                    color: Colors.white70, fontSize: 12),
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
                               ),
                             ),
                             TextButton(
                               onPressed: () {
                                 _pauseWebMedia(); // 防双声
-                                Get.to(() => MiniAppPlayerPage(
+                                Get.to(
+                                  () => MiniAppPlayerPage(
                                     url: _sniffedUrl!,
                                     title: widget.title ?? '嗅探播放',
-                                    headers: _playHeaders()));
+                                    headers: _playHeaders(),
+                                  ),
+                                );
                               },
-                              child: const Text('播放',
-                                  style: TextStyle(color: Colors.white)),
+                              child: const Text(
+                                '播放',
+                                style: TextStyle(color: Colors.white),
+                              ),
                             ),
                           ],
                         ),
@@ -762,7 +809,10 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
                       _hint,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white60, fontSize: 12),
+                      style: const TextStyle(
+                        color: Colors.white60,
+                        fontSize: 12,
+                      ),
                     ),
                   ),
                 ),

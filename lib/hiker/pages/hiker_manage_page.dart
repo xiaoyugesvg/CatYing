@@ -4,9 +4,11 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../common/theme.dart';
 import '../../reading/source/global_proxy.dart';
+import '../../reading/widgets/swipe_action_tile.dart';
 import '../../services/app_log.dart';
 import '../../widgets/app_toast.dart';
 import '../models/hiker_source.dart';
@@ -21,7 +23,9 @@ import '../services/hiker_store.dart';
 /// 原来首页提示只会跳到海阔设置首页，用户还得再进「源管理」找到该源、
 /// 再点调节图标；现在直接弹这个框，一步到位。
 Future<void> showHikerSourceConfigDialog(
-    BuildContext context, HikerSource s) async {
+  BuildContext context,
+  HikerSource s,
+) async {
   final store = HikerStore.instance;
   final existing = store.configOf(s.id);
   final ctrl = TextEditingController(
@@ -36,11 +40,15 @@ Future<void> showHikerSourceConfigDialog(
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: AppTheme.backgroundCard,
-      title: Text('源配置 · ${s.title}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-              color: AppTheme.textPrimary, fontSize: AppTheme.fontHeadline)),
+      title: Text(
+        '源配置 · ${s.title}',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: AppTheme.textPrimary,
+          fontSize: AppTheme.fontHeadline,
+        ),
+      ),
       content: SizedBox(
         width: double.maxFinite,
         child: Column(
@@ -52,31 +60,37 @@ Future<void> showHikerSourceConfigDialog(
                   ? '这个源的规则没有用到 config.xxx。'
                   : '规则用到的配置键：${keys.map((k) => 'config.$k').join('、')}',
               style: TextStyle(
-                  color: keys.isEmpty
-                      ? AppTheme.textTertiary
-                      : AppTheme.accentOnSurface,
-                  fontSize: AppTheme.fontCaption,
-                  height: 1.5),
+                color: keys.isEmpty
+                    ? AppTheme.textTertiary
+                    : AppTheme.accentOnSurface,
+                fontSize: AppTheme.fontCaption,
+                height: 1.5,
+              ),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: ctrl,
               maxLines: 6,
               style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: AppTheme.fontFootnote),
+                color: AppTheme.textPrimary,
+                fontSize: AppTheme.fontFootnote,
+              ),
               decoration: InputDecoration(
                 hintText: '{\n  "host": "https://xxx.com"\n}',
                 hintStyle: TextStyle(color: AppTheme.textTertiary),
-                border:
-                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
             const SizedBox(height: 6),
-            Text('留空 = 清空该源配置；必须是 JSON 对象。',
-                style: TextStyle(
-                    color: AppTheme.textTertiary,
-                    fontSize: AppTheme.fontCaption)),
+            Text(
+              '留空 = 清空该源配置；必须是 JSON 对象。',
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: AppTheme.fontCaption,
+              ),
+            ),
           ],
         ),
       ),
@@ -87,8 +101,7 @@ Future<void> showHikerSourceConfigDialog(
         ),
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(ctrl.text),
-          child:
-              Text('保存', style: TextStyle(color: AppTheme.accentOnSurface)),
+          child: Text('保存', style: TextStyle(color: AppTheme.accentOnSurface)),
         ),
       ],
     ),
@@ -125,6 +138,14 @@ class _HikerManagePageState extends State<HikerManagePage> {
   String _group = ''; // 空 = 全部分组
   bool _usableOnly = false;
 
+  /// 搜索（AppBar 的放大镜切换）
+  bool _searching = false;
+  final TextEditingController _searchCtl = TextEditingController();
+  String _query = '';
+
+  /// 视图：0 = 列表（可长按拖动排序）；1 = 两列卡片
+  int _view = 0;
+
   /// 源诊断的输入：随包资源名 + 用户文件区里的文件（相对路径）
   Set<String> _bundledAssets = const {};
   Set<String> _importedFiles = const {};
@@ -154,8 +175,7 @@ class _HikerManagePageState extends State<HikerManagePage> {
       if (!mounted) return;
       setState(() {
         _bundledAssets = assets.toSet();
-        _importedFiles =
-            files.map((e) => e.path.replaceAll('\\', '/')).toSet();
+        _importedFiles = files.map((e) => e.path.replaceAll('\\', '/')).toSet();
         _diagCache.clear();
       });
     } catch (e) {
@@ -167,6 +187,7 @@ class _HikerManagePageState extends State<HikerManagePage> {
   void dispose() {
     _store.removeListener(_onChanged);
     _prefs.removeListener(_onChanged);
+    _searchCtl.dispose();
     super.dispose();
   }
 
@@ -234,11 +255,13 @@ class _HikerManagePageState extends State<HikerManagePage> {
     if (url == null || url.trim().isEmpty) return;
     if (_busy) return;
     setState(() => _busy = true);
-    final dio = Dio(BaseOptions(
-      connectTimeout: const Duration(seconds: 15),
-      receiveTimeout: const Duration(seconds: 60),
-      responseType: ResponseType.plain,
-    ));
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 60),
+        responseType: ResponseType.plain,
+      ),
+    );
     applyGlobalProxy(dio);
     try {
       final resp = await dio.get<String>(url.trim());
@@ -273,13 +296,20 @@ class _HikerManagePageState extends State<HikerManagePage> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.backgroundCard,
-        title: Text(title,
-            style: TextStyle(
-                color: AppTheme.textPrimary, fontSize: AppTheme.fontHeadline)),
+        title: Text(
+          title,
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontHeadline,
+          ),
+        ),
         content: TextField(
           controller: ctrl,
           maxLines: 6,
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTheme.fontFootnote),
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontFootnote,
+          ),
           decoration: InputDecoration(
             hintText: hint,
             hintStyle: TextStyle(color: AppTheme.textTertiary),
@@ -293,7 +323,10 @@ class _HikerManagePageState extends State<HikerManagePage> {
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(ctrl.text),
-            child: Text(confirm, style: TextStyle(color: AppTheme.accentOnSurface)),
+            child: Text(
+              confirm,
+              style: TextStyle(color: AppTheme.accentOnSurface),
+            ),
           ),
         ],
       ),
@@ -305,12 +338,20 @@ class _HikerManagePageState extends State<HikerManagePage> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.backgroundCard,
-        title: Text('清空全部海阔源？',
-            style: TextStyle(
-                color: AppTheme.textPrimary, fontSize: AppTheme.fontHeadline)),
-        content: Text('只影响「海阔」模块，其它模块不受影响。',
-            style: TextStyle(
-                color: AppTheme.textSecondary, fontSize: AppTheme.fontSubhead)),
+        title: Text(
+          '清空全部海阔源？',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontHeadline,
+          ),
+        ),
+        content: Text(
+          '只影响「海阔」模块，其它模块不受影响。',
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: AppTheme.fontSubhead,
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -333,8 +374,7 @@ class _HikerManagePageState extends State<HikerManagePage> {
   @override
   Widget build(BuildContext context) {
     final total = _store.sources.length;
-    var list = _store.filterSources(group: _group);
-    if (_usableOnly) list = list.where((s) => s.usable).toList();
+    final list = _visibleSources();
     final groups = _store.groups;
 
     return Scaffold(
@@ -343,16 +383,40 @@ class _HikerManagePageState extends State<HikerManagePage> {
         backgroundColor: AppTheme.backgroundPrimary,
         foregroundColor: AppTheme.textPrimary,
         elevation: 0,
-        title: Text('海阔源管理',
-            style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: AppTheme.fontTitle3,
-                fontWeight: FontWeight.bold)),
+        title: Text(
+          '海阔源管理',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontTitle3,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
         actions: [
+          IconButton(
+            tooltip: _searching ? '关闭搜索' : '搜索',
+            onPressed: () => _toggleSearch(),
+            icon: Icon(
+              _searching ? Icons.search_off_rounded : Icons.search_rounded,
+              color: _searching
+                  ? AppTheme.accentOnSurface
+                  : AppTheme.textSecondary,
+            ),
+          ),
+          IconButton(
+            tooltip: _view == 0 ? '切换到卡片视图' : '切换到列表视图',
+            onPressed: () => setState(() => _view = _view == 0 ? 1 : 0),
+            icon: Icon(
+              _view == 0 ? Icons.grid_view_rounded : Icons.view_agenda_outlined,
+              color: AppTheme.textSecondary,
+            ),
+          ),
           IconButton(
             tooltip: '清空',
             onPressed: total == 0 ? null : _clearAll,
-            icon: Icon(Icons.delete_sweep_outlined, color: AppTheme.textSecondary),
+            icon: Icon(
+              Icons.delete_sweep_outlined,
+              color: AppTheme.textSecondary,
+            ),
           ),
         ],
       ),
@@ -392,6 +456,11 @@ class _HikerManagePageState extends State<HikerManagePage> {
           ),
           const SizedBox(height: 14),
 
+          if (total > 0 && _searching) ...[
+            _searchBar(),
+            const SizedBox(height: 10),
+          ],
+
           // 分组筛选 + 仅可用
           if (total > 0) _filterBar(groups, list.length),
           const SizedBox(height: 8),
@@ -402,16 +471,201 @@ class _HikerManagePageState extends State<HikerManagePage> {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 28),
               child: Center(
-                child: Text('这个筛选下没有源',
-                    style: TextStyle(
-                        color: AppTheme.textTertiary, fontSize: AppTheme.fontSubhead)),
+                child: Text(
+                  _query.trim().isEmpty ? '这个筛选下没有源' : '没有匹配的源',
+                  style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontSubhead,
+                  ),
+                ),
               ),
             )
           else
-            ...list.map((s) => _sourceCard(s)),
+            _sourcesSection(list),
         ],
       ),
     );
+  }
+
+  // ── 搜索 / 视图 / 排序 ────────────────────────────────
+
+  void _toggleSearch() {
+    setState(() {
+      _searching = !_searching;
+      if (!_searching) {
+        _searchCtl.clear();
+        _query = '';
+      }
+    });
+  }
+
+  /// 当前可见的源（分组 → 仅可用 → 搜索词）
+  List<HikerSource> _visibleSources() {
+    var list = _store.filterSources(group: _group);
+    if (_usableOnly) list = list.where((s) => s.usable).toList();
+    final q = _query.trim().toLowerCase();
+    if (q.isNotEmpty) {
+      list = list
+          .where(
+            (s) =>
+                s.title.toLowerCase().contains(q) ||
+                s.author.toLowerCase().contains(q) ||
+                s.groupLabel.toLowerCase().contains(q),
+          )
+          .toList();
+    }
+    return list;
+  }
+
+  Widget _searchBar() {
+    return Container(
+      height: 40,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundTertiary,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.search_rounded, size: 18, color: AppTheme.textTertiary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: _searchCtl,
+              autofocus: true,
+              textInputAction: TextInputAction.search,
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: AppTheme.fontSubhead,
+              ),
+              decoration: InputDecoration(
+                isCollapsed: true,
+                border: InputBorder.none,
+                hintText: '搜索源名称 / 作者 / 分组',
+                hintStyle: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontSubhead,
+                ),
+              ),
+              onChanged: (v) => setState(() => _query = v),
+            ),
+          ),
+          if (_query.isNotEmpty)
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                _searchCtl.clear();
+                setState(() => _query = '');
+              },
+              child: Icon(
+                Icons.close_rounded,
+                size: 16,
+                color: AppTheme.textTertiary,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 列表：长按拖动排序（拖动语义与「导入顺序」一致）
+  Widget _sourcesSection(List<HikerSource> list) {
+    if (_view == 0) {
+      return ReorderableListView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        padding: EdgeInsets.zero,
+        buildDefaultDragHandles: false,
+        itemCount: list.length,
+        onReorder: (o, n) => _reorderList(list, o, n),
+        proxyDecorator: (child, index, animation) =>
+            Material(color: Colors.transparent, child: child),
+        itemBuilder: (_, i) => Padding(
+          key: ValueKey(list[i].id),
+          padding: const EdgeInsets.only(bottom: 10),
+          child: ReorderableDelayedDragStartListener(
+            index: i,
+            child: _swipeCard(list[i]),
+          ),
+        ),
+      );
+    }
+    // 卡片视图：两列，长按拖到另一张卡片上换位
+    final cellWidth = (MediaQuery.sizeOf(context).width - 32 - 10) / 2;
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        mainAxisExtent: 128,
+      ),
+      itemCount: list.length,
+      itemBuilder: (_, i) => DragTarget<String>(
+        onWillAcceptWithDetails: (d) => d.data != list[i].id,
+        onAcceptWithDetails: (d) => _moveTo(d.data, list[i].id),
+        builder: (_, candidate, _) => LongPressDraggable<String>(
+          data: list[i].id,
+          feedback: Material(
+            color: Colors.transparent,
+            child: SizedBox(
+              width: cellWidth,
+              height: 128,
+              child: _gridCard(list[i], dragging: true),
+            ),
+          ),
+          childWhenDragging: Opacity(
+            opacity: 0.35,
+            child: _gridCard(list[i]),
+          ),
+          child: _gridCard(list[i], highlight: candidate.isNotEmpty),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _reorderList(
+    List<HikerSource> list,
+    int oldIndex,
+    int newIndex,
+  ) async {
+    if (newIndex > oldIndex) newIndex -= 1;
+    final ids = list.map((e) => e.id).toList();
+    if (oldIndex < 0 || oldIndex >= ids.length) return;
+    final moved = ids.removeAt(oldIndex);
+    ids.insert(newIndex.clamp(0, ids.length), moved);
+    await _applyOrder(ids);
+  }
+
+  /// 卡片视图：把 [movedId] 插到 [targetId] 的位置
+  Future<void> _moveTo(String movedId, String targetId) async {
+    final list = _visibleSources();
+    final ids = list.map((e) => e.id).toList();
+    final from = ids.indexOf(movedId);
+    final to = ids.indexOf(targetId);
+    if (from < 0 || to < 0 || from == to) return;
+    ids.removeAt(from);
+    ids.insert(to, movedId);
+    await _applyOrder(ids);
+  }
+
+  /// 拖动排序必须落在「导入顺序」上，否则 'name' / 'usable' 会立刻把顺序排回去
+  Future<void> _applyOrder(List<String> ids) async {
+    if (_prefs.sortBy != 'default') await _prefs.setSortBy('default');
+    await _store.reorder(ids);
+  }
+
+  Future<void> _shareSource(HikerSource s) async {
+    final text = const JsonEncoder.withIndent('  ').convert(s.raw);
+    await Clipboard.setData(ClipboardData(text: text));
+    AppToast.message('已复制「${s.title}」的源 JSON');
+  }
+
+  Future<void> _deleteSource(HikerSource s) async {
+    await _store.remove(s.id);
+    AppToast.message('已删除「${s.title}」');
   }
 
   Widget _statsCard(int total) {
@@ -433,20 +687,27 @@ class _HikerManagePageState extends State<HikerManagePage> {
   }
 
   Widget _stat(String label, String value) => Expanded(
-        child: Column(
-          children: [
-            Text(value,
-                style: TextStyle(
-                    color: AppTheme.accentOnSurface,
-                    fontSize: AppTheme.fontTitle2,
-                    fontWeight: FontWeight.bold)),
-            const SizedBox(height: 2),
-            Text(label,
-                style: TextStyle(
-                    color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption)),
-          ],
+    child: Column(
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            color: AppTheme.accentOnSurface,
+            fontSize: AppTheme.fontTitle2,
+            fontWeight: FontWeight.bold,
+          ),
         ),
-      );
+        const SizedBox(height: 2),
+        Text(
+          label,
+          style: TextStyle(
+            color: AppTheme.textTertiary,
+            fontSize: AppTheme.fontCaption,
+          ),
+        ),
+      ],
+    ),
+  );
 
   Widget _filterBar(List<String> groups, int shown) {
     return Column(
@@ -458,20 +719,30 @@ class _HikerManagePageState extends State<HikerManagePage> {
             scrollDirection: Axis.horizontal,
             children: [
               _chip('全部', _group.isEmpty, () => setState(() => _group = '')),
-              ...groups.map((g) => _chip(g, _group == g, () => setState(() => _group = g))),
+              ...groups.map(
+                (g) => _chip(g, _group == g, () => setState(() => _group = g)),
+              ),
             ],
           ),
         ),
         const SizedBox(height: 6),
         Row(
           children: [
-            Text('显示 $shown 个',
-                style: TextStyle(
-                    color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption)),
+            Text(
+              '显示 $shown 个',
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: AppTheme.fontCaption,
+              ),
+            ),
             const Spacer(),
-            Text('仅看可用',
-                style: TextStyle(
-                    color: AppTheme.textSecondary, fontSize: AppTheme.fontCaption)),
+            Text(
+              '仅看可用',
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: AppTheme.fontCaption,
+              ),
+            ),
             Switch(
               value: _usableOnly,
               activeThumbColor: AppTheme.accentColor,
@@ -495,11 +766,14 @@ class _HikerManagePageState extends State<HikerManagePage> {
           color: on ? AppTheme.accentSurface : AppTheme.backgroundTertiary,
           borderRadius: BorderRadius.circular(10),
         ),
-        child: Text(label,
-            style: TextStyle(
-                color: on ? AppTheme.accentOnSurface : AppTheme.textSecondary,
-                fontSize: AppTheme.fontCaption,
-                fontWeight: on ? FontWeight.w700 : FontWeight.w500)),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: on ? AppTheme.accentOnSurface : AppTheme.textSecondary,
+            fontSize: AppTheme.fontCaption,
+            fontWeight: on ? FontWeight.w700 : FontWeight.w500,
+          ),
+        ),
       ),
     );
   }
@@ -523,11 +797,14 @@ class _HikerManagePageState extends State<HikerManagePage> {
           children: [
             Icon(icon, size: 17, color: AppTheme.accentOnSurface),
             const SizedBox(width: 5),
-            Text(label,
-                style: TextStyle(
-                    color: AppTheme.accentOnSurface,
-                    fontSize: AppTheme.fontSubhead,
-                    fontWeight: FontWeight.w600)),
+            Text(
+              label,
+              style: TextStyle(
+                color: AppTheme.accentOnSurface,
+                fontSize: AppTheme.fontSubhead,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ],
         ),
       ),
@@ -545,27 +822,58 @@ class _HikerManagePageState extends State<HikerManagePage> {
         '还没有海阔源。用上面的「粘贴 / 文件 / 网址」把海阔导出的 JSON（数组）导进来。\n\n'
         '⚠️ 依赖海阔内置页面模块或宿主能力（WebView 抓页）的源会被标记为不可用 —— 这是导入时就判定好的，不会等点了才报错。',
         style: TextStyle(
-            color: AppTheme.textSecondary, fontSize: AppTheme.fontFootnote, height: 1.6),
+          color: AppTheme.textSecondary,
+          fontSize: AppTheme.fontFootnote,
+          height: 1.6,
+        ),
       ),
     );
   }
 
   /// 这个源的诊断结果（带缓存；配置/文件清单变化时由 [_onChanged] 清掉）
   List<HikerSourceDiagnosis> _diagOf(HikerSource s) => _diagCache.putIfAbsent(
-        s.id,
-        () => s.diagnose(
-          bundledAssets: _bundledAssets,
-          importedFiles: _importedFiles,
-          config: _store.configOf(s.id),
+    s.id,
+    () => s.diagnose(
+      bundledAssets: _bundledAssets,
+      importedFiles: _importedFiles,
+      config: _store.configOf(s.id),
+    ),
+  );
+
+  /// 列表行外面再包一层左滑操作（编辑 / 分享 / 删除）
+  Widget _swipeCard(HikerSource s) {
+    return SwipeActionTile(
+      backgroundColor: AppTheme.backgroundSecondary,
+      borderRadius: BorderRadius.circular(16),
+      actions: [
+        SwipeAction(
+          icon: Icons.edit_outlined,
+          label: '编辑',
+          color: const Color(0xFF5B8DEF),
+          onTap: () => _editConfig(s),
         ),
-      );
+        SwipeAction(
+          icon: Icons.ios_share_rounded,
+          label: '分享',
+          color: const Color(0xFF3AAE8C),
+          onTap: () => _shareSource(s),
+        ),
+        SwipeAction(
+          icon: Icons.delete_outline_rounded,
+          label: '删除',
+          color: Colors.redAccent,
+          onTap: () => _deleteSource(s),
+        ),
+      ],
+      child: _sourceCard(s),
+    );
+  }
 
   Widget _sourceCard(HikerSource s) {
     final isCurrent = _store.currentId == s.id;
     final hasCfg = _store.configOf(s.id).isNotEmpty;
     final issues = _diagOf(s);
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
       decoration: BoxDecoration(
         color: AppTheme.backgroundCard,
@@ -589,21 +897,32 @@ class _HikerManagePageState extends State<HikerManagePage> {
                   Row(
                     children: [
                       Flexible(
-                        child: Text(s.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                color: AppTheme.textPrimary,
-                                fontSize: AppTheme.fontBody,
-                                fontWeight: FontWeight.w600)),
+                        child: Text(
+                          s.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: AppTheme.fontBody,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ),
                       if (isCurrent) ...[
                         const SizedBox(width: 6),
-                        _tag('当前', AppTheme.accentSurface, AppTheme.accentOnSurface),
+                        _tag(
+                          '当前',
+                          AppTheme.accentSurface,
+                          AppTheme.accentOnSurface,
+                        ),
                       ],
                       if (hasCfg) ...[
                         const SizedBox(width: 4),
-                        _tag('已配置', AppTheme.backgroundTertiary, AppTheme.textSecondary),
+                        _tag(
+                          '已配置',
+                          AppTheme.backgroundTertiary,
+                          AppTheme.textSecondary,
+                        ),
                       ],
                     ],
                   ),
@@ -615,7 +934,9 @@ class _HikerManagePageState extends State<HikerManagePage> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                        color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption),
+                      color: AppTheme.textTertiary,
+                      fontSize: AppTheme.fontCaption,
+                    ),
                   ),
                   _diagTags(s, issues),
                 ],
@@ -625,17 +946,142 @@ class _HikerManagePageState extends State<HikerManagePage> {
           IconButton(
             tooltip: '源配置（规则里的 config）',
             onPressed: () => _editConfig(s),
-            icon: Icon(Icons.tune_rounded, size: 18, color: AppTheme.textSecondary),
+            icon: Icon(
+              Icons.tune_rounded,
+              size: 18,
+              color: AppTheme.textSecondary,
+            ),
           ),
           Switch(
             value: _store.isEnabled(s),
             activeThumbColor: AppTheme.accentColor,
             onChanged: (v) => _store.setEnabled(s.id, v),
           ),
-          IconButton(
-            tooltip: '删除',
-            onPressed: () => _store.remove(s.id),
-            icon: Icon(Icons.close_rounded, size: 18, color: AppTheme.textTertiary),
+        ],
+      ),
+    );
+  }
+
+  /// 卡片视图里的紧凑卡片（两列，长按可拖到别的卡片上换位）
+  Widget _gridCard(
+    HikerSource s, {
+    bool highlight = false,
+    bool dragging = false,
+  }) {
+    final isCurrent = _store.currentId == s.id;
+    final hasCfg = _store.configOf(s.id).isNotEmpty;
+    final issues = _diagOf(s);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 6, 4, 8),
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundCard,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: highlight
+              ? AppTheme.accentColor
+              : (isCurrent
+                    ? AppTheme.accentColor.withValues(alpha: 0.55)
+                    : AppTheme.borderLight),
+          width: highlight ? 1.6 : (isCurrent ? 1.4 : 1),
+        ),
+        boxShadow: dragging
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.25),
+                  blurRadius: 16,
+                ),
+              ]
+            : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => _store.setCurrent(s.id),
+                  child: Text(
+                    s.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: AppTheme.fontSubhead,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 40,
+                height: 22,
+                child: FittedBox(
+                  fit: BoxFit.contain,
+                  child: Switch(
+                    value: _store.isEnabled(s),
+                    activeThumbColor: AppTheme.accentColor,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    onChanged: (v) => _store.setEnabled(s.id, v),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '${s.author.isEmpty ? '佚名' : s.author}'
+            '${s.version > 0 ? ' · v${s.version}' : ''}'
+            ' · ${s.groupLabel}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppTheme.textTertiary,
+              fontSize: AppTheme.fontCaption,
+            ),
+          ),
+          const Spacer(),
+          Row(
+            children: [
+              if (isCurrent)
+                _tag('当前', AppTheme.accentSurface, AppTheme.accentOnSurface),
+              if (isCurrent && hasCfg) const SizedBox(width: 4),
+              if (hasCfg)
+                _tag(
+                  '已配置',
+                  AppTheme.backgroundTertiary,
+                  AppTheme.textSecondary,
+                ),
+              if ((isCurrent || hasCfg) && issues.isNotEmpty)
+                const SizedBox(width: 4),
+              if (issues.isNotEmpty)
+                Flexible(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: issues.first.blocking
+                          ? Colors.orange.withValues(alpha: 0.14)
+                          : AppTheme.backgroundTertiary,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      issues.first.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: issues.first.blocking
+                            ? Colors.orange.shade400
+                            : AppTheme.textSecondary,
+                        fontSize: AppTheme.fontCaption,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ],
       ),
@@ -677,12 +1123,15 @@ class _HikerManagePageState extends State<HikerManagePage> {
                           : AppTheme.textSecondary,
                     ),
                     const SizedBox(width: 3),
-                    Text(d.label,
-                        style: TextStyle(
-                            color: d.blocking
-                                ? Colors.orange.shade400
-                                : AppTheme.textSecondary,
-                            fontSize: AppTheme.fontCaption)),
+                    Text(
+                      d.label,
+                      style: TextStyle(
+                        color: d.blocking
+                            ? Colors.orange.shade400
+                            : AppTheme.textSecondary,
+                        fontSize: AppTheme.fontCaption,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -701,33 +1150,43 @@ class _HikerManagePageState extends State<HikerManagePage> {
         title: Row(
           children: [
             Icon(
-              d.blocking ? Icons.error_outline_rounded : Icons.info_outline_rounded,
+              d.blocking
+                  ? Icons.error_outline_rounded
+                  : Icons.info_outline_rounded,
               size: 18,
-              color: d.blocking ? Colors.orange.shade400 : AppTheme.textSecondary,
+              color: d.blocking
+                  ? Colors.orange.shade400
+                  : AppTheme.textSecondary,
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: Text('${d.label} · ${s.title}',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: AppTheme.fontHeadline)),
+              child: Text(
+                '${d.label} · ${s.title}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontHeadline,
+                ),
+              ),
             ),
           ],
         ),
         content: Text(
           d.detail,
           style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: AppTheme.fontSubhead,
-              height: 1.6),
+            color: AppTheme.textSecondary,
+            fontSize: AppTheme.fontSubhead,
+            height: 1.6,
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: Text('知道了',
-                style: TextStyle(color: AppTheme.accentOnSurface)),
+            child: Text(
+              '知道了',
+              style: TextStyle(color: AppTheme.accentOnSurface),
+            ),
           ),
         ],
       ),
@@ -735,8 +1194,14 @@ class _HikerManagePageState extends State<HikerManagePage> {
   }
 
   Widget _tag(String text, Color bg, Color fg) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(6)),
-        child: Text(text, style: TextStyle(color: fg, fontSize: AppTheme.fontCaption)),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+    decoration: BoxDecoration(
+      color: bg,
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Text(
+      text,
+      style: TextStyle(color: fg, fontSize: AppTheme.fontCaption),
+    ),
+  );
 }

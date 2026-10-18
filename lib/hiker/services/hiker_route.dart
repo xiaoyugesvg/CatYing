@@ -32,6 +32,14 @@ enum HikerLinkKind {
   /// `hiker://…` 官方内部页面（二级页面 / 设置 / 搜索 / 收藏…），本模块不支持跳转
   hikerPage,
 
+  /// `hiker://search?rule=<源名>&s=<关键词>` —— 官方「在某个源里搜索」的深链。
+  ///
+  /// 实测「聚阅√」这类聚合源的首页搜索框 / 条目地址就是它（
+  /// `return "hiker://search?rule=" + r + "&s=" + input`）。
+  /// 以前一律当 `hikerPage` ⇒ 点了只弹「海阔内部页面，本版不支持」，
+  /// 用户看到的就是「没抓到直链，反而给出一个内置搜索链接」。
+  search,
+
   /// `javascript:` 官方叫"彩蛋模式"，点击后跳浏览器执行这段 JS
   js,
 
@@ -168,6 +176,50 @@ List<String>? hikerPicList(String url) => play_route.parseImageListUrl(url);
   }
 }
 
+/// 拆 `hiker://search?rule=<源名>&s=<关键词>`（官方「在某个源里搜索」深链）。
+///
+/// 参数名兼容：`rule` / `source` / `title` 指定源；`s` / `keyword` / `q` / `wd`
+/// 指定关键词。没有关键词时返回空串（调用方打开搜索页让用户输入）。
+/// 不是 `hiker://search` 则返回 null（普通 `hiker://` 内部页继续走 [HikerLinkKind.hikerPage]）。
+({String rule, String keyword})? parseHikerSearchUrl(String raw) {
+  final s = raw.trim();
+  final lower = s.toLowerCase();
+  const prefix = 'hiker://search';
+  if (!lower.startsWith(prefix)) return null;
+  // 严格一点：`hiker://searching…` 之类不是搜索深链
+  final rest = s.substring(prefix.length);
+  if (rest.isNotEmpty &&
+      !rest.startsWith('?') &&
+      !rest.startsWith('&') &&
+      !rest.startsWith('#') &&
+      !rest.startsWith('/')) {
+    return null;
+  }
+  // 用正则而不是 Uri.queryParameters：源里常有**未编码的中文/空格/√**，
+  // Uri 解析失败会整条丢掉（关键词就没了）。
+  final q = s.contains('?') ? s.substring(s.indexOf('?') + 1) : '';
+  String pick(List<String> keys) {
+    for (final k in keys) {
+      final m = RegExp('(?:^|&)${RegExp.escape(k)}=([^&]*)').firstMatch(q);
+      if (m == null) continue;
+      String v = m.group(1) ?? '';
+      try {
+        v = Uri.decodeComponent(v);
+      } catch (_) {
+        /* 不是合法百分号编码 → 原文 */
+      }
+      v = v.trim();
+      if (v.isNotEmpty) return v;
+    }
+    return '';
+  }
+
+  return (
+    rule: pick(const ['rule', 'source', 'title']),
+    keyword: pick(const ['s', 'keyword', 'q', 'wd']),
+  );
+}
+
 /// 按官方 `dealWithUrl()` 的**判定顺序**给链接分类。
 ///
 /// 顺序不能乱 —— 官方就是按这个顺序短路返回的：
@@ -179,7 +231,8 @@ HikerLinkKind hikerLinkKind(String raw) {
   if (s.isEmpty) return HikerLinkKind.unknown;
   final lower = s.toLowerCase();
 
-  // ① 官方内部页面
+  // ① 官方内部页面（搜索深链单独一支 —— 本模块能真的打开它）
+  if (parseHikerSearchUrl(s) != null) return HikerLinkKind.search;
   if (lower.startsWith('hiker://')) return HikerLinkKind.hikerPage;
 
   // ② 彩蛋模式（一段 JS，官方跳浏览器执行）
@@ -297,7 +350,10 @@ String _hikerPayloadOf(String url) {
   const mark = '@Referer=';
   final i = s.lastIndexOf(mark);
   if (i < 0) return (url: s, referer: '');
-  return (url: s.substring(0, i).trim(), referer: s.substring(i + mark.length).trim());
+  return (
+    url: s.substring(0, i).trim(),
+    referer: s.substring(i + mark.length).trim(),
+  );
 }
 
 /// 条目地址里的**内联规则**：`真实地址#flags#@rule=js:<code>` / `@lazyRule=.js:<code>`。
@@ -333,8 +389,9 @@ HikerInlineRule? splitHikerInlineRule(String url) {
     idx = ruleIdx;
   }
   if (idx < 0) return null;
-  final code =
-      url.substring(idx + (lazy ? '@lazyRule='.length : '@rule='.length)).trim();
+  final code = url
+      .substring(idx + (lazy ? '@lazyRule='.length : '@rule='.length))
+      .trim();
   if (code.isEmpty) return null;
   // 去掉海阔的 flag 尾巴（`#immersiveTheme##autoCache#` / `#noHistory#`）——
   // 它们是**指令**，不是 URL 的一部分，留着会让 MY_URL / 缓存键全带脏尾巴
@@ -405,6 +462,15 @@ HikerInlineRule? splitHikerInlineRule(String url) {
       return (kind: '脚本', detail: '需要浏览器执行这段 JS');
     case HikerLinkKind.hikerPage:
       return (kind: '海阔内部页', detail: '官方内部页面，本版不支持打开');
+    case HikerLinkKind.search:
+      final sp = parseHikerSearchUrl(s);
+      final kw = sp?.keyword ?? '';
+      final rule = sp?.rule ?? '';
+      final where = rule.isEmpty ? '全源' : rule;
+      return (
+        kind: '搜索',
+        detail: kw.isEmpty ? '在「$where」里搜索' : '在「$where」里搜索「$kw」',
+      );
     default:
       return (kind: '其它', detail: s);
   }

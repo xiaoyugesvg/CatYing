@@ -19,7 +19,14 @@ import 'hiker_detail_page.dart';
 class HikerSearchPage extends StatefulWidget {
   final HikerSource source;
 
-  const HikerSearchPage({super.key, required this.source});
+  /// 预填关键词（`hiker://search?rule=…&s=…` 深链带过来的）；非空时自动搜一次
+  final String initialKeyword;
+
+  const HikerSearchPage({
+    super.key,
+    required this.source,
+    this.initialKeyword = '',
+  });
 
   @override
   State<HikerSearchPage> createState() => _HikerSearchPageState();
@@ -47,7 +54,14 @@ class _HikerSearchPageState extends State<HikerSearchPage> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _focus.requestFocus());
+    final kw = widget.initialKeyword.trim();
+    if (kw.isNotEmpty) _ctrl.text = kw;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focus.requestFocus();
+      // 深链带了关键词 ⇒ 进来直接搜（见 HikerDetailPage._openHikerSearch）
+      if (kw.isNotEmpty) _search(kw);
+    });
   }
 
   @override
@@ -63,11 +77,14 @@ class _HikerSearchPageState extends State<HikerSearchPage> {
     final codes = List<String>.from(_onClose);
     if (codes.isEmpty) return;
     final src = widget.source;
-    final vars = _lastVars.isEmpty ? HikerStore.instance.varsOf(src.id) : _lastVars;
+    final vars = _lastVars.isEmpty
+        ? HikerStore.instance.varsOf(src.id)
+        : _lastVars;
     unawaited(() async {
       try {
         final r = await HikerEngine.instance.runEvents(src, codes, vars: vars);
-        if (r.ok) await HikerStore.instance.saveVarsIfChanged(src.id, vars, r.vars);
+        if (r.ok)
+          await HikerStore.instance.saveVarsIfChanged(src.id, vars, r.vars);
       } catch (e) {
         AppLog.instance.log('[Hiker] onClose 回放失败: $e');
       }
@@ -96,7 +113,12 @@ class _HikerSearchPageState extends State<HikerSearchPage> {
     });
     await HikerPrefs.instance.addHistory(k);
     final vars = HikerStore.instance.varsOf(widget.source.id);
-    final r = await HikerEngine.instance.search(widget.source, k, page: page, vars: vars);
+    final r = await HikerEngine.instance.search(
+      widget.source,
+      k,
+      page: page,
+      vars: vars,
+    );
     // 期间又发起了新的搜索 / 加载更多 ⇒ 这次结果作废（否则旧关键词会覆盖新列表）
     if (!mounted || seq != _seq) return;
     await HikerStore.instance.saveVarsIfChanged(widget.source.id, vars, r.vars);
@@ -116,7 +138,10 @@ class _HikerSearchPageState extends State<HikerSearchPage> {
       _hasMore = r.ok && r.nextPage.isNotEmpty && r.list.isNotEmpty;
       _items = page == 1
           ? r.list
-          : [..._items, ...r.list.where((x) => !_items.any((y) => y.url == x.url))];
+          : [
+              ..._items,
+              ...r.list.where((x) => !_items.any((y) => y.url == x.url)),
+            ];
     });
   }
 
@@ -140,7 +165,11 @@ class _HikerSearchPageState extends State<HikerSearchPage> {
           child: Row(
             children: [
               const SizedBox(width: 10),
-              Icon(Icons.search_rounded, size: 18, color: AppTheme.textTertiary),
+              Icon(
+                Icons.search_rounded,
+                size: 18,
+                color: AppTheme.textTertiary,
+              ),
               const SizedBox(width: 6),
               Expanded(
                 child: TextField(
@@ -148,13 +177,18 @@ class _HikerSearchPageState extends State<HikerSearchPage> {
                   focusNode: _focus,
                   textInputAction: TextInputAction.search,
                   onSubmitted: (v) => _search(v),
-                  style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTheme.fontSubhead),
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontSubhead,
+                  ),
                   decoration: InputDecoration(
                     isDense: true,
                     border: InputBorder.none,
                     hintText: '搜索 ${widget.source.title}',
                     hintStyle: TextStyle(
-                        color: AppTheme.textTertiary, fontSize: AppTheme.fontSubhead),
+                      color: AppTheme.textTertiary,
+                      fontSize: AppTheme.fontSubhead,
+                    ),
                   ),
                 ),
               ),
@@ -164,7 +198,10 @@ class _HikerSearchPageState extends State<HikerSearchPage> {
         actions: [
           TextButton(
             onPressed: () => _search(_ctrl.text),
-            child: Text('搜索', style: TextStyle(color: AppTheme.accentOnSurface)),
+            child: Text(
+              '搜索',
+              style: TextStyle(color: AppTheme.accentOnSurface),
+            ),
           ),
         ],
       ),
@@ -185,18 +222,26 @@ class _HikerSearchPageState extends State<HikerSearchPage> {
         children: [
           Row(
             children: [
-              Text('搜索历史',
-                  style: TextStyle(
-                      color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption)),
+              Text(
+                '搜索历史',
+                style: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontCaption,
+                ),
+              ),
               const Spacer(),
               GestureDetector(
                 onTap: () async {
                   await HikerPrefs.instance.clearHistory();
                   if (mounted) setState(() {});
                 },
-                child: Text('清空',
-                    style: TextStyle(
-                        color: AppTheme.accentOnSurface, fontSize: AppTheme.fontCaption)),
+                child: Text(
+                  '清空',
+                  style: TextStyle(
+                    color: AppTheme.accentOnSurface,
+                    fontSize: AppTheme.fontCaption,
+                  ),
+                ),
               ),
             ],
           ),
@@ -205,28 +250,35 @@ class _HikerSearchPageState extends State<HikerSearchPage> {
             spacing: 8,
             runSpacing: 8,
             children: history
-                .map((k) => GestureDetector(
-                      onTap: () {
-                        _ctrl.text = k;
-                        _search(k);
-                      },
-                      onLongPress: () async {
-                        await HikerPrefs.instance.removeHistory(k);
-                        if (mounted) setState(() {});
-                      },
-                      child: Container(
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: AppTheme.backgroundTertiary,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(k,
-                            style: TextStyle(
-                                color: AppTheme.textSecondary,
-                                fontSize: AppTheme.fontFootnote)),
+                .map(
+                  (k) => GestureDetector(
+                    onTap: () {
+                      _ctrl.text = k;
+                      _search(k);
+                    },
+                    onLongPress: () async {
+                      await HikerPrefs.instance.removeHistory(k);
+                      if (mounted) setState(() {});
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
                       ),
-                    ))
+                      decoration: BoxDecoration(
+                        color: AppTheme.backgroundTertiary,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        k,
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: AppTheme.fontFootnote,
+                        ),
+                      ),
+                    ),
+                  ),
+                )
                 .toList(),
           ),
         ],
@@ -262,8 +314,10 @@ class _HikerSearchPageState extends State<HikerSearchPage> {
               padding: const EdgeInsets.only(bottom: 12),
               child: TextButton(
                 onPressed: () => _search(_keyword, page: _page + 1),
-                child: Text('加载更多',
-                    style: TextStyle(color: AppTheme.accentOnSurface)),
+                child: Text(
+                  '加载更多',
+                  style: TextStyle(color: AppTheme.accentOnSurface),
+                ),
               ),
             ),
         ],
@@ -291,10 +345,18 @@ class _HikerSearchPageState extends State<HikerSearchPage> {
           // 延迟规则链条：用同一个关键词重跑搜索，逐层执行（见 hiker_engine.js）
           replayLazy: (ids, {String lazyInput = ''}) async {
             final vars = HikerStore.instance.varsOf(widget.source.id);
-            final r = await HikerEngine.instance.search(widget.source, _keyword,
-                vars: vars, lazyIds: ids, lazyInput: lazyInput);
-            await HikerStore.instance
-                .saveVarsIfChanged(widget.source.id, vars, r.vars);
+            final r = await HikerEngine.instance.search(
+              widget.source,
+              _keyword,
+              vars: vars,
+              lazyIds: ids,
+              lazyInput: lazyInput,
+            );
+            await HikerStore.instance.saveVarsIfChanged(
+              widget.source.id,
+              vars,
+              r.vars,
+            );
             return r;
           },
         ),
@@ -315,19 +377,37 @@ class _HikerSearchPageState extends State<HikerSearchPage> {
           children: [
             const SizedBox(height: 10),
             ListTile(
-              title: Text(hikerPlainText(it.title),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTheme.fontBody)),
-              subtitle: Text(it.url,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption)),
+              title: Text(
+                hikerPlainText(it.title),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontBody,
+                ),
+              ),
+              subtitle: Text(
+                it.url,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontCaption,
+                ),
+              ),
             ),
             ListTile(
-              leading: Icon(Icons.play_arrow_rounded, color: AppTheme.accentOnSurface),
-              title: Text('打开',
-                  style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTheme.fontBody)),
+              leading: Icon(
+                Icons.play_arrow_rounded,
+                color: AppTheme.accentOnSurface,
+              ),
+              title: Text(
+                '打开',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontBody,
+                ),
+              ),
               onTap: () {
                 Navigator.of(ctx).pop();
                 _open(it);

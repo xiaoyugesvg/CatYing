@@ -236,10 +236,16 @@ class VeneraMangaSource extends MangaSource {
       throw Exception('Venera 源实例化失败: ${created.stringResult}');
     }
     _runtime = runtime;
-    // init() 里可能有网络请求（如拉取站点配置），交给统一任务执行器
-    final r = await _runRaw('init', const {});
-    if (r != null && r is Map && r['error'] != null) {
-      _log('init 返回错误（忽略）: ${r['error']}');
+    // init() 里可能有网络请求（如拉取站点配置）。**init 失败不能拖垮整个源**：
+    // 很多源把「探测可用域名 / 预登录」放在 init 里，站点抖动时它会抛错，
+    // 但 explore/search 本身仍然能用。以前这里直接冒泡 ⇒ 源永远空白。
+    try {
+      final r = await _runRaw('init', const {});
+      if (r != null && r is Map && r['error'] != null) {
+        _log('init 返回错误（忽略）: ${r['error']}');
+      }
+    } catch (e) {
+      _log('init 失败（忽略，继续可用）: $e');
     }
     _log('已就绪（$sourceKey，$className，脚本 ${script.length} 字节）');
   }
@@ -349,33 +355,30 @@ class VeneraMangaSource extends MangaSource {
 
   @override
   Future<List<FilterGroup>> fetchCategories() async {
-    try {
-      await _ensureReady();
-      final raw = _runtime!
-          .evaluate('JSON.stringify(__veneraExploreInfo())')
-          .stringResult;
-      final list = jsonDecode(raw);
-      if (list is! List || list.isEmpty) return const [];
-      const all = FilterOption(value: '-1', name: '全部', isAll: true);
-      return [
-        FilterGroup(
-          key: '__explore__',
-          title: '分类',
-          options: [
-            all,
-            for (final e in list.whereType<Map>())
-              FilterOption(
-                value: '${e['index'] ?? 0}',
-                name: '${e['title'] ?? '列表'}',
-              ),
-          ],
-          selected: all,
-        ),
-      ];
-    } catch (e) {
-      _log('读取 explore 失败: $e');
-      return const [];
-    }
+    // 不吞异常：首页据此把真实错误（脚本报错 / HTTP 403 / 域名不可达）
+    // 显示出来。以前 catch 后返回空列表 ⇒ 页面只剩空白，完全无法排查。
+    await _ensureReady();
+    final raw = _runtime!
+        .evaluate('JSON.stringify(__veneraExploreInfo())')
+        .stringResult;
+    final list = jsonDecode(raw);
+    if (list is! List || list.isEmpty) return const [];
+    const all = FilterOption(value: '-1', name: '全部', isAll: true);
+    return [
+      FilterGroup(
+        key: '__explore__',
+        title: '分类',
+        options: [
+          all,
+          for (final e in list.whereType<Map>())
+            FilterOption(
+              value: '${e['index'] ?? 0}',
+              name: '${e['title'] ?? '列表'}',
+            ),
+        ],
+        selected: all,
+      ),
+    ];
   }
 
   @override

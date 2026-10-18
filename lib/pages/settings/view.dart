@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../../common/theme.dart';
-import '../../emby/emby_accounts_page.dart';
 import '../../widgets/common_widgets.dart';
 import '../../widgets/glass.dart';
 import '../../miniapp/pages/mini_app_market_page.dart';
@@ -67,131 +66,123 @@ class _SettingsPageState extends State<SettingsPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-              Center(
-                child: Text(
-                  '设置',
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: AppTheme.fontTitle3,
-                    fontWeight: FontWeight.bold,
+                Center(
+                  child: Text(
+                    '设置',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: AppTheme.fontTitle3,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: AppTheme.spacingXXL),
+                const SizedBox(height: AppTheme.spacingXXL),
 
-              // 主页面只列分类，点进去各页修改（对齐参考图的分类列表样式）
-              _categoryTile(
-                icon: Icons.brightness_6_outlined,
-                // 指向**统一主题页**（影视/直播/音乐 分区可调 + 阅读入口）。
-                // 原来的「外观」页只有浅色/深色/跟随系统，**没有配色方案** ——
-                // 这就是"外观设置只有三种模式、很单调"的原因。
-                title: '外观主题',
-                onTap: () => Get.to(() => const UnifiedThemeSettingsPage()),
-              ),
-              const SizedBox(height: AppTheme.spacingMD),
-              _categoryTile(
-                icon: Icons.dashboard_customize_outlined,
-                title: '菜单设置',
-                onTap: () => Get.to(() => const HomePagesSettingsPage()),
-              ),
-              const SizedBox(height: AppTheme.spacingMD),
+                // 主页面只列分类，点进去各页修改（对齐参考图的分类列表样式）
+                _categoryTile(
+                  icon: Icons.brightness_6_outlined,
+                  // 指向**统一主题页**（影视/直播/音乐 分区可调 + 阅读入口）。
+                  // 原来的「外观」页只有浅色/深色/跟随系统，**没有配色方案** ——
+                  // 这就是"外观设置只有三种模式、很单调"的原因。
+                  title: '外观主题',
+                  onTap: () => Get.to(() => const UnifiedThemeSettingsPage()),
+                ),
+                const SizedBox(height: AppTheme.spacingMD),
+                _categoryTile(
+                  icon: Icons.dashboard_customize_outlined,
+                  title: '菜单设置',
+                  onTap: () => Get.to(() => const HomePagesSettingsPage()),
+                ),
+                const SizedBox(height: AppTheme.spacingMD),
 
-              // 订阅管理（用户 2026-10-13：原名「数据订阅」→「订阅管理」；
-              // 原独立的「引擎管理」并入该页，不再单独占一格）
-              _categoryTile(
-                icon: Icons.movie_outlined,
-                title: '订阅管理',
-                onTap: () => Get.to(() => const DataSourceSettingsPage()),
-              ),
-              const SizedBox(height: AppTheme.spacingMD),
-              // 程序（独立小程序模块：TVBox 配置 影视+直播）
-              // 用户 2026-10-18：市场改为订阅制独立页（多订阅/多市场），
-              // 「程序管理」直接进市场订阅页；已安装内容在「程序」tab 里看。
-              _categoryTile(
-                icon: Icons.storefront_outlined,
-                title: '程序管理',
-                onTap: () => Get.to(() => const MiniAppMarketPage()),
-              ),
-              const SizedBox(height: AppTheme.spacingMD),
+                // 订阅管理（用户 2026-10-13：原名「数据订阅」→「订阅管理」；
+                // 原独立的「引擎管理」并入该页，不再单独占一格）
+                _categoryTile(
+                  icon: Icons.movie_outlined,
+                  title: '订阅管理',
+                  onTap: () => Get.to(() => const DataSourceSettingsPage()),
+                ),
+                const SizedBox(height: AppTheme.spacingMD),
+                // 程序（独立小程序模块：TVBox 配置 影视+直播）
+                // 用户 2026-10-18：市场改为订阅制独立页（多订阅/多市场），
+                // 「程序管理」直接进市场订阅页；已安装内容在「程序」tab 里看。
+                _categoryTile(
+                  icon: Icons.storefront_outlined,
+                  title: '程序管理',
+                  onTap: () => Get.to(() => const MiniAppMarketPage()),
+                ),
+                const SizedBox(height: AppTheme.spacingMD),
 
-              // 播放
-              _categoryTile(
-                icon: Icons.play_circle_outline,
-                title: '播放管理',
-                onTap: () => Get.to(() => const PlaybackSettingsPage()),
-              ),
-              const SizedBox(height: AppTheme.spacingMD),
-              _categoryTile(
-                icon: Icons.live_tv_outlined,
-                title: '直播管理',
-                onTap: () => Get.toNamed('/live/settings'),
-              ),
-              const SizedBox(height: AppTheme.spacingMD),
+                // 播放
+                _categoryTile(
+                  icon: Icons.play_circle_outline,
+                  title: '播放管理',
+                  onTap: () => Get.to(() => const PlaybackSettingsPage()),
+                ),
+                const SizedBox(height: AppTheme.spacingMD),
+                _categoryTile(
+                  icon: Icons.live_tv_outlined,
+                  title: '直播管理',
+                  onTap: () => Get.toNamed('/live/settings'),
+                ),
+                const SizedBox(height: AppTheme.spacingMD),
 
-              // 内容增强
-              _categoryTile(
-                icon: Icons.subtitles,
-                title: '弹幕管理',
-                onTap: () => Get.to(() => const DanmuSettingsPage()),
-              ),
-              const SizedBox(height: AppTheme.spacingMD),
-              _categoryTile(
-                icon: Icons.movie_filter_outlined,
-                title: 'TMDB管理',
-                onTap: () => Get.to(() => const MetadataSettingsPage()),
-              ),
-              const SizedBox(height: AppTheme.spacingMD),
-              // Emby 管理（自建媒体库：电影 / 剧集）
-              // 对应底栏「Emby」分类；分类默认关闭，可在「菜单设置」开启。
-              _categoryTile(
-                icon: Icons.video_settings_outlined,
-                title: 'Emby管理',
-                onTap: () => Get.to(() => const EmbyAccountsPage()),
-              ),
-              const SizedBox(height: AppTheme.spacingMD),
+                // 内容增强
+                _categoryTile(
+                  icon: Icons.subtitles,
+                  title: '弹幕管理',
+                  onTap: () => Get.to(() => const DanmuSettingsPage()),
+                ),
+                const SizedBox(height: AppTheme.spacingMD),
+                _categoryTile(
+                  icon: Icons.movie_filter_outlined,
+                  title: 'TMDB管理',
+                  onTap: () => Get.to(() => const MetadataSettingsPage()),
+                ),
+                const SizedBox(height: AppTheme.spacingMD),
 
-              // 广告管理（用户 2026-10-16）：网页去广告的统一入口 ——
-              // 总开关 / 悬浮按钮 / 规则增删改 / 导入。
-              // 作用于 RSS 正文、站点型 RSS 源、网页播放页等**页面层**广告。
-              _categoryTile(
-                icon: Icons.block_rounded,
-                title: '广告管理',
-                onTap: () => Get.to(() => const AdBlockSettingsPage()),
-              ),
-              const SizedBox(height: AppTheme.spacingMD),
+                // 广告管理（用户 2026-10-16）：网页去广告的统一入口 ——
+                // 总开关 / 悬浮按钮 / 规则增删改 / 导入。
+                // 作用于 RSS 正文、站点型 RSS 源、网页播放页等**页面层**广告。
+                _categoryTile(
+                  icon: Icons.block_rounded,
+                  title: '广告管理',
+                  onTap: () => Get.to(() => const AdBlockSettingsPage()),
+                ),
+                const SizedBox(height: AppTheme.spacingMD),
 
-              // 海阔（独立模块，用户 2026-10-15）：海阔视界(hiker/hipy)小程序。
-              // 总设置页（源管理 / 显示 / 引擎 / 排序 / 数据 / 调试）。
-              // ⚠️ 与「程序」里的 TVBox 小程序是**两套体系**，互不影响。
-              _categoryTile(
-                icon: Icons.rocket_launch_outlined,
-                title: '海阔设置',
-                onTap: () => Get.to(() => const HikerSettingsPage()),
-              ),
-              const SizedBox(height: AppTheme.spacingMD),
+                // 海阔（独立模块，用户 2026-10-15）：海阔视界(hiker/hipy)小程序。
+                // 总设置页（源管理 / 显示 / 引擎 / 排序 / 数据 / 调试）。
+                // ⚠️ 与「程序」里的 TVBox 小程序是**两套体系**，互不影响。
+                _categoryTile(
+                  icon: Icons.rocket_launch_outlined,
+                  title: '海阔设置',
+                  onTap: () => Get.to(() => const HikerSettingsPage()),
+                ),
+                const SizedBox(height: AppTheme.spacingMD),
 
-              // 存储与信息
-              // 「缓存管理」已并入「通用设置」（用户 2026-10-13：
-              // 设置里不再单独占一格，整块挪进通用设置）
-              //
-              // 通用设置（软件日志 / 缓存管理 / 引擎管理）—— 排在「关于」之前
-              _categoryTile(
-                icon: Icons.settings_rounded,
-                title: '通用设置',
-                onTap: () => Get.to(() => const GeneralSettingsPage()),
-              ),
-              const SizedBox(height: AppTheme.spacingMD),
-              _categoryTile(
-                icon: Icons.info_outline,
-                title: '关于',
-                onTap: () => Get.to(() => const AboutSettingsPage()),
-              ),
-            ],
+                // 存储与信息
+                // 「缓存管理」已并入「通用设置」（用户 2026-10-13：
+                // 设置里不再单独占一格，整块挪进通用设置）
+                //
+                // 通用设置（软件日志 / 缓存管理 / 引擎管理）—— 排在「关于」之前
+                _categoryTile(
+                  icon: Icons.settings_rounded,
+                  title: '通用设置',
+                  onTap: () => Get.to(() => const GeneralSettingsPage()),
+                ),
+                const SizedBox(height: AppTheme.spacingMD),
+                _categoryTile(
+                  icon: Icons.info_outline,
+                  title: '关于',
+                  onTap: () => Get.to(() => const AboutSettingsPage()),
+                ),
+              ],
+            ),
           ),
         ),
       ),
-    ),
-  );
+    );
   }
 
   // ============================================================
@@ -247,9 +238,11 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
               ),
-              Icon(Icons.chevron_right,
-                  size: 18,
-                  color: AppTheme.textTertiary.withValues(alpha: 0.7)),
+              Icon(
+                Icons.chevron_right,
+                size: 18,
+                color: AppTheme.textTertiary.withValues(alpha: 0.7),
+              ),
             ],
           ),
         ),

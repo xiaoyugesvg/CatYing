@@ -270,72 +270,84 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
       padding: const EdgeInsets.fromLTRB(16, 12, 4, 2),
       child: Row(
         children: [
-          Text(
-            'Emby',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.2,
-            ),
-          ),
-          const SizedBox(width: 10),
-          // 服务器 = 源：无论几个服务器都做成可点的切换入口
-          // （以前只有 >1 个时才可点，单服务器时"花花"就是个死胶囊）
-          Flexible(
-            child: PopupMenuButton<String>(
-              tooltip: '切换服务器',
-              color: AppTheme.backgroundSecondary,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
-              ),
-              onSelected: (id) async {
-                if (id == _kManageServers) {
-                  await _openSettings();
-                  return;
-                }
-                await _store.setActive(id);
-                if (mounted) setState(() {});
-                await _refresh();
-              },
-              itemBuilder: (_) => [
-                for (final s in servers)
-                  PopupMenuItem(
-                    value: s.id,
-                    child: Row(
-                      children: [
-                        Icon(
-                          s.id == _store.activeId
-                              ? Icons.check_circle_rounded
-                              : Icons.circle_outlined,
-                          size: 16,
-                          color: s.id == _store.activeId
-                              ? AppTheme.accentColor
-                              : AppTheme.textTertiary,
-                        ),
-                        const SizedBox(width: 8),
-                        Flexible(child: Text(s.name)),
-                      ],
-                    ),
+          // 左侧（标题 + 服务器胶囊）用 Expanded 撑满剩余宽度，
+          // 这样右侧两个按钮才会真正贴到屏幕右边。
+          // 之前是 Flexible + Spacer：Flexible 只用掉自己的内容宽度，
+          // Row 末尾会留下"没有分配出去"的空白 ⇒ 按钮看起来往左缩了一截。
+          Expanded(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Emby',
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.2,
                   ),
-                if (servers.isNotEmpty) const PopupMenuDivider(),
-                const PopupMenuItem(
-                  value: _kManageServers,
-                  child: Row(
-                    children: [
-                      Icon(Icons.settings_outlined, size: 16),
-                      SizedBox(width: 8),
-                      Text('管理服务器'),
+                ),
+                const SizedBox(width: 10),
+                // 服务器 = 源：无论几个服务器都做成可点的切换入口
+                // （以前只有 >1 个时才可点，单服务器时"花花"就是个死胶囊）
+                Flexible(
+                  child: PopupMenuButton<String>(
+                    tooltip: '切换服务器',
+                    color: AppTheme.backgroundSecondary,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(
+                        AppTheme.glassRadiusCard,
+                      ),
+                    ),
+                    onSelected: (id) async {
+                      if (id == _kManageServers) {
+                        await _openSettings();
+                        return;
+                      }
+                      await _store.setActive(id);
+                      if (mounted) setState(() {});
+                      await _refresh();
+                    },
+                    itemBuilder: (_) => [
+                      for (final s in servers)
+                        PopupMenuItem(
+                          value: s.id,
+                          child: Row(
+                            children: [
+                              Icon(
+                                s.id == _store.activeId
+                                    ? Icons.check_circle_rounded
+                                    : Icons.circle_outlined,
+                                size: 16,
+                                color: s.id == _store.activeId
+                                    ? AppTheme.accentColor
+                                    : AppTheme.textTertiary,
+                              ),
+                              const SizedBox(width: 8),
+                              Flexible(child: Text(s.name)),
+                            ],
+                          ),
+                        ),
+                      if (servers.isNotEmpty) const PopupMenuDivider(),
+                      const PopupMenuItem(
+                        value: _kManageServers,
+                        child: Row(
+                          children: [
+                            Icon(Icons.settings_outlined, size: 16),
+                            SizedBox(width: 8),
+                            Text('管理服务器'),
+                          ],
+                        ),
+                      ),
                     ],
+                    child: _serverChip(
+                      server?.name ?? (servers.isEmpty ? '添加服务器' : '未选择'),
+                    ),
                   ),
                 ),
               ],
-              child: _serverChip(
-                server?.name ?? (servers.isEmpty ? '添加服务器' : '未选择'),
-              ),
             ),
           ),
-          const Spacer(),
           _headerAction(
             icon: Icons.refresh_rounded,
             tooltip: '刷新',

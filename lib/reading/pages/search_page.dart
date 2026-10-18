@@ -28,6 +28,7 @@ import '../widgets/jelly_icon_deck.dart';
 import '../widgets/source_group_tabs.dart';
 import '../widgets/source_order_sheet.dart';
 import '../widgets/staggered_entrance.dart';
+import '../../widgets/app_toast.dart';
 import 'browse_history_page.dart';
 import 'comic_detail_page.dart';
 // `ComicAggregateSearchPage`（漫画聚合搜索）在本文件 `_buildAggregateChip` 里用到，
@@ -294,9 +295,21 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       _buildHomeSections(groups);
     } catch (e) {
       _log('自动首页板块流失败: $e');
+      // 不再静默：把真实错误弹出来（Venera 源脚本报错 / 403 / 域名不可达
+      // 都会走到这里），否则页面只剩空白，用户无法判断原因
+      if (mounted) {
+        AppToast.error('${src.name}：${_briefError(e)}');
+      }
     } finally {
       _categorySheetOpening = false;
     }
+  }
+
+  /// 异常压成一行短文案（详情页/Toast 共用）
+  String _briefError(Object e) {
+    var s = '$e'.replaceAll('\n', ' ').trim();
+    if (s.startsWith('Exception: ')) s = s.substring('Exception: '.length);
+    return s.length > 90 ? '${s.substring(0, 90)}…' : s;
   }
 
   /// 构建板块流：板块 1 = 默认列表（最近更新/全部），后续 = 第一个分类维度的
@@ -350,7 +363,8 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       s.error = null;
     } catch (e) {
       _log('板块「${s.title}」加载失败: $e');
-      s.error = '加载失败';
+      // 显示真实原因（脚本报错 / HTTP 状态 / 解析异常），不要只给「加载失败」
+      s.error = _briefError(e);
     } finally {
       s.loading = false;
       // 🔴 只有**真的加载成功**才推进懒加载指针 ✓：原来这里是**无条件**推进 ✗ →
