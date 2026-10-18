@@ -295,6 +295,28 @@ class _WarehouseTabState extends State<_WarehouseTab>
     return l;
   }
 
+  /// Venera / 配置源也参与「排序」菜单（以前只有订阅卡片和书源会排序）
+  List<MangaSource> _sortedManga(List<MangaSource> input) {
+    final l = List<MangaSource>.from(input);
+    switch (_sort) {
+      case _SortMode.custom:
+      case _SortMode.time:
+        break;
+      case _SortMode.name:
+        l.sort((a, b) => a.name.compareTo(b.name));
+        break;
+      case _SortMode.frequency:
+        l.sort((a, b) {
+          final ea = SourceManager().isEnabled(a.id);
+          final eb = SourceManager().isEnabled(b.id);
+          if (ea != eb) return ea ? -1 : 1;
+          return a.name.compareTo(b.name);
+        });
+        break;
+    }
+    return l;
+  }
+
   // ── 更新 / 删除 ──────────────────────────────────────────
 
   Future<void> _update(SourceSubscription s) async {
@@ -391,6 +413,47 @@ class _WarehouseTabState extends State<_WarehouseTab>
     (168, '每 7 天'),
   ];
 
+  /// 自动更新选项：直接铺在弹窗里（向下展开），不弹系统下拉菜单。
+  ///
+  /// 用户 2026-10-18：原来的 Dropdown 会向上盖住弹窗，而且菜单文字是白字
+  /// 配浅色底，看不清。改成常驻 chip 后方向固定、颜色也可控。
+  Widget _intervalChips(int hours, ValueChanged<int> onChanged) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final o in _intervals)
+          GestureDetector(
+            onTap: () => onChanged(o.$1),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: hours == o.$1
+                    ? JellyTheme.primary
+                    : (_isDark
+                          ? Colors.white.withValues(alpha: 0.07)
+                          : Colors.black.withValues(alpha: 0.04)),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: hours == o.$1
+                      ? JellyTheme.primary
+                      : JellyTheme.textSecondary.withValues(alpha: 0.18),
+                ),
+              ),
+              child: Text(
+                o.$2,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: hours == o.$1 ? FontWeight.w600 : FontWeight.w400,
+                  color: hours == o.$1 ? Colors.white : _label,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
   Future<void> _add() async {
     final nameCtl = TextEditingController();
     final urlCtl = TextEditingController();
@@ -438,15 +501,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
                   ),
                 ),
                 const SizedBox(height: 6),
-                DropdownButtonFormField<int>(
-                  initialValue: hours,
-                  decoration: _inputDeco(''),
-                  items: [
-                    for (final o in _intervals)
-                      DropdownMenuItem(value: o.$1, child: Text(o.$2)),
-                  ],
-                  onChanged: (v) => setDlg(() => hours = v ?? hours),
-                ),
+                _intervalChips(hours, (v) => setDlg(() => hours = v)),
                 const SizedBox(height: 10),
                 Text(
                   '订阅一次就会加载一次，源会全部保存；重名时可选择替换或加序号。',
@@ -1017,34 +1072,23 @@ class _WarehouseTabState extends State<_WarehouseTab>
     );
   }
 
-  /// 顶部订阅卡片：已添加的卡片可拖动排序，「添加订阅」固定在末尾
+  /// 顶部订阅卡片（与原来的「添加订阅」卡片同尺寸，可长按拖动排序）
   Widget _subCards() {
     final subs = _sortedSubs;
+    if (subs.isEmpty) return const SizedBox.shrink();
     return SizedBox(
       height: 100,
-      child: Row(
-        children: [
-          Expanded(
-            child: subs.isEmpty
-                ? const SizedBox.shrink()
-                : ReorderableListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.only(left: 14),
-                    buildDefaultDragHandles: false,
-                    itemCount: subs.length,
-                    onReorder: _reorderSubs,
-                    itemBuilder: (_, i) => Padding(
-                      key: ValueKey('sub-${subs[i].id}'),
-                      padding: const EdgeInsets.only(right: 8),
-                      child: _subCard(subs[i], i),
-                    ),
-                  ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(6, 0, 14, 0),
-            child: _addSubCard(),
-          ),
-        ],
+      child: ReorderableListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.only(left: 14, right: 14),
+        buildDefaultDragHandles: false,
+        itemCount: subs.length,
+        onReorder: _reorderSubs,
+        itemBuilder: (_, i) => Padding(
+          key: ValueKey('sub-${subs[i].id}'),
+          padding: const EdgeInsets.only(right: 8),
+          child: _subCard(subs[i], i),
+        ),
       ),
     );
   }
@@ -1061,156 +1105,195 @@ class _WarehouseTabState extends State<_WarehouseTab>
     }
   }
 
-  Widget _addSubCard() {
-    return GestureDetector(
-      onTap: _add,
-      child: Container(
-        width: 88,
-        decoration: BoxDecoration(
-          color: JellyTheme.primary.withValues(alpha: _isDark ? 0.10 : 0.06),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: JellyTheme.primary.withValues(alpha: 0.35),
-          ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 30,
-              height: 30,
-              decoration: BoxDecoration(
-                color: JellyTheme.primary.withValues(alpha: 0.16),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.add_rounded,
-                color: JellyTheme.primary,
-                size: 19,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              '添加订阅',
-              style: TextStyle(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w600,
-                color: _label,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
+  /// 订阅卡片：与原来的「添加订阅」卡片同尺寸（88 宽）。
+  ///
+  /// 只保留：名称 / 开关 / 源数 / 更新日期 / 刷新。
+  /// 点击 = 打开编辑菜单（修改 / 删除 / 复制源链接）；
+  /// 长按 = 拖动排序（不再放拖拽把手）。
   Widget _subCard(SourceSubscription s, int index) {
     final active = s.id == _selectedSubId;
     final busy = _busy.contains(s.id);
-    return GestureDetector(
-      onTap: () => setState(() => _selectedSubId = s.id),
-      // 长按 = 编辑 / 管理（拖动请按卡片右下角的把手）
-      onLongPress: () => _editSub(s),
-      child: Container(
-        width: 176,
-        padding: const EdgeInsets.fromLTRB(10, 8, 6, 4),
-        decoration: BoxDecoration(
-          color: active
-              ? JellyTheme.primary.withValues(alpha: _isDark ? 0.16 : 0.10)
-              : _card,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
+    final date = _timeText(s.lastUpdated);
+    return ReorderableDelayedDragStartListener(
+      index: index,
+      child: GestureDetector(
+        // 点击 = 进入编辑模式（修改 / 删除 / 复制源链接）
+        onTap: () => _editSubMenu(s),
+        child: Container(
+          width: 88,
+          padding: const EdgeInsets.fromLTRB(8, 7, 8, 6),
+          decoration: BoxDecoration(
             color: active
-                ? JellyTheme.primary.withValues(alpha: 0.45)
-                : Colors.transparent,
+                ? JellyTheme.primary.withValues(alpha: _isDark ? 0.16 : 0.10)
+                : _card,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: active
+                  ? JellyTheme.primary.withValues(alpha: 0.45)
+                  : Colors.transparent,
+            ),
           ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    s.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: _label,
-                    ),
-                  ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                s.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: _label,
                 ),
-                Transform.scale(
-                  scale: 0.6,
+              ),
+              SizedBox(
+                height: 22,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
                   child: Switch(
                     value: s.enabled,
                     onChanged: (v) => _subStore.setEnabled(s.id, v),
                   ),
                 ),
-              ],
-            ),
-            Text(
-              '${s.count} 个源 · ${_timeText(s.lastUpdated)}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 10.5,
-                color: JellyTheme.textSecondary,
               ),
-            ),
-            const Spacer(),
-            Row(
-              children: [
-                if (busy)
-                  const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: Center(
-                      child: SizedBox(
-                        width: 13,
-                        height: 13,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+              Text(
+                '${s.count} 个源',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10,
+                  color: JellyTheme.textSecondary,
+                ),
+              ),
+              Text(
+                date.split(' ').first,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 9.5,
+                  color: JellyTheme.textSecondary,
+                ),
+              ),
+              const Spacer(),
+              Row(
+                children: [
+                  if (busy)
+                    const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: Center(
+                        child: SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                    )
+                  else
+                    InkWell(
+                      borderRadius: BorderRadius.circular(6),
+                      onTap: () => _update(s),
+                      child: Padding(
+                        padding: const EdgeInsets.all(3),
+                        child: Icon(
+                          Icons.sync_rounded,
+                          size: 15,
+                          color: JellyTheme.textSecondary,
+                        ),
                       ),
                     ),
-                  )
-                else
-                  _cardBtn(Icons.sync_rounded, '刷新', () => _update(s)),
-                _cardBtn(
-                  Icons.copy_rounded,
-                  '复制链接',
-                  () => _copyLink(s),
-                ),
-                _cardBtn(
-                  Icons.tune_rounded,
-                  '编辑',
-                  () => _editSub(s),
-                ),
-                const Spacer(),
-                ReorderableDragStartListener(
-                  index: index,
-                  child: Padding(
-                    padding: const EdgeInsets.all(5),
-                    child: Icon(
-                      Icons.drag_indicator_rounded,
-                      size: 16,
-                      color: JellyTheme.textSecondary.withValues(alpha: 0.7),
+                  const Spacer(),
+                  if (active)
+                    Icon(
+                      Icons.check_circle_rounded,
+                      size: 13,
+                      color: JellyTheme.primary,
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 点击订阅卡片后的编辑模式：修改 / 复制源链接 / 删除
+  Future<void> _editSubMenu(SourceSubscription s) async {
+    setState(() => _selectedSubId = s.id);
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: _card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      s.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: _label,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
-                ),
-                _cardBtn(
-                  Icons.delete_outline_rounded,
-                  '删除',
-                  () => _deleteSub(s),
-                  danger: true,
-                ),
-              ],
+                ],
+              ),
             ),
+            ListTile(
+              leading: Icon(Icons.tune_rounded, color: _label),
+              title: Text('修改', style: TextStyle(color: _label)),
+              subtitle: Text(
+                '名称 / 链接 / 自动更新',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: JellyTheme.textSecondary,
+                ),
+              ),
+              onTap: () => Navigator.pop(ctx, 'edit'),
+            ),
+            ListTile(
+              leading: Icon(Icons.copy_rounded, color: _label),
+              title: Text('复制源链接', style: TextStyle(color: _label)),
+              onTap: () => Navigator.pop(ctx, 'copy'),
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.delete_outline_rounded,
+                color: Colors.redAccent,
+              ),
+              title: const Text(
+                '删除',
+                style: TextStyle(color: Colors.redAccent),
+              ),
+              onTap: () => Navigator.pop(ctx, 'delete'),
+            ),
+            const SizedBox(height: 8),
           ],
         ),
       ),
     );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case 'edit':
+        await _editSub(s);
+      case 'copy':
+        await _copyLink(s);
+      case 'delete':
+        await _deleteSub(s);
+    }
   }
 
   /// 长按 / 编辑按钮：改名称、链接、更新间隔（也可以直接删除）
@@ -1261,15 +1344,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
                   ),
                 ),
                 const SizedBox(height: 6),
-                DropdownButtonFormField<int>(
-                  initialValue: hours,
-                  decoration: _inputDeco(''),
-                  items: [
-                    for (final o in _intervals)
-                      DropdownMenuItem(value: o.$1, child: Text(o.$2)),
-                  ],
-                  onChanged: (v) => setDlg(() => hours = v ?? hours),
-                ),
+                _intervalChips(hours, (v) => setDlg(() => hours = v)),
               ],
             ),
           ),
@@ -1314,29 +1389,6 @@ class _WarehouseTabState extends State<_WarehouseTab>
       final cur = _subStore.items.firstWhere((e) => e.id == s.id);
       await _update(cur);
     }
-  }
-
-  Widget _cardBtn(
-    IconData icon,
-    String tip,
-    VoidCallback onTap, {
-    bool danger = false,
-  }) {
-    return Tooltip(
-      message: tip,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(6),
-          child: Icon(
-            icon,
-            size: 17,
-            color: danger ? Colors.redAccent : JellyTheme.textSecondary,
-          ),
-        ),
-      ),
-    );
   }
 
   String _timeText(int ms) {
@@ -1465,8 +1517,8 @@ class _WarehouseTabState extends State<_WarehouseTab>
 
   Widget _content() {
     final sources = _sortedSources;
-    final config = _tabConfig;
-    final venera = _tabVenera;
+    final config = _sortedManga(_tabConfig);
+    final venera = _sortedManga(_tabVenera);
     if (sources.isEmpty && config.isEmpty && venera.isEmpty) {
       return _emptyHint();
     }
@@ -1507,13 +1559,13 @@ class _WarehouseTabState extends State<_WarehouseTab>
       children.add(const SizedBox(height: 16));
       children.add(_mangaHeader('配置 / API 源', config.length));
       children.add(const SizedBox(height: 8));
-      children.add(_mangaList(config));
+      children.add(_view.isList ? _mangaList(config) : _mangaGrid(config));
     }
     if (venera.isNotEmpty) {
       children.add(const SizedBox(height: 16));
       children.add(_mangaHeader('Venera 源', venera.length));
       children.add(const SizedBox(height: 8));
-      children.add(_mangaList(venera));
+      children.add(_view.isList ? _mangaList(venera) : _mangaGrid(venera));
     }
     return ListView(
       padding: const EdgeInsets.fromLTRB(14, 8, 14, 28),
@@ -1586,8 +1638,8 @@ class _WarehouseTabState extends State<_WarehouseTab>
     final sub = _selectedSub;
     final text = sub == null
         ? (widget.comic
-              ? '还没有漫画源。点上方「添加订阅」，或从漫画源仓库导入。'
-              : '还没有小说源。点上方「添加订阅」，或从书源仓库导入。')
+              ? '还没有漫画源。点右上角 ＋ 添加订阅，或从漫画源仓库导入。'
+              : '还没有小说源。点右上角 ＋ 添加订阅，或从书源仓库导入。')
         : (sub.count == 0
               ? '「${sub.name}」还没有加载过，点卡片上的刷新按钮拉取。'
               : '「${sub.name}」没有可显示的源，点刷新重新拉取。');
@@ -1847,6 +1899,110 @@ class _WarehouseTabState extends State<_WarehouseTab>
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  /// 卡片 / 网格 / 一行 2·3·4 个：Venera / 配置源也要跟着视图切换。
+  ///
+  /// 之前 `_mangaList` 永远渲染成竖排列表，所以用户点「列表 / 卡片 / 网格」
+  /// 看起来完全没反应（用户 2026-10-18）。
+  Widget _mangaGrid(List<MangaSource> list) {
+    final columns = _view.columns;
+    final ratio = switch (_view) {
+      _ViewMode.card => 4.2,
+      _ViewMode.grid => 1.2,
+      _ViewMode.two => 1.5,
+      _ViewMode.three => 1.15,
+      _ViewMode.four => 0.95,
+      _ViewMode.list => 4.2,
+    };
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: columns,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        childAspectRatio: ratio,
+      ),
+      itemCount: list.length,
+      itemBuilder: (_, i) => _mangaGridCard(list[i]),
+    );
+  }
+
+  Widget _mangaGridCard(MangaSource src) {
+    final picked = _picked.contains(src.id);
+    final enabled = SourceManager().isEnabled(src.id);
+    return GestureDetector(
+      onTap: _selectMode ? () => _togglePick(src.id) : null,
+      onLongPress: () => _enterSelect(src.id),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+        decoration: BoxDecoration(
+          color: _card,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: picked
+                ? JellyTheme.primary
+                : JellyTheme.textSecondary.withValues(alpha: 0.10),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  _selectMode
+                      ? (picked
+                            ? Icons.check_box_rounded
+                            : Icons.check_box_outline_blank_rounded)
+                      : Icons.auto_stories_rounded,
+                  size: 15,
+                  color: _selectMode
+                      ? (picked ? JellyTheme.primary : JellyTheme.textSecondary)
+                      : JellyTheme.primary,
+                ),
+                const Spacer(),
+                SizedBox(
+                  height: 20,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Switch(
+                      value: enabled,
+                      onChanged: (v) async {
+                        await SourceManager().setEnabled(src.id, v);
+                        if (mounted) setState(() {});
+                      },
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const Spacer(),
+            Text(
+              src.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: _label,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              src.id.startsWith('venera:') ? 'JS · ${src.id}' : src.id,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 9.5,
+                color: JellyTheme.textSecondary,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
