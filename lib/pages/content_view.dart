@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../common/theme.dart';
@@ -12,7 +11,6 @@ import 'home/view.dart';
 import 'shelf/view.dart';
 import '../reading/widgets/jelly_nav_bar.dart';
 import '../services/api_config.dart';
-import '../models/subscription.dart';
 import '../services/nav_feature_service.dart';
 import '../services/prefs_mirror.dart';
 import 'live/view.dart';
@@ -41,29 +39,21 @@ class ContentView extends StatefulWidget {
   State<ContentView> createState() => _ContentViewState();
 }
 
-class _ContentViewState extends State<ContentView>
-    with WidgetsBindingObserver {
+class _ContentViewState extends State<ContentView> with WidgetsBindingObserver {
   // int _selectedTab 已迁移到 MainTabController.selectedTab (全局共享)
-  bool _hasSavedConfig = false;
 
-  /// 「已保存配置」这件事**查完了没有**（见 build 里的分支）。
-  /// 查完之前**不渲染「填入订阅」页**，否则冷启动会先闪一帧设置页。
-  bool _configChecked = false;
+  /// 启动最多等 3 秒：不管配置加载成功、失败还是超时，到点直接进主界面，
+  /// 配置继续在后台加载（用户 2026-10-18）。
+  static const Duration _kMaxStartupWait = Duration(seconds: 3);
+  bool _forceEntered = false;
+  Timer? _enterTimer;
 
   bool _showSearch = false;
   // 防止 ever() 回调重入 - 在回调内部清空 pendingSearchKeyword 时会再次触发 ever()
   bool _isProcessingSearchKeyword = false;
 
-  // 设置页表单
-  final _vodUrlController = TextEditingController();
-  bool _isLoadingConfig = false;
-  String? _configError;
-
   // 搜索控制器
   TvSearchController? _searchVM;
-
-  // 设置控制器（多仓库选择）
-  SettingsController? _settingsVM;
 
   /// 上一次 lifecycle state (用于记录 from→to 转换)
   AppLifecycleState? _lastLifecycleState;
@@ -73,22 +63,16 @@ class _ContentViewState extends State<ContentView>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // ── 「闪一哈」的根治 ─────────────────────────────────────────
-    // 首帧就用 main() 里**同步**读到的接口地址（AppState.startupSavedApiUrl）：
-    // 有配置 → 直接进"加载页"，**绝不先渲染一帧「填入订阅」页**。
-    // （以前 _hasSavedConfig 初值恒为 false，要等 _loadSavedConfig() 异步跑完，
-    //   于是冷启动第一帧必然是设置页 —— 用户看到的"闪一哈"。）
-    final seeded = AppState.startupSavedApiUrl.trim();
-    if (seeded.isNotEmpty) {
-      _hasSavedConfig = true;
-      _configChecked = true;
-      _vodUrlController.text = seeded;
-    }
+    // 3 秒硬上限：到点无条件进主界面，配置加载继续在后台跑
+    _enterTimer = Timer(_kMaxStartupWait, () {
+      if (!mounted) return;
+      setState(() => _forceEntered = true);
+    });
     // 主题模式（含「跟随系统」）已在 main() 启动时从 prefs 加载，
     // 这里不再用 BackgroundService.appearanceMode 覆盖 ——
     // 旧逻辑每次冷启动都会把 'system' 覆盖成 dark/light（跟随系统丢失）。
     _searchVM = Get.find<TvSearchController>();
-    _settingsVM = Get.put(SettingsController());
+    Get.put(SettingsController());
     // 对应 Swift: .onChange(of: appState.pendingSearchKeyword)
     // 使用 ever 监听 pendingSearchKeyword 变化，触发搜索 overlay
     // 注意: 在回调内部清空 pendingSearchKeyword 会再次触发 ever()，必须用 guard 防止重入
@@ -117,7 +101,7 @@ class _ContentViewState extends State<ContentView>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _vodUrlController.dispose();
+    _enterTimer?.cancel();
     super.dispose();
   }
 
@@ -127,8 +111,9 @@ class _ContentViewState extends State<ContentView>
     final from = _lastLifecycleState;
     final now = DateTime.now();
     final prevAt = _lastLifecycleChangeAt;
-    final sincePrevMs =
-        prevAt == null ? null : now.difference(prevAt).inMilliseconds;
+    final sincePrevMs = prevAt == null
+        ? null
+        : now.difference(prevAt).inMilliseconds;
 
     AppLog.instance.lifecycle(
       'didChange',
@@ -191,28 +176,20 @@ class _ContentViewState extends State<ContentView>
   }
 
   /// 对应 Swift onAppear - 加载已保存的配置
+  ///
+  /// 用户 2026-10-18：
+  ///   · 不再渲染首次启动的「接口配置」页，直接进主界面；
+  ///   · 有已保存地址就**后台**加载，最多等 3 秒（见 [_kMaxStartupWait]）。
   Future<void> _loadSavedConfig() async {
-    // 首帧已用 main() 的同步值填过（见 initState）→ 这里就不必再读一遍 prefs
-    var savedVodUrl = _vodUrlController.text.trim();
+    var savedVodUrl = AppState.startupSavedApiUrl.trim();
     if (savedVodUrl.isEmpty) {
       final prefs = await SharedPreferences.getInstance();
       savedVodUrl = prefs.getString(AppConstants.apiUrl) ?? '';
       // prefs 丢了就用手写那份文件备份兜底（防"重启又要重新填源"）
       savedVodUrl = await ApiConfig.restoreApiUrlIfLost(savedVodUrl);
     }
-    if (!mounted) return;
+    if (!mounted || savedVodUrl.isEmpty) return;
 
-    if (savedVodUrl.isEmpty) {
-      // 确认「确实没有配置」→ 这时才允许渲染「填入订阅」页
-      setState(() => _configChecked = true);
-      return;
-    }
-
-    setState(() {
-      _hasSavedConfig = true;
-      _configChecked = true;
-      _vodUrlController.text = savedVodUrl;
-    });
     final appState = Get.find<AppState>();
     await appState.loadConfig(vodUrl: savedVodUrl);
   }
@@ -222,23 +199,18 @@ class _ContentViewState extends State<ContentView>
     final appState = Get.find<AppState>();
 
     return Obx(() {
-      // 三态（顺序即优先级）：
-      //   ① 配置就绪 → 主界面
-      //   ② 有已保存配置（含首帧 seed 的）→ 加载页。⚠️ 这里**不再要求
-      //      `loadingPhase != idle`** —— phase 还停在 idle 的那一两帧以前会掉到
-      //      下面的 else 分支，于是先渲染一帧「填入订阅」页（用户说的"闪一哈"）。
-      //   ③ 还没查完有没有配置 → 什么都不画（留背景），绝不闪设置页
-      //   ④ 查完且确实没配置 → 设置页
-      Widget currentChild;
-      if (appState.isConfigLoaded.value) {
-        currentChild = _buildMainTabView();
-      } else if (_hasSavedConfig) {
-        currentChild = _buildLoadingView();
-      } else if (!_configChecked) {
-        currentChild = const SizedBox.shrink();
-      } else {
-        currentChild = _buildSetupView();
-      }
+      // 启动三态：
+      //   ① 配置已就绪 → 主界面
+      //   ② 还没就绪 → 加载页（最多 3 秒）
+      //   ③ 3 秒到 → 无论成功/失败/仍加载中，都直接进主界面，
+      //      配置继续在后台加载（用户 2026-10-18）
+      //
+      // 首次启动不再渲染「接口配置」页：没有地址也直接进软件，
+      // 线路统一到「设置 → 订阅管理」里添加并激活。
+      final Widget currentChild =
+          (appState.isConfigLoaded.value || _forceEntered)
+          ? _buildMainTabView()
+          : _buildLoadingView();
 
       return Stack(
         children: [
@@ -257,387 +229,6 @@ class _ContentViewState extends State<ContentView>
   /// 圆形进度 + 中心 Logo（猫影）
   Widget _buildLoadingView() {
     return const AppLoadingView();
-  }
-
-  Widget _buildSetupView() {
-    final appState = Get.find<AppState>();
-
-    return Material(
-      // 首次配置页也跟随外观（原来写死 0xFF0F0F0F，浅色模式下是一整片黑）
-      color: AppTheme.backgroundPrimary,
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              AppTheme.backgroundPrimary,
-              AppTheme.backgroundSecondary,
-              AppTheme.backgroundPrimary,
-            ],
-          ),
-        ),
-        child: SafeArea(
-        child: Center(
-          // 键盘避让：这一页中间有个接口地址输入框，键盘弹起时若不抬高，
-          // 输入框会被键盘盖住（用户看不到自己在打什么）。
-          // 用 viewInsets（键盘）而不是 padding（刘海/Home 条）。
-          child: Padding(
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.viewInsetsOf(context).bottom,
-            ),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 30),
-            child: Column(
-              children: [
-                const SizedBox(height: 60),
-                // Logo
-                Container(
-                  width: 100,
-                  height: 100,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: LinearGradient(
-                      colors: [
-                        AppTheme.accentColor,
-                        AppTheme.accentLightColor,
-                      ],
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppTheme.accentColor.withValues(alpha: 0.4),
-                        blurRadius: 20,
-                      ),
-                    ],
-                  ),
-                  // 猫猫 Logo（取自 App 图标）。
-                  // 外圈保留原来的强调色渐变圆环 + 光晕，中间放猫猫 ——
-                  // 直接铺满整圆会丢掉原来的"发光圆钮"观感。
-                  child: ClipOval(
-                    child: Padding(
-                      padding: const EdgeInsets.all(6),
-                      child: ClipOval(
-                        child: Image.asset(
-                          'assets/images/cat_logo.png',
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: AppTheme.spacingXL),
-                Text(
-                  '猫影',
-                  style: TextStyle(
-                    fontSize: AppTheme.fontDisplay,
-                    fontWeight: FontWeight.w800,
-                    color: AppTheme.textPrimary,
-                    letterSpacing: 2,
-                  ),
-                ),
-                const SizedBox(height: AppTheme.spacingSM),
-                Text(
-                  '极致视听 · 简洁至上',
-                  style: TextStyle(
-                    fontSize: AppTheme.fontSubhead,
-                    color: AppTheme.textSecondary,
-                    letterSpacing: 4,
-                  ),
-                ),
-                const SizedBox(
-                    height: AppTheme.spacingXXL + AppTheme.spacingSM),
-                // 接口配置标题
-                Container(
-                  alignment: Alignment.centerLeft,
-                  padding: const EdgeInsets.only(left: AppTheme.spacingXS),
-                  child: Text(
-                    '接口配置',
-                    style: TextStyle(
-                      fontSize: AppTheme.fontHeadline,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: AppTheme.spacingMD),
-                // 点播接口地址 - 对应 Swift vodApiUrl TextField
-                Container(
-                  decoration: BoxDecoration(
-                    color: AppTheme.backgroundSecondary,
-                    borderRadius: BorderRadius.circular(15),
-                    border: Border.all(color: AppTheme.borderLight),
-                  ),
-                  child: Row(
-                    children: [
-                      const SizedBox(width: 14),
-                      Icon(Icons.link,
-                          color: AppTheme.accentColor, size: 20),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextField(
-                          controller: _vodUrlController,
-                          style: TextStyle(
-                              color: AppTheme.textPrimary),
-                          decoration: InputDecoration(
-                            hintText: '请输入点播接口地址 (URL)',
-                            hintStyle: TextStyle(
-                                color: AppTheme.textTertiary),
-                            border: InputBorder.none,
-                            contentPadding:
-                                EdgeInsets.symmetric(vertical: 14),
-                          ),
-                          keyboardType: TextInputType.url,
-                        ),
-                      ),
-                      IconButton(
-                        icon: Icon(Icons.content_paste,
-                            color: AppTheme.accentColor, size: 20),
-                        onPressed: _pasteFromClipboard,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: AppTheme.spacingMD),
-                const SizedBox(height: AppTheme.spacingXXL),
-                // 确认按钮 - 对应 Swift "开启影音之旅" Button
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _isLoadingConfig
-                        ? null
-                        : () => _submitConfig(appState),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.accentColor,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                          vertical: AppTheme.spacingLG),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                    ),
-                    child: _isLoadingConfig
-                        ? Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Obx(() {
-                                final phase = appState.loadingPhase.value;
-                                return Text(
-                                  phase.isLoading
-                                      ? phase.description
-                                      : '正在解析配置...',
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: AppTheme.fontHeadline),
-                                );
-                              }),
-                            ],
-                          )
-                        : const Text(
-                            '开启影音之旅',
-                            style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: AppTheme.fontHeadline),
-                          ),
-                  ),
-                ),
-                // 最近使用 - 对应 Swift apiHistory
-                if (_settingsVM != null &&
-                    _settingsVM!.apiHistory.isNotEmpty)
-                  Obx(() {
-                    final history = _settingsVM!.apiHistory;
-                    if (history.isEmpty) return const SizedBox.shrink();
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const SizedBox(height: AppTheme.spacingXXL),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: AppTheme.spacingXS),
-                          child: Text(
-                            '最近使用',
-                            style: TextStyle(
-                              fontSize: AppTheme.fontCaption,
-                              color: AppTheme.textTertiary,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: AppTheme.spacingMD),
-                        ...history.take(3).map((url) => Padding(
-                              padding: const EdgeInsets.only(
-                                  bottom: AppTheme.spacingMD),
-                              child: GestureDetector(
-                                onTap: () {
-                                  _vodUrlController.text = url;
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      vertical: 10,
-                                      horizontal: AppTheme.spacingLG),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.backgroundSecondary,
-                                    borderRadius:
-                                        BorderRadius.circular(10),
-                                    border: Border.all(
-                                        color: AppTheme.borderLight,
-                                        width: 0.5),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                          Icons
-                                              .history_rounded,
-                                          size: AppTheme.fontCaption,
-                                          color:
-                                              AppTheme.textSecondary),
-                                      const SizedBox(
-                                          width: AppTheme.spacingSM),
-                                      Expanded(
-                                        child: Text(
-                                          url,
-                                          style: TextStyle(
-                                            fontSize:
-                                                AppTheme.fontCaption,
-                                            color:
-                                                AppTheme.textSecondary,
-                                          ),
-                                          maxLines: 1,
-                                          overflow:
-                                              TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                      Icon(Icons.chevron_right,
-                                          size: 8,
-                                          color: AppTheme.textTertiary),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            )),
-                      ],
-                    );
-                  }),
-                // 错误信息 - 对应 Swift settingsVM.configError
-                if (_configError != null) ...[
-                  const SizedBox(height: AppTheme.spacingLG),
-                  Container(
-                    padding: const EdgeInsets.all(AppTheme.spacingMD),
-                    decoration: BoxDecoration(
-                      color: Colors.red.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                          color: Colors.red.withValues(alpha: 0.3),
-                          width: 0.5),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.error_outline,
-                            color: Colors.red, size: 16),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _configError!,
-                            style: const TextStyle(
-                                color: Colors.red,
-                                fontSize: AppTheme.fontCaption),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 50),
-                ],
-              ),
-            ),
-          ),
-        ),
-        ),
-      ),
-    );
-  }
-
-  /// 提交配置 - 对应 Swift settingsVM.loadConfig()
-  Future<void> _submitConfig(AppState appState) async {
-    final vodUrl = _vodUrlController.text.trim();
-
-    if (vodUrl.isEmpty) {
-      setState(() {
-        _configError = '请输入点播接口地址';
-      });
-      return;
-    }
-
-    setState(() {
-      _isLoadingConfig = true;
-      _configError = null;
-    });
-
-    // 保存配置 URL（同时落一份文件备份，见 ApiConfig.persistApiUrl）
-    await ApiConfig.persistApiUrl(vodUrl);
-
-    try {
-      await appState.loadConfig(vodUrl: vodUrl);
-
-      if (appState.isConfigLoaded.value) {
-        // 加载成功 - applyLoadedConfigState 已在 loadConfig 中调用
-        if (_settingsVM != null) {
-          await _settingsVM!.addToApiHistory(vodUrl);
-        }
-        // 用户 2026-10-13：「第一次输入的那个源不要还他么的存为订阅，
-        // 而是直接就是存为订阅」→ 首屏填入的源**直接进订阅列表并激活**。
-        await _autoSubscribe(vodUrl);
-      } else {
-        setState(() {
-          _isLoadingConfig = false;
-          _configError = appState.configLoadError.value ?? '配置加载失败';
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _isLoadingConfig = false;
-        _configError = e.toString();
-      });
-    }
-  }
-
-  /// 首屏填入的接口地址 → **直接成为订阅**（幂等：已存在则只切激活）。
-  ///
-  /// ⚠️ [SubscriptionService.add] 本身**不去重**（每次都会新建一条），
-  /// 所以这里必须先自己按 url 查一遍，否则每次启动都会多出一条重复订阅。
-  Future<void> _autoSubscribe(String url) async {
-    final u = url.trim();
-    if (u.isEmpty) return;
-    final svc = SubscriptionService.instance;
-    Subscription? exist;
-    for (final s in svc.subscriptions) {
-      if (s.url.trim() == u) {
-        exist = s;
-        break;
-      }
-    }
-    if (exist != null) {
-      if (svc.activeId.value != exist.id) await svc.setActive(exist.id);
-      return;
-    }
-    // 分类按地址保守推断（.py → PY源；.js/.js.md5/.jar → CatVod 猫源；其余未分类）
-    final s = await svc.add(url: u, kind: SubscriptionKind.inferKind(u));
-    await svc.setActive(s.id);
-  }
-
-  /// 从剪贴板粘贴 - 对应 Swift readPasteboardText()
-  Future<void> _pasteFromClipboard() async {
-    final data = await Clipboard.getData(Clipboard.kTextPlain);
-    if (data?.text != null && data!.text!.isNotEmpty) {
-      _vodUrlController.text = data.text!;
-    }
   }
 
   // ============================================================
@@ -759,14 +350,17 @@ class _ContentViewState extends State<ContentView>
             // `AppTheme` 换配色时 `_palette` 变了但不会通知任何 widget。
             builder: (context, isLight, __) => ValueListenableBuilder<int>(
               valueListenable: AppTheme.paletteRevision,
-              builder: (context, paletteRev, ___) => Obx(() => IndexedStack(
+              builder: (context, paletteRev, ___) => Obx(
+                () => IndexedStack(
                   // 🔴 这里**不能**再拼 `ValueKey('tabs-$isLight-$paletteRev')`：
                   // 换 key 会销毁重建全部 tab 页，阅读子 tab 与各页滚动位置
                   // 全部丢失（用户实测"切个明暗就跳回默认首页"）。
                   // 子页重建改由 `_tabPages(sig)` 换新实例来触发。
                   index: MainTabController.instance.selectedTab.value,
                   children: _tabPages('$isLight-$paletteRev'),
-                ))),
+                ),
+              ),
+            ),
           ),
           // 搜索页 - 对应 Swift .sheet(isPresented: $showSearch)
           if (_showSearch)
@@ -862,11 +456,12 @@ class _ContentViewState extends State<ContentView>
                       // 阅读的 JellyTheme.palette，切影视配色时那个不会变，
                       // 会导致影视栏颜色错（静默 bug）。
                       palette: AppTheme.palette,
-                      currentIndex:
-                          features.indexWhere((f) => f.tabIndex == cur).clamp(
-                                0,
-                                features.isEmpty ? 0 : features.length - 1,
-                              ),
+                      currentIndex: features
+                          .indexWhere((f) => f.tabIndex == cur)
+                          .clamp(
+                            0,
+                            features.isEmpty ? 0 : features.length - 1,
+                          ),
                       floating: true,
                       items: [
                         for (final f in features)
@@ -891,6 +486,7 @@ class _ContentViewState extends State<ContentView>
       ),
     );
   }
+
   /// 处理 showAboutOnLaunch - 启动时显示免责声明
   /// 对应 Swift .sheet(isPresented: $appState.showAboutOnLaunch)
   /// 用户可勾选"不再提示"，勾选后持久化到 SharedPreferences
@@ -910,6 +506,7 @@ class _ContentViewState extends State<ContentView>
   Future<void> _showDisclaimerDialog() async {
     await showAppDisclaimerDialog(context);
   }
+
   Widget _buildNetworkStatusBanner() {
     final appState = Get.find<AppState>();
 
@@ -945,8 +542,7 @@ class _ContentViewState extends State<ContentView>
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.wifi_off,
-                    color: Colors.white, size: 16),
+                const Icon(Icons.wifi_off, color: Colors.white, size: 16),
                 const SizedBox(width: AppTheme.spacingSM),
                 const Text(
                   '网络连接已断开',
