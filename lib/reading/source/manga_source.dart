@@ -96,6 +96,9 @@ abstract class MangaSource {
   /// config 源覆写为 site.chapterOrder==0。
   bool get chapterOrderDescending => false;
 
+  /// 源站点地址（登录 / 浏览器验证用）。无站点地址的源返回空串。
+  String get homeUrl => '';
+
   /// 是否需要魔法（代理/VPN）才能访问。
   /// 固有属性，由 SourceManager 从 SourceDefinition.needsMagic 注入；
   /// 代码源（copymanga 等）默认 false。UI 据此在源标签右上角标魔法图标。

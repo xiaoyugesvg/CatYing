@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../models/comic.dart';
 import '../models/book_source.dart';
@@ -8,6 +11,8 @@ import '../source/adapter.dart';
 import '../source/config_manga_source.dart';
 import '../source/manga_source.dart';
 import '../source/models.dart';
+import '../source/source_config_store.dart';
+import '../source/source_definition.dart';
 import '../source/source_manager.dart';
 import '../services/browse_history_service.dart';
 import '../services/search_history_service.dart';
@@ -29,7 +34,11 @@ import '../widgets/source_group_tabs.dart';
 import '../widgets/source_order_sheet.dart';
 import '../widgets/staggered_entrance.dart';
 import '../../widgets/app_toast.dart';
+import '../../widgets/card_action_sheet.dart';
 import 'browse_history_page.dart';
+import 'book_source_editor_page.dart';
+import 'book_source_login_page.dart';
+import 'comic_source_edit_page.dart';
 import 'comic_detail_page.dart';
 // `ComicAggregateSearchPage`（漫画聚合搜索）在本文件 `_buildAggregateChip` 里用到，
 // 之前缺了这一行 —— 于是 `:607 const ComicAggregateSearchPage()` 报
@@ -38,6 +47,7 @@ import 'comic_aggregate_search_page.dart';
 import 'comic_download_records_page.dart';
 import 'favorites_page.dart';
 import 'source_warehouse_page.dart';
+import 'venera_source_edit_page.dart';
 import '../../common/theme.dart';
 import '../../widgets/app_page_header.dart';
 
@@ -982,7 +992,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   Future<void> _reorderComicSources() async {
     final sources = SourceManager().browsableSources;
     if (sources.length < 2) {
-      _log('可浏览源不足 2 个，无需排序');
+      AppToast.message('可浏览源不足 2 个，无需排序');
       return;
     }
     final ids = await showSourceOrderSheet(
@@ -994,6 +1004,367 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     SourceManager().reorder(ids);
     setState(() {});
   }
+
+  /// 长按源标签 → 操作菜单（排序 / 编辑 / 登录 / 分享 / 多选 / 删除）
+  ///
+  /// 用户 2026-10-18：不要只有「排序 + 视图」，编辑/删除/分享/多选都要能直接点；
+  /// 需要登录的源（Cloudflare 验证等）也要能从菜单直接进登录。
+  Future<void> _showComicSourceActions(MangaSource src) async {
+    final group = SourceManager().groupOf(src).trim();
+    await showCardActions(
+      context,
+      title: src.name,
+      subtitle: group.isEmpty ? '漫画源' : '漫画源 · $group',
+      actions: [
+        CardAction(
+          icon: Icons.swap_vert_rounded,
+          label: '排序',
+          onTap: _reorderComicSources,
+        ),
+        CardAction(
+          icon: Icons.edit_outlined,
+          label: '编辑',
+          onTap: () => _editComicSource(src),
+        ),
+        CardAction(
+          icon: Icons.login_rounded,
+          label: '登录',
+          onTap: () => _loginComicSource(src),
+        ),
+        CardAction(
+          icon: Icons.ios_share_rounded,
+          label: '分享',
+          onTap: () => _shareComicSource(src),
+        ),
+        CardAction(
+          icon: Icons.checklist_rounded,
+          label: '多选',
+          onTap: _showComicSourceMultiSelect,
+        ),
+        CardAction(
+          icon: Icons.delete_outline_rounded,
+          label: '删除',
+          danger: true,
+          onTap: () => _confirmDeleteComicSource(src),
+        ),
+      ],
+    );
+  }
+
+  /// Legado 漫画源对应的仓库条目（编辑/登录都要用它）
+  BookSource? _legadoBookSource(MangaSource src) {
+    if (!src.id.startsWith('legado:')) return null;
+    final url = src.id.substring('legado:'.length);
+    for (final bs in BookSourceStore.instance.all) {
+      if (bs.id == url || bs.url == url) return bs;
+    }
+    return null;
+  }
+
+  /// 编辑源：Legado → 书源编辑器；config/venera/api → 漫画源编辑页
+  Future<void> _editComicSource(MangaSource src) async {
+    if (src.id.startsWith('legado:')) {
+      final bs = _legadoBookSource(src);
+      if (bs == null) {
+        AppToast.error('找不到这条 Legado 源（可能已被删除）');
+        return;
+      }
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => BookSourceEditorPage(source: bs)),
+      );
+      await SourceManager().reload();
+      if (mounted) setState(() {});
+      return;
+    }
+    final def = await _definitionOf(src);
+    if (def == null) {
+      AppToast.message('这个源没有可编辑的配置');
+      return;
+    }
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => def.type == 'venera'
+            ? VeneraSourceEditPage(definition: def)
+            : ComicSourceEditPage(definition: def),
+      ),
+    );
+    // 编辑页保存时自己会 SourceManager().reload()；这里只刷新本页标签
+    if (mounted) setState(() {});
+  }
+
+  /// 登录 / 浏览器验证。
+  ///
+  /// · Legado 源：走书源登录页（loginUrl / JS 表单 / 网页登录采 Cookie 都支持）；
+  /// · 其它源：用内置浏览器打开站点首页，完成 Cloudflare / 站点登录后再回来。
+  Future<void> _loginComicSource(MangaSource src) async {
+    if (src.id.startsWith('legado:')) {
+      final bs = _legadoBookSource(src);
+      if (bs == null) {
+        AppToast.error('找不到这条 Legado 源（可能已被删除）');
+        return;
+      }
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => BookSourceLoginPage(source: bs)),
+      );
+      // Cookie 写进书源 header 后，漫画源的 AnalyzeUrl 才会带上 ⇒ 重新装配源
+      await SourceManager().reload();
+      if (mounted) setState(() {});
+      return;
+    }
+    final url = src.homeUrl.trim();
+    if (!url.startsWith('http')) {
+      AppToast.message('这个源没有可登录的站点地址，可在「编辑」里改配置');
+      return;
+    }
+    if (!mounted) return;
+    await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => WebLoginPage(url: url, title: src.name),
+      ),
+    );
+    if (!mounted) return;
+    // 验证后的 Cookie 留在系统 WebView 里：走 WebView 抓取的源（Cloudflare 站）
+    // 之后会直接带上；提示用户回漫画页刷新即可。
+    AppToast.message('浏览器验证已完成，回到漫画页下拉刷新即可');
+  }
+
+  /// 分享源定义：把原始 JSON 复制到剪贴板（与本地 Py 源/书源仓一致）
+  Future<void> _shareComicSource(MangaSource src) async {
+    Map<String, dynamic>? data;
+    if (src.id.startsWith('legado:')) {
+      data = _legadoBookSource(src)?.raw;
+    } else {
+      data = (await _definitionOf(src))?.toJson();
+    }
+    if (data == null || data.isEmpty) {
+      AppToast.message('这个源没有可分享的配置');
+      return;
+    }
+    await Clipboard.setData(
+      ClipboardData(text: const JsonEncoder.withIndent('  ').convert(data)),
+    );
+    AppToast.message('源配置已复制到剪贴板');
+  }
+
+  /// 按 id 找 config/api/venera 源定义
+  Future<SourceDefinition?> _definitionOf(MangaSource src) async {
+    try {
+      final defs = await SourceConfigStore().loadLocal();
+      for (final d in defs) {
+        if (d.id == src.id) return d;
+      }
+    } catch (e) {
+      _log('读取源定义失败: $e');
+    }
+    return null;
+  }
+
+  /// 多选：批量启用 / 停用 / 删除漫画源
+  Future<void> _showComicSourceMultiSelect() async {
+    final all = SourceManager().sources;
+    if (all.isEmpty) {
+      AppToast.message('还没有漫画源');
+      return;
+    }
+    final picked = <String>{};
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final allPicked = picked.length == all.length;
+          return SafeArea(
+            top: false,
+            child: SizedBox(
+              height: MediaQuery.of(ctx).size.height * 0.66,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 8, 4),
+                    child: Row(
+                      children: [
+                        Text(
+                          '多选漫画源',
+                          style: TextStyle(
+                            fontSize: AppTheme.fontHeadline,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '已选 ${picked.length}',
+                          style: TextStyle(
+                            fontSize: AppTheme.fontCaption,
+                            color: AppTheme.textTertiary,
+                          ),
+                        ),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: () => setSheet(() {
+                            if (allPicked) {
+                              picked.clear();
+                            } else {
+                              picked
+                                ..clear()
+                                ..addAll(all.map((s) => s.id));
+                            }
+                          }),
+                          child: Text(allPicked ? '取消全选' : '全选'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView.builder(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      itemCount: all.length,
+                      itemBuilder: (_, i) {
+                        final s = all[i];
+                        final on = picked.contains(s.id);
+                        final enabled = SourceManager().isEnabled(s.id);
+                        return CheckboxListTile(
+                          dense: true,
+                          value: on,
+                          activeColor: JellyTheme.primary,
+                          controlAffinity: ListTileControlAffinity.leading,
+                          title: Text(
+                            s.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: AppTheme.fontSubhead,
+                            ),
+                          ),
+                          subtitle: Text(
+                            enabled ? '已启用' : '已停用',
+                            style: TextStyle(
+                              color: enabled
+                                  ? JellyTheme.primary
+                                  : AppTheme.textTertiary,
+                              fontSize: AppTheme.fontCaption,
+                            ),
+                          ),
+                          onChanged: (v) => setSheet(() {
+                            if (v == true) {
+                              picked.add(s.id);
+                            } else {
+                              picked.remove(s.id);
+                            }
+                          }),
+                        );
+                      },
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                    child: Row(
+                      children: [
+                        TextButton(
+                          onPressed: picked.isEmpty
+                              ? null
+                              : () async {
+                                  await SourceManager()
+                                      .setEnabledAll(picked, true);
+                                  if (ctx.mounted) setSheet(() {});
+                                },
+                          child: const Text('启用'),
+                        ),
+                        TextButton(
+                          onPressed: picked.isEmpty
+                              ? null
+                              : () async {
+                                  await SourceManager()
+                                      .setEnabledAll(picked, false);
+                                  if (ctx.mounted) setSheet(() {});
+                                },
+                          child: const Text('停用'),
+                        ),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: picked.isEmpty
+                              ? null
+                              : () async {
+                                  final ids = Set<String>.of(picked);
+                                  final ok = await _confirmDeleteCount(
+                                    ids.length,
+                                  );
+                                  if (!ok) return;
+                                  await _deleteComicSources(ids);
+                                  picked.clear();
+                                  if (ctx.mounted) setSheet(() {});
+                                },
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.redAccent,
+                          ),
+                          child: const Text('删除'),
+                        ),
+                        const SizedBox(width: 4),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          child: const Text('完成'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    if (mounted) setState(() {});
+  }
+
+  Future<bool> _confirmDeleteCount(int count) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('删除 $count 个漫画源？'),
+        content: const Text(
+          'Legado 漫画源会同时从漫源仓库删除；其它源会从漫画页移除。',
+          style: TextStyle(height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
+  Future<void> _deleteComicSources(Set<String> ids) async {
+    for (final id in ids.toList()) {
+      if (id.startsWith('legado:')) {
+        await BookSourceStore.instance.remove(id.substring('legado:'.length));
+      } else {
+        await SourceManager().setEnabled(id, false);
+      }
+      SourceManager().dropSource(id);
+    }
+    if (mounted) setState(() {});
+  }
+
 
   /// 双击源标签：删除该源（先确认）
   Future<void> _confirmDeleteComicSource(MangaSource src) async {
@@ -1401,8 +1772,9 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     );
     return GestureDetector(
       onTap: () => _switchSource(src),
-      // 用户 2026-10-18：长按源标签 → 调整顺序；双击 → 删除确认
-      onLongPress: _reorderComicSources,
+      // 用户 2026-10-18：长按源标签 → 操作菜单（排序/编辑/登录/分享/多选/删除）；
+      // 双击 → 删除确认（保留旧手势）
+      onLongPress: () => _showComicSourceActions(src),
       onDoubleTap: () => _confirmDeleteComicSource(src),
       child: Container(
         key: key,

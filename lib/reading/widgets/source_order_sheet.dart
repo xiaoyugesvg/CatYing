@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../common/theme.dart';
 
@@ -8,15 +9,20 @@ import '../../common/theme.dart';
 ///   · 源 tab 长按进入左右移动顺序功能；
 ///   · 面板支持视图切换：列表 / 两列 / 三列 / 四列；
 ///   · 网格模式按住卡片即可拖动调整顺序。
+///
+/// 用户 2026-10-18（补）：视图（列数）必须**记住** ——
+/// 之前每次长按都从列表重建，用户切到两列后一长按又变回列表。
 Future<List<String>?> showSourceOrderSheet(
   BuildContext context, {
   required String title,
   required List<(String id, String name)> items,
-}) {
+}) async {
   final order = List<(String, String)>.of(items);
   final isDark = Theme.of(context).brightness == Brightness.dark;
+  final savedCols = await _loadCols();
   // 面板状态（列数）必须放在 builder 外面，否则每次 setState 都会重置回列表
-  final state = _OrderSheetState(cols: 1);
+  final state = _OrderSheetState(cols: savedCols);
+  if (!context.mounted) return null;
   return showModalBottomSheet<List<String>>(
     context: context,
     isScrollControlled: true,
@@ -33,9 +39,39 @@ Future<List<String>?> showSourceOrderSheet(
           order.map((e) => e.$1).toList(),
         ),
         state: state,
+        onColsChanged: (v) {
+          state.cols = v;
+          _saveCols(v);
+          setSheet(() {});
+        },
       ),
     ),
   );
+}
+
+/// 面板视图（列数）持久化键 —— 漫画/书源两个入口共用同一偏好
+const String _kOrderSheetCols = 'reading_source_order_cols';
+
+/// 进程内缓存：避免每次长按都读一次 SharedPreferences
+int? _cachedCols;
+
+Future<int> _loadCols() async {
+  if (_cachedCols != null) return _cachedCols!;
+  try {
+    final p = await SharedPreferences.getInstance();
+    final v = p.getInt(_kOrderSheetCols);
+    _cachedCols = (v != null && v >= 1 && v <= 4) ? v : 1;
+  } catch (_) {
+    _cachedCols = 1;
+  }
+  return _cachedCols!;
+}
+
+void _saveCols(int v) {
+  _cachedCols = v;
+  SharedPreferences.getInstance()
+      .then((p) => p.setInt(_kOrderSheetCols, v))
+      .catchError((_) => false);
 }
 
 /// 面板内部状态（列数）。
@@ -52,6 +88,7 @@ class _OrderSheetBody extends StatelessWidget {
     required this.onChanged,
     required this.onSave,
     required this.state,
+    required this.onColsChanged,
   });
 
   final String title;
@@ -60,6 +97,7 @@ class _OrderSheetBody extends StatelessWidget {
   final VoidCallback onChanged;
   final VoidCallback onSave;
   final _OrderSheetState state;
+  final ValueChanged<int> onColsChanged;
 
   void _move(int from, int to) {
     if (from == to || from < 0 || from >= order.length) return;
@@ -100,10 +138,7 @@ class _OrderSheetBody extends StatelessWidget {
                     tooltip: '切换视图',
                     initialValue: cols,
                     color: isDark ? AppTheme.backgroundSecondary : Colors.white,
-                    onSelected: (v) {
-                      state.cols = v;
-                      onChanged();
-                    },
+                    onSelected: onColsChanged,
                     itemBuilder: (_) => const [
                       PopupMenuItem(
                         value: 1,

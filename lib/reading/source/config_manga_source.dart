@@ -44,6 +44,10 @@ class ConfigMangaSource extends MangaSource {
   @override
   String get name => site.name;
 
+  /// 站点首页（长按源 →「登录 / 浏览器验证」用）
+  @override
+  String get homeUrl => site.url;
+
   @override
   String get lang => 'zh';
 

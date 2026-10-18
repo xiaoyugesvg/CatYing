@@ -136,6 +136,10 @@ class LegadoComicMangaSource extends MangaSource {
       ? 'Legado 漫画'
       : source.bookSourceName;
 
+  /// 站点地址（长按源 →「登录 / 浏览器验证」用；Legado 源取 bookSourceUrl）
+  @override
+  String get homeUrl => source.bookSourceUrl;
+
   @override
   String get group => (source.bookSourceGroup ?? '').trim();
 
