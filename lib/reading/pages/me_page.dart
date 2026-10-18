@@ -30,7 +30,7 @@ import '../pet/pet_view.dart';
 import 'reading_settings_page.dart';
 import 'search_page.dart';
 import 'book_source_repo_page.dart';
-import 'source_repo_page.dart';
+import 'source_warehouse_page.dart';
 import 'tts_engine_page.dart';
 import 'zlibrary_auth_page.dart';
 import '../../common/theme.dart';
@@ -219,12 +219,13 @@ class _MePageState extends State<MePage> {
                           isDark,
                           icon: Icons.local_mall_rounded,
                           iconBg: JellyTheme.primary,
-                          title: '漫画源仓库',
-                          subtitle: '启用源 · 云端配置',
+                          title: '漫画仓',
+                          subtitle: '订阅 · 源管理',
                           onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => const SourceRepoPage(),
+                              builder: (_) =>
+                                  const SourceWarehousePage(comic: true),
                             ),
                           ),
                         ),

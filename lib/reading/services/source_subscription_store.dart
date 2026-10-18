@@ -88,7 +88,12 @@ class SourceSubscriptionStore extends ChangeNotifier {
     await load();
     final u = url.trim();
     if (u.isEmpty) return null;
-    final exist = _items.where((e) => e.url == u).firstOrNull;
+    // 同一个 URL 只在**同一边**去重：漫画仓与书源仓互不干扰
+    //（用户可以给两边填相同链接/相同名称，用户 2026-10-18）。
+    final sameSide = _items.where(
+      (e) => kind.feedsComic ? e.kind.feedsComic : e.kind.feedsNovel,
+    );
+    final exist = sameSide.where((e) => e.url == u).firstOrNull;
     if (exist != null) return exist;
     final now = DateTime.now().millisecondsSinceEpoch;
     final s = SourceSubscription(
@@ -408,9 +413,36 @@ class SourceSubscriptionStore extends ChangeNotifier {
                       ),
                 )
                 .toList();
-      final merged = existing.where((d) => d.type != 'venera').toList()
-        ..addAll(kept)
-        ..addAll(defs);
+
+      // 清掉历史遗留的「空壳配置源」：之前 Venera index 被误解析成
+      // `type=config`，只剩一个 name、没有 URL/规则 ⇒ 编辑页只有名称、
+      // 点进去也没有内容。名字能和本次 Venera 条目对上的才清，避免误删用户源。
+      final veneraNames = defs
+          .map((d) => '${d.config['name'] ?? ''}'.trim())
+          .where((e) => e.isNotEmpty)
+          .toSet();
+      bool isNameOnlyShell(SourceDefinition d) {
+        if (d.type != 'config') return false;
+        final name = '${d.config['name'] ?? ''}'.trim();
+        if (!veneraNames.contains(name)) return false;
+        final url = '${d.config['url'] ?? ''}'.trim();
+        if (url.isNotEmpty) return false;
+        for (final e in d.config.entries) {
+          if (e.key == 'name' || e.key == 'url') continue;
+          final v = e.value;
+          if (v == null) continue;
+          if (v is String && v.trim().isEmpty) continue;
+          if (v is List && v.isEmpty) continue;
+          if (v is Map && v.isEmpty) continue;
+          return false;
+        }
+        return true;
+      }
+
+      final cleaned = existing
+          .where((d) => d.type != 'venera' && !isNameOnlyShell(d))
+          .toList();
+      final merged = [...cleaned, ...kept, ...defs];
       await SourceConfigStore().saveLocal(merged);
       await SourceManager().reload();
 
@@ -514,6 +546,10 @@ class SourceSubscriptionStore extends ChangeNotifier {
         final m = Map<String, dynamic>.from(e);
         // Legado 书源（bookSourceName）不在这里处理
         if (m.containsKey('bookSourceName')) continue;
+        // Venera index.json 的条目：{name,fileName,key,version}
+        // 它不是配置源，必须走 _updateVenera 下载 .js；如果误当 config 存下来，
+        // 就会变成「只有名称、没有 URL/规则」的空壳（用户 2026-10-18）。
+        if (m.containsKey('fileName')) continue;
         if (m['config'] is Map) {
           final d = SourceDefinition.fromJson(m);
           if (d.id.trim().isNotEmpty) out.add(d);

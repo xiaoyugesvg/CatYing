@@ -28,6 +28,7 @@ class SourceGroupTabs extends StatelessWidget {
     required this.selected,
     required this.onSelected,
     this.onLocate,
+    this.onCreateGroup,
   });
 
   /// 不含「全部」（内部补在最前面）。
@@ -37,6 +38,9 @@ class SourceGroupTabs extends StatelessWidget {
 
   /// 右上角「定位到当前源」按钮；为 null 时不显示。
   final VoidCallback? onLocate;
+
+  /// 末尾「＋ 新建分组」按钮；为 null 时不显示。
+  final VoidCallback? onCreateGroup;
 
   static const String all = '全部';
 
@@ -53,9 +57,33 @@ class SourceGroupTabs extends StatelessWidget {
                 left: 12,
                 right: onLocate == null ? 12 : 0,
               ),
-              itemCount: groups.length + 1,
+              itemCount: groups.length + 1 + (onCreateGroup == null ? 0 : 1),
               separatorBuilder: (_, _) => const SizedBox(width: 8),
               itemBuilder: (context, i) {
+                if (onCreateGroup != null && i == groups.length + 1) {
+                  return GestureDetector(
+                    onTap: onCreateGroup,
+                    child: Container(
+                      alignment: Alignment.center,
+                      padding: const EdgeInsets.symmetric(horizontal: 13),
+                      decoration: BoxDecoration(
+                        color: JellyTheme.primary.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(17),
+                        border: Border.all(
+                          color: JellyTheme.primary.withValues(alpha: 0.35),
+                        ),
+                      ),
+                      child: Text(
+                        '＋ 新建分组',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w500,
+                          color: JellyTheme.primary,
+                        ),
+                      ),
+                    ),
+                  );
+                }
                 final label = i == 0 ? all : groups[i - 1];
                 final sel = label == selected;
                 return GestureDetector(

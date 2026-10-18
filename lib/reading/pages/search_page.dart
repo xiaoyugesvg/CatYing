@@ -36,7 +36,7 @@ import 'comic_detail_page.dart';
 import 'comic_aggregate_search_page.dart';
 import 'comic_download_records_page.dart';
 import 'favorites_page.dart';
-import 'source_repo_page.dart';
+import 'source_warehouse_page.dart';
 import '../../common/theme.dart';
 import '../../widgets/app_page_header.dart';
 
@@ -378,9 +378,11 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     required String name,
     required bool selected,
     required VoidCallback onTap,
+    VoidCallback? onLongPress,
   }) {
     return GestureDetector(
       onTap: onTap,
+      onLongPress: onLongPress,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
@@ -1056,6 +1058,148 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     );
   }
 
+  /// 新建漫画源分组（快速源弹窗里的「＋新建分组」）
+  Future<void> _createMangaGroup(StateSetter setSheetState) async {
+    final name = await _askGroupName();
+    if (name == null) return;
+    final ok = await SourceManager().createGroup(name);
+    if (!ok) {
+      _toast('分组已存在或名称为空');
+      return;
+    }
+    setSheetState(() {});
+  }
+
+  Future<String?> _askGroupName() async {
+    final ctrl = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: JellyTheme.cardLight,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+        ),
+        title: const Text('新建分组'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: '分组名称'),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text),
+            child: const Text('创建'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    final n = (name ?? '').trim();
+    return n.isEmpty ? null : n;
+  }
+
+  /// 长按源 chip：把源移入某个分组
+  void _showMangaGroupPicker(
+    MangaSource src,
+    VoidCallback refresh,
+  ) {
+    final groups = SourceManager().customGroups;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: JellyTheme.cardLight,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      src.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '移动到分组',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: JellyTheme.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 240),
+                child: SingleChildScrollView(
+                  child: Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      _groupChip('未分组', () async {
+                        Navigator.pop(ctx);
+                        await SourceManager().setGroup(src, '');
+                        refresh();
+                      }),
+                      for (final g in groups)
+                        _groupChip(g, () async {
+                          Navigator.pop(ctx);
+                          await SourceManager().setGroup(src, g);
+                          refresh();
+                        }),
+                      _groupChip('＋ 新建分组', () async {
+                        Navigator.pop(ctx);
+                        final n = await _askGroupName();
+                        if (n == null) return;
+                        await SourceManager().createGroup(n);
+                        await SourceManager().setGroup(src, n);
+                        refresh();
+                      }),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _groupChip(String label, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: JellyTheme.primary.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(fontSize: 13, color: JellyTheme.primary),
+        ),
+      ),
+    );
+  }
+
   /// 快速漫画源列表弹窗（「搜索源」输入框 + 源列表筛选 + 快速切换）
   /// 入口：源 chip 排最右侧的 view_list 按钮（用户 2026-10-06 反馈"少个搜索源"）
   Future<void> _showQuickSourceSheet() async {
@@ -1063,8 +1207,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     final currentId = SourceManager().current.id;
     // 当前源是否仍在这个弹窗的可见列表里（被停用 / 切订阅后会不在）
     final hasCurrent = sources.any((s) => s.id == currentId);
-    // 分组口径与「漫画仓」一致（Legado 的 bookSourceGroup，空 = 未分组）
-    final groups = collectSourceGroups(sources.map((s) => s.group));
+    // 分组口径：用户自定义分组优先（SourceManager.groupOf），其次源自带
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final filter = TextEditingController();
     // 当前源 chip 的 key：打开弹窗后自动滚到它（源多时定位到当前位置）
@@ -1080,8 +1223,13 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
             final kw = filter.text.trim().toLowerCase();
+            // 每次重建都重新收集：新建分组 / 移动源后 tab 立即出现
+            final groups = collectSourceGroups([
+              ...sources.map((s) => SourceManager().groupOf(s)),
+              ...SourceManager().customGroups,
+            ]);
             final shown = sources.where((s) {
-              final g = sourceGroupLabel(s.group);
+              final g = sourceGroupLabel(SourceManager().groupOf(s));
               if (selectedGroup != SourceGroupTabs.all && g != selectedGroup) {
                 return false;
               }
@@ -1137,6 +1285,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                         onSelected: (g) =>
                             setSheetState(() => selectedGroup = g),
                         onLocate: hasCurrent ? locateCurrent : null,
+                        onCreateGroup: () => _createMangaGroup(setSheetState),
                       ),
                     ),
                     Padding(
@@ -1175,6 +1324,11 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                             _switchSource(s);
                                           }
                                         },
+                                        onLongPress: () =>
+                                            _showMangaGroupPicker(
+                                              s,
+                                              () => setSheetState(() {}),
+                                            ),
                                       ),
                                     ),
                                 ],
@@ -1708,7 +1862,8 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                       onTap: () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => const SourceRepoPage(),
+                          builder: (_) =>
+                              const SourceWarehousePage(comic: true),
                         ),
                       ),
                     ),
@@ -1831,7 +1986,10 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                     onTap: () => Navigator.push(
                                       context,
                                       MaterialPageRoute(
-                                        builder: (_) => const SourceRepoPage(),
+                                        builder: (_) =>
+                                            const SourceWarehousePage(
+                                              comic: true,
+                                            ),
                                       ),
                                     ),
                                   ),
@@ -1926,7 +2084,9 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             FilledButton.icon(
               onPressed: () => Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => const SourceRepoPage()),
+                MaterialPageRoute(
+                  builder: (_) => const SourceWarehousePage(comic: true),
+                ),
               ),
               icon: Icon(
                 hasConfigured

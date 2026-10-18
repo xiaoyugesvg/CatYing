@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/settings_service.dart';
 import 'config_manga_source.dart';
 import 'copy_manga_source.dart';
@@ -62,6 +65,83 @@ class SourceManager extends ChangeNotifier {
   final Map<String, MangaSource> _sources = {};
   MangaSource? _current;
   bool _initialized = false;
+
+  /// 用户自定义的漫画源分组（源 id → 分组名）。
+  /// 源脚本本身是只读的，`MangaSource.group` 只是默认值，这里覆盖它。
+  static const String _kGroupOverrides = 'manga_source_groups_v1';
+  static const String _kCustomGroups = 'manga_custom_groups_v1';
+  final Map<String, String> _groupOverrides = {};
+  final List<String> _customGroups = [];
+
+  /// 源的分组（用户设置优先，其次源脚本自带）
+  String groupOf(MangaSource s) {
+    final custom = _groupOverrides[s.id]?.trim() ?? '';
+    return custom.isNotEmpty ? custom : s.group;
+  }
+
+  /// 用户新建的分组（允许暂时为空）
+  List<String> get customGroups => List.unmodifiable(_customGroups);
+
+  Future<void> _loadGroups() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_kGroupOverrides);
+      _groupOverrides.clear();
+      if (raw != null && raw.isNotEmpty) {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          for (final e in decoded.entries) {
+            final k = '${e.key}'.trim();
+            final v = '${e.value}'.trim();
+            if (k.isNotEmpty && v.isNotEmpty) _groupOverrides[k] = v;
+          }
+        }
+      }
+      _customGroups
+        ..clear()
+        ..addAll(
+          (prefs.getStringList(_kCustomGroups) ?? const <String>[])
+              .map((e) => e.trim())
+              .where((e) => e.isNotEmpty),
+        );
+    } catch (e) {
+      _log('读取漫画源分组失败: $e');
+    }
+  }
+
+  Future<void> _saveGroups() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kGroupOverrides, jsonEncode(_groupOverrides));
+      await prefs.setStringList(_kCustomGroups, _customGroups);
+    } catch (e) {
+      _log('保存漫画源分组失败: $e');
+    }
+  }
+
+  /// 新建分组
+  Future<bool> createGroup(String name) async {
+    final n = name.trim();
+    if (n.isEmpty || _customGroups.contains(n)) return false;
+    _customGroups.add(n);
+    await _saveGroups();
+    notifyListeners();
+    return true;
+  }
+
+  /// 把源移到指定分组（空字符串 = 未分组）
+  Future<void> setGroup(MangaSource s, String group) async {
+    final g = group.trim();
+    if (g.isEmpty) {
+      _groupOverrides.remove(s.id);
+    } else {
+      _groupOverrides[s.id] = g;
+      if (!_customGroups.contains(g)) _customGroups.add(g);
+    }
+    await _saveGroups();
+    notifyListeners();
+  }
+
   // 零源时的哨兵源：current 返回它而非抛异常，避免各处 .current 在无源时崩溃。
   // 搜索/分类返回空；详情/章节/取图抛描述性错误，被调用方现有 try/catch 接住提示用户。
   final MangaSource _noSource = _NoSource();
@@ -155,6 +235,9 @@ class SourceManager extends ChangeNotifier {
 
     // 禁用源列表（持久化，与 sources.json 解耦）
     _disabledIds = SettingsService().disabledSourceIds.toSet();
+
+    // 用户自定义分组
+    await _loadGroups();
 
     // 应用用户自定义顺序（用户 2026-10-18：长按源标签拖动后保存的顺序）
     final savedOrder = SettingsService().mangaSourceOrder;

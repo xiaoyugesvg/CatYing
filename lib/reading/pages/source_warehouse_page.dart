@@ -1,12 +1,16 @@
 import 'dart:convert';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../common/theme.dart';
+import '../../services/network_manager.dart';
+import '../../widgets/app_toast.dart';
 import '../models/book_source.dart';
 import '../models/source_subscription.dart';
+import '../services/comic_source_importer.dart';
 import '../services/source_subscription_store.dart';
 import '../source/manga_source.dart';
 import '../source/source_config_store.dart';
@@ -15,6 +19,7 @@ import '../source/source_manager.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/swipe_action_tile.dart';
 import 'book_source_editor_page.dart';
+import 'book_source_qr_scan_page.dart';
 import 'comic_source_edit_page.dart';
 
 /// 阅读模块的「书源仓 / 漫画仓」（两个独立页面，不再用 Tab 合并）。
@@ -89,6 +94,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
   final _sourceStore = BookSourceStore.instance;
   final Set<String> _busy = {};
   bool _loading = true;
+  bool _healthChecking = false;
 
   /// 当前选中的订阅 tab：null = 「全部」
   String? _selectedSubId;
@@ -551,8 +557,16 @@ class _WarehouseTabState extends State<_WarehouseTab>
               : SourceSubscriptionKind.comic)
         : SourceSubscriptionKind.novel;
 
+    // ⚠️ 去重 / 重名判断必须**只看当前这个仓**：
+    //   用户 2026-10-18：「不同订阅链接，只是取了一样名称花花」——
+    //   原来用 _subStore.items 全表判断，漫画仓的「花花」会把书源仓的
+    //   「花花」误判成重复，甚至替换掉另一边的订阅。
+    final sideItems = _subStore.items
+        .where((e) => widget.comic ? e.kind.feedsComic : e.kind.feedsNovel)
+        .toList();
+
     // 同一个链接已存在 → 直接更新这条，避免重复记录
-    final sameUrl = _subStore.items.where((e) => e.url == url).firstOrNull;
+    final sameUrl = sideItems.where((e) => e.url == url).firstOrNull;
     if (sameUrl != null) {
       await _subStore.updateSubscription(
         sameUrl.id,
@@ -569,7 +583,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
 
     // 名称重复 → 弹窗让用户选「替换」还是「加序号」
     SourceSubscription? replaceTarget;
-    final dup = _subStore.items.where((e) => e.name == name).toList();
+    final dup = sideItems.where((e) => e.name == name).toList();
     if (dup.isNotEmpty) {
       final choice = await showDialog<String>(
         context: context,
@@ -1011,6 +1025,25 @@ class _WarehouseTabState extends State<_WarehouseTab>
                 const SizedBox(width: 4),
               ]
             : [
+                // 漫画仓已替代「漫画源仓库」：把它的体检 / 导入入口搬到这里
+                if (widget.comic)
+                  IconButton(
+                    tooltip: '源体检',
+                    onPressed: _healthChecking ? null : _runQuickHealthCheck,
+                    icon: _healthChecking
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.health_and_safety_rounded),
+                  ),
+                if (widget.comic)
+                  IconButton(
+                    tooltip: '导入源',
+                    onPressed: _showComicImportDialog,
+                    icon: const Icon(Icons.input_rounded),
+                  ),
                 IconButton(
                   tooltip: '全部更新',
                   onPressed: _busy.isEmpty ? _updateAll : null,
@@ -1070,6 +1103,337 @@ class _WarehouseTabState extends State<_WarehouseTab>
         Expanded(child: _content()),
       ],
     );
+  }
+
+  // ── 漫画仓：源体检 / 导入源（原「漫画源仓库」顶栏功能）────────
+
+  String _shortErr(String raw) {
+    final s = raw.replaceAll('\n', ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+    return s.length > 120 ? '${s.substring(0, 120)}…' : s;
+  }
+
+  /// 一键体检：并发探测每个启用源的搜索接口
+  Future<void> _runQuickHealthCheck() async {
+    if (_healthChecking) return;
+    final sources = SourceManager().enabledSources;
+    if (sources.isEmpty) {
+      _toast('没有可检测的源');
+      return;
+    }
+    setState(() => _healthChecking = true);
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+        content: Row(
+          children: [
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2.5),
+            ),
+            SizedBox(width: 16),
+            Expanded(child: Text('正在体检漫画源…')),
+          ],
+        ),
+      ),
+    );
+
+    final bad = <MangaSource, String>{};
+    const t = Duration(seconds: 12);
+    await Future.wait(
+      sources.map((s) async {
+        try {
+          final page = await s.search('漫画', page: 0).timeout(t);
+          if (page.items.isEmpty) bad[s] = '搜索无结果';
+        } catch (e) {
+          bad[s] = _shortErr('$e');
+        }
+      }),
+    );
+    if (!mounted) return;
+    Navigator.of(context, rootNavigator: true).pop();
+    setState(() => _healthChecking = false);
+
+    if (bad.isEmpty) {
+      _toast('体检完成：${sources.length} 个源全部可用');
+      return;
+    }
+    final ok = sources.length - bad.length;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _card,
+        title: Text(
+          '源体检：$ok 可用 / ${bad.length} 失效',
+          style: TextStyle(color: _label),
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              for (final e in bad.entries)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 5),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        e.key.name,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      Text(
+                        e.value,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: JellyTheme.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 导入源：网址 / 文件 / 文本 / 二维码
+  Future<void> _showComicImportDialog() async {
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _card,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+        ),
+        title: Text(
+          '导入源',
+          style: TextStyle(
+            color: _label,
+            fontSize: AppTheme.fontHeadline,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '支持漫画配置源、Legado 漫画脚本；Venera 源请用「添加订阅」',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: JellyTheme.textSecondary,
+                  height: 1.45,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: _importTile('网址', Icons.link_rounded, () {
+                      Navigator.pop(ctx, 'url');
+                    }),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _importTile('文件', Icons.folder_open_rounded, () {
+                      Navigator.pop(ctx, 'file');
+                    }),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: _importTile('文本', Icons.text_snippet_outlined, () {
+                      Navigator.pop(ctx, 'text');
+                    }),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _importTile(
+                      '二维码',
+                      Icons.qr_code_scanner_rounded,
+                      () {
+                        Navigator.pop(ctx, 'qr');
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case 'url':
+        await _importComicFromUrl();
+      case 'file':
+        await _importComicFromFile();
+      case 'text':
+        await _importComicFromText();
+      case 'qr':
+        await _importComicFromQr();
+    }
+  }
+
+  Widget _importTile(String label, IconData icon, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          color: JellyTheme.primary.withValues(alpha: _isDark ? 0.10 : 0.06),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: JellyTheme.primary.withValues(alpha: 0.25),
+          ),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, size: 22, color: JellyTheme.primary),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: _label,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _importComicFromUrl() async {
+    final ctrl = TextEditingController();
+    final url = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _card,
+        title: Text('网址导入', style: TextStyle(color: _label)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: TextInputType.url,
+          decoration: _inputDeco('漫画源 JSON 地址'),
+          style: TextStyle(color: _label),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text),
+            child: const Text('导入'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    final u = (url ?? '').trim();
+    if (u.isEmpty) return;
+    try {
+      final text = await NetworkManager.instance.getString(u);
+      if (text.trim().isEmpty) {
+        _toast('下载内容为空');
+        return;
+      }
+      await _applyComicImport(text);
+    } catch (e) {
+      _toast('下载失败：$e');
+    }
+  }
+
+  Future<void> _importComicFromText() async {
+    final ctrl = TextEditingController();
+    final text = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _card,
+        title: Text('文本导入', style: TextStyle(color: _label)),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 220,
+          child: TextField(
+            controller: ctrl,
+            autofocus: true,
+            maxLines: null,
+            expands: true,
+            textAlignVertical: TextAlignVertical.top,
+            style: TextStyle(color: _label, fontSize: 12),
+            decoration: _inputDeco('粘贴漫画源 JSON'),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text),
+            child: const Text('导入'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    final t = (text ?? '').trim();
+    if (t.isEmpty) return;
+    await _applyComicImport(t);
+  }
+
+  Future<void> _importComicFromFile() async {
+    try {
+      final result = await FilePicker.pickFiles(type: FileType.any);
+      if (result.isEmpty) return;
+      final f = result.first;
+      final bytes = await f.readAsBytes();
+      if (bytes.isEmpty) {
+        _toast('文件是空的');
+        return;
+      }
+      await _applyComicImport(utf8.decode(bytes, allowMalformed: true));
+    } catch (e) {
+      _toast('导入失败：$e');
+    }
+  }
+
+  Future<void> _importComicFromQr() async {
+    final text = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (_) => const BookSourceQrScanPage()),
+    );
+    if (text == null || text.trim().isEmpty) return;
+    await _applyComicImport(text);
+  }
+
+  Future<void> _applyComicImport(String text) async {
+    final r = await importComicSourcesText(text);
+    if (!mounted) return;
+    setState(() {});
+    if (r.ok) {
+      AppToast.message(r.message);
+    } else {
+      AppToast.error(r.message);
+    }
   }
 
   /// 顶部订阅卡片（与原来的「添加订阅」卡片同尺寸，可长按拖动排序）
