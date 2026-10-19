@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/third_party_source.dart';
 import 'plugin_script_cache.dart';
@@ -79,6 +80,10 @@ class BuiltinSourcesService {
         await store.addAll(need);
       }
     }
+    // ✅ 2026-10-19：把**实测失效**的内置源关掉。
+    //   init 只补"缺失"的、从不改"已存在"的 ⇒ 老设备里那些死源仍是启用状态，
+    //   每次播放都先撞一次死源（试播超时 + 最后失败）。这里显式关一遍 ✓
+    await _disableDeadBuiltinSources(force: force);
   }
 
   /// 异步检查远端更新（洛雪 + MusicFree）。无网络/失败时静默。
@@ -149,6 +154,29 @@ class BuiltinSourcesService {
     (path: 'hywmusic', name: 'HYWMusic'),
   ];
 
+  /// **失效源名单**（洛雪源 path）：后端已停服 ⇒ 注册时**默认禁用**，
+  /// 避免用户误选、也避免每次试播先撞一次死源。
+  ///
+  /// 实测证据（2026-10-19，逐个打后端接口）：
+  ///   · `stellarwave` —— 唯一后端 `ffapi.cn` 返回
+  ///       `{"code":-1,"msg":"接口已经关闭！"}`（原注释里的"主用"源）
+  ///   · `huanyin`     —— `music-dl.sayqz.com` TLS 握手失败；
+  ///       `api.xcvts.cn` 咪咕搜索返回 `code:502 咪咕搜索接口均不可用`
+  ///   · `ikun`        —— `api.ikunshare.com` TLS 连接失败
+  ///   · `huibq`       —— `lxmusicapi.onrender.com` 503（Render 免费实例已下线）
+  ///
+  /// ⚠️ 仍然可用的源**不在此列**、保持启用：
+  ///   `hywmusic`（`103.79.184.97` 实测 tx/wy 均返回真直链，卡密 200）
+  static const Set<String> _deadLxPaths = {
+    'stellarwave',
+    'huanyin',
+    'ikun',
+    'huibq',
+  };
+
+  /// 命中失效源名单？（按洛雪源 path 判断）
+  static bool _isDeadLx(String path) => _deadLxPaths.contains(path);
+
   Future<List<ThirdPartySource>> _loadLxSources() async {
     final out = <ThirdPartySource>[];
     for (final c in _lxCandidates) {
@@ -162,7 +190,8 @@ class BuiltinSourcesService {
           kind: 'script',
           template: '',
           script: script,
-          enabled: true,
+          // ✅ 2026-10-19：失效源（后端已停服）默认**禁用** ⇒ 不参与试播
+          enabled: !_isDeadLx(c.path),
           isBuiltin: true,
           updateUrl: '$_lxRawBase/${c.path}/latest.js',
         ));
@@ -472,6 +501,40 @@ class BuiltinSourcesService {
       debugPrint('[BuiltinSources] 已移除下架 MusicFree 源 ${doomed.length} 个');
     } catch (e) {
       debugPrint('[BuiltinSources] 移除下架 MusicFree 源失败: $e');
+    }
+  }
+
+  /// 把已安装设备上遗留的**失效内置源**关掉（只关一次）。
+  ///
+  /// 为什么需要：`init` 只补"缺失"的源、**从不改"已存在"的** ⇒
+  /// 老设备里 stellarwave / huanyin / ikun / huibq 仍是 `enabled: true`，
+  /// 每次播放都会先撞一次死源（试播超时 + 最后才失败）✗
+  ///
+  /// ⚠️ 用 prefs 旗标保证**只关一次**：之后用户若手动把它们重新打开
+  ///    （比如想再试一次源作者有没有修好），下次启动**不会**又被关掉 ✓
+  ///
+  /// [force] = true（"恢复默认"）时忽略旗标，关完再把旗标写回 true。
+  static const _deadDisabledFlagKey = 'music.builtinDeadDisabled.v1';
+
+  Future<void> _disableDeadBuiltinSources({bool force = false}) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!force && prefs.getBool(_deadDisabledFlagKey) == true) return;
+      final store = ThirdPartySourceStore.instance;
+      var disabled = 0;
+      for (final path in _deadLxPaths) {
+        final id = 'builtin_lx_$path';
+        final cur = store.byId(id);
+        if (cur == null || !cur.enabled) continue;
+        await store.setEnabled(id, false);
+        disabled++;
+      }
+      await prefs.setBool(_deadDisabledFlagKey, true);
+      if (disabled > 0) {
+        debugPrint('[BuiltinSources] 已默认禁用失效内置源 $disabled 个');
+      }
+    } catch (e) {
+      debugPrint('[BuiltinSources] 禁用失效内置源失败: $e');
     }
   }
 }
