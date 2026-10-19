@@ -213,7 +213,10 @@ class _DetailPageState extends State<DetailPage> {
   ///
   /// 与热切换互斥：_playerEngine 已是目标内核说明播放器内菜单刚重建过，
   /// 本回调（ever 异步触发）直接跳过，避免把新实例又 dispose 重建一次。
-  void _onEngineChanged() {
+  ///
+  /// ⚠️ 2026-10-19：必须 await dispose，否则旧引擎未死透就重建会导致
+  ///   「黑屏但有声音」（与 _onEngineHotSwap 同一问题）。
+  Future<void> _onEngineChanged() async {
     if (!mounted) return;
     final engine = PlayerPrefs.instance.vodEngine.value;
     if (engine == PlayerEngine.webview) {
@@ -223,7 +226,7 @@ class _DetailPageState extends State<DetailPage> {
       _player = null;
       _lastPlayerUrl = '';
       _lastPlayerHeadersKey = '';
-      old?.dispose();
+      await old?.dispose();
       setState(() {});
       return;
     }
@@ -677,7 +680,12 @@ class _DetailPageState extends State<DetailPage> {
   /// 选中核心时偏好已保存；这里记住当前进度 → 释放旧引擎实例 →
   /// 按新偏好立刻重建并从原位置续播，不用等下一集。
   /// ObjectKey(_player) 会让 VideoPlayerWidget 整体 remount，状态干净。
-  void _onEngineHotSwap(PlayerEngine engine) {
+  ///
+  /// ⚠️ 2026-10-19：**必须 await dispose** —— KSPlayer 的 close 是异步的
+  ///   （原生层销毁解码线程、释放 Metal 资源都需要时间），不 await 就创建
+  ///   新实例会导致旧引擎还没死透、新引擎就 open，表现为「黑屏但有声音」
+  ///   （音频已起、视频层没挂上）。await 后等旧引擎完全退出再重建。
+  Future<void> _onEngineHotSwap(PlayerEngine engine) async {
     if (engine == PlayerEngine.webview) {
       // 网页内核不走原生 Player
       _playerEngine = engine;
@@ -685,7 +693,7 @@ class _DetailPageState extends State<DetailPage> {
       _player = null;
       _lastPlayerUrl = '';
       _lastPlayerHeadersKey = '';
-      old?.dispose();
+      await old?.dispose();
       setState(() {});
       return;
     }
@@ -695,10 +703,15 @@ class _DetailPageState extends State<DetailPage> {
         ? Map<String, String>.from(_controller.playHeaders)
         : const <String, String>{};
     final pos = _player?.state.position ?? Duration.zero;
+    // 先暂停再 dispose：dispose 是异步的（KSPlayer 要等解码线程退出、
+    // 释放 Metal 资源），期间若继续播放，记录的进度会落后实际位置。
+    if (_player?.state.playing == true) {
+      await _player?.pause();
+    }
     final old = _player;
     // 先置空：_createPlayerAndOpen 才会走「按新引擎重建」分支而非「只换源」
     _player = null;
-    old?.dispose();
+    await old?.dispose();
     _createPlayerAndOpen(
       url,
       headers,

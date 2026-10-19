@@ -102,7 +102,9 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
               physics: const BouncingScrollPhysics(),
               padding: EdgeInsets.zero,
               children: [
-                SizedBox(height: MediaQuery.paddingOf(context).top + 58),
+                // 与媒体库详情页一致：标题下移叠在 backdrop 下部渐变区，
+                // 给海报留足展示空间（原 58px 太靠前，标题几乎贴顶）
+                SizedBox(height: MediaQuery.of(context).size.height * 0.40),
                 _buildHero(),
                 const SizedBox(height: 16),
                 // 壁纸 → 内容底的过渡（固定高度渐变，避免随内容长度拉伸）

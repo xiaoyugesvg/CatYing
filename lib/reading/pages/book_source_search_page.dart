@@ -1,7 +1,11 @@
 import 'package:cached_network_image_ce/cached_network_image.dart';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../widgets/card_action_sheet.dart';
 import '../models/book_source.dart';
 import '../services/book_source_service.dart';
 import '../services/qread_api.dart';
@@ -17,6 +21,8 @@ import '../widgets/source_group_tabs.dart';
 import '../widgets/jelly_search_bar.dart';
 import 'book_download_records_page.dart';
 import 'book_source_detail_page.dart';
+import 'book_source_editor_page.dart';
+import 'book_source_login_page.dart';
 import 'book_source_repo_page.dart';
 import 'browse_history_page.dart';
 import 'favorites_page.dart';
@@ -946,8 +952,9 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
   Widget _sourceChip(String name, String id) {
     final selected = id == _selectedSourceId;
     return GestureDetector(
-      // 用户 2026-10-18：长按源标签 → 调整顺序；双击 → 删除确认
-      onLongPress: _reorderBookSources,
+      // 用户 2026-10-19：长按源标签 → 操作菜单（排序/编辑/登录/分享/多选/删除）；
+      // 双击 → 删除确认（保留旧手势）
+      onLongPress: () => _showBookSourceActions(name, id),
       onDoubleTap: () => _confirmDeleteBookSource(id, name),
       onTap: () {
         setState(() => _selectedSourceId = id);
@@ -1012,6 +1019,289 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
         .toList();
     await store.reorder([...ids, ...rest]);
     if (mounted) setState(() {});
+  }
+
+  /// 长按源标签 → 操作菜单（排序 / 编辑 / 登录 / 分享 / 多选 / 删除）
+  ///
+  /// 与漫画源 tab 的长按菜单保持一致（2026-10-19 用户要求）。
+  Future<void> _showBookSourceActions(String name, String id) async {
+    final src = store.all.firstWhere(
+      (s) => s.id == id,
+      orElse: () => BookSource(raw: const {}, id: id),
+    );
+    final group = src.group.trim();
+    await showCardActions(
+      context,
+      title: name,
+      subtitle: group.isEmpty ? '书源' : '书源 · $group',
+      actions: [
+        CardAction(
+          icon: Icons.swap_vert_rounded,
+          label: '排序',
+          onTap: _reorderBookSources,
+        ),
+        CardAction(
+          icon: Icons.edit_outlined,
+          label: '编辑',
+          onTap: () => _editBookSource(src),
+        ),
+        CardAction(
+          icon: Icons.login_rounded,
+          label: '登录',
+          onTap: () => _loginBookSource(src),
+        ),
+        CardAction(
+          icon: Icons.ios_share_rounded,
+          label: '分享',
+          onTap: () => _shareBookSource(src),
+        ),
+        CardAction(
+          icon: Icons.checklist_rounded,
+          label: '多选',
+          onTap: _showBookSourceMultiSelect,
+        ),
+        CardAction(
+          icon: Icons.delete_outline_rounded,
+          label: '删除',
+          danger: true,
+          onTap: () => _confirmDeleteBookSource(id, name),
+        ),
+      ],
+    );
+  }
+
+  /// 编辑书源：打开书源编辑器
+  Future<void> _editBookSource(BookSource src) async {
+    if (src.id.isEmpty || src.raw.isEmpty) {
+      _toast('找不到这条书源（可能已被删除）');
+      return;
+    }
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => BookSourceEditorPage(source: src)),
+    );
+    // 编辑页保存时会自己刷新；这里只刷新本页标签
+    if (mounted) setState(() {});
+  }
+
+  /// 登录 / 浏览器验证：复用 Legado 书源登录页
+  Future<void> _loginBookSource(BookSource src) async {
+    if (src.id.isEmpty || src.raw.isEmpty) {
+      _toast('找不到这条书源（可能已被删除）');
+      return;
+    }
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => BookSourceLoginPage(source: src)),
+    );
+    // Cookie 写进书源 header 后，搜索/探索请求才会带上 ⇒ 刷新本页
+    if (mounted) setState(() {});
+  }
+
+  /// 分享书源：把原始 JSON 复制到剪贴板
+  Future<void> _shareBookSource(BookSource src) async {
+    final data = src.raw;
+    if (data.isEmpty) {
+      _toast('这个源没有可分享的配置');
+      return;
+    }
+    await Clipboard.setData(
+      ClipboardData(text: const JsonEncoder.withIndent('  ').convert(data)),
+    );
+    _toast('源配置已复制到剪贴板');
+  }
+
+  /// 多选：批量启用 / 停用 / 删除书源
+  Future<void> _showBookSourceMultiSelect() async {
+    final all = store.sorted().where((s) => s.belongsToBook).toList();
+    if (all.isEmpty) {
+      _toast('还没有书源');
+      return;
+    }
+    final picked = <String>{};
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final allPicked = picked.length == all.length;
+          return SafeArea(
+            top: false,
+            child: SizedBox(
+              height: MediaQuery.of(ctx).size.height * 0.66,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 8, 4),
+                    child: Row(
+                      children: [
+                        Text(
+                          '多选書源',
+                          style: TextStyle(
+                            fontSize: AppTheme.fontHeadline,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '已选 ${picked.length}',
+                          style: TextStyle(
+                            fontSize: AppTheme.fontCaption,
+                            color: AppTheme.textTertiary,
+                          ),
+                        ),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: () => setSheet(() {
+                            if (allPicked) {
+                              picked.clear();
+                            } else {
+                              picked
+                                ..clear()
+                                ..addAll(all.map((s) => s.id));
+                            }
+                          }),
+                          child: Text(allPicked ? '取消全选' : '全选'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView.builder(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      itemCount: all.length,
+                      itemBuilder: (_, i) {
+                        final s = all[i];
+                        final on = picked.contains(s.id);
+                        return CheckboxListTile(
+                          dense: true,
+                          value: on,
+                          activeColor: JellyTheme.primary,
+                          controlAffinity: ListTileControlAffinity.leading,
+                          title: Text(
+                            s.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: AppTheme.fontSubhead,
+                            ),
+                          ),
+                          subtitle: Text(
+                            s.enabled ? '已启用' : '已停用',
+                            style: TextStyle(
+                              color: s.enabled
+                                  ? JellyTheme.primary
+                                  : AppTheme.textTertiary,
+                              fontSize: AppTheme.fontCaption,
+                            ),
+                          ),
+                          onChanged: (v) => setSheet(() {
+                            if (v == true) {
+                              picked.add(s.id);
+                            } else {
+                              picked.remove(s.id);
+                            }
+                          }),
+                        );
+                      },
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                    child: Row(
+                      children: [
+                        TextButton(
+                          onPressed: picked.isEmpty
+                              ? null
+                              : () async {
+                                  for (final id in picked) {
+                                    await store.setEnabled(id, true);
+                                  }
+                                  if (ctx.mounted) setSheet(() {});
+                                },
+                          child: const Text('启用'),
+                        ),
+                        TextButton(
+                          onPressed: picked.isEmpty
+                              ? null
+                              : () async {
+                                  for (final id in picked) {
+                                    await store.setEnabled(id, false);
+                                  }
+                                  if (ctx.mounted) setSheet(() {});
+                                },
+                          child: const Text('停用'),
+                        ),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: picked.isEmpty
+                              ? null
+                              : () async {
+                                  final ids = Set<String>.of(picked);
+                                  final ok = await _confirmDeleteBookSources(
+                                    ids.length,
+                                  );
+                                  if (!ok) return;
+                                  for (final id in ids) {
+                                    await store.remove(id);
+                                  }
+                                  picked.clear();
+                                  if (ctx.mounted) setSheet(() {});
+                                },
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.redAccent,
+                          ),
+                          child: const Text('删除'),
+                        ),
+                        const SizedBox(width: 4),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          child: const Text('完成'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    if (mounted) setState(() {});
+  }
+
+  /// 批量删除确认
+  Future<bool> _confirmDeleteBookSources(int count) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('删除 $count 个书源？'),
+        content: const Text(
+          '删除后书源仓库里也会一并移除。',
+          style: TextStyle(height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    return ok == true;
   }
 
   /// 双击源标签：删除该源（先确认）

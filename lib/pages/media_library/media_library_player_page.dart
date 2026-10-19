@@ -78,10 +78,13 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
     return AppPlayer(config: const AppConfig(title: 'TVBox'));
   }
 
-  void _rebuildPlayer({Duration? start}) {
+  Future<void> _rebuildPlayer({Duration? start}) async {
     final old = _player;
     if (old != null && _ownsPlayer) {
-      unawaited(old.dispose());
+      // ⚠️ 2026-10-19：必须 await dispose —— KSPlayer 的 close 是异步的，
+      //   不 await 就创建新实例会导致旧引擎未死透、新引擎就 open，
+      //   表现为「黑屏但有声音」（音频已起、视频层没挂上）。
+      await old.dispose();
     }
     final p = _newPlayer();
     _player = p;
@@ -153,9 +156,15 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
           key: ObjectKey(player),
           player: player,
           // 核心热切换：记住当前进度，按新偏好重建播放器续播
-          onEngineChanged: (_) {
+          // ⚠️ 2026-10-19：必须等 _rebuildPlayer 的 dispose 完成后再继续，
+          //   否则旧引擎未死透就创建新实例，导致「黑屏但有声音」。
+          onEngineChanged: (_) async {
+            // 先暂停再取进度：dispose 是异步的，期间继续播放会导致进度落后
+            if (_player?.state.playing == true) {
+              await _player?.pause();
+            }
             final pos = _player?.state.position;
-            _rebuildPlayer(
+            await _rebuildPlayer(
               start: (pos != null && pos > Duration.zero) ? pos : null,
             );
           },
