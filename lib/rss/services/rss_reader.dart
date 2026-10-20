@@ -67,6 +67,13 @@ class RssReader {
       extraHeaders: spec.headers,
     );
     var arts = _blacklist(source, parseArticles(source, body, url));
+    // 规则**全部失效**（站点改版 / 换域名）时按页面结构兜底。
+    // 用户 2026-10-20：「嗨漫之家看不了，但网页能打开」—— 站点从
+    // acgmhx.com 换到 acgmhn.com，旧的 `class.grid-item` 选择器一条都命中不了。
+    if (arts.isEmpty && source.hasRules && body.contains('<')) {
+      final generic = _blacklist(source, _genericHtmlList(source, body, url));
+      if (generic.isNotEmpty) arts = generic;
+    }
     var effectiveBody = body;
     var effectiveUrl = url;
 
@@ -107,7 +114,7 @@ class RssReader {
       // ⇒ 用户那份 txt 里 5 条站点型源（源仓库 / Yiove / 使用文档…）即使丢了
       //   `singleUrl` 标记也能被认出来，交给上层**内嵌网页直开**，
       //   而不是甩一句"没有抓到内容"（用户 2026-10-15 反复报的那句）。
-      siteLike: !source.hasRules && arts.isEmpty && !_looksLikeFeed(body),
+      siteLike: arts.isEmpty && !_looksLikeFeed(body) && body.contains('<'),
     );
   }
 
@@ -163,6 +170,77 @@ class RssReader {
       source.hasRules
           ? _parseByRules(source, body, pageUrl)
           : _parseStandardFeed(source, body, pageUrl);
+
+  /// 通用 HTML 列表兜底（**只在规则产出 0 条时**使用）。
+  ///
+  /// 站点改版后旧选择器全失效的情况很常见（例：嗨漫之家把
+  /// `class.grid-item` 换成了 `ul#list > li`）。这里按"结构化列表"的通用
+  /// 特征提取：容器子项都有链接 + 图片/标题，**至少 4 条才采纳**，
+  /// 避免把导航/推荐位当成文章列表。
+  static List<RssArticle> _genericHtmlList(
+      RssSource source, String body, String pageUrl) {
+    dom.Document doc;
+    try {
+      doc = html_parser.parse(body);
+    } catch (_) {
+      return const [];
+    }
+
+    const selectors = <String>[
+      'ul#list > li',
+      'ul.list > li',
+      '.list > li',
+      'article',
+    ];
+    List<dom.Element> items = const [];
+    for (final sel in selectors) {
+      try {
+        final els = doc.querySelectorAll(sel);
+        if (els.length >= 4) {
+          items = els;
+          break;
+        }
+      } catch (_) {/* 选择器不支持就试下一个 */}
+    }
+    if (items.isEmpty) return const [];
+
+    final out = <RssArticle>[];
+    final seen = <String>{};
+    for (final el in items) {
+      final a = el.querySelector('a[href]');
+      if (a == null) continue;
+      var href = (a.attributes['href'] ?? '').trim();
+      if (href.isEmpty ||
+          href.startsWith('#') ||
+          href.toLowerCase().startsWith('javascript')) {
+        continue;
+      }
+      href = _absUrl(href, pageUrl);
+      if (href.isEmpty || !seen.add(href)) continue;
+
+      final img = el.querySelector('img');
+      final imgSrc = (img?.attributes['data-src'] ??
+              img?.attributes['data-original'] ??
+              img?.attributes['src'] ??
+              '')
+          .trim();
+      final title = (img?.attributes['alt'] ??
+              a.attributes['title'] ??
+              el.querySelector('.title')?.text ??
+              a.text)
+          .trim();
+      if (title.isEmpty) continue;
+
+      out.add(RssArticle(
+        title: title,
+        link: href,
+        image: _absUrl(imgSrc, pageUrl),
+        sourceId: source.id,
+        sourceName: source.name,
+      ));
+    }
+    return out.length >= 4 ? out : const [];
+  }
 
   /// 黑名单过滤（URL 命中就跳过）。
   static List<RssArticle> _blacklist(RssSource source, List<RssArticle> list) {
