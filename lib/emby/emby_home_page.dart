@@ -34,7 +34,13 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
   String? _loadedServerId;
 
   // ── 顶部幻灯片（Backdrop 轮播）──────────────────────────────
-  final PageController _heroController = PageController(viewportFraction: 0.86);
+  //
+  // 循环：PageView 用**虚拟大页数**（itemCount: null），实际内容按
+  // `index % 长度` 取。这样从最后一张往右滑 / 自动轮播时是「继续往前」，
+  // 不会像原来那样 animateToPage(0) 一路倒着飞回去。
+  static const int _heroLoopBase = 10000;
+  final PageController _heroController =
+      PageController(viewportFraction: 0.86, initialPage: _heroLoopBase);
   Timer? _heroTimer;
   int _heroIndex = 0;
   List<EmbyItem> _heroItems = const [];
@@ -120,6 +126,7 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
         _heroItems = _pickHeroItems();
         _heroIndex = 0;
       });
+      _resetHeroPage();
       _scheduleHero();
     } on EmbyApiException catch (e) {
       if (!mounted) return;
@@ -157,15 +164,25 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
     return out;
   }
 
+  /// 列表刷新后把虚拟页号拨回起点（否则沿用旧页号会让圆点下标错位）。
+  void _resetHeroPage() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _heroItems.length <= 1) return;
+      if (_heroController.hasClients) {
+        _heroController.jumpToPage(_heroLoopBase);
+      }
+    });
+  }
+
   void _scheduleHero() {
     _heroTimer?.cancel();
     if (_heroItems.length <= 1) return;
     _heroTimer = Timer.periodic(const Duration(seconds: 6), (_) {
       if (!mounted || _heroItems.length <= 1) return;
       if (!_heroController.hasClients) return;
-      final next = (_heroIndex + 1) % _heroItems.length;
-      _heroController.animateToPage(
-        next,
+      // 无限 PageView：直接 nextPage，最后一张之后自然接到第一张
+      //（以前 `(i+1) % len` 从末页回到 0 会整条倒着滑一遍）。
+      _heroController.nextPage(
         duration: const Duration(milliseconds: 420),
         curve: Curves.easeOutCubic,
       );
@@ -460,15 +477,25 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
           child: PageView.builder(
             controller: _heroController,
             physics: const BouncingScrollPhysics(),
-            onPageChanged: (i) => setState(() => _heroIndex = i),
-            itemCount: _heroItems.length,
-            itemBuilder: (_, i) => Padding(
-              padding: EdgeInsets.only(
-                left: i == 0 ? 16 : 6,
-                right: i == _heroItems.length - 1 ? 16 : 6,
-              ),
-              child: _heroCard(_heroItems[i], cardWidth),
-            ),
+            onPageChanged: (i) {
+              final n = _heroItems.length;
+              if (n == 0) return;
+              setState(() => _heroIndex = i % n);
+            },
+            // null = 无限：内容按 `i % 长度` 取，形成首尾相接的循环
+            itemCount: _heroItems.length <= 1 ? 1 : null,
+            itemBuilder: (_, i) {
+              final n = _heroItems.length;
+              if (n == 0) return const SizedBox.shrink();
+              final idx = i % n;
+              return Padding(
+                padding: EdgeInsets.only(
+                  left: idx == 0 ? 16 : 6,
+                  right: idx == n - 1 ? 16 : 6,
+                ),
+                child: _heroCard(_heroItems[idx], cardWidth),
+              );
+            },
           ),
         ),
         const SizedBox(height: 10),

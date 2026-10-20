@@ -656,6 +656,14 @@ class _AdBlockSettingsPageState extends State<AdBlockSettingsPage> {
                 switchValue: _svc.showBubble,
                 onSwitchChanged: (v) => _svc.setShowBubble(v),
               ),
+              SettingsRow(
+                icon: Icons.open_in_new_rounded,
+                title: '禁止跳转第三方网站',
+                subtitle: '网页里点外站链接时先弹窗确认，默认禁止',
+                trailingSwitch: true,
+                switchValue: _svc.blockThirdParty,
+                onSwitchChanged: (v) => _svc.setBlockThirdParty(v),
+              ),
             ],
           ),
 

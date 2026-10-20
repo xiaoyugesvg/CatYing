@@ -1258,6 +1258,18 @@ class SpiderService {
   /// Map —— 不转的话请求头会被静默丢掉，表现为"解析成功却 403/黑屏"。
   Map<String, dynamic>? _normalizePlayResult(Map<String, dynamic>? r) {
     if (r == null) return null;
+    // Python 源（T3 规范）返回的是 `playUrl`（见 assets/python-project/.../__init__.py），
+    // 而详情页读的是 `url` ⇒ 不转的话 py 源表现为「详情页正常、点播放没反应」。
+    final u = r['url'];
+    final urlMissing = u == null || (u is String && u.trim().isEmpty);
+    if (urlMissing) {
+      final alt = r['playUrl'] ?? r['play_url'] ?? r['jx'];
+      if (alt is String && alt.trim().isNotEmpty) {
+        r['url'] = alt;
+      } else if (alt is List && alt.isNotEmpty) {
+        r['url'] = alt;
+      }
+    }
     final h = r['header'];
     if (h is String && h.trim().isNotEmpty) {
       try {

@@ -447,7 +447,11 @@ class _ContentViewState extends State<ContentView> with WidgetsBindingObserver {
                 builder: (context, paletteRev, __) => Obx(
                   () {
                     final features = NavFeatureService.instance.enabled;
-                    final cur = MainTabController.instance.selectedTab.value;
+                    final raw = MainTabController.instance.selectedTab.value;
+                    // 索引 2 是历史遗留的「收藏」占位页（实际渲染 ShelfPage）。
+                    // 若当前停在这里，底栏找不到对应项会回退成 0 ⇒ 看起来像
+                    // 「首页已选中」，点首页只触发 onReselect 而不切页。
+                    final cur = raw == 2 ? 1 : raw;
                     return JellyNavBar(
                       // 不再换 key：`palette` 是构造参数，每次重建都传新的
                       // `AppTheme.palette`，新实例自然会 rebuild 取到新色；
@@ -486,6 +490,14 @@ class _ContentViewState extends State<ContentView> with WidgetsBindingObserver {
                           ),
                       ],
                       onTap: (i) {
+                        if (i < 0 || i >= features.length) return;
+                        MainTabController.instance.select(features[i].tabIndex);
+                      },
+                      // 兜底：底栏的 currentIndex 是「按 features 反查」的，
+                      // 当实际 tab 不在底栏里（例如从首页右上角进了未启用的
+                      // 史藏）时会回退到 0。此时 JellyNavBar 认为「首页已选中」
+                      // 只回调 onReselect —— 这里照样切过去，保证点首页一定回首页。
+                      onReselect: (i) {
                         if (i < 0 || i >= features.length) return;
                         MainTabController.instance.select(features[i].tabIndex);
                       },

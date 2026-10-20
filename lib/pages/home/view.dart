@@ -14,6 +14,7 @@ import '../../widgets/engine_load_panel.dart';
 import '../../widgets/source_switch_sheet.dart';
 import '../../widgets/vod_card.dart';
 import '../webview/view.dart';
+import '../calendar/tv_calendar_page.dart';
 import 'controller.dart';
 import '../../widgets/home_search_bar.dart';
 import '../../services/main_tab_controller.dart';
@@ -220,6 +221,28 @@ class _HomePageState extends State<HomePage> {
               ),
               child: Icon(
                 Icons.schedule_outlined,
+                size: 16,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // 追剧日历：豆瓣当日 / 本周 / 本月热播与更新情况
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => Get.to(() => const TvCalendarPage()),
+            child: Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? AppTheme.palette.cardDark
+                    : AppTheme.palette.cardLight,
+                borderRadius: BorderRadius.circular(15),
+                border: Border.all(color: AppTheme.borderLight, width: 0.5),
+              ),
+              child: Icon(
+                Icons.calendar_month_rounded,
                 size: 16,
                 color: AppTheme.textPrimary,
               ),

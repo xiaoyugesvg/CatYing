@@ -71,17 +71,19 @@ enum NavFeature {
   /// （Emby 原来用彩色品牌图，暗色下深藏青底会糊进背景、浅色下又发灰，
   ///  用户 2026-10-20 要求「图标也根据主题变换」。）
   String? get iconAsset => switch (this) {
+        NavFeature.home => 'assets/icons/home.png',
         NavFeature.emby => 'assets/icons/emby.png',
         NavFeature.music => 'assets/icons/music.png',
         NavFeature.books => 'assets/icons/books.png',
+        NavFeature.live => 'assets/icons/live.png',
         _ => null,
       };
 
   /// 图标资源是否用前景色着色（[iconAsset] 对应的图）。
   ///
-  /// 目前都是白色蒙版，必须着色才能与其它图标颜色一致；
-  /// 以后若加彩色品牌图（不能着色），在这里返回 false 即可。
-  bool get iconAssetTinted => iconAsset != null;
+  /// · 首页图标是**彩色徽标**（七彩花瓣）：着色会把颜色全抹掉 ⇒ 原样显示；
+  /// · 其余几张是白色蒙版，必须着色才能与 Material 图标颜色一致。
+  bool get iconAssetTinted => iconAsset != null && this != NavFeature.home;
 
   /// 选中图标
   IconData get activeIcon => switch (this) {

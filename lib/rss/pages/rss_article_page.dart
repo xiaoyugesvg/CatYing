@@ -9,6 +9,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../common/theme.dart';
 import '../../services/ad_block_service.dart';
+import '../../services/third_party_nav_guard.dart';
 import '../../widgets/ad_block_bubble.dart';
 import '../models/rss_article.dart';
 import '../models/rss_source.dart';
@@ -266,6 +267,12 @@ class _RssWebViewPageState extends State<RssWebViewPage> {
           AdBlockService.instance.injectInto(_c, url);
           _refreshNavState();
         },
+        // 跳第三方站点先弹窗确认（默认禁止，见「设置 → 广告管理」）
+        onNavigationRequest: (req) => ThirdPartyNavGuard.decide(
+          context,
+          target: req.url,
+          siteUrl: widget.url,
+        ),
       ));
     AdBlockService.attach(_c);
     AdBlockService.instance.ensureLoaded();

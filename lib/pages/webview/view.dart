@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../services/app_log.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../../common/theme.dart';
+import '../../services/third_party_nav_guard.dart';
 
 /// 应用内 WebView 页面
 ///
@@ -53,6 +54,12 @@ class _InAppWebViewPageState extends State<InAppWebViewPage> {
               });
             }
           },
+          // 跳第三方站点先弹窗确认（默认禁止，见「设置 → 广告管理」）
+          onNavigationRequest: (req) => ThirdPartyNavGuard.decide(
+            context,
+            target: req.url,
+            siteUrl: widget.url,
+          ),
           onWebResourceError: (error) {
             // 仅打印错误，不弹 dialog（避免遮挡；用户在加载条上能看到失败）
             AppLog.instance.log(

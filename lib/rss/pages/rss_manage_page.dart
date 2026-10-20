@@ -1214,24 +1214,26 @@ class _RssManagePageState extends State<RssManagePage> {
       final res = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: const ['json', 'opml', 'xml', 'txt'],
+        // file_picker 13.x：`pickFiles()` 默认就支持多选（`allowMultiple`
+        // 参数已移除），返回 List<PlatformFile>；这里遍历全部文件。
       );
       if (res.isEmpty) return;
-      final f = res.first;
-      String text;
-      try {
-        // ⚠️ 必须 utf8.decode：String.fromCharCodes 会把中文源名变成乱码
-        text = utf8.decode(await f.readAsBytes(), allowMalformed: true);
-      } catch (_) {
-        final p = f.path;
-        if (p == null) {
-          AppToast.error('读不出这个文件');
-          return;
+      setState(() => _busy = true);
+      final all = <RssSource>[];
+      for (final f in res) {
+        String text;
+        try {
+          // ⚠️ 必须 utf8.decode：String.fromCharCodes 会把中文源名变成乱码
+          text = utf8.decode(await f.readAsBytes(), allowMalformed: true);
+        } catch (_) {
+          final p = f.path;
+          if (p == null) continue;
+          text = await File(p).readAsString();
         }
-        text = await File(p).readAsString();
+        all.addAll(parseRssSources(text));
       }
       if (!mounted) return;
-      setState(() => _busy = true);
-      await _absorb(text);
+      await _absorbList(all);
     } catch (e) {
       AppToast.error('导入失败：${_short(e)}');
     } finally {
@@ -1242,6 +1244,15 @@ class _RssManagePageState extends State<RssManagePage> {
   /// 解析文本 → 入库。
   Future<void> _absorb(String text) async {
     final list = parseRssSources(text);
+    if (list.isEmpty) {
+      AppToast.error('没解析出订阅源（支持 JSON / OPML / 每行一个地址）');
+      return;
+    }
+    await _absorbList(list);
+  }
+
+  /// 已解析好的源批量入库（多文件导入时合并成一次写盘）。
+  Future<void> _absorbList(List<RssSource> list) async {
     if (list.isEmpty) {
       AppToast.error('没解析出订阅源（支持 JSON / OPML / 每行一个地址）');
       return;

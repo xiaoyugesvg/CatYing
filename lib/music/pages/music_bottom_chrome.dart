@@ -279,6 +279,16 @@ class MusicBottomChrome extends StatelessWidget {
                 ? musicTabs[i].active
                 : musicTabs[i].icon,
             label: musicTabs[i].label,
+            // 「主页」与影视底栏的「首页」共用同一枚彩色徽标
+            //（用户 2026-10-20：「主页/首页图标改成这个」）
+            iconBuilder: musicTabs[i].label == '主页'
+                ? (color, size) => Image.asset(
+                      'assets/icons/home.png',
+                      width: size,
+                      height: size,
+                      fit: BoxFit.contain,
+                    )
+                : null,
           ),
       ],
       onTap: (i) {

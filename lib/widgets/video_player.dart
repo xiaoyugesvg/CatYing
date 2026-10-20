@@ -9,6 +9,7 @@ import '../services/app_log.dart';
 import '../services/tmdb_service.dart';
 import 'app_player.dart';
 import 'ks_player.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart' show DragToMoveArea;
 import '../common/theme.dart';
@@ -426,6 +427,97 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     _danmuEpCache[key] = episodeId;
     while (_danmuEpCache.length > _danmuCacheLimit) {
       _danmuEpCache.remove(_danmuEpCache.keys.first);
+    }
+  }
+
+  // ── 弹幕**磁盘**缓存 ────────────────────────────────────────────
+  // 进程内缓存只在本集/本会话有效，App 重启后同一集还要再走
+  // search→bangumi→comment 三次往返。用户 2026-10-20：「别的软件一播放就
+  // 出弹幕，这个要好久」⇒ 把整集弹幕落盘，重看时几毫秒读出来直接上屏。
+  static Directory? _danmuDiskDirCached;
+
+  /// 文件名用的稳定短哈希（FNV-1a）—— `String.hashCode` 不保证跨进程一致。
+  static String _danmuDiskHash(String s) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.codeUnitAt(i);
+      h = (h * 0x01000193) & 0xFFFFFFFF;
+    }
+    return h.toRadixString(16).padLeft(8, '0');
+  }
+
+  static Future<Directory?> _danmuDiskDir() async {
+    final cached = _danmuDiskDirCached;
+    if (cached != null) return cached;
+    try {
+      final root = await getApplicationSupportDirectory();
+      final d = Directory('${root.path}${Platform.pathSeparator}danmu_cache');
+      if (!await d.exists()) await d.create(recursive: true);
+      return _danmuDiskDirCached = d;
+    } catch (e) {
+      AppLog.instance.log('[video_player] danmu cache dir fail: $e');
+      return null;
+    }
+  }
+
+  Future<File?> _danmuDiskFile(String key) async {
+    final d = await _danmuDiskDir();
+    if (d == null) return null;
+    return File(
+      '${d.path}${Platform.pathSeparator}${_danmuDiskHash(key)}.json',
+    );
+  }
+
+  /// 读磁盘缓存；没有 / 解析失败返回 null。
+  Future<List<DanmuItem>?> _danmuReadDiskCache(String key) async {
+    try {
+      final f = await _danmuDiskFile(key);
+      if (f == null || !await f.exists()) return null;
+      final decoded = jsonDecode(await f.readAsString());
+      if (decoded is! List) return null;
+      final out = <DanmuItem>[];
+      for (final e in decoded) {
+        if (e is! List || e.length < 4) continue;
+        out.add(DanmuItem(
+          (e[0] as num).toDouble(),
+          e[1].toString(),
+          Color((e[2] as num).toInt()),
+          (e[3] as num).toInt(),
+        ));
+      }
+      return out.isEmpty ? null : out;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 写磁盘缓存（失败静默）；目录内最多保留 [_danmuDiskLimit] 集。
+  static const int _danmuDiskLimit = 80;
+
+  Future<void> _danmuWriteDiskCache(String key, List<DanmuItem> list) async {
+    if (list.isEmpty) return;
+    try {
+      final f = await _danmuDiskFile(key);
+      if (f == null) return;
+      await f.writeAsString(jsonEncode([
+        for (final d in list) [d.time, d.text, d.color.value, d.mode],
+      ]));
+      final d = await _danmuDiskDir();
+      if (d == null) return;
+      final files = await d
+          .list()
+          .where((e) => e is File && e.path.endsWith('.json'))
+          .cast<File>()
+          .toList();
+      if (files.length <= _danmuDiskLimit) return;
+      files.sort((a, b) => a.statSync().modified.compareTo(b.statSync().modified));
+      for (var i = 0; i < files.length - _danmuDiskLimit; i++) {
+        try {
+          await files[i].delete();
+        } catch (_) {}
+      }
+    } catch (e) {
+      AppLog.instance.log('[video_player] danmu cache write fail: $e');
     }
   }
 
@@ -1361,6 +1453,33 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     // url 命中不到时是否还值得用片名兜底（仅 http(s) 播放地址）
     final titleFallbackUsable = title.isNotEmpty && url.startsWith('http');
 
+    // 磁盘缓存键：有片名就按「片名|年份|集号」（与片名兜底的进程内缓存同构），
+    // 没片名退回播放地址 —— 同一集两种情况下键都稳定。
+    var cleanTitle = title.isEmpty ? '' : TmdbService.cleanTitle(title);
+    if (cleanTitle.isEmpty) cleanTitle = title;
+    final cacheKey = title.isEmpty
+        ? 'u:$url'
+        : '${cleanTitle.toLowerCase()}|'
+            '${TmdbService.extractYear(title, '') ?? ''}|'
+            '${widget.selectedEpisodeIndex}';
+
+    // ① 磁盘缓存命中 → 直接上屏（几毫秒），不等远端 3~4 次往返。
+    final disk = await _danmuReadDiskCache(cacheKey);
+    if (disk != null) {
+      if (!mounted || loadGen != _danmuLoadGen) return;
+      _danmusRaw = disk;
+      final filtered = _filterByBlockWords(disk);
+      AppLog.instance.log(
+        '[video_player] danmu 磁盘缓存命中: ${filtered.length} 条 ($cacheKey)',
+      );
+      _danmuLastFailAt = null;
+      setState(() {
+        _danmus = filtered;
+        _danmuLoaded = true;
+      });
+      return;
+    }
+
     final base = _danmuApiBase();
     // ✅ 修复：前面已经有 `?url=`，这里统一用 `&` 接 format
     //   （原来 titleFallbackUsable=true 时会拼成 ?url=xxx?format=json —— 两个问号 ✗）
@@ -1377,57 +1496,82 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     final urlFuture = _danmuGetText(api);
     Future<String?>? searchFuture;
     if (titleFallbackUsable) {
-      var clean = TmdbService.cleanTitle(title);
-      if (clean.isEmpty) clean = title;
       searchFuture = _danmuGetText(
-        '$base/api/v2/search/anime?keyword=${Uri.encodeQueryComponent(clean)}',
+        '$base/api/v2/search/anime'
+        '?keyword=${Uri.encodeQueryComponent(cleanTitle)}',
       );
     }
 
     // 🔴 请求失败（null）≠ 真的 0 条（'' 或解析后为空）：
     //    失败时**直接 return，不置位 `_danmuLoaded`**，留给下次重试；
     //    否则一次网络波动就把本次播放会话的弹幕永久锁死。
-    final urlBody = await urlFuture;
-    if (urlBody == null) {
-      if (loadGen == _danmuLoadGen) {
-        _danmuLastFailAt = DateTime.now();
-        _scheduleDanmuRetry(url); // 见该方法的说明：确保失败后真的还会重试
-      }
-      AppLog.instance.log('[video_player] danmu URL 探测失败，等待重试');
-      return;
+    //
+    // ✅ 2026-10-20：「别的软件一播放就出弹幕，这个要等好久」——
+    //   URL 探测原来被**无条件 await**（单请求最长 8s），而片名兜底要从
+    //   搜索→分集→弹幕串行 3 次往返 ⇒ 探测慢的时候明明兜底已经拿到数据，
+    //   还要干等它 ✗。现在探测只**软等** 1.5s，超时就先看兜底链路，
+    //   最后再把迟到的探测结果补上。
+    String? urlBody;
+    var urlPending = false;
+    try {
+      urlBody = await urlFuture.timeout(const Duration(milliseconds: 1500));
+    } on TimeoutException {
+      urlPending = true;
     }
-    var list = await parseDanmuBodyAsync(urlBody);
+    var list =
+        urlBody == null ? <DanmuItem>[] : await parseDanmuBodyAsync(urlBody);
 
     // ---- 按片名兜底 ----
     // 该弹幕服务的 url 匹配要求播放地址与库里索引的**标准平台地址**完全一致；
     // spider 源给的多是 CDN 直链（带签名/会变），几乎必然 0 条。
     // 服务同时提供 搜索→分集→弹幕 三步链路，此处作为兜底。
     var danmuSource = 'url';
+    List<DanmuItem>? fb;
     if (list.isEmpty && titleFallbackUsable) {
-      final fb = await _danmuFetchByTitle(
+      fb = await _danmuFetchByTitle(
         base,
         title,
         epName,
         url,
         searchFuture: searchFuture,
       );
-      if (fb == null) {
-        // 兜底链路请求失败：同上，不置位，等待重试
-        if (loadGen == _danmuLoadGen) {
-          _danmuLastFailAt = DateTime.now();
-          _scheduleDanmuRetry(url); // 同上：让失败真的可重试
-        }
-        AppLog.instance.log('[video_player] danmu 片名兜底请求失败，等待重试');
-        return;
+      if (fb != null) {
+        list = fb;
+        if (list.isNotEmpty) danmuSource = 'title';
       }
-      list = fb;
-      if (list.isNotEmpty) danmuSource = 'title';
+    }
+
+    // 探测只是"慢"（软超时）而非失败 → 等它的最终结果补一刀
+    if (list.isEmpty && urlPending) {
+      final late = await urlFuture;
+      if (late != null) {
+        urlBody = late;
+        final lateList = await parseDanmuBodyAsync(late);
+        if (lateList.isNotEmpty) {
+          list = lateList;
+          danmuSource = 'url';
+        }
+      }
+    }
+
+    // 两条链路都**请求失败**（不是"真 0 条"）→ 不置位，留给下次重试
+    final urlOk = urlBody != null;
+    final titleOk = !titleFallbackUsable || fb != null;
+    if (list.isEmpty && !urlOk && !titleOk) {
+      if (loadGen == _danmuLoadGen) {
+        _danmuLastFailAt = DateTime.now();
+        _scheduleDanmuRetry(url); // 见该方法的说明：确保失败后真的还会重试
+      }
+      AppLog.instance.log('[video_player] danmu 请求失败，等待重试');
+      return;
     }
 
     // ⚠️ 2026-10-14：**先留一份未按屏蔽词过滤的原始列表** —— 播放中修改屏蔽词时
     //   用它重新过滤。原来只在"请求返回时"过滤一次，而 `DanmuLayer` 也不感知
     //   屏蔽词 ⇒ 改屏蔽词对**已加载的这一集**完全无效，必须重进播放页。
     _danmusRaw = list;
+    // 落盘：下次重看这一集直接从磁盘秒出（不阻塞本次上屏）
+    if (list.isNotEmpty) unawaited(_danmuWriteDiskCache(cacheKey, list));
     list = _filterByBlockWords(list);
     AppLog.instance.log(
       '[video_player] danmu loaded: ${list.length} 条 (source=$danmuSource, title=$title)',
@@ -3301,8 +3445,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             _danmuToggleButton(),
             _engineSwitchButton(),
 
-            // 字幕（仅当媒体含内嵌字幕轨时出现；AVPlayer 内核恒无 → 自动隐藏）
-            if (_subtitleTracks.isNotEmpty) _subtitleButton(),
+            // 字幕：内核支持字幕就显示入口（mpv / KSPlayer）；
+            // 当前媒体没有内嵌轨时点开是「暂无字幕」说明，而不是干脆看不到按钮。
+            if (_subtitleTracks.isNotEmpty || _player.supportsSubtitles)
+              _subtitleButton(),
 
             if (_isNativeFullscreen) ...[
               const SizedBox(width: 4),
@@ -4841,6 +4987,21 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       _showMessage('投屏：当前没有可投屏的视频地址');
       return;
     }
+    // 投屏时本地必须停：否则电视和手机同时出声（用户 2026-10-20「修复投屏功能」）
+    try {
+      if (_player.state.playing) await _player.pause();
+    } catch (e) {
+      AppLog.instance.log('[video_player] 投屏前暂停本地失败: $e');
+    }
+    // DLNA 设备不会带自定义请求头（Referer/UA），遇到防盗链源电视上会黑屏。
+    // 这里只记日志便于排查；播放地址本身照常投递。
+    final castHeaders = widget.headers ?? const <String, String>{};
+    if (castHeaders.isNotEmpty) {
+      AppLog.instance.w(
+        '[video_player] 投屏地址带 ${castHeaders.length} 个请求头，'
+        '部分电视可能无法直接播放',
+      );
+    }
     Get.toNamed(
       '/dlna',
       parameters: {
@@ -5271,6 +5432,17 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                       : null,
                   onTap: () => Navigator.of(sheetContext).pop(-1),
                 ),
+                if (tracks.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(16, 8, 16, 12),
+                    child: Text(
+                      '当前视频没有内嵌字幕轨',
+                      style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: AppTheme.fontSubhead,
+                      ),
+                    ),
+                  ),
                 for (var i = 0; i < tracks.length; i++)
                   ListTile(
                     dense: true,

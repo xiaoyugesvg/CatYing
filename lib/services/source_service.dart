@@ -185,37 +185,58 @@ class SourceService {
   }
 
   /// 解析 filters 字段
+  ///
+  /// 兼容几种常见写法（py / drpy / TVBox 源混用）：
+  ///   · `{"分类id": [{key,name,value:[{n,v}]}]}`  —— 标准
+  ///   · `[{key,name,value:[...]}]`                —— 整源共用一组筛选
+  ///   · `value` / `values` 两种键名；值项 `{n,v}` / `{name,value}` / 纯字符串
   Map<String, List<SortFilter>> _parseFilters(dynamic filtersData) {
     final filtersMap = <String, List<SortFilter>>{};
     if (filtersData == null) return filtersMap;
 
-    final filters = filtersData as Map<String, dynamic>;
-    for (final entry in filters.entries) {
-      final typeId = entry.key;
-      final filterList = entry.value as List<dynamic>;
-      final parsedFilters = <SortFilter>[];
-      for (final filter in filterList) {
-        final f = filter as Map<String, dynamic>;
-        final key = f['key'] as String? ?? '';
-        final name = f['name'] as String? ?? key;
-        final values = <SortFilterValue>[];
-        if (f['value'] != null) {
-          for (final v in f['value'] as List<dynamic>) {
-            final vv = v as Map<String, dynamic>;
-            final n = vv['n'] as String? ?? '';
-            final val = vv['v'] as String? ?? '';
+    if (filtersData is List) {
+      final parsed = _parseFilterGroups(filtersData);
+      if (parsed.isNotEmpty) filtersMap['*'] = parsed;
+      return filtersMap;
+    }
+    if (filtersData is! Map) return filtersMap;
+    for (final entry in filtersData.entries) {
+      final parsed = _parseFilterGroups(entry.value);
+      if (parsed.isNotEmpty) filtersMap['${entry.key}'] = parsed;
+    }
+    return filtersMap;
+  }
+
+  /// 把一组筛选配置解析成 [SortFilter]（键名/值形状都做兼容）。
+  List<SortFilter> _parseFilterGroups(dynamic value) {
+    if (value is! List) return const <SortFilter>[];
+    final out = <SortFilter>[];
+    for (final raw in value) {
+      if (raw is! Map) continue;
+      final f = Map<String, dynamic>.from(raw);
+      final key = (f['key'] ?? f['k'] ?? '').toString();
+      if (key.isEmpty) continue;
+      final name = (f['name'] ?? f['n'] ?? key).toString();
+      final values = <SortFilterValue>[];
+      final rawValues = f['value'] ?? f['values'] ?? f['v'];
+      if (rawValues is List) {
+        for (final v in rawValues) {
+          if (v is Map) {
+            final vv = Map<String, dynamic>.from(v);
+            final n = (vv['n'] ?? vv['name'] ?? vv['v'] ?? '').toString();
+            final val = (vv['v'] ?? vv['value'] ?? '').toString();
             if (n.isNotEmpty || val.isNotEmpty) {
               values.add(SortFilterValue(n: n, v: val));
             }
+          } else if (v != null) {
+            final s = v.toString();
+            if (s.isNotEmpty) values.add(SortFilterValue(n: s, v: s));
           }
         }
-        if (key.isNotEmpty) {
-          parsedFilters.add(SortFilter(key: key, name: name, values: values));
-        }
       }
-      filtersMap[typeId] = parsedFilters;
+      out.add(SortFilter(key: key, name: name, values: values));
     }
-    return filtersMap;
+    return out;
   }
 
   List<SortData> _parseXMLCategories(String xml) {
@@ -782,13 +803,21 @@ class SourceService {
     // 解析分类
     if (result['class'] != null) {
       for (final cls in result['class'] as List<dynamic>) {
-        final c = cls as Map<String, dynamic>;
-        final id = c['type_id'] is int
-            ? c['type_id'].toString()
-            : c['type_id'] as String? ?? '';
-        final name = c['type_name'] as String? ?? '';
-        sorts.add(SortData(
-            id: id, name: name, filters: filtersMap[id] ?? []));
+        if (cls is! Map) continue;
+        final c = Map<String, dynamic>.from(cls);
+        // 兼容 type_id/type_name 与 id/name 两种写法（py 源常见后者）
+        final rawId = c['type_id'] ?? c['id'] ?? c['tid'];
+        final id = rawId?.toString() ?? '';
+        if (id.isEmpty) continue;
+        final name = (c['type_name'] ?? c['name'] ?? id).toString();
+        // 少数源把 filters 直接挂在分类项里；顶层共用组用 '*' 兜底
+        final own = _parseFilters(c['filters'])[id] ?? const <SortFilter>[];
+        final merged = <SortFilter>[
+          ...?filtersMap[id],
+          ...?filtersMap['*'],
+          ...own,
+        ];
+        sorts.add(SortData(id: id, name: name, filters: merged));
       }
     }
 

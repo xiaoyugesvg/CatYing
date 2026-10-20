@@ -36,7 +36,7 @@ class _NavAppearancePageState extends State<NavAppearancePage> {
             tinted: f.iconAssetTinted,
           ),
         // 音乐菜单（同样是 JellyNavBar，但标签与主菜单不同）
-        (label: '主页', icon: Icons.home_rounded, asset: null, tinted: false),
+        (label: '主页', icon: Icons.home_rounded, asset: 'assets/icons/home.png', tinted: false),
         (label: '乐库', icon: Icons.library_music_rounded, asset: null, tinted: false),
         (label: '榜单', icon: Icons.leaderboard_rounded, asset: null, tinted: false),
         (label: '搜索', icon: Icons.search_rounded, asset: null, tinted: false),

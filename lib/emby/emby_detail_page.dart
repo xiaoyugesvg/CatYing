@@ -180,36 +180,76 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
             maxHeight: 1080,
           )
         : _api.imageUrl(_item.id, tag: _item.imageTag, maxHeight: 1080);
+    // ⚠️ 头图**不能再 cover 铺满整屏**：Backdrop 是 16:9，手机屏是竖的，
+    //   cover 会把图横向裁到只剩中间一小块（用户 2026-10-20 截图：
+    //   「封面图片放大了很多」）。现在改成「顶部 16:9 清晰头图 + 全屏模糊色晕」。
+    final w = MediaQuery.sizeOf(context).width;
+    final bannerH = w * 9 / 16;
     return Stack(
       fit: StackFit.expand,
       children: [
-        // 没有 Backdrop 时用海报铺满并模糊，避免一张竖图被硬拉成横屏
-        ImageFiltered(
-          imageFilter: ui.ImageFilter.blur(
-            sigmaX: hasBackdrop ? 0 : 18,
-            sigmaY: hasBackdrop ? 0 : 18,
-          ),
-          child: CachedNetworkImage(
-            imageUrl: url,
-            httpHeaders: _api.imageHeaders,
-            fit: BoxFit.cover,
-            placeholder: (_, _) => const ColoredBox(color: Colors.black),
-            errorWidget: (_, _, _) => const ColoredBox(color: Colors.black),
+        // ① 内容底色（下半屏与正文容器同色，渐变才有落点）
+        const ColoredBox(color: Color(0xFF0D0D12)),
+        // ② 柔和底：同一张图模糊铺满，只保留色晕（不做清晰填充）
+        Positioned.fill(
+          child: ImageFiltered(
+            imageFilter: ui.ImageFilter.blur(sigmaX: 32, sigmaY: 32),
+            child: Opacity(
+              opacity: 0.45,
+              child: CachedNetworkImage(
+                imageUrl: url,
+                httpHeaders: _api.imageHeaders,
+                fit: BoxFit.cover,
+                placeholder: (_, _) => const ColoredBox(color: Colors.black),
+                errorWidget: (_, _, _) => const ColoredBox(color: Colors.black),
+              ),
+            ),
           ),
         ),
-        // 顶部压暗（状态栏/返回键可读）+ 底部压暗（白色标题可读）
-        const DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Color(0x8C000000),
-                Color(0x33000000),
-                Color(0x66000000),
-                Color(0xF0000000),
-              ],
-              stops: [0, 0.35, 0.7, 1],
+        // ③ 顶部清晰头图：高度 = 宽 × 9/16 ⇒ 不放大、不裁切
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          height: bannerH,
+          child: ImageFiltered(
+            imageFilter: ui.ImageFilter.blur(
+              sigmaX: hasBackdrop ? 0 : 18,
+              sigmaY: hasBackdrop ? 0 : 18,
+            ),
+            child: CachedNetworkImage(
+              imageUrl: url,
+              httpHeaders: _api.imageHeaders,
+              fit: BoxFit.cover,
+              placeholder: (_, _) => const ColoredBox(color: Colors.black),
+              errorWidget: (_, _, _) => const ColoredBox(color: Colors.black),
+            ),
+          ),
+        ),
+        // ④ 渐变：顶部压暗（状态栏/返回键可读）+ 头图底边渐隐到内容底色。
+        //    铺满整屏并**在正文之前完全变成不透明底色**，否则渐隐结束后
+        //    模糊色晕又露出来（出现一条"分层"的硬边）。
+        Positioned.fill(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: const [
+                  Color(0x8C000000),
+                  Color(0x22000000),
+                  Color(0x000D0D12),
+                  Color(0xFF0D0D12),
+                  Color(0xFF0D0D12),
+                ],
+                stops: [
+                  0,
+                  0.10,
+                  (bannerH / MediaQuery.sizeOf(context).height) * 0.75,
+                  (bannerH / MediaQuery.sizeOf(context).height) + 0.10,
+                  1,
+                ],
+              ),
             ),
           ),
         ),

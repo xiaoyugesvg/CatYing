@@ -733,13 +733,19 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                   child: Row(
                     children: [
-                      _tabPill(
-                        '本地 $localCount',
-                        _tab == 0,
-                        () => setState(() => _tab = 0),
+                      // ⚠️ 两个 tab 必须**各占一半**：原来第一个是自然宽度、
+                      //   第二个用 Flexible（Container 带 alignment ⇒ 撑满剩余）
+                      //   ⇒ 订阅那一颗被拉成一整行长条（用户 2026-10-20 截图：
+                      //   「这个分类的按钮太大了吧，要么两个对半分」）。
+                      Expanded(
+                        child: _tabPill(
+                          '本地 $localCount',
+                          _tab == 0,
+                          () => setState(() => _tab = 0),
+                        ),
                       ),
                       const SizedBox(width: 8),
-                      Flexible(
+                      Expanded(
                         child: _tabPill(
                           subName,
                           _tab == 1,

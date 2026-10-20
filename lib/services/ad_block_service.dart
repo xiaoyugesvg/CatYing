@@ -47,6 +47,9 @@ class AdBlockService extends ChangeNotifier {
   static const String _kFilterAt = 'adblock_filter_at_v1';
   static const String _kFilterOrigin = 'adblock_filter_origin_v1'; // custom | builtin
 
+  /// 网页跳第三方站点时是否拦截（默认**禁止**，弹窗让用户确认）。
+  static const String _kBlockThirdParty = 'adblock_block_third_party_v1';
+
   /// **内置**的 CSS 过滤器（**默认就用它，不用联网**）：
   /// 从 Adblock4limbo 的 `.user.css` 里抽出「元素隐藏」那一块
   /// （18008 条通用广告选择器 + `display:none!important`，约 321 KB），
@@ -71,6 +74,7 @@ class AdBlockService extends ChangeNotifier {
   bool _enabled = true;
   bool _bubble = true;
   bool _builtin = true;
+  bool _blockThirdParty = true;
   bool _loaded = false;
 
   final List<AdBlockRule> _rules = [];
@@ -101,6 +105,9 @@ class AdBlockService extends ChangeNotifier {
 
   /// 是否叠加内置通用选择器
   bool get builtinEnabled => _builtin;
+
+  /// 网页里跳转**第三方站点**时是否先弹窗确认（默认开 = 默认禁止）
+  bool get blockThirdParty => _blockThirdParty;
 
   List<AdBlockRule> get rules => List.unmodifiable(_rules);
 
@@ -576,6 +583,7 @@ class AdBlockService extends ChangeNotifier {
       _enabled = prefs.getBool(_kEnabled) ?? true;
       _bubble = prefs.getBool(_kBubble) ?? true;
       _builtin = prefs.getBool(_kBuiltin) ?? true;
+      _blockThirdParty = prefs.getBool(_kBlockThirdParty) ?? true;
       _builtinOff
         ..clear()
         ..addAll(prefs.getStringList(_kBuiltinOff) ?? const []);
@@ -626,12 +634,19 @@ class AdBlockService extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setBlockThirdParty(bool v) async {
+    _blockThirdParty = v;
+    await _saveFlags();
+    notifyListeners();
+  }
+
   Future<void> _saveFlags() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_kEnabled, _enabled);
       await prefs.setBool(_kBubble, _bubble);
       await prefs.setBool(_kBuiltin, _builtin);
+      await prefs.setBool(_kBlockThirdParty, _blockThirdParty);
       await prefs.setStringList(_kBuiltinOff, _builtinOff.toList());
       await prefs.setBool(_kFilterOn, _filterOn);
       await prefs.setString(_kFilterSrc, _filterSrc);

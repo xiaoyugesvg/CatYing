@@ -25,7 +25,8 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
   /// 直播源排序：0 时间 / 1 名称 / 2 频率
   int _sort = 0;
   bool _searching = false;
-  bool _compact = false;
+  /// 源列表展示形态：false = 列表（一行一源），true = 卡片（一行两源）
+  bool _cardView = false;
   String _keyword = '';
 
   /// 源使用次数（选台/切源时累加，供「频率」排序）
@@ -215,18 +216,18 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                   ),
                 ),
               ),
-              // 视图：标准 / 紧凑
+              // 视图：列表 / 卡片（卡片一行两个）
               IconButton(
-                tooltip: _compact ? '标准视图' : '紧凑视图',
+                tooltip: _cardView ? '列表视图' : '卡片视图',
                 visualDensity: VisualDensity.compact,
                 icon: Icon(
-                  _compact
-                      ? Icons.view_agenda_rounded
-                      : Icons.view_headline_rounded,
+                  _cardView
+                      ? Icons.view_list_rounded
+                      : Icons.grid_view_rounded,
                   size: 20,
                   color: AppTheme.textSecondary,
                 ),
-                onPressed: () => setState(() => _compact = !_compact),
+                onPressed: () => setState(() => _cardView = !_cardView),
               ),
             ],
           ),
@@ -263,71 +264,67 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
               ),
             ),
           const SizedBox(height: 2),
-          Container(
-            decoration: BoxDecoration(
-              color: AppTheme.backgroundSecondary,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Obx(() {
-              // 依赖 sourcesTick，改名/增删后强制重建
-              final _ = LiveService.instance.sourcesTick.value;
-              final svc = LiveService.instance;
-              final srcs = svc.sources.toList();
-              final visible = _visibleSources(srcs);
-              // 只有「无关键词 + 时间排序」时才允许拖动，避免排序把手错位
-              final canReorder = _keyword.trim().isEmpty && _sort == 0;
-              // 「添加直播源」按钮必须**始终**可见：空列表时也要能直接加，
-              // 否则全新安装要先到直播页加一个源、设置页才冒出按钮（用户实测困惑）。
-              return Column(
-                children: [
-                  if (srcs.isEmpty)
-                    const _EmptyRow()
-                  else if (visible.isEmpty)
-                    const ListTile(
-                      title: Text('没有匹配的直播源'),
-                      subtitle: Text('换个关键词试试'),
-                    )
-                  else if (canReorder)
-                    // 源列表可拖动排序；「添加直播源」放在 ReorderableListView
-                    // 之外，因此不参与排序、也不可拖。
-                    ReorderableListView(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      buildDefaultDragHandles: false,
-                      onReorder: svc.reorderSource,
-                      children: [
-                        for (var i = 0; i < srcs.length; i++)
-                          _sourceTile(
-                            i,
-                            srcs[i],
-                            key: ValueKey(
-                              '$i|${srcs[i].name}|${svc.getSourceUrl(i) ?? ''}',
-                            ),
-                            dense: _compact,
+          Obx(() {
+            // 依赖 sourcesTick，改名/增删后强制重建
+            final _ = LiveService.instance.sourcesTick.value;
+            final svc = LiveService.instance;
+            final srcs = svc.sources.toList();
+            final visible = _visibleSources(srcs);
+            // 只有「列表视图 + 无关键词 + 时间排序」时才允许拖动：
+            // 卡片视图是两列网格，拖动会跨列错位，直接不给手柄。
+            final canReorder =
+                !_cardView && _keyword.trim().isEmpty && _sort == 0;
+            // 「添加直播源」按钮必须**始终**可见：空列表时也要能直接加，
+            // 否则全新安装要先到直播页加一个源、设置页才冒出按钮（用户实测困惑）。
+            return Column(
+              children: [
+                if (srcs.isEmpty)
+                  _cardWrap(const _EmptyRow())
+                else if (visible.isEmpty)
+                  _cardWrap(ListTile(
+                    title: Text('没有匹配的直播源'),
+                    subtitle: Text('换个关键词试试'),
+                  ))
+                else if (_cardView)
+                  _sourceGrid(visible)
+                else if (canReorder)
+                  // 源列表可拖动排序；每个源是**独立卡片**（以前整块包在
+                  // 一个 Container 里，看起来像一整张大卡）。
+                  ReorderableListView(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    buildDefaultDragHandles: false,
+                    onReorder: svc.reorderSource,
+                    children: [
+                      for (var i = 0; i < srcs.length; i++)
+                        _sourceTile(
+                          i,
+                          srcs[i],
+                          key: ValueKey(
+                            '$i|${srcs[i].name}|${svc.getSourceUrl(i) ?? ''}',
                           ),
-                      ],
-                    )
-                  else
-                    Column(
-                      children: [
-                        for (final e in visible)
-                          _sourceTile(
-                            e.$1,
-                            e.$2,
-                            key: ValueKey(
-                              '${e.$1}|${e.$2.name}|'
-                              '${svc.getSourceUrl(e.$1) ?? ''}',
-                            ),
-                            showHandle: false,
-                            dense: _compact,
+                        ),
+                    ],
+                  )
+                else
+                  Column(
+                    children: [
+                      for (final e in visible)
+                        _sourceTile(
+                          e.$1,
+                          e.$2,
+                          key: ValueKey(
+                            '${e.$1}|${e.$2.name}|'
+                            '${svc.getSourceUrl(e.$1) ?? ''}',
                           ),
-                      ],
-                    ),
-                  _addTile(),
-                ],
-              );
-            }),
-          ),
+                          showHandle: false,
+                        ),
+                    ],
+                  ),
+                _cardWrap(_addTile(), margin: _cardView ? 0 : 8),
+              ],
+            );
+          }),
           SizedBox(height: 24),
           Text(
             '全局 EPG 地址',
@@ -497,8 +494,15 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
         : isMaiyou
         ? '麦优订阅 · ${src.statusText()}'
         : src.statusText();
-    return ListTile(
+    return Container(
       key: key,
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundSecondary,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: ListTile(
       onTap: () => _selectSource(index, src),
       contentPadding: EdgeInsets.symmetric(
         horizontal: 12,
@@ -697,6 +701,45 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
           ),
         ],
       ),
+      ),
+    );
+  }
+
+  /// 统一样式的独立卡片（空态 / 没有匹配 / 添加源共用）。
+  Widget _cardWrap(Widget child, {double margin = 8}) {
+    return Container(
+      margin: EdgeInsets.only(bottom: margin),
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundSecondary,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: child,
+    );
+  }
+
+  /// 卡片视图：一行两个源，每个源一张独立卡片。
+  Widget _sourceGrid(List<(int, LiveSource)> visible) {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: visible.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
+        mainAxisExtent: 96,
+      ),
+      itemBuilder: (_, i) {
+        final e = visible[i];
+        return _sourceTile(
+          e.$1,
+          e.$2,
+          key: ValueKey('card|${e.$1}|${e.$2.name}'),
+          showHandle: false,
+          dense: true,
+        );
+      },
     );
   }
 

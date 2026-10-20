@@ -8,6 +8,7 @@ import '../../hiker/pages/hiker_settings_page.dart';
 import 'controller.dart';
 import 'sub/about_settings_page.dart';
 import 'sub/ad_block_settings_page.dart';
+import 'sub/calendar_settings_page.dart';
 import 'sub/unified_theme_settings_page.dart';
 import 'sub/danmu_settings_page.dart';
 import 'sub/data_source_settings_page.dart';
@@ -138,6 +139,13 @@ class _SettingsPageState extends State<SettingsPage> {
                   icon: Icons.movie_filter_outlined,
                   title: 'TMDB管理',
                   onTap: () => Get.to(() => const MetadataSettingsPage()),
+                ),
+                const SizedBox(height: AppTheme.spacingMD),
+                // 追剧日历（用户 2026-10-20）：首页右上角日历入口的数据设置
+                _categoryTile(
+                  icon: Icons.calendar_month_rounded,
+                  title: '追剧日历',
+                  onTap: () => Get.to(() => const CalendarSettingsPage()),
                 ),
                 const SizedBox(height: AppTheme.spacingMD),
 
