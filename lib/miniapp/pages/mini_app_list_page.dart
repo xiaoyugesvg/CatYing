@@ -425,7 +425,7 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
       );
     }
     if (_viewMode.isList) {
-      // 列表模式：一行一个（长按同样出菜单）
+      // 列表模式：一行一个（长按条目直接拖动排序，菜单在 ⋮）
       return ListView(
         padding: const EdgeInsets.fromLTRB(
           AppTheme.spacingMD,
@@ -436,27 +436,16 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
         ),
         children: [
           for (final a in apps)
-            canDrag
-                ? DragTarget<String>(
-                    onWillAcceptWithDetails: (d) => d.data != a.id,
-                    onAcceptWithDetails: (d) => _moveApp(d.data, a.id),
-                    builder: (_, candidate, _) => _listRow(
-                      title: a.name,
-                      subtitle: _appTag(a),
-                      onTap: () => _openApp(a),
-                      onLongPress: () => _showAppMenu(a),
-                      dragHandle: CardDragHandle(
-                        data: a.id,
-                        label: a.name,
-                      ),
-                    ),
-                  )
-                : _listRow(
-                    title: a.name,
-                    subtitle: _appTag(a),
-                    onTap: () => _openApp(a),
-                    onLongPress: () => _showAppMenu(a),
-                  ),
+            _draggableApp(
+              a,
+              canDrag,
+              _listRow(
+                title: a.name,
+                subtitle: _appTag(a),
+                onTap: () => _openApp(a),
+                onMenu: () => _showAppMenu(a),
+              ),
+            ),
         ],
       );
     }
@@ -486,43 +475,75 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
       itemCount: apps.length,
       itemBuilder: (context, index) {
         final app = apps[index];
-        final card = _MiniAppCard(
-          app: app,
-          // 稳定随机色：按 id（不是 name —— 同名不同来源要能区分）取色
-          tint: _tintFor(app.id.isNotEmpty ? app.id : app.name),
-          onTap: () => _openApp(app),
-          onLongPress: () => _showAppMenu(app),
-          dragHandle: canDrag
-              ? CardDragHandle(
-                  data: app.id,
-                  label: app.name,
-                  background: _tintFor(app.id.isNotEmpty ? app.id : app.name),
-                  foreground: Colors.white,
-                  iconColor: Colors.white.withValues(alpha: 0.85),
-                )
-              : null,
-        );
-        if (!canDrag) return card;
-        return DragTarget<String>(
-          onWillAcceptWithDetails: (d) => d.data != app.id,
-          onAcceptWithDetails: (d) => _moveApp(d.data, app.id),
-          builder: (_, candidate, _) {
-            if (candidate.isEmpty) return card;
-            return DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(
-                  color: AppTheme.accentColor.withValues(alpha: 0.8),
-                  width: 2,
-                ),
-              ),
-              child: card,
-            );
-          },
+        return _draggableApp(
+          app,
+          canDrag,
+          _MiniAppCard(
+            app: app,
+            // 稳定随机色：按 id（不是 name —— 同名不同来源要能区分）取色
+            tint: _tintFor(app.id.isNotEmpty ? app.id : app.name),
+            onTap: () => _openApp(app),
+            onMenu: () => _showAppMenu(app),
+          ),
         );
       },
     );
   }
+
+  /// 长按条目直接拖动排序（列表 / 一行多列通用）；菜单统一在 ⋮ 按钮。
+  Widget _draggableApp(MiniApp app, bool canDrag, Widget child) {
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (d) => d.data != app.id,
+      onAcceptWithDetails: (d) => _moveApp(d.data, app.id),
+      builder: (_, candidate, __) {
+        final tile = candidate.isEmpty
+            ? child
+            : DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: AppTheme.accentColor.withValues(alpha: 0.8),
+                    width: 2,
+                  ),
+                ),
+                child: child,
+              );
+        if (!canDrag) return tile;
+        return LongPressDraggable<String>(
+          data: app.id,
+          feedback: _appDragFeedback(app),
+          childWhenDragging: Opacity(opacity: 0.35, child: tile),
+          child: tile,
+        );
+      },
+    );
+  }
+
+  Widget _appDragFeedback(MiniApp app) => Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: _tintFor(app.id.isNotEmpty ? app.id : app.name),
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.25),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Text(
+            app.name,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      );
 
   /// 程序副标题：影视 N / 频道 N / 在线站点…
   String _appTag(MiniApp app) {
@@ -568,8 +589,7 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     required String title,
     required String subtitle,
     required VoidCallback onTap,
-    VoidCallback? onLongPress,
-    Widget? dragHandle,
+    VoidCallback? onMenu,
   }) {
     // 行式卡片对齐参考图与「市场」Tab：**彩色首字图标 + 标题 + 副标题 + 右侧箭头**
     final tint = _tintFor(title);
@@ -586,7 +606,6 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
           child: InkWell(
             borderRadius: BorderRadius.circular(14),
             onTap: onTap,
-            onLongPress: onLongPress,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               child: Row(
@@ -639,7 +658,19 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  if (dragHandle != null) dragHandle,
+                  if (onMenu != null)
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: onMenu,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Icon(
+                          Icons.more_horiz_rounded,
+                          size: 18,
+                          color: AppTheme.textTertiary,
+                        ),
+                      ),
+                    ),
                   Icon(
                     Icons.chevron_right_rounded,
                     size: 18,
@@ -1083,7 +1114,7 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     );
   }
 
-  /// 把手拖到另一张卡片上 → 重排（自定义顺序落盘）
+  /// 长按拖到另一张卡片上 → 重排（自定义顺序落盘）
   Future<void> _moveApp(String fromId, String toId) async {
     if (fromId == toId) return;
     final apps = service.apps;
@@ -1517,17 +1548,15 @@ class _MiniAppCard extends StatelessWidget {
   /// 封面底色（由外层按 app.id 稳定取色后传入）
   final Color tint;
   final VoidCallback onTap;
-  final VoidCallback onLongPress;
 
-  /// 拖动把手（长按它排序）；null = 不显示
-  final Widget? dragHandle;
+  /// 菜单入口（⋮）。长按已经是拖动排序，菜单不能再用长按。
+  final VoidCallback? onMenu;
 
   const _MiniAppCard({
     required this.app,
     required this.tint,
     required this.onTap,
-    required this.onLongPress,
-    this.dragHandle,
+    this.onMenu,
   });
 
   @override
@@ -1536,7 +1565,6 @@ class _MiniAppCard extends StatelessWidget {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
-      onLongPress: onLongPress,
       child: Container(
         width: double.infinity,
         // antiAlias：底部那层压暗渐变要跟着圆角裁，否则四角会露出方角
@@ -1599,12 +1627,29 @@ class _MiniAppCard extends StatelessWidget {
                 ),
               ),
             ),
-            // 拖动把手（右上角）：长按它移动排序
-            if (dragHandle != null)
+            // 菜单按钮（右上角）：长按卡片 = 拖动排序，菜单放这里
+            if (onMenu != null)
               Positioned(
-                top: 4,
-                right: 4,
-                child: dragHandle!,
+                top: 2,
+                right: 2,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: onMenu,
+                  child: Container(
+                    width: 24,
+                    height: 24,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.18),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.more_horiz_rounded,
+                      size: 15,
+                      color: Colors.white.withValues(alpha: 0.9),
+                    ),
+                  ),
+                ),
               ),
             // 首字：略往上挪，给底部名称留出位置，别挤在一起
             Align(

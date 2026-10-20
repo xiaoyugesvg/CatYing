@@ -264,18 +264,33 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   /// 按住把手拖到另一条线路上 → 重排并落盘
   Future<void> _moveSource(String fromKey, String toKey) async {
     if (fromKey == toKey) return;
-    final all = List<SourceBean>.of(
-      // ignore: invalid_use_of_protected_member
-      ApiConfig.instance.sourceBeanList.value,
-    );
-    final from = all.indexWhere((s) => s.key == fromKey);
-    final to = all.indexWhere((s) => s.key == toKey);
+    final isLocal =
+        fromKey.startsWith('localpy_') && toKey.startsWith('localpy_');
+    if (isLocal) {
+      // 本地源顺序存在 LocalPythonSources 里（订阅线路表不管本地源）
+      final visible = _filteredSourcesFrom(
+        List<SourceBean>.of(ApiConfig.instance.localVideoSources),
+      ).map((s) => s.key).toList();
+      final from = visible.indexOf(fromKey);
+      final to = visible.indexOf(toKey);
+      if (from < 0 || to < 0) return;
+      final moved = visible.removeAt(from);
+      visible.insert(to.clamp(0, visible.length), moved);
+      await LocalPythonSources.instance.reorderWithin(visible);
+      await ApiConfig.instance.reloadLocalVideoSources();
+      return;
+    }
+    // 订阅线路：只重排当前可见的这批（搜索过滤时不影响隐藏的源）
+    // ignore: invalid_use_of_protected_member
+    final visible = _filteredSourcesFrom(
+      List<SourceBean>.of(ApiConfig.instance.sourceBeanList.value),
+    ).map((s) => s.key).toList();
+    final from = visible.indexOf(fromKey);
+    final to = visible.indexOf(toKey);
     if (from < 0 || to < 0) return;
-    final item = all.removeAt(from);
-    all.insert(to, item);
-    await ApiConfig.instance.reorderVideoSources(
-      all.map((s) => s.key).toList(),
-    );
+    final item = visible.removeAt(from);
+    visible.insert(to.clamp(0, visible.length), item);
+    await ApiConfig.instance.reorderVideoSources(visible);
   }
 
   /// 「失效」分类的列表：已移出的线路，可逐条 / 全部移回
@@ -461,72 +476,45 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
 
   /// 当前 tab 的源列表（本地源 / 订阅线路共用同一套网格与单列形态）。
   ///
-  /// 本地源：长按 = 卡片菜单（编辑 / 分享 / 删除），不参与订阅线路的拖动排序；
-  /// 订阅线路：长按 = 卡片菜单（分享 / 失效），把手长按拖动排序。
+  /// 用户 2026-10-20：**长按条目任意位置拖动排序**（列表/网格都一样）；
+  /// 菜单统一收到条目右侧的 ⋮ 按钮，避免和长按拖动抢手势。
   Widget _buildSourceList(
     List<SourceBean> list,
     String? selectedKey, {
     required bool isLocal,
   }) {
-    Widget tileOf(SourceBean source) {
-      if (isLocal) {
-        return _SourceTile(
-          name: source.name,
-          api: source.api,
-          selected: source.key == selectedKey,
-          onTap: () => _selectSource(source),
-          onLongPress: () => _localSourceMenu(source),
-        );
-      }
+    Widget itemOf(SourceBean source, Widget child) {
       return DragTarget<String>(
         onWillAcceptWithDetails: (d) => d.data != source.key,
         onAcceptWithDetails: (d) => _moveSource(d.data, source.key),
-        builder: (_, candidate, _) {
-          final tile = _SourceTile(
-            name: source.name,
-            api: source.api,
-            selected: source.key == selectedKey,
-            onTap: () => _selectSource(source),
-            onLongPress: () => _sourceMenu(source),
-            dragHandle: CardDragHandle(
-              data: source.key,
-              label: source.name,
-            ),
-          );
-          return _dropHighlight(tile, candidate);
-        },
+        builder: (_, candidate, _) =>
+            _draggableItem(source, child, candidate),
       );
     }
 
-    Widget rowOf(SourceBean source) {
-      if (isLocal) {
-        return _SourceRow(
-          name: source.name,
-          api: source.api,
-          selected: source.key == selectedKey,
-          onTap: () => _selectSource(source),
-          onLongPress: () => _localSourceMenu(source),
-        );
-      }
-      return DragTarget<String>(
-        onWillAcceptWithDetails: (d) => d.data != source.key,
-        onAcceptWithDetails: (d) => _moveSource(d.data, source.key),
-        builder: (_, candidate, _) {
-          final row = _SourceRow(
+    Widget tileOf(SourceBean source) => itemOf(
+          source,
+          _SourceTile(
             name: source.name,
             api: source.api,
             selected: source.key == selectedKey,
             onTap: () => _selectSource(source),
-            onLongPress: () => _sourceMenu(source),
-            dragHandle: CardDragHandle(
-              data: source.key,
-              label: source.name,
-            ),
-          );
-          return _dropHighlight(row, candidate);
-        },
-      );
-    }
+            onMenu: () =>
+                isLocal ? _localSourceMenu(source) : _sourceMenu(source),
+          ),
+        );
+
+    Widget rowOf(SourceBean source) => itemOf(
+          source,
+          _SourceRow(
+            name: source.name,
+            api: source.api,
+            selected: source.key == selectedKey,
+            onTap: () => _selectSource(source),
+            onMenu: () =>
+                isLocal ? _localSourceMenu(source) : _sourceMenu(source),
+          ),
+        );
 
     return ListView(
       controller: _scrollController,
@@ -550,6 +538,45 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
           for (final source in list) rowOf(source),
       ],
     );
+  }
+
+  /// 长按拖动外壳：反馈卡 + 落点高亮。
+  Widget _draggableItem(
+    SourceBean source,
+    Widget child,
+    List<String?> candidate,
+  ) {
+    final draggable = LongPressDraggable<String>(
+      data: source.key,
+      feedback: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+          decoration: BoxDecoration(
+            color: AppTheme.backgroundSecondary,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.25),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Text(
+            source.name,
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: AppTheme.fontSubhead,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+      childWhenDragging: Opacity(opacity: 0.3, child: child),
+      child: child,
+    );
+    return _dropHighlight(draggable, candidate);
   }
 
   /// 拖动悬停时的高亮外框
@@ -804,19 +831,15 @@ class _SourceRow extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
 
-  /// 长按 = 卡片式菜单（分享 / 失效）
-  final VoidCallback? onLongPress;
-
-  /// 拖动把手（长按它排序）；null = 不显示（本地 Python 源）
-  final Widget? dragHandle;
+  /// 菜单入口（⋮）。长按已经是拖动排序，菜单不能再用长按。
+  final VoidCallback? onMenu;
 
   const _SourceRow({
     required this.name,
     required this.api,
     required this.selected,
     required this.onTap,
-    this.onLongPress,
-    this.dragHandle,
+    this.onMenu,
   });
 
   @override
@@ -825,7 +848,6 @@ class _SourceRow extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 6),
       child: GestureDetector(
         onTap: onTap,
-        onLongPress: onLongPress,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
           decoration: BoxDecoration(
@@ -875,7 +897,16 @@ class _SourceRow extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              if (dragHandle != null) dragHandle!,
+              if (onMenu != null)
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: onMenu,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: Icon(Icons.more_horiz_rounded,
+                        size: 17, color: AppTheme.textTertiary),
+                  ),
+                ),
             ],
           ),
         ),
@@ -977,26 +1008,21 @@ class _SourceTile extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
 
-  /// 长按 = 卡片式菜单（分享 / 失效）
-  final VoidCallback? onLongPress;
-
-  /// 拖动把手（长按它排序）；null = 不显示（本地 Python 源）
-  final Widget? dragHandle;
+  /// 菜单入口（⋮）。长按已经是拖动排序，菜单不能再用长按。
+  final VoidCallback? onMenu;
 
   const _SourceTile({
     required this.name,
     required this.api,
     required this.selected,
     required this.onTap,
-    this.onLongPress,
-    this.dragHandle,
+    this.onMenu,
   });
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      onLongPress: onLongPress,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
@@ -1035,10 +1061,16 @@ class _SourceTile extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            if (dragHandle != null) ...[
-              const SizedBox(width: 2),
-              dragHandle!,
-            ],
+            if (onMenu != null)
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onMenu,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 2),
+                  child: Icon(Icons.more_horiz_rounded,
+                      size: 16, color: AppTheme.textTertiary),
+                ),
+              ),
           ],
         ),
       ),

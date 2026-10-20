@@ -45,6 +45,7 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
   CalendarFeedBundle? _bundle;
   bool _feedLoading = true;
   String? _feedError;
+  Timer? _feedWatchdog;
 
   List<TraktCalendarEntry> _trakt = const [];
   bool _traktLoading = false;
@@ -67,22 +68,54 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
   }
 
   Future<void> _loadFeed({bool force = false}) async {
+    // 兜底看门狗：即使数据层因为任何原因卡住（DNS 挂起 / 平台侧阻塞），
+    // 也必须在 26 秒内把转圈收掉，换成可见的错误 + 重试按钮。
+    _feedWatchdog?.cancel();
+    _feedWatchdog = Timer(const Duration(seconds: 26), () {
+      if (!mounted || !_feedLoading) return;
+      setState(() {
+        _feedLoading = false;
+        _feedError = '加载超时了，检查网络后点「重新加载」';
+      });
+    });
     setState(() {
       _feedLoading = true;
       _feedError = null;
     });
-    final bundle = await CalendarFeedService.instance.fetch(force: force);
-    if (!mounted) return;
-    setState(() {
-      _bundle = bundle;
-      _feedLoading = false;
-      if (bundle.isEmpty) _feedError = '暂时拿不到榜单数据，请检查网络后重试';
-    });
+    try {
+      final bundle = await CalendarFeedService.instance.fetch(
+        force: force,
+        // 哪一份 JSON 先回来就先渲染，不让最慢的那份拖住整页。
+        onPartial: (partial) {
+          if (!mounted) return;
+          if (_bundle != null && !_bundle!.isEmpty) return;
+          if (partial.isEmpty) return;
+          setState(() => _bundle = partial);
+        },
+      );
+      _feedWatchdog?.cancel();
+      if (!mounted) return;
+      setState(() {
+        _bundle = bundle;
+        _feedLoading = false;
+        if (bundle.isEmpty) _feedError = '暂时拿不到榜单数据，请检查网络后重试';
+      });
+    } catch (e) {
+      // 任何异常都必须收掉 loading —— 否则页面会永远停在转圈（用户实测）
+      _feedWatchdog?.cancel();
+      if (!mounted) return;
+      setState(() {
+        _feedLoading = false;
+        _feedError = '榜单加载失败：$e';
+      });
+    }
   }
 
   Future<void> _loadTrakt() async {
     final svc = TraktService.instance;
-    await svc.load();
+    try {
+      await svc.load();
+    } catch (_) {}
     if (!mounted) return;
     if (!svc.configured || !svc.loggedIn) {
       setState(() {
@@ -97,7 +130,9 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
       _traktError = null;
     });
     try {
-      final list = await svc.fetchCalendar();
+      final list = await svc
+          .fetchCalendar()
+          .timeout(const Duration(seconds: 20));
       if (!mounted) return;
       setState(() {
         _trakt = list;
@@ -120,6 +155,12 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
     } else {
       await _loadFeed(force: true);
     }
+  }
+
+  @override
+  void dispose() {
+    _feedWatchdog?.cancel();
+    super.dispose();
   }
 
   @override
@@ -639,9 +680,33 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
   Widget _buildFeedTab(DateTime now) {
     final bundle = _bundle;
     if (_feedLoading && bundle == null) {
-      return const Padding(
-        padding: EdgeInsets.only(top: 80),
-        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      return Padding(
+        padding: const EdgeInsets.only(top: 64),
+        child: Column(
+          children: [
+            const SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              '正在加载公开榜单…',
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: AppTheme.fontFootnote,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '按数据源分片加载，慢的时候会先显示已到的内容',
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: AppTheme.fontCaption,
+              ),
+            ),
+          ],
+        ),
       );
     }
     if (bundle == null || bundle.isEmpty) {
@@ -660,7 +725,30 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
         ],
         _buildSectionHeader(_sectionTitle()),
         const SizedBox(height: 10),
-        if (list.isEmpty)
+        if (list.isEmpty && _feedLoading)
+          Padding(
+            padding: const EdgeInsets.only(top: 40),
+            child: Column(
+              children: [
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  '正在加载…',
+                  style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontCaption,
+                  ),
+                ),
+              ],
+            ),
+          )
+        else if (list.isEmpty && _feedError != null)
+          _errorBlock(_feedError!, () => _loadFeed(force: true))
+        else if (list.isEmpty)
           _emptyBlock(_emptyHint(), '切换周期或下拉刷新试试。')
         else
           GridView.builder(
@@ -865,6 +953,7 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
                         ? Container(color: AppTheme.backgroundSecondary)
                         : CachedNetworkImage(
                             imageUrl: poster,
+                            httpHeaders: item.coverHeaders,
                             fit: BoxFit.cover,
                             placeholder: (_, _) =>
                                 Container(color: AppTheme.backgroundSecondary),
@@ -938,6 +1027,7 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
     await _showDetailSheet(
       title: item.title,
       poster: poster,
+      coverHeaders: item.coverHeaders,
       meta: [
         if (item.rating > 0) '评分 ${item.rating.toStringAsFixed(1)}',
         if (item.region.isNotEmpty) item.region,
@@ -986,6 +1076,7 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
     required String sub,
     required VoidCallback onSearch,
     VoidCallback? onTmdb,
+    Map<String, String>? coverHeaders,
   }) async {
     await showModalBottomSheet<void>(
       context: context,
@@ -1013,6 +1104,7 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
                           ? Container(color: AppTheme.backgroundPrimary)
                           : CachedNetworkImage(
                               imageUrl: poster,
+                              httpHeaders: coverHeaders,
                               fit: BoxFit.cover,
                               errorWidget: (_, _, _) => Container(
                                 color: AppTheme.backgroundPrimary,

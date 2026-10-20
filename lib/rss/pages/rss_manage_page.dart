@@ -22,6 +22,7 @@ import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../common/theme.dart';
 import '../../reading/pages/book_source_qr_scan_page.dart';
@@ -34,6 +35,28 @@ import '../services/rss_reader.dart';
 import '../services/rss_store.dart';
 import 'rss_source_edit_page.dart';
 
+/// 列表展示方式（与书源仓 / 漫源仓库同款：列表 / 卡片 / 一行两个）
+enum _RssView {
+  list('列表', Icons.view_list_rounded),
+  card('卡片', Icons.view_agenda_rounded),
+  two('一行两个', Icons.apps_rounded);
+
+  const _RssView(this.label, this.icon);
+  final String label;
+  final IconData icon;
+}
+
+/// 排序方式
+enum _RssSort {
+  custom('自定义顺序'),
+  name('名称'),
+  group('分组'),
+  enabled('启用优先');
+
+  const _RssSort(this.label);
+  final String label;
+}
+
 class RssManagePage extends StatefulWidget {
   const RssManagePage({super.key});
 
@@ -45,10 +68,19 @@ class _RssManagePageState extends State<RssManagePage> {
   RssStore get store => RssStore.instance;
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
 
+  static const String _viewKey = 'rss_manage_view';
+  static const String _sortKey = 'rss_manage_sort';
+
   final _urlCtrl = TextEditingController(); // 导入卡片里的地址框
   final _searchCtrl = TextEditingController(); // 页面内筛选框
   String _query = '';
   bool _busy = false;
+
+  /// 正在检测订阅源可用性
+  bool _checking = false;
+
+  _RssView _view = _RssView.list;
+  _RssSort _sort = _RssSort.custom;
 
   /// 多选模式（勾选后底部浮出操作栏）
   bool _selectMode = false;
@@ -60,10 +92,44 @@ class _RssManagePageState extends State<RssManagePage> {
   @override
   void initState() {
     super.initState();
+    _restorePrefs();
     store.tick.addListener(_refresh);
     _searchCtrl.addListener(() {
       if (mounted) setState(() => _query = _searchCtrl.text.trim());
     });
+  }
+
+  Future<void> _restorePrefs() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final v = sp.getInt(_viewKey);
+      final s = sp.getInt(_sortKey);
+      if (!mounted) return;
+      setState(() {
+        if (v != null && v >= 0 && v < _RssView.values.length) {
+          _view = _RssView.values[v];
+        }
+        if (s != null && s >= 0 && s < _RssSort.values.length) {
+          _sort = _RssSort.values[s];
+        }
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _setView(_RssView v) async {
+    setState(() => _view = v);
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setInt(_viewKey, v.index);
+    } catch (_) {}
+  }
+
+  Future<void> _setSort(_RssSort s) async {
+    setState(() => _sort = s);
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setInt(_sortKey, s.index);
+    } catch (_) {}
   }
 
   @override
@@ -81,20 +147,42 @@ class _RssManagePageState extends State<RssManagePage> {
   String _groupOf(RssSource s) =>
       s.group.trim().isEmpty ? '未分组' : s.group.trim();
 
-  /// 当前显示（分组筛选 + 关键词筛选）
+  /// 当前显示（分组筛选 + 关键词筛选 + 排序）
   List<RssSource> get _visible {
-    var all = store.sources;
+    final all = List<RssSource>.of(store.sources);
+    var list = all;
     if (_pickedGroup != null) {
-      all = all.where((s) => _groupOf(s) == _pickedGroup).toList();
+      list = list.where((s) => _groupOf(s) == _pickedGroup).toList();
     }
     final q = _query.toLowerCase();
-    if (q.isEmpty) return all;
-    return all
-        .where((s) =>
-            s.name.toLowerCase().contains(q) ||
-            s.group.toLowerCase().contains(q) ||
-            s.url.toLowerCase().contains(q))
-        .toList();
+    if (q.isNotEmpty) {
+      list = list
+          .where((s) =>
+              s.name.toLowerCase().contains(q) ||
+              s.group.toLowerCase().contains(q) ||
+              s.url.toLowerCase().contains(q))
+          .toList();
+    }
+    switch (_sort) {
+      case _RssSort.custom:
+        break;
+      case _RssSort.name:
+        list.sort((a, b) => a.name.compareTo(b.name));
+        break;
+      case _RssSort.group:
+        list.sort((a, b) {
+          final c = _groupOf(a).compareTo(_groupOf(b));
+          return c != 0 ? c : a.name.compareTo(b.name);
+        });
+        break;
+      case _RssSort.enabled:
+        list.sort((a, b) {
+          if (a.enabled != b.enabled) return a.enabled ? -1 : 1;
+          return a.name.compareTo(b.name);
+        });
+        break;
+    }
+    return list;
   }
 
   // ── 页面骨架 ────────────────────────────────────────────────────
@@ -146,6 +234,19 @@ class _RssManagePageState extends State<RssManagePage> {
                     strokeWidth: 2, color: AppTheme.accentColor),
               ),
             ),
+          ),
+        if (!_selectMode)
+          IconButton(
+            tooltip: '检测订阅源',
+            onPressed: _checking ? null : _runHealthCheck,
+            icon: _checking
+                ? SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppTheme.accentColor),
+                  )
+                : Icon(Icons.radar, color: AppTheme.textPrimary),
           ),
         if (!_selectMode)
           _appBarIcon(Icons.ios_share_rounded, '分享全部订阅源', () {
@@ -379,20 +480,177 @@ class _RssManagePageState extends State<RssManagePage> {
             ),
           ),
         ),
-        // 分组胶囊行
+        // 分组胶囊行 + 排序 / 视图切换（与书源仓同款按钮）
         Padding(
           padding: const EdgeInsets.only(top: 10, bottom: 4),
           child: SizedBox(
             height: 34,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: _groupChips(base),
+            child: Row(
+              children: [
+                Expanded(
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: _groupChips(base),
+                  ),
+                ),
+                _sortButton(),
+                _viewToggleButton(),
+              ],
             ),
           ),
         ),
         const SizedBox(height: 4),
-        for (final s in list) _tile(s),
+        if (_view == _RssView.list)
+          for (final s in list) _dragWrap(s, _tile(s))
+        else if (_view == _RssView.card)
+          for (final s in list) _dragWrap(s, _cardTile(s))
+        else
+          GridView.builder(
+            padding: EdgeInsets.zero,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+              mainAxisExtent: 142,
+            ),
+            itemCount: list.length,
+            itemBuilder: (_, i) => _dragWrap(list[i], _gridTile(list[i])),
+          ),
       ],
+    );
+  }
+
+  // ── 拖动排序（三种视图通用：长按条目任意位置直接拖）─────────────
+
+  Widget _dragWrap(RssSource s, Widget child) {
+    if (_selectMode) return child;
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (d) => d.data != s.id,
+      onAcceptWithDetails: (d) => _moveSource(d.data, s.id),
+      builder: (_, candidate, __) {
+        final tile = LongPressDraggable<String>(
+          data: s.id,
+          feedback: _dragFeedback(s),
+          childWhenDragging: Opacity(opacity: 0.35, child: child),
+          child: child,
+        );
+        if (candidate.isEmpty) return tile;
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppTheme.accentColor, width: 1.6),
+          ),
+          child: tile,
+        );
+      },
+    );
+  }
+
+  Widget _dragFeedback(RssSource s) => Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: AppTheme.backgroundSecondary,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.25),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Text(
+            s.name,
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: AppTheme.fontSubhead,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      );
+
+  Future<void> _moveSource(String fromId, String toId) async {
+    if (fromId == toId) return;
+    // 拖动时强制回到「自定义顺序」，否则按名称/分组排序后看起来没动
+    if (_sort != _RssSort.custom) await _setSort(_RssSort.custom);
+    // 只重排当前可见的这一批（分组/搜索筛选时不影响隐藏的源）
+    final ids = _visible.map((s) => s.id).toList();
+    final from = ids.indexOf(fromId);
+    final to = ids.indexOf(toId);
+    if (from < 0 || to < 0) return;
+    final moved = ids.removeAt(from);
+    ids.insert(to.clamp(0, ids.length), moved);
+    await store.reorderWithin(ids);
+  }
+
+  // ── 排序 / 视图切换 ─────────────────────────────────────────────
+
+  Widget _sortButton() {
+    return PopupMenuButton<_RssSort>(
+      tooltip: '排序',
+      initialValue: _sort,
+      color: AppTheme.backgroundSecondary,
+      onSelected: _setSort,
+      itemBuilder: (_) => [
+        for (final v in _RssSort.values)
+          PopupMenuItem(
+            value: v,
+            child: Row(
+              children: [
+                Icon(
+                  v == _sort ? Icons.check_rounded : Icons.sort_rounded,
+                  size: 17,
+                  color: v == _sort
+                      ? AppTheme.accentColor
+                      : AppTheme.textSecondary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  v.label,
+                  style: TextStyle(
+                    fontSize: AppTheme.fontFootnote,
+                    color: v == _sort
+                        ? AppTheme.accentColor
+                        : AppTheme.textPrimary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        child: Icon(Icons.sort_rounded,
+            size: 19, color: AppTheme.textSecondary),
+      ),
+    );
+  }
+
+  /// 视图切换：点一下按 列表 → 卡片 → 一行两个 → 列表 轮换
+  Widget _viewToggleButton() {
+    final next = _RssView.values[(_view.index + 1) % _RssView.values.length];
+    return Tooltip(
+      message: '视图：${_view.label}（点击切换为${next.label}）',
+      child: GestureDetector(
+        onTap: () => _setView(next),
+        child: Container(
+          width: 30,
+          height: 30,
+          margin: const EdgeInsets.only(left: 2),
+          decoration: BoxDecoration(
+            color: _isDark
+                ? Colors.white.withValues(alpha: 0.07)
+                : Colors.black.withValues(alpha: 0.04),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(next.icon, size: 15, color: AppTheme.textSecondary),
+        ),
+      ),
     );
   }
 
@@ -625,7 +883,6 @@ class _RssManagePageState extends State<RssManagePage> {
                 ],
               ),
               onTap: () => _togglePick(s.id),
-              onLongPress: () => _showSourceMenu(s),
               trailing: Switch(
                 value: s.enabled,
                 activeThumbColor: AppTheme.accentColor,
@@ -634,6 +891,209 @@ class _RssManagePageState extends State<RssManagePage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _pickIcon(RssSource s, {double size = 22}) {
+    final sel = _selected.contains(s.id);
+    return GestureDetector(
+      onTap: () => _togglePick(s.id),
+      child: Icon(
+        sel ? Icons.check_box : Icons.check_box_outline_blank,
+        size: size,
+        color: sel ? AppTheme.accentColor : AppTheme.textTertiary,
+      ),
+    );
+  }
+
+  BoxDecoration _cardDecoration(RssSource s) {
+    final sel = _selected.contains(s.id);
+    final cur = s.id == store.selectedId;
+    return BoxDecoration(
+      color: AppTheme.backgroundSecondary,
+      borderRadius: BorderRadius.circular(14),
+      border: sel
+          ? Border.all(color: AppTheme.accentColor, width: 1.2)
+          : Border.all(
+              color: cur
+                  ? AppTheme.accentColor.withValues(alpha: 0.5)
+                  : AppTheme.borderLight,
+              width: cur ? 1 : 0.5,
+            ),
+    );
+  }
+
+  /// 卡片视图：一行一张的大卡片
+  Widget _cardTile(RssSource s) {
+    final cur = s.id == store.selectedId;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _togglePick(s.id),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.fromLTRB(12, 10, 8, 12),
+        decoration: _cardDecoration(s),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                _pickIcon(s),
+                const SizedBox(width: 8),
+                _avatar(s),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            s.enabled ? Icons.check_circle : Icons.block,
+                            size: 14,
+                            color:
+                                s.enabled ? Colors.green : AppTheme.textTertiary,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              s.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: AppTheme.fontHeadline,
+                                fontWeight: FontWeight.w600,
+                                color: s.enabled
+                                    ? AppTheme.textPrimary
+                                    : AppTheme.textTertiary,
+                              ),
+                            ),
+                          ),
+                          GestureDetector(
+                            onTap: () => _showSourceMenu(s),
+                            child: Icon(Icons.info_outline_rounded,
+                                size: 16, color: AppTheme.textTertiary),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        s.url,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: AppTheme.fontCaption,
+                          color: AppTheme.textTertiary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: s.enabled,
+                  activeThumbColor: AppTheme.accentColor,
+                  onChanged: (v) => store.setEnabled(s.id, v),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              children: [
+                if (cur) _tag('当前', highlight: true),
+                _tag(_groupOf(s)),
+                if (s.hasRules) _tag('规则'),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 一行两个：紧凑卡片
+  Widget _gridTile(RssSource s) {
+    final cur = s.id == store.selectedId;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _togglePick(s.id),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(10, 9, 6, 8),
+        decoration: _cardDecoration(s),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                _avatar(s, size: 32),
+                const Spacer(),
+                _pickIcon(s, size: 18),
+              ],
+            ),
+            const SizedBox(height: 7),
+            Text(
+              s.name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12.5,
+                height: 1.15,
+                fontWeight: FontWeight.w600,
+                color:
+                    s.enabled ? AppTheme.textPrimary : AppTheme.textTertiary,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              s.url,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: AppTheme.fontCaption,
+                color: AppTheme.textTertiary,
+              ),
+            ),
+            const Spacer(),
+            Row(
+              children: [
+                Flexible(
+                  child: Wrap(
+                    spacing: 3,
+                    runSpacing: 3,
+                    children: [
+                      if (cur) _tag('当前', highlight: true),
+                      _tag(_groupOf(s)),
+                    ],
+                  ),
+                ),
+                // 长按已改为拖动排序 ⇒ 菜单入口放这里
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => _showSourceMenu(s),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Icon(Icons.more_horiz_rounded,
+                        size: 17, color: AppTheme.textTertiary),
+                  ),
+                ),
+                SizedBox(
+                  width: 42,
+                  height: 28,
+                  child: FittedBox(
+                    child: Switch(
+                      value: s.enabled,
+                      activeThumbColor: AppTheme.accentColor,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      onChanged: (v) => store.setEnabled(s.id, v),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -661,10 +1121,10 @@ class _RssManagePageState extends State<RssManagePage> {
       );
 
   /// 首字头像（源没有图标字段 ⇒ 用名称首字，比灰方块好认）
-  Widget _avatar(RssSource s) {
+  Widget _avatar(RssSource s, {double size = 40}) {
     return Container(
-      width: 40,
-      height: 40,
+      width: size,
+      height: size,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: s.enabled
@@ -672,12 +1132,12 @@ class _RssManagePageState extends State<RssManagePage> {
             : (_isDark
                 ? Colors.white.withValues(alpha: 0.06)
                 : Colors.black.withValues(alpha: 0.04)),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(size >= 40 ? 10 : 8),
       ),
       child: Text(
         s.name.isNotEmpty ? s.name.characters.first : '?',
         style: TextStyle(
-          fontSize: AppTheme.fontHeadline,
+          fontSize: size >= 40 ? AppTheme.fontHeadline : 15,
           fontWeight: FontWeight.bold,
           color: s.enabled ? AppTheme.accentColor : AppTheme.textTertiary,
         ),
@@ -831,6 +1291,157 @@ class _RssManagePageState extends State<RssManagePage> {
           icon: Icon(icon, size: 21, color: AppTheme.textSecondary),
         ),
       );
+
+  // ── 检测订阅源 ──────────────────────────────────────────────────
+
+  /// 逐个抓第一页：能出文章 = 可用；403/503 走内嵌网页 = 网页型；
+  /// 其余（异常 / 0 篇）= 失效。检测完可一键停用失效源。
+  Future<void> _runHealthCheck() async {
+    if (_checking || _busy) return;
+    final targets = store.enabledSources;
+    if (targets.isEmpty) {
+      AppToast.message('没有启用的订阅源可检测');
+      return;
+    }
+    setState(() => _checking = true);
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        content: Row(
+          children: [
+            SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2.5, color: AppTheme.accentColor),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                '正在检测 ${targets.length} 个订阅源…',
+                style: TextStyle(color: AppTheme.textPrimary),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    final failed = <String, String>{};
+    final webOnly = <String>{};
+    // 限并发 4：部分源会跑 JS 规则，一次性全开容易互相拖到超时。
+    var next = 0;
+    Future<void> worker() async {
+      while (next < targets.length) {
+        final s = targets[next++];
+        try {
+          final r = await RssReader.fetchArticles(s, ignoreCache: true)
+              .timeout(const Duration(seconds: 20));
+          if (r.siteLike) {
+            webOnly.add(s.id);
+          } else if (r.articles.isEmpty) {
+            failed[s.id] = '没有抓到文章（站点改版或规则失效）';
+          }
+        } catch (e) {
+          failed[s.id] = _short(e);
+        }
+      }
+    }
+
+    final workers = targets.length < 4 ? targets.length : 4;
+    await Future.wait(List.generate(workers, (_) => worker()));
+    if (!mounted) return;
+    Navigator.of(context, rootNavigator: true).pop();
+    setState(() => _checking = false);
+
+    final ok = targets.length - failed.length - webOnly.length;
+    if (failed.isEmpty) {
+      AppToast.message(webOnly.isEmpty
+          ? '检测完成：${targets.length} 个源全部可用'
+          : '检测完成：$ok 个可用，${webOnly.length} 个需网页模式');
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        title: Text(
+          '检测完成：$ok 可用 / ${failed.length} 失败',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontHeadline,
+          ),
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (webOnly.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    '另有 ${webOnly.length} 个源会自动用内嵌网页打开',
+                    style: TextStyle(
+                      fontSize: AppTheme.fontCaption,
+                      color: AppTheme.textTertiary,
+                    ),
+                  ),
+                ),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 300),
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final e in failed.entries)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 5),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              store.byId(e.key)?.name ?? e.key,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                            Text(
+                              e.value,
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: AppTheme.textTertiary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await store.setEnabledAll(failed.keys, false);
+              if (ctx.mounted) Navigator.pop(ctx);
+              AppToast.message('已停用 ${failed.length} 个失效源');
+            },
+            child: const Text('停用失败源'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
 
   // ── 源菜单 / 分享 / 清空 ────────────────────────────────────────
 

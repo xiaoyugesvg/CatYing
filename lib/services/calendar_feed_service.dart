@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 
 import 'app_log.dart';
@@ -36,8 +38,23 @@ class CalendarFeedItem {
     this.category = '',
   });
 
-  String posterUrl(String imageBase) =>
-      posterPath.isEmpty ? '' : '$imageBase/w342$posterPath';
+  String posterUrl(String imageBase) {
+    if (posterPath.isEmpty) return '';
+    // 兜底数据来自豆瓣，posterPath 已经是完整 URL；正常数据是 TMDB 路径
+    if (posterPath.startsWith('http')) return posterPath;
+    return '$imageBase/w342$posterPath';
+  }
+
+  /// 豆瓣图床需要 Referer，否则 418；TMDB 图不需要。
+  Map<String, String>? get coverHeaders => posterPath.contains('doubanio.com')
+      ? const {
+          'Referer': 'https://movie.douban.com/',
+          'User-Agent':
+              'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
+                  'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 '
+                  'Mobile/15E148 Safari/604.1',
+        }
+      : null;
 
   bool updatedOn(DateTime day) {
     final d = DateTime.tryParse(lastUpdateDate);
@@ -82,7 +99,7 @@ class CalendarFeedBundle {
   });
 
   bool get isEmpty =>
-      doubanTv.isEmpty && guduoTv.isEmpty && guduoMovie.isEmpty;
+      doubanTv.isEmpty && theaterAired.isEmpty && guduoTv.isEmpty && guduoMovie.isEmpty;
 }
 
 /// 追剧日历数据源 —— 直接复用 MineTrakt（`_worker.js`）用的公开榜单 JSON：
@@ -105,7 +122,10 @@ class CalendarFeedService {
   CalendarFeedBundle? _cache;
   DateTime? _cacheAt;
 
-  Future<CalendarFeedBundle> fetch({bool force = false}) async {
+  Future<CalendarFeedBundle> fetch({
+    bool force = false,
+    void Function(CalendarFeedBundle partial)? onPartial,
+  }) async {
     final cached = _cache;
     final at = _cacheAt;
     if (!force &&
@@ -115,38 +135,67 @@ class CalendarFeedService {
       return cached;
     }
     final dio = Dio(BaseOptions(
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 15),
+      // 三份 JSON 里 theater.json 有 400KB+，蜂窝网络下慢慢传是正常的，
+      // 所以 receiveTimeout 只用来判定「卡死」，总时长交给外层兜底。
+      connectTimeout: const Duration(seconds: 8),
+      receiveTimeout: const Duration(seconds: 12),
       headers: {
         'User-Agent': 'CatYing/1.0',
         'Accept': 'application/json',
       },
     ));
 
-    dynamic doubanRaw, theaterRaw, guduoRaw;
-    await Future.wait([
-      dio.get<dynamic>(_douban).then((r) => doubanRaw = r.data).catchError(
-        (e) {
-          AppLog.instance.w('[CalendarFeed] douban.json 失败: $e');
-          return null;
-        },
-      ),
-      dio.get<dynamic>(_theater).then((r) => theaterRaw = r.data).catchError(
-        (e) {
-          AppLog.instance.w('[CalendarFeed] theater.json 失败: $e');
-          return null;
-        },
-      ),
-      dio.get<dynamic>(_guduo).then((r) => guduoRaw = r.data).catchError(
-        (e) {
-          AppLog.instance.w('[CalendarFeed] guduo.json 失败: $e');
-          return null;
-        },
-      ),
-    ]);
+    // 三份 JSON 各拉各的：任何一份慢/挂都不能拖住另外两份。
+    // 用户 2026-10-20：「日历一直转圈加载不出来」—— 原来 `Future.wait`
+    // 等全部完成，douban.json 一旦挂起整页就永远 loading。
+    final results = <String, dynamic>{};
+
+    CalendarFeedBundle assemble() => CalendarFeedBundle(
+          doubanTv: _parseDouban(results['douban']),
+          theaterAired: _parseTheater(results['theater']),
+          guduoTv: _parseGuduo(results['guduo'], '剧集'),
+          guduoMovie: _parseGuduo(results['guduo'], '电影'),
+          guduoVariety: _parseGuduo(results['guduo'], '综艺'),
+          guduoAnime: _parseGuduo(results['guduo'], '动漫'),
+        );
+
+    Future<void> loadOne(String key, String url) async {
+      try {
+        final r = await dio
+            .get<dynamic>(url)
+            .timeout(const Duration(seconds: 25));
+        results[key] = r.data;
+      } catch (e) {
+        AppLog.instance.w('[CalendarFeed] $key 失败: $e');
+      }
+      // 每回来一份就先把已有的喂给页面，避免用户盯着转圈等最慢的那份。
+      if (onPartial != null && results.isNotEmpty) {
+        try {
+          onPartial(assemble());
+        } catch (_) {}
+      }
+    }
+
+    AppLog.instance.log('[CalendarFeed] 开始拉取榜单');
+    // 豆瓣直连兜底与三个 JSON 并行：主数据源挂掉时也能出内容。
+    final fallbackFuture = _doubanFallback();
+    await Future.wait<void>([
+      loadOne('douban', _douban),
+      loadOne('theater', _theater),
+      loadOne('guduo', _guduo),
+    ]).timeout(const Duration(seconds: 22), onTimeout: () => const <void>[]);
+
+    final doubanRaw = results['douban'];
+    final theaterRaw = results['theater'];
+    final guduoRaw = results['guduo'];
+
+    var doubanList = _parseDouban(doubanRaw);
+    if (doubanList.isEmpty) {
+      doubanList = await fallbackFuture;
+    }
 
     final bundle = CalendarFeedBundle(
-      doubanTv: _parseDouban(doubanRaw),
+      doubanTv: doubanList,
       theaterAired: _parseTheater(theaterRaw),
       guduoTv: _parseGuduo(guduoRaw, '剧集'),
       guduoMovie: _parseGuduo(guduoRaw, '电影'),
@@ -163,6 +212,80 @@ class CalendarFeedService {
       ' / 骨朵 ${bundle.guduoTv.length + bundle.guduoMovie.length}',
     );
     return bundle;
+  }
+
+  /// 豆瓣直连兜底（主 JSON 全部失败时用）。
+  ///
+  /// 只用于「至少能看到东西」：标题/评分/封面来自豆瓣公开列表，
+  /// 没有 TMDB id，也拿不到精确的首播/更新日期 —— 统一按今天算，
+  /// 保证 今天 / 本周 / 本月 三个周期都能展示。
+  Future<List<CalendarFeedItem>> _doubanFallback() async {
+    try {
+      final dio = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 6),
+        receiveTimeout: const Duration(seconds: 8),
+        headers: {
+          'User-Agent':
+              'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
+                  'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 '
+                  'Mobile/15E148 Safari/604.1',
+          'Referer': 'https://movie.douban.com/',
+          'Accept': 'application/json',
+        },
+      ));
+      Future<dynamic> one(String type) async {
+        try {
+          final r = await dio.get<dynamic>(
+            'https://movie.douban.com/j/search_subjects',
+            queryParameters: {
+              'type': type,
+              'tag': '热门',
+              'page_limit': 30,
+              'page_start': 0,
+            },
+          ).timeout(const Duration(seconds: 8));
+          return r.data;
+        } catch (e) {
+          AppLog.instance.w('[CalendarFeed] 豆瓣兜底 $type 失败: $e');
+          return null;
+        }
+      }
+
+      final now = DateTime.now();
+      final today =
+          '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      final datas = await Future.wait([one('tv'), one('movie')]);
+      final out = <CalendarFeedItem>[];
+      final seen = <String>{};
+      for (var i = 0; i < datas.length; i++) {
+        final raw = datas[i];
+        final decoded = raw is String ? jsonDecode(raw) : raw;
+        if (decoded is! Map || decoded['subjects'] is! List) continue;
+        for (final e in decoded['subjects'] as List) {
+          if (e is! Map) continue;
+          final title = (e['title'] ?? '').toString().trim();
+          if (title.isEmpty || !seen.add(title)) continue;
+          out.add(CalendarFeedItem(
+            tmdbId: 0,
+            title: title,
+            posterPath: (e['cover'] ?? '').toString(),
+            rating: double.tryParse('${e['rate'] ?? ''}') ?? 0,
+            voteCount: 0,
+            popularity: 0,
+            releaseDate: today,
+            lastUpdateDate: today,
+            genre: '',
+            region: '',
+            mediaType: i == 0 ? 'tv' : 'movie',
+          ));
+        }
+      }
+      AppLog.instance.log('[CalendarFeed] 豆瓣直连兜底 ${out.length} 条');
+      return out;
+    } catch (e) {
+      AppLog.instance.w('[CalendarFeed] 豆瓣直连兜底失败: $e');
+      return const [];
+    }
   }
 
   List<CalendarFeedItem> _parseDouban(dynamic raw) {

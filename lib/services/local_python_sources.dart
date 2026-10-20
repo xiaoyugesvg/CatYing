@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/local_python_source.dart';
 import 'app_log.dart';
@@ -109,7 +110,61 @@ class LocalPythonSources {
       AppLog.instance.w('[LocalPy] 扫描目录失败: $e');
     }
 
-    _sources.sort((a, b) => a.addedAt.compareTo(b.addedAt));
+    await _applyOrder();
+    await _save();
+  }
+
+  static const String _kOrder = 'local_py_order_v1';
+  List<String> _order = const [];
+
+  /// 应用用户拖动出来的顺序（没排过的按导入时间）。
+  Future<void> _applyOrder() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      _order = p.getStringList(_kOrder) ?? const [];
+    } catch (_) {
+      _order = const [];
+    }
+    if (_order.isEmpty) {
+      _sources.sort((a, b) => a.addedAt.compareTo(b.addedAt));
+      return;
+    }
+    final idx = {for (var i = 0; i < _order.length; i++) _order[i]: i};
+    _sources.sort((a, b) {
+      final ia = idx[a.key];
+      final ib = idx[b.key];
+      if (ia != null && ib != null) return ia.compareTo(ib);
+      if (ia != null) return -1;
+      if (ib != null) return 1;
+      return a.addedAt.compareTo(b.addedAt);
+    });
+  }
+
+  /// 只重排传入的这批源（搜索/筛选时不影响其它源），并持久化顺序。
+  Future<void> reorderWithin(List<String> visibleKeys) async {
+    if (visibleKeys.isEmpty) return;
+    final wanted = visibleKeys.toSet();
+    final byKey = {for (final s in _sources) s.key: s};
+    final queue = List<String>.from(visibleKeys);
+    final next = <LocalPythonSource>[];
+    var qi = 0;
+    for (final s in _sources) {
+      if (wanted.contains(s.key)) {
+        final moved = byKey[queue[qi++]];
+        if (moved != null) next.add(moved);
+      } else {
+        next.add(s);
+      }
+    }
+    if (next.length != _sources.length) return;
+    _sources
+      ..clear()
+      ..addAll(next);
+    _order = _sources.map((s) => s.key).toList();
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setStringList(_kOrder, _order);
+    } catch (_) {}
     await _save();
   }
 

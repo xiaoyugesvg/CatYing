@@ -1570,6 +1570,18 @@ class _WarehouseTabState extends State<_WarehouseTab>
     Navigator.of(context, rootNavigator: true).pop();
     setState(() => _healthChecking = false);
 
+    // 体检完默认停用失效源（用户 2026-10-20：检测不能用就默认关闭）。
+    // 逐个 setEnabled 而不是 setEnabledAll：后者在这版里不会真正落盘。
+    var disabled = 0;
+    if (bad.isNotEmpty) {
+      final manager = SourceManager();
+      for (final s in bad.keys) {
+        if (!manager.isEnabled(s.id)) continue;
+        await manager.setEnabled(s.id, false);
+        if (!manager.isEnabled(s.id)) disabled++;
+      }
+    }
+
     if (bad.isEmpty) {
       _toast('体检完成：${sources.length} 个源全部可用');
       return;
@@ -1585,29 +1597,50 @@ class _WarehouseTabState extends State<_WarehouseTab>
         ),
         content: SizedBox(
           width: double.maxFinite,
-          child: ListView(
-            shrinkWrap: true,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              for (final e in bad.entries)
+              if (disabled > 0)
                 Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 5),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        e.key.name,
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                      Text(
-                        e.value,
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          color: JellyTheme.textSecondary,
-                        ),
-                      ),
-                    ],
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    '已自动停用 $disabled 个失效源（不删除，可在源列表里重新启用）',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: JellyTheme.primary,
+                    ),
                   ),
                 ),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 320),
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final e in bad.entries)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 5),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              e.key.name,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600),
+                            ),
+                            Text(
+                              e.value,
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: JellyTheme.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
@@ -2431,10 +2464,20 @@ class _WarehouseTabState extends State<_WarehouseTab>
               onWillAcceptWithDetails: (d) => d.data != sources[i].id,
               onAcceptWithDetails: (d) =>
                   _moveBookSource(d.data, sources[i].id),
-              builder: (_, candidate, _) => _sourceGridCard(
-                sources[i],
-                highlight: candidate.isNotEmpty,
-              ),
+              builder: (_, candidate, __) {
+                final card = _sourceGridCard(
+                  sources[i],
+                  highlight: candidate.isNotEmpty,
+                );
+                if (_selectMode) return card;
+                // 长按卡片本身拖动（列表/卡片/一行两个统一）
+                return LongPressDraggable<String>(
+                  data: sources[i].id,
+                  feedback: _dragFeedbackChip(sources[i].name),
+                  childWhenDragging: Opacity(opacity: 0.35, child: card),
+                  child: card,
+                );
+              },
             ),
           ),
         );
@@ -2600,8 +2643,9 @@ class _WarehouseTabState extends State<_WarehouseTab>
   Widget _sourceGridCard(BookSource s, {bool highlight = false}) {
     final picked = _picked.contains(s.id);
     return GestureDetector(
-      onTap: _selectMode ? () => _togglePick(s.id) : null,
-      onLongPress: () => _showGridMenu(s),
+      onTap: _selectMode
+          ? () => _togglePick(s.id)
+          : () => _showGridMenu(s),
       child: Container(
         padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
         decoration: BoxDecoration(
@@ -2649,43 +2693,17 @@ class _WarehouseTabState extends State<_WarehouseTab>
                     ),
                   ),
                 ),
-                // 拖动把手：长按这里可自由移动排序（长按卡片本身 = 菜单）
+                // 长按已是拖动排序 ⇒ 菜单入口改成 ⋮
                 if (!_selectMode)
-                  LongPressDraggable<String>(
-                    data: s.id,
-                    feedback: Material(
-                      color: Colors.transparent,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 10,
-                        ),
-                        decoration: BoxDecoration(
-                          color: _card,
-                          borderRadius: BorderRadius.circular(12),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.2),
-                              blurRadius: 12,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: Text(
-                          s.name,
-                          style: TextStyle(
-                            color: _label,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                    child: const Padding(
-                      padding: EdgeInsets.all(3),
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => _showGridMenu(s),
+                    child: Padding(
+                      padding: const EdgeInsets.all(3),
                       child: Icon(
-                        Icons.drag_indicator_rounded,
-                        size: 15,
+                        Icons.more_horiz_rounded,
+                        size: 16,
+                        color: JellyTheme.textSecondary,
                       ),
                     ),
                   ),
@@ -2895,6 +2913,33 @@ class _WarehouseTabState extends State<_WarehouseTab>
     if (mounted) setState(() => _sort = _SortMode.custom);
   }
 
+  /// 拖动时的悬浮反馈（名称胶囊）
+  Widget _dragFeedbackChip(String name) => Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: _card,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.2),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Text(
+            name,
+            style: TextStyle(
+              color: _label,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      );
+
   /// 卡片 / 网格 / 一行 2·3·4 个：Venera / 配置源也要跟着视图切换。
   ///
   /// 之前 `_mangaList` 永远渲染成竖排列表，所以用户点「列表 / 卡片 / 网格」
@@ -2915,10 +2960,20 @@ class _WarehouseTabState extends State<_WarehouseTab>
       itemBuilder: (_, i) => DragTarget<String>(
         onWillAcceptWithDetails: (d) => d.data != list[i].id,
         onAcceptWithDetails: (d) => _moveMangaWithin(list, d.data, list[i].id),
-        builder: (_, candidate, __) => _mangaGridCard(
-          list[i],
-          highlight: candidate.isNotEmpty,
-        ),
+        builder: (_, candidate, __) {
+          final card = _mangaGridCard(
+            list[i],
+            highlight: candidate.isNotEmpty,
+          );
+          if (_selectMode) return card;
+          // 长按卡片本身拖动（列表/卡片/一行两个统一）
+          return LongPressDraggable<String>(
+            data: list[i].id,
+            feedback: _dragFeedbackChip(list[i].name),
+            childWhenDragging: Opacity(opacity: 0.35, child: card),
+            child: card,
+          );
+        },
       ),
     );
   }
@@ -2934,7 +2989,6 @@ class _WarehouseTabState extends State<_WarehouseTab>
           _editEntry(src.id);
         }
       },
-      onLongPress: () => _enterSelect(src.id),
       child: Container(
         padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
         decoration: BoxDecoration(
@@ -2966,44 +3020,6 @@ class _WarehouseTabState extends State<_WarehouseTab>
                       : JellyTheme.primary,
                 ),
                 const Spacer(),
-                // 拖动把手：长按把手换位（长按卡片 = 多选）
-                if (!_selectMode)
-                  LongPressDraggable<String>(
-                    data: src.id,
-                    feedback: Material(
-                      color: Colors.transparent,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: _card,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: JellyTheme.primary),
-                        ),
-                        child: Text(
-                          src.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 12, color: _label),
-                        ),
-                      ),
-                    ),
-                    childWhenDragging: Opacity(
-                      opacity: 0.35,
-                      child: Icon(
-                        Icons.drag_indicator_rounded,
-                        size: 16,
-                        color: JellyTheme.textSecondary,
-                      ),
-                    ),
-                    child: Icon(
-                      Icons.drag_indicator_rounded,
-                      size: 16,
-                      color: JellyTheme.textSecondary,
-                    ),
-                  ),
                 SizedBox(
                   height: 20,
                   child: FittedBox(

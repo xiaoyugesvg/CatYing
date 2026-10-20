@@ -276,13 +276,15 @@ class TraktService {
     final url =
         '$_api/calendars/my/shows/$start/$days?extended=full&images=poster';
 
-    Future<Response<dynamic>> once() => _dio().get<dynamic>(
+    Future<Response<dynamic>> once() => _dio()
+        .get<dynamic>(
           url,
           options: Options(
             headers: _authHeaders(),
             validateStatus: (_) => true,
           ),
-        );
+        )
+        .timeout(const Duration(seconds: 15));
 
     var res = await once();
     if (res.statusCode == 401) {

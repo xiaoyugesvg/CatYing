@@ -189,11 +189,25 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
         });
       },
     );
+    // 体检完默认停用失效源（用户 2026-10-20：检测不能用就默认关闭）。
+    // 结果从服务缓存取：即使用户中途退出页面，这里也能照常收尾。
+    final dead = _bookSources.where((s) {
+      final h = service.healthCache[s.id];
+      return s.enabled &&
+          h != null &&
+          h.level != BookSourceHealthLevel.healthy;
+    }).toList();
+    for (final s in dead) {
+      await store.setEnabled(s.id, false);
+    }
     if (!mounted) return;
     setState(() {
       _phase = _Phase.done;
       _done = _total;
     });
+    if (dead.isNotEmpty) {
+      _toast('体检完成：已自动停用 ${dead.length} 个失效源');
+    }
   }
 
   Future<void> _optimize() async {
@@ -202,8 +216,9 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
         .toList();
     final bad = _bookSources.where(
       (s) =>
-          _itemState(s) == _ItemState.networkFail ||
-          _itemState(s) == _ItemState.parseFail,
+          s.enabled &&
+          (_itemState(s) == _ItemState.networkFail ||
+              _itemState(s) == _ItemState.parseFail),
     );
     final ok = await showDialog<bool>(
       context: context,
@@ -213,9 +228,8 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
           style: TextStyle(fontSize: AppTheme.fontHeadline),
         ),
         content: Text(
-          '将把 ${usable.length} 个可用源置顶，其中重新启用 0 个；'
-          '停用 ${bad.length} 个网络不通/解析失败的源'
-          '（不删除，可再次体检恢复）。确定继续？',
+          '将把 ${usable.length} 个可用源置顶，并停用 ${bad.length} 个仍启用的失效源'
+          '（体检后已自动停用，不删除，可再次体检恢复）。确定继续？',
           style: const TextStyle(fontSize: AppTheme.fontSubhead, height: 1.6),
         ),
         actions: [

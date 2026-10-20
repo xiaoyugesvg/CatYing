@@ -33,6 +33,22 @@ import 'rss_store.dart';
 /// 抓一页的结果：文章列表 + 下一页地址（空 = 到底了）+ 是否"其实是个网页"。
 typedef RssFetchResult = ({List<RssArticle> articles, String nextUrl, bool siteLike});
 
+/// 视频详情页里的一集。
+class RssVideoEpisode {
+  const RssVideoEpisode({required this.title, required this.url});
+
+  final String title;
+  final String url;
+}
+
+/// 视频详情页里的一条播放线路（苹果 CMS 的 `sid`）。
+class RssVideoLine {
+  const RssVideoLine({required this.name, required this.episodes});
+
+  final String name;
+  final List<RssVideoEpisode> episodes;
+}
+
 class RssReader {
   RssReader._();
 
@@ -114,7 +130,7 @@ class RssReader {
     // 点开第一条；配合 `cacheFirst` 就是"点开秒开"。
     if (source.preload && page == 1 && arts.isNotEmpty) {
       unawaited(fetchContent(source, arts.first).catchError(
-          (_) => (text: '', image: '', isHtml: false)));
+          (_) => (text: '', image: '', isHtml: false, imageCount: 0)));
     }
 
     return (
@@ -721,11 +737,15 @@ class RssReader {
     return out;
   }
 
-  /// 取正文。返回 (内容, 文章里的第一张图, 是不是 HTML)。
+  /// 取正文。返回 (内容, 文章里的第一张图, 是不是 HTML, 正文页图片数量)。
   ///
   /// [isHtml] 为 true 时 `text` 字段装的是**原始 HTML**，调用方要用网页渲染
   /// （用户给的「影视聚合(资源站)」整页就是个 HLS 播放器模板）。
-  static Future<({String text, String image, bool isHtml})> fetchContent(
+  ///
+  /// [imageCount] 用来识别「图集型」文章（秀人岛 / 凹凸吧 / 下厨房步骤图）：
+  /// 这类页面文字提取出来几乎没内容，直接显示原网页体验最好。
+  static Future<
+      ({String text, String image, bool isHtml, int imageCount})> fetchContent(
       RssSource source, RssArticle article) async {
     // `articleStyle`：官方文档没写清 0/1/2/3 的语义，这里按"1 最像纯文字 /
     //   ≥2 最像富媒体模板"的常见用法映射，0 = 按产出内容自动判断。
@@ -740,9 +760,11 @@ class RssReader {
           text: article.contentHtml,
           image: _firstImage(article.contentHtml, article.link),
           isHtml: true,
+          imageCount: _countContentImages(article.contentHtml),
         );
       }
       final body = await _body(source, article.link);
+      final imageCount = _countContentImages(body);
       if (source.hasRules && (source.ruleContent ?? '').trim().isNotEmpty) {
         final out = _ruleFor(source, body, article.link)
             .getString(source.ruleContent);
@@ -751,6 +773,7 @@ class RssReader {
             text: out,
             image: _firstImage(out, article.link),
             isHtml: true,
+            imageCount: imageCount,
           );
         }
         final text = _stripHtml(out);
@@ -759,6 +782,7 @@ class RssReader {
             text: forceHtml ? out : text,
             image: _firstImage(out, article.link),
             isHtml: forceHtml,
+            imageCount: imageCount,
           );
         }
       }
@@ -766,11 +790,199 @@ class RssReader {
         text: extractArticleText(body),
         image: _firstImage(body, article.link),
         isHtml: false,
+        imageCount: imageCount,
       );
     } catch (e) {
-      return (text: '正文抓取失败：${_short(e)}', image: '', isHtml: false);
+      return (
+        text: '正文抓取失败：${_short(e)}',
+        image: '',
+        isHtml: false,
+        imageCount: 0,
+      );
     }
   }
+
+  /// 正文页里的图片数量（图集判定用）。
+  ///
+  /// 除了常规 `<img>`，还认 `#imgData` 这种「base64 路径清单」
+  /// （凹凸吧 109 张图就是它，页面里几乎没有可直接用的 `<img>`）。
+  static int _countContentImages(String html) {
+    var n = 0;
+    try {
+      final data = RegExp(
+        r'''id=["']imgData["'][^>]*value=["']([^"']+)["']''',
+        caseSensitive: false,
+      ).firstMatch(html);
+      if (data != null) {
+        n += data
+            .group(1)!
+            .split('|')
+            .where((e) => e.trim().isNotEmpty)
+            .length;
+      }
+    } catch (_) {}
+    try {
+      final doc = html_parser.parse(html);
+      for (final img in doc.querySelectorAll('img')) {
+        final a = img.attributes;
+        final src = (a['data-original'] ??
+                a['data-src'] ??
+                a['data-lazy-src'] ??
+                a['src'] ??
+                '')
+            .trim();
+        if (src.isEmpty || src.startsWith('data:')) continue;
+        final cls = (a['class'] ?? '').toLowerCase();
+        if (cls.contains('logo') || cls.contains('avatar')) continue;
+        final w = int.tryParse(a['width'] ?? '') ?? 0;
+        final h = int.tryParse(a['height'] ?? '') ?? 0;
+        if ((w > 0 && w < 200) || (h > 0 && h < 200)) continue;
+        final lower = src.toLowerCase();
+        if (!(lower.startsWith('http') ||
+            lower.startsWith('//') ||
+            lower.startsWith('/'))) {
+          continue;
+        }
+        if (lower.endsWith('.svg') || lower.contains('/icon')) continue;
+        final path = lower.split('?').first;
+        final isImg = path.endsWith('.jpg') ||
+            path.endsWith('.jpeg') ||
+            path.endsWith('.png') ||
+            path.endsWith('.webp') ||
+            path.endsWith('.avif') ||
+            path.endsWith('.bmp') ||
+            path.contains('loadimage');
+        if (isImg) n++;
+      }
+    } catch (_) {}
+    return n;
+  }
+
+  // ── 视频类源：详情页分集 / 播放页直链 ───────────────────────────
+
+  /// 从视频详情页 HTML 里抠出「线路 → 集数」。
+  ///
+  /// 覆盖苹果 CMS / 海洋 CMS 常见的 `/index.php/vod/play/id/…/sid/…/nid/….html`
+  /// 链接（樱花动漫这类源只写了列表规则，正文规则为空，以前只能当纯文本看）。
+  /// 找不到分集时返回空列表，调用方退回「网页播放」。
+  static Future<List<RssVideoLine>> fetchVideoLines(
+      RssSource source, RssArticle article) async {
+    final body = await _get(article.link, source);
+    final groups = <String, List<RssVideoEpisode>>{};
+    final seen = <String>{};
+    final re = RegExp(
+      r'''<a\b[^>]*?href\s*=\s*(?:"([^"]*)"|'([^']*)')[^>]*>([\s\S]*?)</a>''',
+      caseSensitive: false,
+    );
+    for (final m in re.allMatches(body)) {
+      final href = (m.group(1) ?? m.group(2) ?? '').trim();
+      if (href.isEmpty || href.startsWith('javascript:')) continue;
+      if (!_looksPlayLink(href)) continue;
+      final label = _stripHtml(m.group(3) ?? '').trim();
+      if (label.isEmpty || label.length > 24) continue;
+      final abs = _absUrl(href, article.link);
+      if (abs.isEmpty || !seen.add(abs)) continue;
+      final sid = _playSid(abs);
+      final key = sid.isEmpty ? '线路' : '线路$sid';
+      groups.putIfAbsent(key, () => <RssVideoEpisode>[]).add(
+            RssVideoEpisode(title: label, url: abs),
+          );
+    }
+    if (groups.isEmpty) return const [];
+    final keys = groups.keys.toList()
+      ..sort((a, b) {
+        final na = int.tryParse(RegExp(r'\d+').firstMatch(a)?.group(0) ?? '');
+        final nb = int.tryParse(RegExp(r'\d+').firstMatch(b)?.group(0) ?? '');
+        return (na ?? 0).compareTo(nb ?? 0);
+      });
+    final lines = [
+      for (final k in keys)
+        RssVideoLine(name: k, episodes: groups[k]!.take(300).toList()),
+    ];
+    final total = lines.fold<int>(0, (n, l) => n + l.episodes.length);
+    return total == 0 ? const [] : lines;
+  }
+
+  static bool _looksPlayLink(String href) {
+    final h = href.toLowerCase();
+    if (h.contains('vod/play') || h.contains('vod-play')) return true;
+    return h.contains('/play/') && (h.contains('sid') || h.contains('nid'));
+  }
+
+  static String _playSid(String url) {
+    final m = RegExp(r'/sid/(\d+)').firstMatch(url) ??
+        RegExp(r'[?&]sid=(\d+)').firstMatch(url);
+    return m?.group(1) ?? '';
+  }
+
+  /// 播放页 → 视频直链（苹果 CMS 的 `player_aaaa` 配置里通常直接带 m3u8）。
+  ///
+  /// 解析不到（加密 / JS 动态拼地址）返回 null，调用方退回嗅探播放。
+  static Future<String?> resolvePlayUrl(
+      RssSource source, String pageUrl) async {
+    try {
+      final body = await _get(pageUrl, source);
+      final cfg = _playerConfig(body);
+      if (cfg != null) {
+        final enc = cfg['encrypt'];
+        final encrypted = enc == 1 || enc == '1' || enc == true;
+        final u = (cfg['url'] ?? '').toString().trim();
+        if (!encrypted && u.startsWith('http')) return u;
+      }
+      // 兜底：整页里直接出现的 m3u8/mp4
+      final m = RegExp(
+        r'''https?:(?:\\/\\/|//)[^\s"'<>\\]+?\.(?:m3u8|mp4|flv|mkv)(?:\?[^\s"'<>\\]*)?''',
+        caseSensitive: false,
+      ).firstMatch(body);
+      return m?.group(0)?.replaceAll(r'\/', '/');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 取 `player_aaaa = {...}` 里的 JSON（字段里有嵌套对象，必须括号配对扫描）。
+  static Map<String, dynamic>? _playerConfig(String body) {
+    final at = body.indexOf('player_aaaa');
+    if (at < 0) return null;
+    final eq = body.indexOf('=', at);
+    if (eq < 0) return null;
+    final start = body.indexOf('{', eq);
+    if (start < 0) return null;
+    var depth = 0;
+    var inStr = false;
+    var esc = false;
+    for (var i = start; i < body.length; i++) {
+      final c = body[i];
+      if (inStr) {
+        if (esc) {
+          esc = false;
+        } else if (c == '\\') {
+          esc = true;
+        } else if (c == '"') {
+          inStr = false;
+        }
+      } else if (c == '"') {
+        inStr = true;
+      } else if (c == '{') {
+        depth++;
+      } else if (c == '}') {
+        depth--;
+        if (depth == 0) {
+          try {
+            final d = jsonDecode(body.substring(start, i + 1));
+            return d is Map ? Map<String, dynamic>.from(d) : null;
+          } catch (_) {
+            return null;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  /// 播放直链要带的请求头（源 header 里的 Referer / UA / Cookie 等）。
+  static Map<String, String> playHeaders(RssSource source) =>
+      Map<String, String>.from(_headers(source));
 
   // ── 网络 ────────────────────────────────────────────────────────
 

@@ -12,6 +12,7 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../common/theme.dart';
@@ -37,14 +38,20 @@ class RssPage extends StatefulWidget {
   State<RssPage> createState() => _RssPageState();
 }
 
+/// 文章列表的展示方式：列表（左图右文）/ 卡片（一行两个大图）
+enum _ArticleView { list, card }
+
 class _RssPageState extends State<RssPage> {
   RssStore get store => RssStore.instance;
+
+  static const String _viewKey = 'rss_article_view';
 
   List<RssArticle> _articles = [];
   bool _loading = false;
   String _error = '';
   int _page = 1;
   int _channel = 0;
+  _ArticleView _view = _ArticleView.list;
 
   /// 上一页算出的"下一页地址"（仅 `ruleNextPage` 型源用；空 = 到底了）。
   String _nextUrl = '';
@@ -111,6 +118,7 @@ class _RssPageState extends State<RssPage> {
   @override
   void initState() {
     super.initState();
+    _restoreView();
     store.tick.addListener(_onStoreChanged);
     if (_tabEnabled) {
       _start();
@@ -350,6 +358,26 @@ class _RssPageState extends State<RssPage> {
         ),
       );
 
+  Future<void> _restoreView() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final v = sp.getInt(_viewKey);
+      if (v != null && v >= 0 && v < _ArticleView.values.length && mounted) {
+        setState(() => _view = _ArticleView.values[v]);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _toggleView() async {
+    final next =
+        _view == _ArticleView.list ? _ArticleView.card : _ArticleView.list;
+    setState(() => _view = next);
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setInt(_viewKey, next.index);
+    } catch (_) {}
+  }
+
   /// 登录 / 源站设置 —— 按源的 `loginUi` 动态生成表单，
   /// 保存后调源自己的 jsLib 钩子（`upLoginData`）并重载分类与列表。
   Future<void> _openLogin() async {
@@ -427,7 +455,7 @@ class _RssPageState extends State<RssPage> {
                         const _RssLogo(),
                         const SizedBox(width: 8),
                         ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 150),
+                          constraints: const BoxConstraints(maxWidth: 120),
                           child: Text(
                             src?.name ?? 'RSS',
                             maxLines: 1,
@@ -464,6 +492,14 @@ class _RssPageState extends State<RssPage> {
                     const SizedBox(width: 8),
                   ],
                   _topIcon(Icons.refresh_rounded, '刷新', _loading ? null : _reload),
+                  const SizedBox(width: 8),
+                  _topIcon(
+                    _view == _ArticleView.card
+                        ? Icons.view_list_rounded
+                        : Icons.grid_view_rounded,
+                    _view == _ArticleView.card ? '切换为列表视图' : '切换为卡片视图',
+                    _toggleView,
+                  ),
                   const SizedBox(width: 8),
                   _topIcon(Icons.tune_rounded, 'RSS 管理', _openManage),
                 ],
@@ -587,17 +623,128 @@ class _RssPageState extends State<RssPage> {
     return RefreshIndicator(
       onRefresh: () async => _reload(),
       color: AppTheme.accentColor,
-      child: ListView.builder(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(14, 0, 14, 110),
-        itemCount: _articles.length + 1,
-        itemBuilder: (c, i) {
-          if (i == _articles.length) return _footer();
-          return _articleRow(_articles[i], src);
-        },
+      child: _view == _ArticleView.card
+          ? _cardList(src)
+          : ListView.builder(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 110),
+              itemCount: _articles.length + 1,
+              itemBuilder: (c, i) {
+                if (i == _articles.length) return _footer();
+                return _articleRow(_articles[i], src);
+              },
+            ),
+    );
+  }
+
+  /// 卡片视图：一行两个（封面在上、标题两行），与「RSS 管理」的卡片观感一致。
+  Widget _cardList(RssSource src) {
+    final rows = (_articles.length + 1) ~/ 2;
+    return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 110),
+      itemCount: rows + 1,
+      itemBuilder: (c, i) {
+        if (i == rows) return _footer();
+        final left = _articles[i * 2];
+        final right =
+            i * 2 + 1 < _articles.length ? _articles[i * 2 + 1] : null;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: SizedBox(
+            height: 188,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: _articleCard(left, src)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: right == null
+                      ? const SizedBox.shrink()
+                      : _articleCard(right, src),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _articleCard(RssArticle a, RssSource src) {
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundSecondary,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.borderLight, width: 0.5),
+      ),
+      child: InkWell(
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => RssArticlePage(source: src, article: a),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              height: 96,
+              child: a.hasImage
+                  ? CachedNetworkImage(
+                      imageUrl: a.image,
+                      fit: BoxFit.cover,
+                      placeholder: (_, __) =>
+                          Container(color: AppTheme.backgroundTertiary),
+                      errorWidget: (_, __, ___) => _coverPlaceholder(),
+                    )
+                  : _coverPlaceholder(),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(9, 8, 9, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      a.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        height: 1.3,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      [a.sourceName, a.pubDate]
+                          .where((e) => e.trim().isNotEmpty)
+                          .join(' · '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppTheme.textTertiary,
+                        fontSize: AppTheme.fontCaption,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
+
+  Widget _coverPlaceholder() => Container(
+        color: AppTheme.backgroundTertiary,
+        alignment: Alignment.center,
+        child: Icon(Icons.rss_feed_rounded,
+            size: 26, color: AppTheme.textTertiary),
+      );
 
   /// 统一空态：图标 + 标题 + 说明 + （可选）按钮
   Widget _emptyView({
