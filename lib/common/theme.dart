@@ -215,10 +215,17 @@ class AppTheme {
 
   /// 次要文字：原先是半透明黑/白；这里用调色板的中灰 + 同等的"弱化"强度。
   /// 2026-10-01 提高深浅两档透明度（列表/卡片文字对比度不足：深色下太暗、浅色宣纸底上太浅）
-  static Color get textSecondary =>
-      _palette.textSecondary.withValues(alpha: _light ? 0.92 : 0.84);
-  static Color get textTertiary =>
-      _palette.textSecondary.withValues(alpha: _light ? 0.68 : 0.64);
+  ///
+  /// ── 2026-10-20 暗色再提亮 ─────────────────────────────────────
+  /// 用户反馈「夜间模式字体是灰色的，伤眼」：调色板中灰（如 #8E8E93）压墨夜底
+  /// 只有 ~3.3:1 对比度。暗色改为**白色降透明度**（稳定 ~8:1，不随配色漂移），
+  /// 浅色仍用调色板原值（白天观感不变）。
+  static Color get textSecondary => _light
+      ? _palette.textSecondary.withValues(alpha: 0.92)
+      : Colors.white.withValues(alpha: 0.72);
+  static Color get textTertiary => _light
+      ? _palette.textSecondary.withValues(alpha: 0.68)
+      : Colors.white.withValues(alpha: 0.55);
 
   static Color get borderLight =>
       _palette.primary.withValues(alpha: _light ? 0.10 : 0.12);

@@ -173,11 +173,11 @@ class MusicTheme {
   /// 次要文字
   ///
   /// ⚠️ 浓度必须与全局 `AppTheme.textSecondary` 同向：全局是
-  /// "浅色更实(0.92) / 深色更淡(0.84)"，原来这里写反成
-  /// "浅色 0.80 / 深色 0.90"，于是同一套 palette、同一屏里，
-  /// 音乐的歌手名/副标题比全局同语义文字更淡（浅色）或更实（深色）。
-  static Color get secondary =>
-      palette.textSecondary.withValues(alpha: _isDark ? 0.84 : 0.92);
+  /// "浅色更实(0.92) / 深色改用白色 72%"（调色板中灰在墨夜底上只有
+  /// ~3.3:1，夜间发灰伤眼 —— 用户 2026-10-20 反馈）。
+  static Color get secondary => _isDark
+      ? const Color(0xB8FFFFFF) // white 72%
+      : palette.textSecondary.withValues(alpha: 0.92);
 
   /// 鼠尾草绿（Beans 的次要强调，用于"已下载/已完成"等状态）
   ///

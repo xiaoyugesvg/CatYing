@@ -54,7 +54,15 @@ class JellyTheme {
   // 文字颜色
   static Color get textPrimaryLight => _palette.textPrimaryLight;
   static Color get textPrimaryDark => _palette.textPrimaryDark;
-  static Color get textSecondary => _palette.textSecondary;
+
+  /// 次要文字。
+  ///
+  /// 暗色与全局 `AppTheme.textSecondary` 同一套：调色板中灰压墨夜底只有
+  /// ~3.3:1，夜间发灰伤眼（用户 2026-10-20 反馈）⇒ 改用白色 72%，
+  /// 对比度稳定且不随配色漂移；浅色保持调色板原值。
+  static Color get textSecondary => AppBrightness.isLight.value
+      ? _palette.textSecondary
+      : Colors.white.withValues(alpha: 0.72);
 
   /// 毛玻璃效果滤镜
   static final ImageFilter glassFilter = ImageFilter.blur(
