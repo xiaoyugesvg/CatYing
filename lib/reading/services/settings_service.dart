@@ -2583,12 +2583,18 @@ class SettingsService extends ChangeNotifier {
       final dir = Directory('${root.path}/nav_icons');
       if (!await dir.exists()) await dir.create(recursive: true);
       final ext = _pickImageExt(src.path);
-      final dest = File('${dir.path}/nav_${label.codeUnits.join('_')}.$ext');
+      // ⚠️ 文件名必须**每次不同**：Flutter 的 `Image.file` 按「路径」做解码缓存，
+      //   固定成 `nav_<label>.<ext>` 时第二次上传覆盖同名文件，界面仍显示旧图
+      //   （用户 2026-10-20：「换一次能换，换第二次换不了」）。
+      final stamp = DateTime.now().microsecondsSinceEpoch;
+      final dest =
+          File('${dir.path}/nav_${label.codeUnits.join('_')}_$stamp.$ext');
       await src.copy(dest.path);
       final old = _navCustomIcons[label];
       _navCustomIcons[label] = dest.path;
       await _persistNavCustomIcons();
       notifyListeners();
+      // 上一次的图标文件清理掉（路径已不同，不影响新图缓存）
       if (old != null && old.isNotEmpty && old != dest.path) {
         try {
           final f = File(old);

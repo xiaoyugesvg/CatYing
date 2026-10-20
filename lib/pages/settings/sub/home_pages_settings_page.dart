@@ -595,8 +595,13 @@ class HomePagesSettingsPage extends StatelessWidget {
                     color: AppTheme.accentColor.withValues(alpha: 0.22),
                     width: 0.5),
               ),
-              child: Icon(_iconOf[f] ?? Icons.circle_outlined,
-                  size: 17, color: AppTheme.accentColor),
+              child: f.iconAsset != null
+                  ? Padding(
+                      padding: const EdgeInsets.all(5),
+                      child: Image.asset(f.iconAsset!, fit: BoxFit.contain),
+                    )
+                  : Icon(_iconOf[f] ?? Icons.circle_outlined,
+                      size: 17, color: AppTheme.accentColor),
             ),
             const SizedBox(width: 12),
             // 名称（必需页面带说明）

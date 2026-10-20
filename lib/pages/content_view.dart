@@ -468,6 +468,16 @@ class _ContentViewState extends State<ContentView> with WidgetsBindingObserver {
                           JellyNavItem(
                             icon: f.activeIcon,
                             label: f.label,
+                            // Emby 用官方图标图片（见 NavFeature.iconAsset）；
+                            // 用户上传过自定义图标的仍由 JellyNavBar 优先渲染。
+                            iconBuilder: f.iconAsset == null
+                                ? null
+                                : (color, size) => Image.asset(
+                                      f.iconAsset!,
+                                      width: size,
+                                      height: size,
+                                      fit: BoxFit.contain,
+                                    ),
                           ),
                       ],
                       onTap: (i) {

@@ -64,6 +64,13 @@ enum NavFeature {
         NavFeature.search => Icons.search,
       };
 
+  /// 默认图标**图片资源**（非 null 时优先于 [icon]/[activeIcon] 的 Material 图标）。
+  ///
+  /// 目前只有 Emby —— 它的官方图标是品牌图形，用 `Icons.video_settings`
+  /// 完全看不出是 Emby（用户 2026-10-20 要求换成官方图标）。
+  String? get iconAsset =>
+      this == NavFeature.emby ? 'assets/icons/emby.png' : null;
+
   /// 选中图标
   IconData get activeIcon => switch (this) {
         NavFeature.home => Icons.home,
