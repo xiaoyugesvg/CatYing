@@ -1,17 +1,26 @@
+import 'dart:async';
+
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../common/theme.dart';
-import '../../services/douban_service.dart';
+import '../../services/calendar_feed_service.dart';
+import '../../services/tmdb_service.dart';
+import '../../services/trakt_service.dart';
+import '../settings/sub/calendar_settings_page.dart';
 import '../webview/view.dart';
 
 /// 「追剧日历」—— 首页右上角日历入口。
 ///
-/// 数据参考 <https://github.com/SunMoonWithYou/minetrakt> 的「豆瓣热播 / 最新」
-/// 思路：按 今日 / 本周 / 本月 三个周期，分别拉豆瓣公开列表（剧集 / 电影），
-/// 展示最新、热播与更新情况。
+/// 顶部 4 个 tab：
+///   1. 追剧日历：Trakt 设备码登录后，按天展示你追的剧未来 30 天的待播集；
+///   2. 豆瓣热播 / 3. 平台剧场 / 4. 骨朵热榜：
+///      来自 MineTrakt 用的公开 JSON，再按 今天 / 本周 / 本月 过滤：
+///        · 今天：今日更新的剧
+///        · 本周：最近 7 天更新的剧
+///        · 本月：近 30 天首播的新剧
 class TvCalendarPage extends StatefulWidget {
   const TvCalendarPage({super.key});
 
@@ -21,32 +30,34 @@ class TvCalendarPage extends StatefulWidget {
 
 class _TvCalendarPageState extends State<TvCalendarPage> {
   static const List<String> _periodLabels = ['今天', '本周', '本月'];
-
-  int _period = 0;
-  bool _loading = true;
-  String? _error;
-
-  /// 每个周期读取的豆瓣列表：section 标题 → (type, tag)
-  static const List<List<(String, String, String)>> _sections = [
-    // 今天
-    [('今日热播剧集', 'tv', '热门'), ('今日热门电影', 'movie', '热门')],
-    // 本周（豆瓣 tv 分类没有「最新」标签，用「国产剧」代表近期新剧）
-    [('本周新剧', 'tv', '国产剧'), ('本周新片', 'movie', '最新')],
-    // 本月
-    [('本月热播剧集', 'tv', '热门'), ('本月高分电影', 'movie', '豆瓣高分')],
+  static const List<String> _tabLabels = ['追剧日历', '豆瓣热播', '平台剧场', '骨朵热榜'];
+  static const List<IconData> _tabIcons = [
+    Icons.event_note_rounded,
+    Icons.local_movies_rounded,
+    Icons.subscriptions_rounded,
+    Icons.local_fire_department_rounded,
   ];
 
-  final Map<String, List<DoubanSubject>> _data = {};
+  int _tab = 0;
+  int _period = 0;
+  int _guduoCat = 0; // 0 全部 / 1 剧集 / 2 电影 / 3 综艺 / 4 动漫
+
+  CalendarFeedBundle? _bundle;
+  bool _feedLoading = true;
+  String? _feedError;
+
+  List<TraktCalendarEntry> _trakt = const [];
+  bool _traktLoading = false;
+  String? _traktError;
 
   @override
   void initState() {
     super.initState();
-    _loadDefaultPeriod().then((_) {
-      if (mounted) _load();
-    });
+    _loadDefaultPeriod();
+    _loadFeed();
+    _loadTrakt();
   }
 
-  /// 「设置 → 追剧日历 → 默认打开周期」
   Future<void> _loadDefaultPeriod() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -55,43 +66,76 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
     } catch (_) {}
   }
 
-  Future<void> _load() async {
+  Future<void> _loadFeed({bool force = false}) async {
     setState(() {
-      _loading = true;
-      _error = null;
+      _feedLoading = true;
+      _feedError = null;
     });
-    final sections = _sections[_period];
-    final results = await Future.wait([
-      for (final s in sections)
-        DoubanService.instance.fetch(type: s.$2, tag: s.$3),
-    ]);
+    final bundle = await CalendarFeedService.instance.fetch(force: force);
     if (!mounted) return;
-    for (var i = 0; i < sections.length; i++) {
-      _data[_keyOf(sections[i])] = results[i];
-    }
-    final empty = results.every((r) => r.isEmpty);
     setState(() {
-      _loading = false;
-      if (empty) _error = '暂时拿不到豆瓣数据，请检查网络后重试';
+      _bundle = bundle;
+      _feedLoading = false;
+      if (bundle.isEmpty) _feedError = '暂时拿不到榜单数据，请检查网络后重试';
     });
   }
 
-  String _keyOf((String, String, String) s) => '${s.$2}|${s.$3}';
+  Future<void> _loadTrakt() async {
+    final svc = TraktService.instance;
+    await svc.load();
+    if (!mounted) return;
+    if (!svc.configured || !svc.loggedIn) {
+      setState(() {
+        _trakt = const [];
+        _traktLoading = false;
+        _traktError = null;
+      });
+      return;
+    }
+    setState(() {
+      _traktLoading = true;
+      _traktError = null;
+    });
+    try {
+      final list = await svc.fetchCalendar();
+      if (!mounted) return;
+      setState(() {
+        _trakt = list;
+        _traktLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _traktLoading = false;
+        _traktError = e is TraktNotLoggedIn
+            ? 'Trakt 登录已失效，请重新登录'
+            : '追剧日历加载失败：$e';
+      });
+    }
+  }
 
-  void _switchPeriod(int i) {
-    if (i == _period) return;
-    setState(() => _period = i);
-    final sections = _sections[_period];
-    final missing = sections.any((s) => !_data.containsKey(_keyOf(s)));
-    if (missing) {
-      _load();
+  Future<void> _refresh() async {
+    if (_tab == 0) {
+      await _loadTrakt();
     } else {
-      setState(() => _loading = false);
+      await _loadFeed(force: true);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    // AppTheme 的颜色 getter 是静态的，换肤/明暗切换不会通知 widget；
+    // 这里主动监听，保证日历页在浅色/深色和不同配色下都跟着变。
+    return ValueListenableBuilder<bool>(
+      valueListenable: AppBrightness.isLight,
+      builder: (_, __, ___) => ValueListenableBuilder<int>(
+        valueListenable: AppTheme.paletteRevision,
+        builder: (_, ___, ____) => _buildPage(context),
+      ),
+    );
+  }
+
+  Widget _buildPage(BuildContext context) {
     final now = DateTime.now();
     return Scaffold(
       backgroundColor: AppTheme.backgroundPrimary,
@@ -110,38 +154,36 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
         actions: [
           IconButton(
             tooltip: '刷新',
-            onPressed: _load,
+            onPressed: _refresh,
             icon: Icon(Icons.refresh_rounded, color: AppTheme.textSecondary),
           ),
         ],
       ),
       body: RefreshIndicator(
         color: AppTheme.accentColor,
-        onRefresh: _load,
+        onRefresh: _refresh,
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
           children: [
             _buildDateHeader(now),
             const SizedBox(height: 14),
-            _buildPeriodChips(),
-            const SizedBox(height: 18),
-            if (_loading)
-              const Padding(
-                padding: EdgeInsets.only(top: 80),
-                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-              )
-            else if (_error != null)
-              _buildError()
+            _buildTabs(),
+            const SizedBox(height: 14),
+            if (_tab != 0) ...[
+              _buildPeriodChips(),
+              const SizedBox(height: 14),
+            ],
+            if (_tab == 0)
+              _buildTraktTab(now)
             else
-              for (final s in _sections[_period]) ...[
-                _buildSection(s.$1, _data[_keyOf(s)] ?? const []),
-                const SizedBox(height: 22),
-              ],
+              _buildFeedTab(now),
           ],
         ),
       ),
     );
   }
+
+  // ── 顶部 ──────────────────────────────────────────────────────
 
   Widget _buildDateHeader(DateTime now) {
     const weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
@@ -189,7 +231,7 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                weekdayLabel(now, weekdays),
+                weekdays[(now.weekday - 1).clamp(0, 6)],
                 style: TextStyle(
                   color: AppTheme.textPrimary,
                   fontSize: AppTheme.fontTitle2,
@@ -198,7 +240,9 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
               ),
               const SizedBox(height: 2),
               Text(
-                '今天追什么 · 豆瓣热播 / 最新',
+                _tab == 0
+                    ? '我的追剧 · Trakt 未来 30 天待播'
+                    : '今天追什么 · 豆瓣 / 剧场 / 骨朵',
                 style: TextStyle(
                   color: AppTheme.textTertiary,
                   fontSize: AppTheme.fontCaption,
@@ -211,8 +255,67 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
     );
   }
 
-  String weekdayLabel(DateTime now, List<String> weekdays) =>
-      weekdays[(now.weekday - 1).clamp(0, 6)];
+  Widget _buildTabs() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (var i = 0; i < _tabLabels.length; i++) ...[
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                if (_tab == i) return;
+                setState(() => _tab = i);
+                if (i == 0) _loadTrakt();
+                if (i != 0 && (_bundle == null || _bundle!.isEmpty)) {
+                  _loadFeed();
+                }
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: i == _tab
+                      ? AppTheme.accentColor
+                      : AppTheme.backgroundSecondary,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: i == _tab
+                        ? Colors.transparent
+                        : AppTheme.borderLight,
+                    width: 0.5,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _tabIcons[i],
+                      size: 15,
+                      color:
+                          i == _tab ? Colors.white : AppTheme.textSecondary,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      _tabLabels[i],
+                      style: TextStyle(
+                        color:
+                            i == _tab ? Colors.white : AppTheme.textSecondary,
+                        fontSize: AppTheme.fontFootnote,
+                        fontWeight:
+                            i == _tab ? FontWeight.w700 : FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (i != _tabLabels.length - 1) const SizedBox(width: 8),
+          ],
+        ],
+      ),
+    );
+  }
 
   Widget _buildPeriodChips() {
     return Row(
@@ -221,19 +324,19 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
           Expanded(
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: () => _switchPeriod(i),
+              onTap: () => setState(() => _period = i),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
-                height: 36,
+                height: 34,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: i == _period
-                      ? AppTheme.accentColor
+                      ? AppTheme.accentColor.withValues(alpha: 0.18)
                       : AppTheme.backgroundSecondary,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(11),
                   border: Border.all(
                     color: i == _period
-                        ? Colors.transparent
+                        ? AppTheme.accentColor.withValues(alpha: 0.55)
                         : AppTheme.borderLight,
                     width: 0.5,
                   ),
@@ -241,7 +344,9 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
                 child: Text(
                   _periodLabels[i],
                   style: TextStyle(
-                    color: i == _period ? Colors.white : AppTheme.textSecondary,
+                    color: i == _period
+                        ? AppTheme.accentColor
+                        : AppTheme.textSecondary,
                     fontSize: AppTheme.fontFootnote,
                     fontWeight:
                         i == _period ? FontWeight.w700 : FontWeight.w500,
@@ -256,81 +361,307 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
     );
   }
 
-  Widget _buildError() {
-    return Padding(
-      padding: const EdgeInsets.only(top: 60),
-      child: Column(
-        children: [
-          Icon(
-            Icons.event_busy_rounded,
-            size: 46,
-            color: AppTheme.textTertiary.withValues(alpha: 0.5),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            _error ?? '加载失败',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: AppTheme.fontSubhead,
-            ),
-          ),
-          const SizedBox(height: 16),
-          TextButton.icon(
-            onPressed: _load,
-            icon: const Icon(Icons.refresh_rounded, size: 18),
-            label: const Text('重新加载'),
-          ),
-        ],
-      ),
-    );
-  }
+  // ── Tab 1：Trakt 追剧日历 ─────────────────────────────────────
 
-  Widget _buildSection(String title, List<DoubanSubject> list) {
+  Widget _buildTraktTab(DateTime now) {
+    final svc = TraktService.instance;
+    if (!svc.configured) {
+      return _hintCard(
+        icon: Icons.key_rounded,
+        title: '先填写 Trakt Client ID',
+        subtitle: '到「设置 → 追剧日历」填入 Trakt 应用的 Client ID，'
+            '登录后这里会按天显示你追的剧的待播集。',
+        action: '去设置',
+        onTap: () => Get.to(() => const CalendarSettingsPage()),
+      );
+    }
+    if (!svc.loggedIn) {
+      return _hintCard(
+        icon: Icons.login_rounded,
+        title: '登录 Trakt',
+        subtitle: '用设备码登录（不需要密码），登录后自动同步你在 Trakt 追的剧。',
+        action: '开始登录',
+        onTap: _startTraktLogin,
+      );
+    }
+    if (_traktLoading && _trakt.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.only(top: 80),
+        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+    if (_traktError != null && _trakt.isEmpty) {
+      return _errorBlock(_traktError!, () => _loadTrakt());
+    }
+    if (_trakt.isEmpty) {
+      return _emptyBlock(
+        '未来 30 天没有待播剧集',
+        '在 Trakt 里加入待看 / 标记观看后，这里会自动出现。',
+      );
+    }
+
+    // 按北京时间分组
+    final groups = <String, List<(TraktCalendarEntry, String)>>{};
+    for (final e in _trakt) {
+      final utc = DateTime.tryParse(e.firstAired);
+      if (utc == null) continue;
+      final bj = utc.toUtc().add(const Duration(hours: 8));
+      final key =
+          '${bj.year}-${bj.month.toString().padLeft(2, '0')}-${bj.day.toString().padLeft(2, '0')}';
+      final time =
+          '${bj.hour.toString().padLeft(2, '0')}:${bj.minute.toString().padLeft(2, '0')}';
+      groups.putIfAbsent(key, () => []).add((e, time));
+    }
+    final keys = groups.keys.toList()..sort();
+    final todayKey =
+        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    const weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Container(
-              width: 3,
-              height: 14,
-              decoration: BoxDecoration(
-                color: AppTheme.accentColor,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(width: 8),
             Text(
-              title,
+              '未来 30 天 · ${_trakt.length} 集',
               style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: AppTheme.fontHeadline,
-                fontWeight: FontWeight.w700,
+                color: AppTheme.textSecondary,
+                fontSize: AppTheme.fontCaption,
               ),
             ),
             const Spacer(),
-            Text(
-              '${list.length} 部',
-              style: TextStyle(
-                color: AppTheme.textTertiary,
-                fontSize: AppTheme.fontCaption,
+            TextButton(
+              onPressed: _logoutTrakt,
+              style: TextButton.styleFrom(
+                minimumSize: Size.zero,
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(
+                '退出登录',
+                style: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontCaption,
+                ),
               ),
             ),
           ],
         ),
-        const SizedBox(height: 10),
-        if (list.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 18),
-            child: Text(
-              '暂无数据',
+        const SizedBox(height: 6),
+        for (final day in keys) ...[
+          _buildTraktDayHeader(day, day == todayKey, weekdays),
+          const SizedBox(height: 10),
+          GridView.builder(
+            padding: EdgeInsets.zero,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 10,
+              childAspectRatio: 0.47,
+            ),
+            itemCount: groups[day]!.length,
+            itemBuilder: (_, i) {
+              final (entry, time) = groups[day]![i];
+              return _traktCard(entry, time);
+            },
+          ),
+          const SizedBox(height: 20),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildTraktDayHeader(String day, bool isToday, List<String> weekdays) {
+    final d = DateTime.tryParse(day);
+    final wd = d == null ? '' : weekdays[(d.weekday - 1).clamp(0, 6)];
+    return Row(
+      children: [
+        Container(
+          width: 3,
+          height: 14,
+          decoration: BoxDecoration(
+            color: AppTheme.accentColor,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          '${day.substring(5).replaceAll('-', '月')}日',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontHeadline,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          wd,
+          style: TextStyle(
+            color: AppTheme.textTertiary,
+            fontSize: AppTheme.fontCaption,
+          ),
+        ),
+        if (isToday) ...[
+          const SizedBox(width: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+            decoration: BoxDecoration(
+              color: AppTheme.accentColor,
+              borderRadius: BorderRadius.circular(5),
+            ),
+            child: const Text(
+              '今天',
               style: TextStyle(
-                color: AppTheme.textTertiary,
-                fontSize: AppTheme.fontFootnote,
+                color: Colors.white,
+                fontSize: 9,
+                fontWeight: FontWeight.w700,
               ),
             ),
-          )
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _traktCard(TraktCalendarEntry e, String time) {
+    final poster = e.poster;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _showTraktDetail(e, time),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: poster.isEmpty
+                  ? Container(color: AppTheme.backgroundSecondary)
+                  : CachedNetworkImage(
+                      imageUrl: poster,
+                      fit: BoxFit.cover,
+                      placeholder: (_, _) =>
+                          Container(color: AppTheme.backgroundSecondary),
+                      errorWidget: (_, _, _) => Container(
+                        color: AppTheme.backgroundSecondary,
+                        child: Icon(
+                          Icons.live_tv_rounded,
+                          color: AppTheme.textTertiary,
+                          size: 22,
+                        ),
+                      ),
+                    ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            e.showTitle,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: AppTheme.fontCaption,
+              height: 1.25,
+            ),
+          ),
+          Text(
+            '${e.episodeLabel} · $time',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppTheme.accentColor,
+              fontSize: 10,
+              height: 1.35,
+            ),
+          ),
+          if (e.episodeTitle.isNotEmpty)
+            Text(
+              e.episodeTitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: 10,
+                height: 1.3,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _startTraktLogin() async {
+    final svc = TraktService.instance;
+    try {
+      final auth = await svc.startDeviceAuth();
+      if (!mounted) return;
+      final ok = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _TraktLoginDialog(auth: auth),
+      );
+      if (ok == true) await _loadTrakt();
+    } catch (e) {
+      if (!mounted) return;
+      _toast('Trakt 登录失败：$e');
+    }
+  }
+
+  Future<void> _logoutTrakt() async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        title: Text('退出 Trakt 登录？',
+            style: TextStyle(color: AppTheme.textPrimary)),
+        content: Text('退出后追剧日历会清空，公开榜单不受影响。',
+            style: TextStyle(color: AppTheme.textSecondary)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('退出')),
+        ],
+      ),
+    );
+    if (yes != true) return;
+    await TraktService.instance.logout();
+    if (!mounted) return;
+    setState(() => _trakt = const []);
+    _toast('已退出 Trakt');
+  }
+
+  // ── Tab 2/3/4：公开榜单 ─────────────────────────────────────
+
+  Widget _buildFeedTab(DateTime now) {
+    final bundle = _bundle;
+    if (_feedLoading && bundle == null) {
+      return const Padding(
+        padding: EdgeInsets.only(top: 80),
+        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+    if (bundle == null || bundle.isEmpty) {
+      if (_feedError != null) {
+        return _errorBlock(_feedError!, () => _loadFeed(force: true));
+      }
+      return _emptyBlock('暂时没有榜单数据', '下拉刷新重试。');
+    }
+    final list = _feedListFor(bundle, now);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_tab == 3) ...[
+          _buildGuduoCats(),
+          const SizedBox(height: 12),
+        ],
+        _buildSectionHeader(_sectionTitle()),
+        const SizedBox(height: 10),
+        if (list.isEmpty)
+          _emptyBlock(_emptyHint(), '切换周期或下拉刷新试试。')
         else
           GridView.builder(
             padding: EdgeInsets.zero,
@@ -343,16 +674,184 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
               childAspectRatio: 0.52,
             ),
             itemCount: list.length,
-            itemBuilder: (_, i) => _posterCard(list[i]),
+            itemBuilder: (_, i) => _feedCard(list[i]),
+          ),
+        if (bundle.updatedAt.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 16),
+            child: Text(
+              '数据更新：${bundle.updatedAt}',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: AppTheme.fontCaption,
+              ),
+            ),
           ),
       ],
     );
   }
 
-  Widget _posterCard(DoubanSubject s) {
+  List<CalendarFeedItem> _feedListFor(CalendarFeedBundle b, DateTime now) {
+    final List<CalendarFeedItem> base;
+    switch (_tab) {
+      case 2:
+        base = b.theaterAired;
+        break;
+      case 3:
+        final all = <CalendarFeedItem>[
+          ...b.guduoTv,
+          ...b.guduoMovie,
+          ...b.guduoVariety,
+          ...b.guduoAnime,
+        ];
+        final seen = <String>{};
+        base = [
+          for (final e in all)
+            if (seen.add('${e.tmdbId}|${e.title}')) e,
+        ];
+        break;
+      default:
+        base = b.doubanTv;
+    }
+    var list = base.where((e) {
+      switch (_period) {
+        case 1:
+          return e.updatedWithin(now, 7);
+        case 2:
+          return e.releasedWithin(now, 30);
+        default:
+          return e.updatedOn(now);
+      }
+    }).toList();
+
+    if (_tab == 3) {
+      if (_guduoCat == 1) list = list.where((e) => e.category == '剧集').toList();
+      if (_guduoCat == 2) list = list.where((e) => e.category == '电影').toList();
+      if (_guduoCat == 3) list = list.where((e) => e.category == '综艺').toList();
+      if (_guduoCat == 4) list = list.where((e) => e.category == '动漫').toList();
+    }
+
+    // 当天没有更新时，豆瓣热播用热度榜兜底，避免整页空白
+    if (list.isEmpty && _period == 0 && _tab == 1 && _guduoCat == 0) {
+      list = base.take(9).toList();
+    }
+    if (_tab == 3) {
+      list.sort((a, b) {
+        final ra = a.rank > 0 ? a.rank : 999;
+        final rb = b.rank > 0 ? b.rank : 999;
+        return ra.compareTo(rb);
+      });
+    } else {
+      list.sort((a, b) => b.popularity.compareTo(a.popularity));
+    }
+    return list.take(30).toList();
+  }
+
+  String _sectionTitle() {
+    final period = _periodLabels[_period];
+    switch (_tab) {
+      case 2:
+        return '$period · 平台剧场';
+      case 3:
+        return '$period · 骨朵热榜';
+      default:
+        return '$period · 豆瓣热播';
+    }
+  }
+
+  String _emptyHint() {
+    switch (_period) {
+      case 1:
+        return '最近 7 天没有更新';
+      case 2:
+        return '近 30 天没有新剧';
+      default:
+        return '今天没有更新';
+    }
+  }
+
+  Widget _buildGuduoCats() {
+    const labels = ['全部', '剧集', '电影', '综艺', '动漫'];
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (var i = 0; i < labels.length; i++) ...[
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => setState(() => _guduoCat = i),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: i == _guduoCat
+                      ? AppTheme.accentColor.withValues(alpha: 0.18)
+                      : AppTheme.backgroundSecondary,
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(
+                    color: i == _guduoCat
+                        ? AppTheme.accentColor.withValues(alpha: 0.55)
+                        : AppTheme.borderLight,
+                    width: 0.5,
+                  ),
+                ),
+                child: Text(
+                  labels[i],
+                  style: TextStyle(
+                    color: i == _guduoCat
+                        ? AppTheme.accentColor
+                        : AppTheme.textSecondary,
+                    fontSize: 11,
+                    fontWeight:
+                        i == _guduoCat ? FontWeight.w600 : FontWeight.w400,
+                  ),
+                ),
+              ),
+            ),
+            if (i != labels.length - 1) const SizedBox(width: 6),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title) {
+    return Row(
+      children: [
+        Container(
+          width: 3,
+          height: 14,
+          decoration: BoxDecoration(
+            color: AppTheme.accentColor,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          title,
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontHeadline,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _feedCard(CalendarFeedItem item) {
+    final imageBase = TmdbService.instance.effectiveImgBase;
+    final poster = item.posterUrl(imageBase);
+    final updateNote = item.lastUpdateDate.length >= 10
+        ? item.lastUpdateDate.substring(5)
+        : item.lastUpdateDate;
+    final note = updateNote.isNotEmpty
+        ? '更新 $updateNote'
+        : (item.rank > 0 ? '热榜 #${item.rank}' : item.genre);
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () => _showDetail(s),
+      onTap: () => _showFeedDetail(item),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -362,16 +861,14 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
                 Positioned.fill(
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(10),
-                    child: s.cover.isEmpty
+                    child: poster.isEmpty
                         ? Container(color: AppTheme.backgroundSecondary)
                         : CachedNetworkImage(
-                            imageUrl: s.cover,
-                            httpHeaders: DoubanService.imageHeaders,
+                            imageUrl: poster,
                             fit: BoxFit.cover,
-                            placeholder: (_, __) => Container(
-                              color: AppTheme.backgroundSecondary,
-                            ),
-                            errorWidget: (_, __, ___) => Container(
+                            placeholder: (_, _) =>
+                                Container(color: AppTheme.backgroundSecondary),
+                            errorWidget: (_, _, _) => Container(
                               color: AppTheme.backgroundSecondary,
                               child: Icon(
                                 Icons.movie_outlined,
@@ -382,44 +879,23 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
                           ),
                   ),
                 ),
-                if (s.rate > 0)
+                if (item.rating > 0)
                   Positioned(
                     left: 5,
                     top: 5,
                     child: Container(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 2),
                       decoration: BoxDecoration(
                         color: Colors.black.withValues(alpha: 0.6),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
-                        s.rate.toStringAsFixed(1),
+                        item.rating.toStringAsFixed(1),
                         style: const TextStyle(
                           color: Color(0xFFFFC53D),
                           fontSize: 10,
                           fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
-                if (s.isNew)
-                  Positioned(
-                    right: 5,
-                    top: 5,
-                    child: Container(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: AppTheme.accentColor,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: const Text(
-                        'NEW',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w800,
                         ),
                       ),
                     ),
@@ -429,7 +905,7 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
           ),
           const SizedBox(height: 6),
           Text(
-            s.title,
+            item.title,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
@@ -438,12 +914,79 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
               height: 1.25,
             ),
           ),
+          if (note.isNotEmpty)
+            Text(
+              note,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: 10,
+                height: 1.3,
+              ),
+            ),
         ],
       ),
     );
   }
 
-  Future<void> _showDetail(DoubanSubject s) async {
+  // ── 详情 / 通用块 ────────────────────────────────────────────
+
+  Future<void> _showFeedDetail(CalendarFeedItem item) async {
+    final imageBase = TmdbService.instance.effectiveImgBase;
+    final poster = item.posterUrl(imageBase);
+    await _showDetailSheet(
+      title: item.title,
+      poster: poster,
+      meta: [
+        if (item.rating > 0) '评分 ${item.rating.toStringAsFixed(1)}',
+        if (item.region.isNotEmpty) item.region,
+        if (item.genre.isNotEmpty) item.genre,
+      ].join(' · '),
+      sub: [
+        if (item.releaseDate.isNotEmpty) '首播 ${item.releaseDate}',
+        if (item.lastUpdateDate.isNotEmpty) '更新 ${item.lastUpdateDate}',
+      ].join(' · '),
+      onSearch: () => Get.toNamed('/search', arguments: item.title),
+      onTmdb: item.tmdbId <= 0
+          ? null
+          : () => Get.to(
+                () => InAppWebViewPage(
+                  url:
+                      'https://www.themoviedb.org/${item.mediaType == 'movie' ? 'movie' : 'tv'}/${item.tmdbId}',
+                  title: item.title,
+                ),
+              ),
+    );
+  }
+
+  Future<void> _showTraktDetail(TraktCalendarEntry e, String time) async {
+    await _showDetailSheet(
+      title: e.showTitle,
+      poster: e.poster,
+      meta: '${e.episodeLabel} · $time'
+          '${e.episodeTitle.isNotEmpty ? ' · ${e.episodeTitle}' : ''}',
+      sub: e.overview,
+      onSearch: () => Get.toNamed('/search', arguments: e.showTitle),
+      onTmdb: e.tmdbId <= 0
+          ? null
+          : () => Get.to(
+                () => InAppWebViewPage(
+                  url: 'https://www.themoviedb.org/tv/${e.tmdbId}',
+                  title: e.showTitle,
+                ),
+              ),
+    );
+  }
+
+  Future<void> _showDetailSheet({
+    required String title,
+    required String poster,
+    required String meta,
+    required String sub,
+    required VoidCallback onSearch,
+    VoidCallback? onTmdb,
+  }) async {
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppTheme.backgroundSecondary,
@@ -466,14 +1009,14 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
                     child: SizedBox(
                       width: 84,
                       height: 118,
-                      child: s.cover.isEmpty
+                      child: poster.isEmpty
                           ? Container(color: AppTheme.backgroundPrimary)
                           : CachedNetworkImage(
-                              imageUrl: s.cover,
-                              httpHeaders: DoubanService.imageHeaders,
+                              imageUrl: poster,
                               fit: BoxFit.cover,
-                              errorWidget: (_, __, ___) =>
-                                  Container(color: AppTheme.backgroundPrimary),
+                              errorWidget: (_, _, _) => Container(
+                                color: AppTheme.backgroundPrimary,
+                              ),
                             ),
                     ),
                   ),
@@ -483,21 +1026,37 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          s.title,
+                          title,
                           style: TextStyle(
                             color: AppTheme.textPrimary,
                             fontSize: AppTheme.fontHeadline,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
-                        const SizedBox(height: 6),
-                        Text(
-                          s.rate > 0 ? '豆瓣评分 ${s.rate.toStringAsFixed(1)}' : '暂无评分',
-                          style: TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: AppTheme.fontCaption,
+                        if (meta.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            meta,
+                            style: TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: AppTheme.fontCaption,
+                              height: 1.4,
+                            ),
                           ),
-                        ),
+                        ],
+                        if (sub.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            sub,
+                            maxLines: 4,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppTheme.textTertiary,
+                              fontSize: AppTheme.fontCaption,
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -510,7 +1069,7 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
                     child: FilledButton.icon(
                       onPressed: () {
                         Navigator.of(ctx).pop();
-                        Get.toNamed('/search', arguments: s.title);
+                        onSearch();
                       },
                       icon: const Icon(Icons.search_rounded, size: 18),
                       label: const Text('搜索资源'),
@@ -519,15 +1078,15 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: OutlinedButton.icon(
-                      onPressed: () {
-                        Navigator.of(ctx).pop();
-                        if (s.url.isEmpty) return;
-                        Get.to(
-                          () => InAppWebViewPage(url: s.url, title: s.title),
-                        );
-                      },
-                      icon: const Icon(Icons.open_in_browser_rounded, size: 18),
-                      label: const Text('豆瓣详情'),
+                      onPressed: onTmdb == null
+                          ? null
+                          : () {
+                              Navigator.of(ctx).pop();
+                              onTmdb();
+                            },
+                      icon:
+                          const Icon(Icons.open_in_browser_rounded, size: 18),
+                      label: const Text('TMDB 详情'),
                     ),
                   ),
                 ],
@@ -536,6 +1095,264 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _hintCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required String action,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 50),
+      child: Column(
+        children: [
+          Icon(icon, size: 52, color: AppTheme.accentColor.withValues(alpha: 0.7)),
+          const SizedBox(height: 14),
+          Text(
+            title,
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: AppTheme.fontHeadline,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: AppTheme.fontFootnote,
+                height: 1.5,
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          FilledButton(onPressed: onTap, child: Text(action)),
+        ],
+      ),
+    );
+  }
+
+  Widget _errorBlock(String message, VoidCallback retry) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 60),
+      child: Column(
+        children: [
+          Icon(Icons.event_busy_rounded,
+              size: 46, color: AppTheme.textTertiary.withValues(alpha: 0.5)),
+          const SizedBox(height: 12),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: AppTheme.fontSubhead),
+          ),
+          const SizedBox(height: 16),
+          TextButton.icon(
+            onPressed: retry,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('重新加载'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _emptyBlock(String title, String hint) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 50),
+      child: Column(
+        children: [
+          Icon(Icons.video_library_outlined,
+              size: 46, color: AppTheme.textTertiary.withValues(alpha: 0.5)),
+          const SizedBox(height: 12),
+          Text(title,
+              style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: AppTheme.fontSubhead)),
+          const SizedBox(height: 6),
+          Text(hint,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontCaption)),
+        ],
+      ),
+    );
+  }
+
+  void _toast(String text) {
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(
+        content: Text(text),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+}
+
+/// Trakt 设备码登录弹窗：展示 user_code、打开激活页、按 interval 轮询。
+class _TraktLoginDialog extends StatefulWidget {
+  const _TraktLoginDialog({required this.auth});
+
+  final TraktDeviceAuth auth;
+
+  @override
+  State<_TraktLoginDialog> createState() => _TraktLoginDialogState();
+}
+
+class _TraktLoginDialogState extends State<_TraktLoginDialog> {
+  Timer? _timer;
+  bool _polling = false;
+  bool _finished = false;
+  String _status = '等待你在 Trakt 上确认…';
+  late final DateTime _deadline = DateTime.now()
+      .add(Duration(seconds: widget.auth.expiresIn.clamp(60, 1800)));
+
+  @override
+  void initState() {
+    super.initState();
+    _schedule();
+  }
+
+  void _schedule() {
+    _timer?.cancel();
+    _timer = Timer(
+      Duration(seconds: widget.auth.interval.clamp(3, 30)),
+      _poll,
+    );
+  }
+
+  Future<void> _poll() async {
+    if (_polling || _finished || !mounted) return;
+    if (DateTime.now().isAfter(_deadline)) {
+      _finished = true;
+      setState(() => _status = '设备码已过期，请重新登录');
+      return;
+    }
+    _polling = true;
+    final status = await TraktService.instance.pollDeviceAuth(widget.auth);
+    _polling = false;
+    if (!mounted || _finished) return;
+    switch (status) {
+      case TraktPollStatus.success:
+        _finished = true;
+        _timer?.cancel();
+        Navigator.of(context).pop(true);
+        break;
+      case TraktPollStatus.pending:
+        setState(() => _status = '等待你在 Trakt 上确认…');
+        _schedule();
+        break;
+      case TraktPollStatus.slowDown:
+        setState(() => _status = '请求太频繁，稍等一下…');
+        _schedule();
+        break;
+      case TraktPollStatus.denied:
+        _finished = true;
+        setState(() => _status = '你在 Trakt 上拒绝了授权');
+        break;
+      case TraktPollStatus.expired:
+        _finished = true;
+        setState(() => _status = '设备码已过期，请重新登录');
+        break;
+      case TraktPollStatus.error:
+        setState(() => _status = '网络异常，正在重试…');
+        _schedule();
+        break;
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppTheme.backgroundSecondary,
+      title: Text(
+        '登录 Trakt',
+        style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTheme.fontHeadline),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '1. 打开 trakt.tv/activate',
+            style: TextStyle(
+                color: AppTheme.textSecondary, fontSize: AppTheme.fontFootnote),
+          ),
+          Text(
+            '2. 输入下面的设备码',
+            style: TextStyle(
+                color: AppTheme.textSecondary, fontSize: AppTheme.fontFootnote),
+          ),
+          const SizedBox(height: 12),
+          Center(
+            child: SelectableText(
+              widget.auth.userCode,
+              style: TextStyle(
+                color: AppTheme.accentColor,
+                fontSize: 26,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 4,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              if (!_finished)
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              if (!_finished) const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _status,
+                  style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontCaption,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () {
+            _finished = true;
+            _timer?.cancel();
+            Navigator.of(context).pop(false);
+          },
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Get.to(
+            () => InAppWebViewPage(
+              url: widget.auth.verificationUrl,
+              title: 'Trakt 激活',
+            ),
+          ),
+          child: const Text('打开激活页'),
+        ),
+      ],
     );
   }
 }

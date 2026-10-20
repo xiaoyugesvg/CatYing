@@ -391,7 +391,6 @@ class _RssPageState extends State<RssPage> {
           onPick: (id) {
             if (id != store.selectedId) store.select(id);
           },
-          onManage: _openManage,
         ),
       ),
     );
@@ -810,21 +809,20 @@ class _RssLogo extends StatelessWidget {
 
 /// 订阅源切换面板 —— **照影视模块 `SourceSwitchSheet` 的版式做**：
 ///   拖拽条 → 「标题 + 定位 + 网格/列表切换」→ 搜索胶囊 →
-///   2 列卡片（3.4 纵横比）/ 单列行 → 底部「RSS 管理」入口
+///   2 列卡片（3.4 纵横比）/ 单列行
 ///
 /// 用户 2026-10-15：「RSS 这个顶栏切换参考影视撒，顶栏太丑了」。
+/// 用户 2026-10-20：去掉底部「RSS 管理」入口 —— 它会遮住下面的源卡片。
 class _RssSourceSwitchSheet extends StatefulWidget {
   const _RssSourceSwitchSheet({
     required this.sources,
     required this.selectedId,
     required this.onPick,
-    required this.onManage,
   });
 
   final List<RssSource> sources;
   final String selectedId;
   final ValueChanged<String> onPick;
-  final VoidCallback onManage;
 
   @override
   State<_RssSourceSwitchSheet> createState() => _RssSourceSwitchSheetState();
@@ -1346,35 +1344,6 @@ class _RssSourceSwitchSheetState extends State<_RssSourceSwitchSheet> {
             ),
             // 多选底栏：全选 / 已选数 / 分享 / 删除 / 完成
             if (_selectMode) _selectBar(),
-            // 底部入口：去管理页导入 / 排序 / 删除
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () {
-                Navigator.pop(context);
-                widget.onManage();
-              },
-              child: Container(
-                margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                padding: const EdgeInsets.symmetric(vertical: 11),
-                decoration: BoxDecoration(
-                  color: AppTheme.backgroundTertiary,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppTheme.borderLight, width: 0.5),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.tune_rounded,
-                        size: 16, color: AppTheme.textSecondary),
-                    const SizedBox(width: 6),
-                    Text('RSS 管理',
-                        style: TextStyle(
-                            fontSize: AppTheme.fontSubhead,
-                            color: AppTheme.textPrimary)),
-                  ],
-                ),
-              ),
-            ),
           ],
         ),
       ),

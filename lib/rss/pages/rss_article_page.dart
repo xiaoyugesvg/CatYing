@@ -193,12 +193,27 @@ class _RssHtmlViewState extends State<_RssHtmlView> {
         },
         // 去广告：正文里常带第三方脚本塞的广告层，DOM 就绪后再注入一次
         onPageFinished: (url) =>
-            AdBlockService.instance.injectInto(_c, url.isEmpty ? widget.baseUrl : url),
+            _injectAds(url.isEmpty ? widget.baseUrl : url),
       ));
     // 挂 JS 通道必须在加载之前
     AdBlockService.attach(_c);
     AdBlockService.instance.ensureLoaded();
     _c.loadHtmlString(widget.html, baseUrl: widget.baseUrl);
+    _injectAds(widget.baseUrl);
+  }
+
+  /// 去广告注入 + 延迟补注入。
+  ///
+  /// 用户 2026-10-20：「广告也去不掉」（主要指 RSS）。很多广告是在正文脚本
+  /// 跑完之后才插进 DOM 的，只在 `onPageFinished` 注入一次抓不到；这里在
+  /// 1.2s / 3s / 6s 再补几次，覆盖延迟加载的广告位。
+  void _injectAds(String url) {
+    AdBlockService.instance.injectInto(_c, url);
+    for (final ms in const [1200, 3000, 6000]) {
+      Future<void>.delayed(Duration(milliseconds: ms), () {
+        if (mounted) AdBlockService.instance.injectInto(_c, url);
+      });
+    }
   }
 
   @override
@@ -264,7 +279,7 @@ class _RssWebViewPageState extends State<RssWebViewPage> {
         // 去广告：网页源（站点型 RSS / 原文链接）里的广告层
         onPageStarted: (url) => AdBlockService.instance.injectInto(_c, url),
         onPageFinished: (url) {
-          AdBlockService.instance.injectInto(_c, url);
+          _injectAdsDelayed(url);
           _refreshNavState();
         },
         // 跳第三方站点先弹窗确认（默认禁止，见「设置 → 广告管理」）
@@ -277,6 +292,17 @@ class _RssWebViewPageState extends State<RssWebViewPage> {
     AdBlockService.attach(_c);
     AdBlockService.instance.ensureLoaded();
     _c.loadRequest(Uri.parse(widget.url));
+  }
+
+  /// 去广告注入 + 延迟补注入（覆盖脚本跑完后才插进来的广告位）。
+  void _injectAdsDelayed(String url) {
+    final target = url.isEmpty ? widget.url : url;
+    AdBlockService.instance.injectInto(_c, target);
+    for (final ms in const [1200, 3000, 6000]) {
+      Future<void>.delayed(Duration(milliseconds: ms), () {
+        if (mounted) AdBlockService.instance.injectInto(_c, target);
+      });
+    }
   }
 
   /// 刷新前进/后退按钮可用状态（页面跳转后调用）。

@@ -176,6 +176,48 @@ def _catvod_args(method, args):
     return a
 
 
+def _adapt_kwargs(fn, desired):
+    """按目标函数的**真实形参名**调用，兼容 hipy / catvod 的命名差异。
+
+    用户 2026-10-20 日志实证：
+        TypeError: Spider.playerContent() got an unexpected keyword argument 'id'
+    源脚本写的是 `playerContent(self, flag, video_id, vip_flags)`（hipy 风格），
+    而我们统一用 `id` / `vipFlags`。Dart 侧改不了每个源的参数名，所以在这里
+    把统一参数映射到函数签名里真实存在的名字；签名里没有的多余参数直接丢掉。
+    """
+    import inspect
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return desired
+    params = list(sig.parameters.values())
+    pnames = [p.name for p in params
+              if p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)]
+    # 有 **kwargs 的源：原样透传最安全
+    if any(p.kind == p.VAR_KEYWORD for p in params):
+        return desired
+    aliases = {
+        "flag": ("flag",),
+        "id": ("id", "video_id", "vid", "ids"),
+        "ids": ("ids", "id", "video_id"),
+        "vipFlags": ("vipFlags", "vip_flags", "flags"),
+        "key": ("key", "wd", "word", "keyword"),
+        "wd": ("wd", "key", "word", "keyword"),
+        "quick": ("quick", "isQuick"),
+        "pg": ("pg", "page"),
+        "tid": ("tid", "type_id"),
+        "extend": ("extend", "filters"),
+        "filter": ("filter", "filters"),
+    }
+    out = {}
+    for k, v in desired.items():
+        for cand in aliases.get(k, (k,)):
+            if cand in pnames:
+                out[cand] = v
+                break
+    return out
+
+
 def _resolve_target(mod, method):
     if hasattr(mod, "Spider"):
         try:
@@ -219,7 +261,7 @@ def call(module, method, args_json):
         if not callable(fn):
             raise AttributeError("{} 中没有可调用的 {}".format(
                 getattr(mod, "__name__", "?"), method))
-        result = fn(**call_args)
+        result = fn(**_adapt_kwargs(fn, call_args))
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
         # 返回错误 JSON（Swift 侧拿不到 traceback，拼进 error 方便排查）

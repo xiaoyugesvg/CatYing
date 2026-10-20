@@ -29,6 +29,7 @@ class LiveController extends GetxController {
     super.onInit();
     loadFavorites();
     _loadViewModes();
+    _loadSavedGroupName();
     // 恢复统一由 LiveService.onInit 完成（live_lives 优先 / live_url 自动加载），
     // 这里只监听变化刷新 UI，避免双重恢复互相覆盖导致直播页空白
     ever(service.sources, (_) => update());
@@ -41,8 +42,46 @@ class LiveController extends GetxController {
       if (n > 0 && selectedGroupIndex.value >= n) {
         selectedGroupIndex.value = 0;
       }
+      // 分组列表就绪/变化后，恢复上次选中的分组（按名称匹配）
+      _restoreGroupIfNeeded();
       update();
     });
+  }
+
+  /// 上次选中的分组名（持久化，用于切页/重建/重启后恢复）。
+  String _savedGroupName = '';
+
+  Future<void> _loadSavedGroupName() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _savedGroupName = (prefs.getString('live_group_name') ?? '').trim();
+    } catch (_) {}
+    _restoreGroupIfNeeded();
+  }
+
+  Future<void> _saveGroupName(String name) async {
+    _savedGroupName = name;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('live_group_name', name);
+    } catch (_) {}
+  }
+
+  /// 按保存的**分组名**恢复下标。
+  ///
+  /// 用户 2026-10-20：「来回切换不应该还是之前选的源和分组吗？」
+  /// 分组顺序可能随源变化，所以存名称不存下标；每次分组列表变化都重新定位，
+  /// 这样「我的收藏」异步加载导致下标整体后移时也不会指错分组。
+  /// 找不到（换到没有这个分组的源）就保持当前/第一个，不会出现"空白分组"。
+  void _restoreGroupIfNeeded() {
+    final list = groups;
+    if (list.isEmpty || _savedGroupName.isEmpty) return;
+    final i = list.indexWhere((g) => g.name == _savedGroupName);
+    if (i < 0 || i == selectedGroupIndex.value) return;
+    selectedGroupIndex.value = i;
+    final hasFav = list.first.name == favGroupName;
+    final real = hasFav ? i - 1 : i;
+    if (real >= 0) service.selectedGroup.value = real;
   }
 
   /// 直播源列表
@@ -209,6 +248,7 @@ class LiveController extends GetxController {
   Future<void> selectSource(int index) async {
     await service.loadSource(index);
     selectedChannelIndex.value = 0;
+    _restoreGroupIfNeeded();
     update();
   }
 
@@ -221,6 +261,10 @@ class LiveController extends GetxController {
     final real = hasFav ? index - 1 : index;
     if (real >= 0) {
       service.selectedGroup.value = real;
+    }
+    // 记住选择（按名称持久化，切页/重建后恢复）
+    if (index >= 0 && index < groups.length) {
+      _saveGroupName(groups[index].name);
     }
     selectedChannelIndex.value = 0;
     update();

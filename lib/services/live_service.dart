@@ -301,6 +301,13 @@ class LiveService extends GetxService {
       }
     }
     if (seq != null && _stale(seq)) return;
+    // 用户 2026-10-20：「进入其它页面再回直播，分组点不动、下面也没频道」。
+    // 根因是网络失败/拿到空列表时用空数组覆盖了已有频道 → 分组一起被清空。
+    // 手里还有列表时**保留现状**（错误只在完全没有内容时才算致命）。
+    if (all.isEmpty && channels.isNotEmpty) {
+      AppLog.instance.log('[LiveService] 本次未取到频道，保留现有 ${channels.length} 条');
+      return;
+    }
     channels.value = all;
     _rebuildGroups();
   }
@@ -570,8 +577,12 @@ class LiveService extends GetxService {
         await _saveChannelCache('url:$url', list);
       }
       if (_stale(seq)) return;
-      channels.value = list;
-      _rebuildGroups();
+      // 空列表不覆盖已有频道（同 _loadSourceLocked 的说明）：保留旧列表，
+      // 只把错误提示留给「当前完全没内容」的情况。
+      if (list.isNotEmpty || channels.isEmpty) {
+        channels.value = list;
+        _rebuildGroups();
+      }
       _rawLives = null;
       _notifySources([
         LiveSource(
@@ -582,7 +593,7 @@ class LiveService extends GetxService {
       ]);
       selectedSourceIndex.value = 0;
       if (list.isEmpty) {
-        error.value = '未解析到频道';
+        if (channels.isEmpty) error.value = '未解析到频道';
       } else {
         await _persistUrl(url);
       }

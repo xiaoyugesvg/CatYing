@@ -1,4 +1,5 @@
 import 'app_log.dart';
+import 'api_config.dart';
 import 'network_manager.dart';
 import 'nodejs_manager.dart';
 import 'spider_service.dart';
@@ -21,6 +22,38 @@ class SceneRecovery {
   final void Function() setReconnecting;
   final void Function() setCompleted;
   final void Function(String message) setFailed;
+
+  /// reload 500 后的「强制重新下载源」每个恢复流程只做一次。
+  bool _redownloadTried = false;
+
+  /// Node `/source/loadPath` 500 说明缓存里的 index.js 本身坏了
+  ///（require 失败 / start() 抛异常），单纯重试永远失败。
+  /// 这里删掉缓存并走完整 `loadSource()` 重新下载一次。
+  Future<bool> _tryRedownloadSource() async {
+    if (_redownloadTried) return false;
+    _redownloadTried = true;
+    // 优先当前线路清单里的 JS 源（反映用户此刻选中的订阅）；
+    // 清单里没有再用 SpiderService 记下的主源地址。
+    var url = '';
+    for (final s in ApiConfig.instance.sourceBeanList) {
+      if (!s.isJsScriptSource) continue;
+      final api = s.api.trim();
+      if (api.startsWith('http')) {
+        url = api;
+        break;
+      }
+    }
+    if (url.isEmpty) {
+      url = SpiderService.instance.mainScriptUrl.trim();
+    }
+    if (url.isEmpty) return false;
+    AppLog.instance
+        .log('[SceneRecovery] reload 失败 → 强制重新下载源: $url');
+    final (ok, msg) = await NodeJSManager.instance.redownloadSource(url);
+    AppLog.instance.log(
+        '[SceneRecovery] 重新下载源${ok ? "成功" : "失败"}: ${msg ?? ""}');
+    return ok;
+  }
 
   Future<void> recover() async {
     final startAt = DateTime.now();
@@ -136,7 +169,8 @@ class SceneRecovery {
       AppLog.instance.sceneStep(cid, 'reload_start',
           fields: {'managementPort': managementPort});
       final reloaded = await NodeJSManager.instance
-          .reloadSourceViaManagementPort(managementPort);
+          .reloadSourceViaManagementPort(managementPort) ||
+          await _tryRedownloadSource();
       AppLog.instance.sceneStep(
         cid,
         reloaded ? 'reload_ok' : 'reload_fail',
@@ -277,7 +311,8 @@ class SceneRecovery {
         if (portOk) {
           final reloadStart = DateTime.now();
           final reloaded = await NodeJSManager.instance
-              .reloadSourceViaManagementPort(managementPort);
+                  .reloadSourceViaManagementPort(managementPort) ||
+              await _tryRedownloadSource();
           AppLog.instance.sceneStep(
             cid,
             'recover_mgmt_reload',

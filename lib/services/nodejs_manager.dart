@@ -422,16 +422,32 @@ class NodeJSManager {
         options: Options(
           contentType: 'application/json',
           responseType: ResponseType.plain,
+          // ⚠️ 必须放开校验：Node 在 loadScript 抛异常时回 500 + {"error":...}，
+          //    默认 validateStatus 会直接抛 DioException，把真正的失败原因
+          //    （require 失败 / start() 异常）整个丢掉，日志里只剩 "500"。
+          validateStatus: (_) => true,
         ),
       );
+      final code = resp.statusCode ?? 0;
+      final ok = code < 400;
+      String? detail;
+      if (!ok) {
+        detail = '${resp.data ?? ''}'.trim();
+        if (detail.length > 400) detail = detail.substring(0, 400);
+        // Node 还会把完整堆栈写进源目录的 load-error.txt，一并带出来
+        final forensic = await _readNodeLoadForensic(sourcePath);
+        if (forensic != null && forensic.isNotEmpty) {
+          detail = '$detail | $forensic';
+        }
+        AppLog.instance.w('[NodeJS] /source/loadPath 失败($code): $detail');
+      }
       final elapsed = DateTime.now().difference(startAt).inMilliseconds;
-      final ok = resp.statusCode != null && resp.statusCode! < 400;
       AppLog.instance.http('POST', url, port: port,
-          statusCode: resp.statusCode, elapsedMs: elapsed, ok: ok,
+          statusCode: code, elapsedMs: elapsed, ok: ok,
           caller: 'reloadSourceViaManagementPort');
       AppLog.instance.reload(ok ? 'ok' : 'fail', port: port,
-          statusCode: resp.statusCode, elapsedMs: elapsed, ok: ok,
-          error: ok ? null : 'HTTP ${resp.statusCode}');
+          statusCode: code, elapsedMs: elapsed, ok: ok,
+          error: ok ? null : detail);
       return ok;
     } catch (e) {
       final elapsed = DateTime.now().difference(startAt).inMilliseconds;
@@ -442,6 +458,59 @@ class NodeJSManager {
       AppLog.instance.reload('exception', port: port,
           elapsedMs: elapsed, ok: false, error: e.toString());
       return false;
+    }
+  }
+
+  /// 读取 Node 在 require / start 失败时写下的取证文件（只取 error= 行）。
+  Future<String?> _readNodeLoadForensic(String sourcePath) async {
+    for (final name in const ['load-error.txt', 'loadPath-error.txt']) {
+      try {
+        final f = File('$sourcePath/$name');
+        if (!await f.exists()) continue;
+        final text = (await f.readAsString()).trim();
+        if (text.isEmpty) continue;
+        final errLine = text
+            .split('\n')
+            .firstWhere((l) => l.startsWith('error='), orElse: () => '');
+        final body = errLine.isNotEmpty ? errLine.substring(6) : text;
+        // 读到了就删掉，避免下次被旧现场误导
+        try {
+          await f.delete();
+        } catch (_) {}
+        return body.length > 500 ? body.substring(0, 500) : body;
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  /// 强制重新下载并载入 Node 源（用于 reload 500 的自愈）。
+  ///
+  /// 为什么需要：`/source/loadPath` 500 说明缓存目录里的 `index.js` 本身
+  /// require 失败 / `start()` 抛异常（文件损坏、依赖缺失）。光重试 loadPath
+  /// 永远失败；把缓存删掉让 `loadSource(url)` 走完整下载分支才有机会恢复。
+  Future<(bool success, String? message)> redownloadSource(String url) async {
+    if (url.trim().isEmpty) return (false, '源地址为空，无法重新下载');
+    try {
+      final path = await _platform.getLastSourceCachePath();
+      if (path != null && path.isNotEmpty) {
+        for (final name in const [
+          'index.js',
+          'index.js.md5',
+          'index.config.js',
+          'load-error.txt',
+          'loadPath-error.txt',
+        ]) {
+          try {
+            final f = File('$path/$name');
+            if (await f.exists()) await f.delete();
+          } catch (_) {}
+        }
+      }
+      AppLog.instance.log('[NodeJS] 重新下载源: $url');
+      return await _platform.loadSource(url);
+    } catch (e) {
+      AppLog.instance.w('[NodeJS] 重新下载源失败: $e');
+      return (false, '$e');
     }
   }
 

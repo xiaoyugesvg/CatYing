@@ -64,6 +64,11 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
   void initState() {
     super.initState();
     _currentIndex = widget.startIndex;
+    // ⚠️ 关键：先让 DetailController 解析当前集。
+    // Spider / 本地 py 源的「集地址」是 id（如 `/vodplay/150215-1-1`），
+    // 不是可播放 URL；以前这里直接拿它 open，播放器只会报
+    // `stream error: unsupported URL`，然后卡满 15 秒「加载超时」。
+    widget.controller.selectEpisode(_currentIndex);
     _rebuildPlayer();
   }
 
@@ -97,16 +102,26 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
     final url = _resolvedUrl();
     if (url.isNotEmpty) {
       _lastOpenedUrl = url;
-      p.open(AppMedia(url, httpHeaders: widget.headers ?? const {}, start: start));
+      // 用 controller 的最新请求头：解析刚完成时 playHeaders 才被写入，
+      // 构造页面时传进来的 widget.headers 可能还是上一集的（防盗链会 403）。
+      final headers = widget.controller.playHeaders.isNotEmpty
+          ? Map<String, String>.from(widget.controller.playHeaders)
+          : (widget.headers ?? const <String, String>{});
+      p.open(AppMedia(url, httpHeaders: headers, start: start));
     }
   }
 
   String _resolvedUrl() {
+    // controller.playUrl 只会在**解析成功且形态合法**后写入
     final parsed = widget.controller.playUrl.value;
     if (parsed != null && parsed.isNotEmpty) return parsed;
     final eps = _episodes;
     if (eps.isEmpty) return '';
-    return eps[_currentIndex.clamp(0, eps.length - 1)].url;
+    final raw = eps[_currentIndex.clamp(0, eps.length - 1)].url.trim();
+    // 集地址可能是 `id`（无 scheme）—— 绝不能交给播放器兜底，
+    // 否则就是 unsupported URL / 15 秒加载超时。
+    final u = Uri.tryParse(raw);
+    return (u != null && u.hasScheme) ? raw : '';
   }
 
   void _switchTo(int index) {
@@ -150,9 +165,23 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
         }
         final url = _resolvedUrl();
         final player = _player;
-        if (player == null) {
+        if (player == null || url.isEmpty) {
+          final err = widget.controller.errorMessage.value;
           return Center(
-            child: CircularProgressIndicator(color: AppTheme.accentColor),
+            child: (err != null && err.isNotEmpty)
+                ? Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      err,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 13,
+                        height: 1.5,
+                      ),
+                    ),
+                  )
+                : CircularProgressIndicator(color: AppTheme.accentColor),
           );
         }
         return VideoPlayerWidget(
@@ -175,7 +204,7 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
             );
           },
           url: url,
-          headers: widget.headers?.isEmpty ?? true ? null : widget.headers,
+          headers: _currentHeaders(),
           initialVideoFit: VideoFitType.contain,
           videoTitle: title,
           currentEpisodeName: _currentEpisodeName(),
@@ -203,5 +232,12 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
     final eps = _episodes;
     if (eps.isEmpty) return null;
     return eps[_currentIndex.clamp(0, eps.length - 1)].name;
+  }
+
+  /// 请求头：优先用 controller 的最新值（解析完成后才写入），否则用页面参数。
+  Map<String, String>? _currentHeaders() {
+    final live = widget.controller.playHeaders;
+    if (live.isNotEmpty) return Map<String, String>.from(live);
+    return (widget.headers?.isEmpty ?? true) ? null : widget.headers;
   }
 }

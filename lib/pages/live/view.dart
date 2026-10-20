@@ -42,7 +42,13 @@ class LivePage extends StatefulWidget {
 }
 
 class _LivePageState extends State<LivePage> {
-  final _controller = Get.put(LiveController());
+  /// ⚠️ 不能无条件 `Get.put`：LivePage 的 State 在某些情况下会被重建
+  ///（外观切换 / IndexedStack 重建），无条件 put 会**新建一个 Controller**，
+  /// 把用户选中的分组重置回 0（用户 2026-10-20：「来回切换分组就变了」）。
+  /// 已有实例时直接复用。
+  final _controller = Get.isRegistered<LiveController>()
+      ? Get.find<LiveController>()
+      : Get.put(LiveController());
   Player? _player;
   VideoController? _videoController;
 
@@ -766,7 +772,12 @@ class _LivePageState extends State<LivePage> {
                         children: [
                           Obx(() {
                             final err = LiveService.instance.error.value;
-                            if (err == null) return const SizedBox.shrink();
+                            // 已经有频道列表时不显示错误横幅 —— 失败的是
+                            // 「刷新」，不该在正常播放时顶着一个转圈重试图标
+                            //（用户 2026-10-20：「播放时下面一直有加载图标」）。
+                            if (err == null || c.channels.isNotEmpty) {
+                              return const SizedBox.shrink();
+                            }
                             final loading =
                                 LiveService.instance.isLoading.value;
                             // 按你的要求：**不显示红色错误文案与「重试」文字**。
@@ -917,13 +928,14 @@ class _LivePageState extends State<LivePage> {
                                 // 分组选择（右下拉）
                                 Expanded(
                                   child: GestureDetector(
-                                    onTap: groups.isEmpty
-                                        ? null
-                                        : () => _showGroupPicker(
-                                            context,
-                                            c,
-                                            groups,
-                                          ),
+                                    onTap: () {
+                                      if (groups.isEmpty) {
+                                        AppToast.message(
+                                            '直播源还没加载出来，点左侧刷新重试');
+                                        return;
+                                      }
+                                      _showGroupPicker(context, c, groups);
+                                    },
                                     child: Container(
                                       padding: EdgeInsets.symmetric(
                                         horizontal: 14,

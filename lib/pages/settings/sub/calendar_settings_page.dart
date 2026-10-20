@@ -2,19 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../common/theme.dart';
-import '../../../services/douban_service.dart';
 import '../../../services/tmdb_service.dart';
+import '../../../services/trakt_service.dart';
 import '../../../widgets/app_toast.dart';
 import '../../../widgets/common_widgets.dart';
 import 'settings_shared.dart';
 
 /// 「追剧日历」设置卡片。
 ///
-/// 用户 2026-10-20：「相关的数据 key 填写就新建一个追剧日历的设置管理卡片」。
-/// 这里放三件事：
-///   · 豆瓣 Cookie（可选）—— 豆瓣列表接口风控较严时填上更稳；
-///   · TMDB API Key（可选）—— 与「TMDB 管理」共用，用于补充信息；
-///   · 默认打开周期（今天 / 本周 / 本月）。
+/// 两块数据：
+///   · Trakt 追剧日历：填 Trakt Client ID 后，到追剧日历里用设备码登录；
+///   · 豆瓣热播 / 平台剧场 / 骨朵热榜：MineTrakt 同款公开 JSON，无需 Key。
 class CalendarSettingsPage extends StatefulWidget {
   const CalendarSettingsPage({super.key});
 
@@ -26,8 +24,8 @@ class _CalendarSettingsPageState extends State<CalendarSettingsPage> {
   static const String _kDefaultPeriod = 'calendar_default_period';
   static const List<String> _periodLabels = ['今天', '本周', '本月'];
 
-  String _cookie = '';
   int _defaultPeriod = 0;
+  bool _traktLoggedIn = false;
 
   @override
   void initState() {
@@ -36,27 +34,27 @@ class _CalendarSettingsPageState extends State<CalendarSettingsPage> {
   }
 
   Future<void> _load() async {
-    final cookie = await DoubanService.instance.loadCookie();
     var period = 0;
     try {
       final prefs = await SharedPreferences.getInstance();
       period = (prefs.getInt(_kDefaultPeriod) ?? 0).clamp(0, 2);
     } catch (_) {}
+    await TraktService.instance.load();
     if (!mounted) return;
     setState(() {
-      _cookie = cookie;
       _defaultPeriod = period;
+      _traktLoggedIn = TraktService.instance.loggedIn;
     });
   }
 
-  Future<void> _editCookie() async {
-    final ctrl = TextEditingController(text: _cookie);
+  Future<void> _editTraktClientId() async {
+    final ctrl = TextEditingController(text: TraktService.instance.clientId);
     final saved = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.backgroundSecondary,
         title: Text(
-          '豆瓣 Cookie',
+          'Trakt Client ID',
           style: TextStyle(
             color: AppTheme.textPrimary,
             fontSize: AppTheme.fontHeadline,
@@ -68,19 +66,18 @@ class _CalendarSettingsPageState extends State<CalendarSettingsPage> {
           children: [
             TextField(
               controller: ctrl,
-              maxLines: 4,
-              minLines: 3,
+              autocorrect: false,
               style: TextStyle(
                 color: AppTheme.textPrimary,
                 fontSize: AppTheme.fontFootnote,
               ),
               decoration: const InputDecoration(
-                hintText: '可留空；风控较严时粘贴浏览器里的 Cookie',
+                hintText: '在 trakt.tv/oauth/applications 创建应用后获取',
               ),
             ),
             const SizedBox(height: 8),
             Text(
-              '只用于 movie.douban.com 的公开列表接口，不会上传到别处。',
+              '只保存 Client ID（设备码 + PKCE 授权，不需要 Client Secret）。',
               style: TextStyle(
                 color: AppTheme.textTertiary,
                 fontSize: AppTheme.fontCaption,
@@ -101,10 +98,34 @@ class _CalendarSettingsPageState extends State<CalendarSettingsPage> {
       ),
     );
     if (saved == null) return;
-    await DoubanService.instance.saveCookie(saved);
+    await TraktService.instance.saveClientId(saved);
     if (!mounted) return;
-    setState(() => _cookie = saved);
-    AppToast.message(saved.isEmpty ? '已清除豆瓣 Cookie' : '豆瓣 Cookie 已保存');
+    setState(() {});
+    AppToast.message(saved.isEmpty ? '已清除 Trakt Client ID' : 'Trakt Client ID 已保存');
+  }
+
+  Future<void> _logoutTrakt() async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        title: Text('退出 Trakt 登录？',
+            style: TextStyle(color: AppTheme.textPrimary)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('退出')),
+        ],
+      ),
+    );
+    if (yes != true) return;
+    await TraktService.instance.logout();
+    if (!mounted) return;
+    setState(() => _traktLoggedIn = false);
+    AppToast.message('已退出 Trakt');
   }
 
   Future<void> _editTmdbKey() async {
@@ -200,21 +221,48 @@ class _CalendarSettingsPageState extends State<CalendarSettingsPage> {
       title: '追剧日历',
       children: [
         SettingsGroup(
-          title: '数据源',
-          hint: '列表来自豆瓣公开接口（movie.douban.com/j/search_subjects），'
-              '无需 key；TMDB Key 与「TMDB 管理」共用，用于补充信息。',
+          title: 'Trakt 追剧日历',
+          hint: '在 trakt.tv/oauth/applications 新建应用（Redirect URI 填 '
+              'urn:ietf:wg:oauth:2.0:oob），把 Client ID 填到这里，'
+              '然后到「追剧日历 → 追剧日历 tab」点登录。',
           children: [
             SettingsRow(
-              icon: Icons.cookie_outlined,
-              title: '豆瓣 Cookie',
-              subtitle: _cookie.isEmpty ? '未填写（可选）' : '已填写',
-              value: _cookie.isEmpty ? '未设置' : '已设置',
-              onTap: _editCookie,
+              icon: Icons.vpn_key_outlined,
+              title: 'Trakt Client ID',
+              subtitle: TraktService.instance.configured
+                  ? '已填写'
+                  : '未填写（追剧日历需要）',
+              value: TraktService.instance.configured ? '已配置' : '未配置',
+              onTap: _editTraktClientId,
+            ),
+            SettingsRow(
+              icon: Icons.login_rounded,
+              title: 'Trakt 登录状态',
+              subtitle: _traktLoggedIn
+                  ? '已登录，点击可退出'
+                  : '未登录（到追剧日历里点「开始登录」）',
+              value: _traktLoggedIn ? '已登录' : '未登录',
+              onTap: _traktLoggedIn ? _logoutTrakt : null,
+            ),
+          ],
+        ),
+        SettingsGroup(
+          title: '公开榜单',
+          hint: '与 MineTrakt 相同：豆瓣热播 / 平台剧场 / 骨朵热榜三份公开 JSON，'
+              '自带 TMDB 海报与更新日期，无需 Key；TMDB Key 仅用于图片代理。',
+          children: [
+            const SettingsRow(
+              icon: Icons.cloud_download_outlined,
+              title: '日历数据源',
+              subtitle: '豆瓣热播 · 平台剧场 · 骨朵热榜（公开 JSON）',
+              value: '内置',
             ),
             SettingsRow(
               icon: Icons.key_rounded,
               title: 'TMDB API Key',
-              subtitle: TmdbService.instance.configured ? '已配置' : '可选',
+              subtitle: TmdbService.instance.configured
+                  ? '已配置（图片走 TMDB 代理）'
+                  : '可选（不填也能看海报）',
               value: TmdbService.instance.configured ? '已配置' : '未配置',
               onTap: _editTmdbKey,
             ),

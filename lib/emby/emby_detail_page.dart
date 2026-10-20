@@ -6,6 +6,7 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../common/theme.dart';
+import '../../services/tmdb_service.dart';
 import 'emby_api.dart';
 import 'emby_models.dart';
 import 'emby_player_page.dart';
@@ -62,6 +63,15 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
   Color? _posterEdgeColor;
   String? _posterEdgeUrl;
 
+  /// TMDB 刮削到的竖版海报（与影视详情页同源）。
+  /// Emby 自己的 Primary 未必是竖版海报（很多库只有 Backdrop 横图），
+  /// 所以配置了 TMDB Key 时优先用 TMDB 的海报。
+  String? _tmdbPoster;
+  String? _tmdbPosterKey;
+
+  /// 同一部片只搜一次（详情页可能被反复重建）。
+  static final Map<String, String> _tmdbPosterCache = {};
+
   /// 正文底色 = 主色压暗到渐变终点（与头图渐变无缝衔接）。
   Color get _bgColor => _posterEdgeColor == null
       ? _libGradBase
@@ -90,12 +100,75 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
       }
       if (!mounted) return;
       setState(() => _loading = false);
+      // Emby 自带的图多为横版 Backdrop；配置了 TMDB Key 时按影视详情页的
+      // 同一套刮削取一张竖版海报（异步，取到后 setState 替换）
+      _resolveTmdbPoster();
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _loading = false;
         _error = e is EmbyApiException ? e.message : '加载失败：$e';
       });
+    }
+  }
+
+  /// 用 TMDB 刮一张竖版海报（与影视详情页同一个数据源）。
+  ///
+  /// 用户 2026-10-20：「不是用的刮削 TMDB 来获取的详情页里面的封面吗？」
+  /// —— 之前 Emby 详情页确实只用了 Emby 自己的图（Backdrop 横图为主）。
+  /// 现在配置了 TMDB Key 就按片名 + 年份搜一次，优先取同类型（剧集/电影）
+  /// 的 `poster_path`；没配 Key 或搜不到时继续用 Emby 自带图。
+  Future<void> _resolveTmdbPoster() async {
+    final tmdb = TmdbService.instance;
+    if (!tmdb.configured) return;
+    final title = TmdbService.cleanTitle(_item.name);
+    if (title.isEmpty) return;
+    final year = _item.year;
+    final key = '${title.toLowerCase()}|${year ?? ''}|${_item.isSeries}';
+    if (_tmdbPosterKey == key) return;
+    _tmdbPosterKey = key;
+
+    final cached = _tmdbPosterCache[key];
+    if (cached != null) {
+      if (mounted) {
+        setState(() => _tmdbPoster = cached.isEmpty ? null : cached);
+      }
+      return;
+    }
+    try {
+      final cands = await tmdb.searchCandidates(title, year);
+      if (cands.isEmpty) {
+        _tmdbPosterCache[key] = '';
+        return;
+      }
+      final wantType = _item.isSeries ? 'tv' : 'movie';
+      String? path;
+      // ① 类型一致且带海报
+      for (final c in cands) {
+        if (c.$1 != wantType) continue;
+        final p = (c.$2['poster_path'] ?? '').toString();
+        if (p.isNotEmpty) {
+          path = p;
+          break;
+        }
+      }
+      // ② 类型对不上也接受第一条有海报的（电影/剧集命名常不一致）
+      if (path == null) {
+        for (final c in cands) {
+          final p = (c.$2['poster_path'] ?? '').toString();
+          if (p.isNotEmpty) {
+            path = p;
+            break;
+          }
+        }
+      }
+      final url = path == null ? '' : '${tmdb.effectiveImgBase}/w500$path';
+      _tmdbPosterCache[key] = url;
+      if (mounted && _tmdbPosterKey == key) {
+        setState(() => _tmdbPoster = url.isEmpty ? null : url);
+      }
+    } catch (_) {
+      // 静默：失败继续用 Emby 自带图
     }
   }
 
@@ -130,9 +203,9 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
               physics: const BouncingScrollPhysics(),
               padding: EdgeInsets.zero,
               children: [
-                // 与媒体库详情页一致：标题下移叠在 backdrop 下部渐变区，
-                // 给海报留足展示空间（原 58px 太靠前，标题几乎贴顶）
-                SizedBox(height: MediaQuery.of(context).size.height * 0.40),
+                // 与影视模块详情页一致：竖版海报按 2:3 贴顶铺满，标题叠在
+                // 海报下部（约屏高 52%），给海报留出完整展示空间。
+                SizedBox(height: MediaQuery.of(context).size.height * 0.52),
                 _buildHero(),
                 const SizedBox(height: 16),
                 // 壁纸 → 内容底的过渡（固定高度渐变，避免随内容长度拉伸）
@@ -245,19 +318,34 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
     }
   }
 
+  /// 头图 / 壁纸。
+  ///
+  /// 用户 2026-10-20：「Emby 里面的图片是不是全是横屏的？详情页我想要影视
+  /// 里面那种」—— Emby 的 Backdrop 都是 16:9 横图，铺在竖屏上要么被裁得
+  /// 只剩中间一条，要么上下留空。影视模块详情页用的是**竖版海报**（2:3），
+  /// 这里改成同样口径：优先 Primary（竖版封面），没有才回退 Backdrop。
   Widget _buildBackdrop() {
+    final hasPoster =
+        _item.imageTag != null && _item.imageTag!.isNotEmpty;
     final hasBackdrop =
         _item.backdropTag != null && _item.backdropTag!.isNotEmpty;
-    final url = hasBackdrop
-        ? _api.imageUrl(
-            _item.backdropImageId,
-            tag: _item.backdropTag,
-            imageType: 'Backdrop',
-            maxHeight: 1080,
-          )
-        : _api.imageUrl(_item.id, tag: _item.imageTag, maxHeight: 1080);
+    // ① TMDB 刮削海报（影视详情页同源）② Emby 竖版 Primary ③ 横版 Backdrop
+    final tmdbPoster = _tmdbPoster;
+    final usingTmdb = tmdbPoster != null && tmdbPoster.isNotEmpty;
+    final url = usingTmdb
+        ? tmdbPoster
+        : hasPoster
+            ? _api.imageUrl(_item.id, tag: _item.imageTag, maxHeight: 1600)
+            : hasBackdrop
+                ? _api.imageUrl(
+                    _item.backdropImageId,
+                    tag: _item.backdropTag,
+                    imageType: 'Backdrop',
+                    maxHeight: 1080,
+                  )
+                : '';
     // 首次见到的头图 → 异步取底部主色（媒体库同款，取到后 setState 刷新渐变）
-    if (_posterEdgeUrl != url) {
+    if (url.isNotEmpty && _posterEdgeUrl != url) {
       _posterEdgeUrl = url;
       _edgeColorOf(url).then((c) {
         if (mounted && _posterEdgeUrl == url) {
@@ -267,78 +355,76 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
     }
     // 取色失败/未完成兜底：中性深色（同 media_library_detail_page）
     final edge = _posterEdgeColor ?? _libGradBase;
-    // ⚠️ 头图**不能再 cover 铺满整屏**：Backdrop 是 16:9，手机屏是竖的，
-    //   cover 会把图横向裁到只剩中间一小块（用户 2026-10-20 截图：
-    //   「封面图片放大了很多」）。现在改成「顶部 16:9 清晰头图 + 全屏模糊色晕」。
     final w = MediaQuery.sizeOf(context).width;
-    final bannerH = w * 9 / 16;
+    final screenH = MediaQuery.sizeOf(context).height;
+    // 竖版海报按 2:3 铺满宽度：高 = 宽 × 1.5（与影视模块详情页一致）
+    final posterH = w * 1.5;
     return Stack(
       fit: StackFit.expand,
       children: [
-        // ① 内容底色（下半屏与正文容器同色，渐变才有落点）
+        // ① 内容底色（海报下方与正文容器同色，渐变才有落点）
         ColoredBox(color: _bgColor),
-        // ② 柔和底：同一张图模糊铺满，只保留色晕（不做清晰填充）
-        Positioned.fill(
-          child: ImageFiltered(
-            imageFilter: ui.ImageFilter.blur(sigmaX: 32, sigmaY: 32),
-            child: Opacity(
-              opacity: 0.45,
-              child: CachedNetworkImage(
-                imageUrl: url,
-                httpHeaders: _api.imageHeaders,
-                fit: BoxFit.cover,
-                placeholder: (_, _) => const ColoredBox(color: Colors.black),
-                errorWidget: (_, _, _) => const ColoredBox(color: Colors.black),
-              ),
-            ),
-          ),
-        ),
-        // ③ 顶部清晰头图：高度 = 宽 × 9/16 ⇒ 不放大、不裁切
+        // ② 竖版海报：贴顶、满宽、2:3
         Positioned(
           top: 0,
           left: 0,
           right: 0,
-          height: bannerH,
-          child: ImageFiltered(
-            imageFilter: ui.ImageFilter.blur(
-              sigmaX: hasBackdrop ? 0 : 18,
-              sigmaY: hasBackdrop ? 0 : 18,
-            ),
-            child: CachedNetworkImage(
-              imageUrl: url,
-              httpHeaders: _api.imageHeaders,
-              fit: BoxFit.cover,
-              placeholder: (_, _) => const ColoredBox(color: Colors.black),
-              errorWidget: (_, _, _) => const ColoredBox(color: Colors.black),
+          height: posterH,
+          child: url.isEmpty
+              ? const ColoredBox(color: _libGradBase)
+              : CachedNetworkImage(
+                  imageUrl: url,
+                  // Emby 图要带鉴权头；TMDB 图是公开 CDN，不要把 Emby Token 带过去
+                  httpHeaders: usingTmdb ? null : _api.imageHeaders,
+                  fit: BoxFit.cover,
+                  placeholder: (_, _) => const ColoredBox(color: Colors.black),
+                  errorWidget: (_, _, _) => const ColoredBox(color: Colors.black),
+                ),
+        ),
+        // ③ 海报底边过渡带：透明 → 主色（消掉图片与渐变之间的硬分界）
+        Positioned(
+          top: (posterH - 70).clamp(0.0, screenH),
+          left: 0,
+          right: 0,
+          height: 70,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [edge.withValues(alpha: 0), edge],
+              ),
             ),
           ),
         ),
-        // ④ 渐变（媒体库同款取色体系）：顶部压暗（状态栏/返回键可读）+
-        //    头图底边起从封面主色向下压暗到正文底色。
-        //    铺满整屏并**在正文之前完全变成不透明底色**，否则渐隐结束后
-        //    模糊色晕又露出来（出现一条"分层"的硬边）。
-        Positioned.fill(
+        // ④ 顶部轻遮罩：只保证状态栏 / 返回键可读（上部保持干净）
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Colors.black54, Colors.transparent],
+              stops: [0.0, 0.18],
+            ),
+          ),
+        ),
+        // ⑤ 海报下方：主色 → 压暗，铺到正文底（与影视详情页同款）
+        Positioned(
+          top: posterH.clamp(0.0, screenH),
+          left: 0,
+          right: 0,
+          bottom: 0,
           child: DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  const Color(0x8C000000),
-                  const Color(0x22000000),
-                  Colors.transparent,
                   edge,
                   _darken(edge, _kGradDarkenMid),
                   _darken(edge, _kGradDarkenEnd),
                 ],
-                stops: [
-                  0,
-                  0.10,
-                  bannerH / MediaQuery.sizeOf(context).height,
-                  (bannerH / MediaQuery.sizeOf(context).height) + 0.08,
-                  (bannerH / MediaQuery.sizeOf(context).height) + 0.33,
-                  1,
-                ],
+                stops: const [0.0, 0.30, 1.0],
               ),
             ),
           ),
@@ -363,6 +449,10 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
               fontSize: 28,
               fontWeight: FontWeight.w800,
               height: 1.15,
+              // 海报可能偏亮 → 加一层轻投影保证标题可读
+              shadows: [
+                Shadow(color: Colors.black54, blurRadius: 12),
+              ],
             ),
           ),
           // 刮削到的宣传语（Tagline）

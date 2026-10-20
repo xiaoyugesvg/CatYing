@@ -39,8 +39,22 @@ class ContentView extends StatefulWidget {
   State<ContentView> createState() => _ContentViewState();
 }
 
-class _ContentViewState extends State<ContentView> with WidgetsBindingObserver {
+class _ContentViewState extends State<ContentView>
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   // int _selectedTab 已迁移到 MainTabController.selectedTab (全局共享)
+
+  /// 主 tab 切换时的左右平移（用户 2026-10-20：「页面切换不能左右平移么」）。
+  ///
+  /// ⚠️ 不能用 PageView：这里 12 个页面都靠 IndexedStack **保活**（滚动位置、
+  ///   已加载列表、阅读子 tab 等），改成 PageView 会把非相邻页销毁。
+  ///   所以保留 IndexedStack 只做「整页滑入」动画：动画只改位移，
+  ///   不碰子树，Element/State 全部复用。
+  late final AnimationController _tabSlideCtrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 240),
+  );
+  double _tabSlideFrom = 0;
+  int _lastTabIndex = MainTabController.instance.selectedTab.value;
 
   /// 启动最多等 3 秒：不管配置加载成功、失败还是超时，到点直接进主界面，
   /// 配置继续在后台加载（用户 2026-10-18）。
@@ -73,6 +87,13 @@ class _ContentViewState extends State<ContentView> with WidgetsBindingObserver {
     // 旧逻辑每次冷启动都会把 'system' 覆盖成 dark/light（跟随系统丢失）。
     _searchVM = Get.find<TvSearchController>();
     Get.put(SettingsController());
+    // tab 切换 → 记录方向并播放一次「滑入」动画（向右切页从右侧进，反之从左侧）
+    ever(MainTabController.instance.selectedTab, (int index) {
+      if (index == _lastTabIndex) return;
+      _tabSlideFrom = index > _lastTabIndex ? 1.0 : -1.0;
+      _lastTabIndex = index;
+      _tabSlideCtrl.forward(from: 0);
+    });
     // 对应 Swift: .onChange(of: appState.pendingSearchKeyword)
     // 使用 ever 监听 pendingSearchKeyword 变化，触发搜索 overlay
     // 注意: 在回调内部清空 pendingSearchKeyword 会再次触发 ever()，必须用 guard 防止重入
@@ -102,6 +123,7 @@ class _ContentViewState extends State<ContentView> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _enterTimer?.cancel();
+    _tabSlideCtrl.dispose();
     super.dispose();
   }
 
@@ -350,16 +372,33 @@ class _ContentViewState extends State<ContentView> with WidgetsBindingObserver {
             // `AppTheme` 换配色时 `_palette` 变了但不会通知任何 widget。
             builder: (context, isLight, __) => ValueListenableBuilder<int>(
               valueListenable: AppTheme.paletteRevision,
-              builder: (context, paletteRev, ___) => Obx(
-                () => IndexedStack(
-                  // 🔴 这里**不能**再拼 `ValueKey('tabs-$isLight-$paletteRev')`：
-                  // 换 key 会销毁重建全部 tab 页，阅读子 tab 与各页滚动位置
-                  // 全部丢失（用户实测"切个明暗就跳回默认首页"）。
-                  // 子页重建改由 `_tabPages(sig)` 换新实例来触发。
-                  index: MainTabController.instance.selectedTab.value,
-                  children: _tabPages('$isLight-$paletteRev'),
-                ),
-              ),
+              builder: (context, paletteRev, ___) => Obx(() {
+                final tabIndex =
+                    MainTabController.instance.selectedTab.value;
+                return AnimatedBuilder(
+                  animation: _tabSlideCtrl,
+                  builder: (context, child) {
+                    // 240ms 内从 ±1 屏滑回 0：向右切页从右侧进，向左切页从左侧进
+                    final t =
+                        Curves.easeOutCubic.transform(_tabSlideCtrl.value);
+                    final dx = _tabSlideFrom * (1 - t);
+                    return FractionalTranslation(
+                      translation: Offset(dx, 0),
+                      child: child,
+                    );
+                  },
+                  // child 不参与动画重建：IndexedStack 以及 12 个 tab 页的
+                  // Element/State 全部复用（保活滚动位置与已加载数据）
+                  child: IndexedStack(
+                    // 🔴 这里**不能**再拼 `ValueKey('tabs-$isLight-$paletteRev')`：
+                    // 换 key 会销毁重建全部 tab 页，阅读子 tab 与各页滚动位置
+                    // 全部丢失（用户实测"切个明暗就跳回默认首页"）。
+                    // 子页重建改由 `_tabPages(sig)` 换新实例来触发。
+                    index: tabIndex,
+                    children: _tabPages('$isLight-$paletteRev'),
+                  ),
+                );
+              }),
             ),
           ),
           // 搜索页 - 对应 Swift .sheet(isPresented: $showSearch)
