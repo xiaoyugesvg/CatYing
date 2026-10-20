@@ -309,7 +309,7 @@ class _NavAppearancePageState extends State<NavAppearancePage> {
                               child: Image.asset(
                                 asset,
                                 fit: BoxFit.contain,
-                                // 白色蒙版图（音乐）按图标色着色，与其它图标一致
+                                // 白色蒙版图按图标色着色，与其它图标一致
                                 color: assetTinted
                                     ? AppTheme.textSecondary
                                     : null,
