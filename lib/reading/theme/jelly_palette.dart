@@ -29,9 +29,9 @@ class JellyPalette {
 
   /// 果冻紫蓝（默认，搬自原 JellyTheme 常量）
   const JellyPalette.jelly()
-    : primary = const Color(0xFF6D73AA),
-      primaryLight = const Color(0xFF8E94C6),
-      primaryDark = const Color(0xFF4A4F7A),
+    : primary = const Color(0xFF7379C4),
+      primaryLight = const Color(0xFF9AA0DC),
+      primaryDark = const Color(0xFF555A93),
       accent = const Color(0xFFFFB4A2),
       success = const Color(0xFF7FDB9F),
       warning = const Color(0xFFFFD97D),
@@ -51,9 +51,9 @@ class JellyPalette {
   /// 粉色可爱少女风：灰玫瑰粉低饱和主色 + 柔粉米白背景，配柔淡紫强调；
   /// dark 取深褐底，文字用带粉调 off-white 降低对比眩光。
   const JellyPalette.pink()
-    : primary = const Color(0xFFCB8A9E),
-      primaryLight = const Color(0xFFDFA9B8),
-      primaryDark = const Color(0xFFA06378),
+    : primary = const Color(0xFFD48AA2),
+      primaryLight = const Color(0xFFE8AFC0),
+      primaryDark = const Color(0xFFA55F76),
       accent = const Color(0xFFB89EC9),
       success = const Color(0xFF7FDB9F),
       warning = const Color(0xFFFFD97D),
@@ -139,9 +139,9 @@ class JellyPalette {
   /// 蓝色天空风：明亮天蓝低饱和主色 + 清新浅蓝背景，配日光黄强调；
   /// dark 取深夜空底，文字用带蓝调 off-white 降低对比眩光。
   const JellyPalette.sky()
-    : primary = const Color(0xFF6BA6CC),
-      primaryLight = const Color(0xFFA0CDE3),
-      primaryDark = const Color(0xFF4A7C9E),
+    : primary = const Color(0xFF5FA6D6),
+      primaryLight = const Color(0xFF97CBE6),
+      primaryDark = const Color(0xFF42789C),
       accent = const Color(0xFFE6C267),
       success = const Color(0xFF66BB6A),
       warning = const Color(0xFFFFD97D),
@@ -257,9 +257,9 @@ class JellyPalette {
 
   /// 沙丘暖阳：燕麦沙色 + 雾蓝强调，低饱和暖调。
   const JellyPalette.sand()
-    : primary = const Color(0xFFC2A26B),
-      primaryLight = const Color(0xFFDCC39A),
-      primaryDark = const Color(0xFF99804F),
+    : primary = const Color(0xFFC9A55F),
+      primaryLight = const Color(0xFFE0C68F),
+      primaryDark = const Color(0xFF9C7C42),
       accent = const Color(0xFF7FA8B8),
       success = const Color(0xFF66BB6A),
       warning = const Color(0xFFFFD97D),
@@ -275,6 +275,111 @@ class JellyPalette {
       textPrimaryLight = const Color(0xFF3A3225),
       textPrimaryDark = const Color(0xFFF4EFE3),
       textSecondary = const Color(0xFFA69A85);
+
+  /// 中秋月圆：金桂 + 月白蓝，浅色是暖米白（月饼／月光），深色取夜空墨蓝。
+  const JellyPalette.midAutumn()
+    : primary = const Color(0xFFC49A3F),
+      primaryLight = const Color(0xFFE0BF74),
+      primaryDark = const Color(0xFF9A7429),
+      accent = const Color(0xFF7C9FCB),
+      success = const Color(0xFF7FBF8F),
+      warning = const Color(0xFFE8B44A),
+      error = const Color(0xFFD9604F),
+      blue = const Color(0xFF5B84B1),
+      backgroundLight = const Color(0xFFFBF6E9),
+      backgroundDark = const Color(0xFF1B1E2A),
+      cardLight = Colors.white,
+      cardDark = const Color(0xFF272B39),
+      navSelectedBg = const Color(0xFFEFE3C4),
+      navSelectedFg = const Color(0xFF8A6820),
+      navUnselected = const Color(0xFF2A2A2E),
+      textPrimaryLight = const Color(0xFF3A3223),
+      textPrimaryDark = const Color(0xFFF4EEDF),
+      textSecondary = const Color(0xFFA3936F);
+
+  /// 新春纳福：正红 + 鎏金，浅色暖纸底，深色取枣红夜色。
+  const JellyPalette.springFestival()
+    : primary = const Color(0xFFBE2F2A),
+      primaryLight = const Color(0xFFD95C54),
+      primaryDark = const Color(0xFF8E211D),
+      accent = const Color(0xFFD9AE3C),
+      success = const Color(0xFF6FAF7C),
+      warning = const Color(0xFFE8B44A),
+      error = const Color(0xFFD94040),
+      blue = const Color(0xFF4E7FB5),
+      backgroundLight = const Color(0xFFFDF5F1),
+      backgroundDark = const Color(0xFF231415),
+      cardLight = Colors.white,
+      cardDark = const Color(0xFF32201F),
+      navSelectedBg = const Color(0xFFF3D9D2),
+      navSelectedFg = const Color(0xFF8E211D),
+      navUnselected = const Color(0xFF2A1E1E),
+      textPrimaryLight = const Color(0xFF3C2320),
+      textPrimaryDark = const Color(0xFFF7E9E4),
+      textSecondary = const Color(0xFFB08A82);
+
+  /// 元旦新岁：子夜蓝 + 烟花金，浅色清透，深色取跨年夜空。
+  const JellyPalette.newYear()
+    : primary = const Color(0xFF3F6FB5),
+      primaryLight = const Color(0xFF6E9BD8),
+      primaryDark = const Color(0xFF2B4F87),
+      accent = const Color(0xFFE0B454),
+      success = const Color(0xFF66BB6A),
+      warning = const Color(0xFFFFD97D),
+      error = const Color(0xFFEF5350),
+      blue = const Color(0xFF2196F3),
+      backgroundLight = const Color(0xFFF2F5FB),
+      backgroundDark = const Color(0xFF141B28),
+      cardLight = Colors.white,
+      cardDark = const Color(0xFF1F2838),
+      navSelectedBg = const Color(0xFFD3E0F4),
+      navSelectedFg = const Color(0xFF2B4F87),
+      navUnselected = const Color(0xFF222A36),
+      textPrimaryLight = const Color(0xFF26313F),
+      textPrimaryDark = const Color(0xFFE9EFF9),
+      textSecondary = const Color(0xFF8A99AD);
+
+  /// 圣诞雪夜：松针绿 + 圣诞红，浅色带雪雾感，深色取松林夜。
+  const JellyPalette.christmas()
+    : primary = const Color(0xFF2F7D5A),
+      primaryLight = const Color(0xFF5AA37F),
+      primaryDark = const Color(0xFF1F5C40),
+      accent = const Color(0xFFC0392B),
+      success = const Color(0xFF66BB6A),
+      warning = const Color(0xFFE8C15A),
+      error = const Color(0xFFD64545),
+      blue = const Color(0xFF4E88B8),
+      backgroundLight = const Color(0xFFF3F8F4),
+      backgroundDark = const Color(0xFF101E18),
+      cardLight = Colors.white,
+      cardDark = const Color(0xFF1A2B23),
+      navSelectedBg = const Color(0xFFD2E8DB),
+      navSelectedFg = const Color(0xFF1F5C40),
+      navUnselected = const Color(0xFF1E2A24),
+      textPrimaryLight = const Color(0xFF23352C),
+      textPrimaryDark = const Color(0xFFE8F2EC),
+      textSecondary = const Color(0xFF86A294);
+
+  /// 国庆华诞：朱红 + 鎏金，浅色暖金纸底，深色取深枣红。
+  const JellyPalette.nationalDay()
+    : primary = const Color(0xFFC0432F),
+      primaryLight = const Color(0xFFDC6E57),
+      primaryDark = const Color(0xFF92301F),
+      accent = const Color(0xFFD9B44A),
+      success = const Color(0xFF6FAF7C),
+      warning = const Color(0xFFE8B44A),
+      error = const Color(0xFFD94040),
+      blue = const Color(0xFF4E7FB5),
+      backgroundLight = const Color(0xFFFBF4EA),
+      backgroundDark = const Color(0xFF231816),
+      cardLight = Colors.white,
+      cardDark = const Color(0xFF322420),
+      navSelectedBg = const Color(0xFFF2DFC8),
+      navSelectedFg = const Color(0xFF92301F),
+      navUnselected = const Color(0xFF2A211D),
+      textPrimaryLight = const Color(0xFF3A2921),
+      textPrimaryDark = const Color(0xFFF7ECE3),
+      textSecondary = const Color(0xFFAE9480);
 
   final Color primary;
   final Color primaryLight;
@@ -428,6 +533,16 @@ class JellyPalette {
         return const JellyPalette.coffee();
       case 'sand':
         return const JellyPalette.sand();
+      case 'midAutumn':
+        return const JellyPalette.midAutumn();
+      case 'springFestival':
+        return const JellyPalette.springFestival();
+      case 'newYear':
+        return const JellyPalette.newYear();
+      case 'christmas':
+        return const JellyPalette.christmas();
+      case 'nationalDay':
+        return const JellyPalette.nationalDay();
       default:
         return const JellyPalette.jelly();
     }
@@ -607,4 +722,10 @@ const List<ThemePresetInfo> themePresets = [
   ThemePresetInfo('lavender', '薰衣草梦', JellyPalette.lavender()),
   ThemePresetInfo('coffee', '暖棕咖啡', JellyPalette.coffee()),
   ThemePresetInfo('sand', '沙丘暖阳', JellyPalette.sand()),
+  // ── 节日主题（用户 2026-10-20）────────────────────────────────
+  ThemePresetInfo('midAutumn', '中秋月圆', JellyPalette.midAutumn()),
+  ThemePresetInfo('springFestival', '新春纳福', JellyPalette.springFestival()),
+  ThemePresetInfo('newYear', '元旦新岁', JellyPalette.newYear()),
+  ThemePresetInfo('christmas', '圣诞雪夜', JellyPalette.christmas()),
+  ThemePresetInfo('nationalDay', '国庆华诞', JellyPalette.nationalDay()),
 ];

@@ -8,7 +8,7 @@ import '../../common/theme.dart';
 ///
 /// 颜色经 [_palette]（[JellyPalette]）驱动：各 `static Color get xxx` 读取当前
 /// 调色板，切换主题只需 [apply] 换 _palette 并重建（调用点仍用 `JellyTheme.primary`
-/// 等不变）。内置预设共 7 套，见 `jelly_palette.dart` 的 `themePresets`。
+/// 等不变）。内置预设见 `jelly_palette.dart` 的 `themePresets`（含节日主题）。
 class JellyTheme {
   /// 当前调色板。默认 **`ink`（水墨书香）** —— 与全项目的默认主题一致：
   /// `SettingsService._themePreset` 默认 `'ink'`、`ModuleThemeStore._readingPreset`
