@@ -28,6 +28,7 @@ import '../services/rss_store.dart';
 import '../widgets/rss_login_sheet.dart';
 import 'rss_article_page.dart';
 import 'rss_manage_page.dart';
+import 'rss_source_edit_page.dart';
 
 class RssPage extends StatefulWidget {
   const RssPage({super.key});
@@ -895,6 +896,26 @@ class _RssSourceSwitchSheetState extends State<_RssSourceSwitchSheet> {
       title: s.name,
       subtitle: s.url,
       actions: [
+        CardAction(
+          icon: Icons.tune_rounded,
+          label: '编辑',
+          onTap: () async {
+            final ok = await Navigator.push<bool>(
+              context,
+              MaterialPageRoute(
+                builder: (_) => RssSourceEditPage(source: s),
+              ),
+            );
+            if (ok == true && mounted) {
+              // 面板里的 _items 是打开时的快照 ⇒ 编辑后原地替换，避免还显示旧名字
+              final updated = RssStore.instance.byId(s.id);
+              final i = _items.indexWhere((e) => e.id == s.id);
+              if (updated != null && i >= 0) {
+                setState(() => _items[i] = updated);
+              }
+            }
+          },
+        ),
         CardAction(
           icon: Icons.ios_share_rounded,
           label: '分享',

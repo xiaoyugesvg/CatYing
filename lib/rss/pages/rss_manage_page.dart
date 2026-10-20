@@ -32,6 +32,7 @@ import '../../widgets/common_widgets.dart';
 import '../models/rss_source.dart';
 import '../services/rss_reader.dart';
 import '../services/rss_store.dart';
+import 'rss_source_edit_page.dart';
 
 class RssManagePage extends StatefulWidget {
   const RssManagePage({super.key});
@@ -848,6 +849,19 @@ class _RssManagePageState extends State<RssManagePage> {
               AppToast.message('已切换到「${s.name}」');
             },
           ),
+        CardAction(
+          icon: Icons.tune_rounded,
+          label: '编辑',
+          onTap: () async {
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => RssSourceEditPage(source: s),
+              ),
+            );
+            if (mounted) setState(() {});
+          },
+        ),
         CardAction(
           icon: Icons.edit_rounded,
           label: '改名',

@@ -264,6 +264,17 @@ class RssStore {
     await _persist();
   }
 
+  /// 整条覆盖保存（编辑页用）：按 id 原位替换。
+  ///
+  /// 与 [rename] 的区别是**所有字段**都可改（规则 / 请求头 / 分类），
+  /// 站点改版后用户能直接修规则，不必删源重导。
+  Future<void> saveSource(RssSource s) async {
+    final i = _sources.indexWhere((e) => e.id == s.id);
+    if (i < 0) return;
+    _sources[i] = s;
+    await _persist();
+  }
+
   /// 写入某源的**登录信息**（`loginUi` 表单值的 JSON 字符串）。
   ///
   /// 落盘是为了跨重启保住用户的选择（如「影视聚合(资源站)」的"选影视源站"）；
