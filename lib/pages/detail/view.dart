@@ -108,6 +108,14 @@ class _DetailPageState extends State<DetailPage> {
   /// 再从过期续播位重建一次（表现为"切换不灵/跳进度/黑屏闪一下"）。
   PlayerEngine? _playerEngine;
 
+  /// 热切换互斥标记。
+  ///
+  /// 「播放器内菜单」和「PlayerPrefs.vodEngine 的 ever 监听」是**两条并行
+  /// 触发路径**：菜单里 `setEngine()` 会先改 Rx，ever 随即回调，而菜单自己
+  /// 也会再调一次 `_onEngineHotSwap` ⇒ 两份热切换同时跑，各自 dispose/重建，
+  /// 最后留下一个没挂视频层的孤儿实例（表现：切换没变化、只有声音没画面）。
+  bool _engineSwapInFlight = false;
+
   /// 用户已选的字幕（跨内核热切换接力）。
   /// 各内核的字幕轨 id 不同，切换时按语言的 matchKey 把同一条字幕找回。
   SubtitleChoice? _subtitleChoice;
@@ -223,6 +231,8 @@ class _DetailPageState extends State<DetailPage> {
   Future<void> _onEngineChanged() async {
     if (!mounted) return;
     final engine = PlayerPrefs.instance.vodEngine.value;
+    // 已经有一次热切换在跑（多半就是菜单那条路径触发的）→ 不再叠加
+    if (_engineSwapInFlight) return;
     if (engine == PlayerEngine.webview) {
       // 网页内核不走原生 Player：释放实例即可，build 会自动改挂 WebviewPlayerPage
       _playerEngine = engine;
@@ -690,6 +700,20 @@ class _DetailPageState extends State<DetailPage> {
   ///   新实例会导致旧引擎还没死透、新引擎就 open，表现为「黑屏但有声音」
   ///   （音频已起、视频层没挂上）。await 后等旧引擎完全退出再重建。
   Future<void> _onEngineHotSwap(PlayerEngine engine) async {
+    // ── 互斥：菜单 + ever 监听是两条并行路径，只能有一次真正重建 ──────
+    if (_engineSwapInFlight) return;
+    _engineSwapInFlight = true;
+    // 先记下目标内核：随后 ever 回调进来时会因 `_playerEngine == engine`
+    // 直接跳过，不会再把刚建好的实例拆掉。
+    _playerEngine = engine;
+    try {
+      await _doEngineHotSwap(engine);
+    } finally {
+      _engineSwapInFlight = false;
+    }
+  }
+
+  Future<void> _doEngineHotSwap(PlayerEngine engine) async {
     if (engine == PlayerEngine.webview) {
       // 网页内核不走原生 Player
       _playerEngine = engine;
@@ -722,6 +746,10 @@ class _DetailPageState extends State<DetailPage> {
       _headersKey(headers),
       pos > Duration.zero ? pos : null,
     );
+    // 切换内核 = 重新加载一次：必须清掉上一次的错误态，否则详情页还停在
+    // 「播放失败」遮罩上 —— 看起来就像"切换没生效"。
+    _controller.errorMessage.value = null;
+    _controller.isPlaying.value = true;
     setState(() {});
   }
 

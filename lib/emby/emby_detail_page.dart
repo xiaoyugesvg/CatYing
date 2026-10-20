@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'dart:ui' as ui;
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
@@ -32,12 +34,38 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
   static const Color _libCard = Color(0x14FFFFFF); // white8
   static const Color _libBorder = Color(0x1FFFFFFF); // white12
 
+  // ── 媒体库同款「封面主色调 → 渐变底色」────────────────────────────
+  /// 头图取色未完成/失败时的兜底底色（同 media_library_detail_page：
+  /// 不能用 AppTheme.backgroundPrimary，浅色模式是宣纸米白，压暗后是脏灰）。
+  static const Color _libGradBase = Color(0xFF14141A);
+
+  /// 压暗：保色相/饱和度，只降明度（比 lerp 到黑更"本色"，不会越调越灰）。
+  static Color _darken(Color c, double amount) {
+    final hsl = HSLColor.fromColor(c);
+    return hsl
+        .withLightness((hsl.lightness * (1 - amount)).clamp(0.0, 1.0))
+        .toColor();
+  }
+
+  /// 渐变压暗比例（媒体库同款）：中段 / 末尾。
+  static const double _kGradDarkenMid = 0.45;
+  static const double _kGradDarkenEnd = 0.82;
+
   late final EmbyApi _api = EmbyApi(widget.server);
   late EmbyItem _item = widget.item;
   List<EmbyItem> _episodes = const [];
   bool _loading = true;
   String? _error;
   bool _overviewExpanded = false;
+
+  /// 头图底部主色（媒体库同款取色，取到后 setState 刷新渐变）。
+  Color? _posterEdgeColor;
+  String? _posterEdgeUrl;
+
+  /// 正文底色 = 主色压暗到渐变终点（与头图渐变无缝衔接）。
+  Color get _bgColor => _posterEdgeColor == null
+      ? _libGradBase
+      : _darken(_posterEdgeColor!, _kGradDarkenEnd);
 
   /// 选集区域的 GlobalKey（用于"选集"按钮滚动定位）
   final _episodeSectionKey = GlobalKey();
@@ -110,17 +138,17 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                 // 壁纸 → 内容底的过渡（固定高度渐变，避免随内容长度拉伸）
                 Container(
                   height: 32,
-                  decoration: const BoxDecoration(
+                  decoration: BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
-                      colors: [Color(0x000D0D12), Color(0xFF0D0D12)],
+                      colors: [Colors.transparent, _bgColor],
                     ),
                   ),
                 ),
                 Container(
                   // 媒体库同款：内容直接浮在深色壁纸上（不再垫浅色圆角底板）
-                  color: const Color(0xFF0D0D12),
+                  color: _bgColor,
                   padding: const EdgeInsets.fromLTRB(20, 8, 20, 44),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -169,6 +197,54 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
 
   // ── 头图 ──────────────────────────────────────────────────
 
+  /// 取图片主色调（下半 40% 区域平均色 —— 主体色，做渐变用）。
+  /// 失败返回黑色兜底；结果缓存到 [_posterEdgeColor]，同一头图只取一次。
+  /// （与 media_library_detail_page 同款实现）
+  Future<Color> _edgeColorOf(String url) async {
+    try {
+      final prov = CachedNetworkImageProvider(url);
+      final stream = prov.resolve(ImageConfiguration.empty);
+      final completer = Completer<ui.Image>();
+      late final ImageStreamListener listener;
+      listener = ImageStreamListener(
+        (info, _) {
+          if (!completer.isCompleted) completer.complete(info.image);
+          stream.removeListener(listener);
+        },
+        onError: (e, s) {
+          if (!completer.isCompleted) completer.completeError(e);
+          stream.removeListener(listener);
+        },
+      );
+      stream.addListener(listener);
+      final img = await completer.future.timeout(const Duration(seconds: 8));
+      final w = img.width;
+      final h = img.height;
+      final data = await img.toByteData(format: ui.ImageByteFormat.rawRgba);
+      img.dispose();
+      if (data == null || w == 0 || h == 0) return Colors.black;
+      final bytes = data.buffer.asUint8List();
+      // 采样下半 40% 区域（海报主体色，偏亮海报也取得到主色）
+      var r = 0, g = 0, b = 0, n = 0;
+      final yStart = (h * 0.55).floor();
+      final yEnd = (h * 0.95).floor();
+      for (var y = yStart; y < yEnd; y++) {
+        for (var x = 0; x < w; x += 2) {
+          final i = (y * w + x) * 4;
+          if (i + 2 >= bytes.length) continue;
+          r += bytes[i];
+          g += bytes[i + 1];
+          b += bytes[i + 2];
+          n++;
+        }
+      }
+      if (n == 0) return Colors.black;
+      return Color.fromARGB(255, r ~/ n, g ~/ n, b ~/ n);
+    } catch (_) {
+      return Colors.black;
+    }
+  }
+
   Widget _buildBackdrop() {
     final hasBackdrop =
         _item.backdropTag != null && _item.backdropTag!.isNotEmpty;
@@ -180,6 +256,17 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
             maxHeight: 1080,
           )
         : _api.imageUrl(_item.id, tag: _item.imageTag, maxHeight: 1080);
+    // 首次见到的头图 → 异步取底部主色（媒体库同款，取到后 setState 刷新渐变）
+    if (_posterEdgeUrl != url) {
+      _posterEdgeUrl = url;
+      _edgeColorOf(url).then((c) {
+        if (mounted && _posterEdgeUrl == url) {
+          setState(() => _posterEdgeColor = c);
+        }
+      });
+    }
+    // 取色失败/未完成兜底：中性深色（同 media_library_detail_page）
+    final edge = _posterEdgeColor ?? _libGradBase;
     // ⚠️ 头图**不能再 cover 铺满整屏**：Backdrop 是 16:9，手机屏是竖的，
     //   cover 会把图横向裁到只剩中间一小块（用户 2026-10-20 截图：
     //   「封面图片放大了很多」）。现在改成「顶部 16:9 清晰头图 + 全屏模糊色晕」。
@@ -189,7 +276,7 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
       fit: StackFit.expand,
       children: [
         // ① 内容底色（下半屏与正文容器同色，渐变才有落点）
-        const ColoredBox(color: Color(0xFF0D0D12)),
+        ColoredBox(color: _bgColor),
         // ② 柔和底：同一张图模糊铺满，只保留色晕（不做清晰填充）
         Positioned.fill(
           child: ImageFiltered(
@@ -226,7 +313,8 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
             ),
           ),
         ),
-        // ④ 渐变：顶部压暗（状态栏/返回键可读）+ 头图底边渐隐到内容底色。
+        // ④ 渐变（媒体库同款取色体系）：顶部压暗（状态栏/返回键可读）+
+        //    头图底边起从封面主色向下压暗到正文底色。
         //    铺满整屏并**在正文之前完全变成不透明底色**，否则渐隐结束后
         //    模糊色晕又露出来（出现一条"分层"的硬边）。
         Positioned.fill(
@@ -235,18 +323,20 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: const [
-                  Color(0x8C000000),
-                  Color(0x22000000),
-                  Color(0x000D0D12),
-                  Color(0xFF0D0D12),
-                  Color(0xFF0D0D12),
+                colors: [
+                  const Color(0x8C000000),
+                  const Color(0x22000000),
+                  Colors.transparent,
+                  edge,
+                  _darken(edge, _kGradDarkenMid),
+                  _darken(edge, _kGradDarkenEnd),
                 ],
                 stops: [
                   0,
                   0.10,
-                  (bannerH / MediaQuery.sizeOf(context).height) * 0.75,
-                  (bannerH / MediaQuery.sizeOf(context).height) + 0.10,
+                  bannerH / MediaQuery.sizeOf(context).height,
+                  (bannerH / MediaQuery.sizeOf(context).height) + 0.08,
+                  (bannerH / MediaQuery.sizeOf(context).height) + 0.33,
                   1,
                 ],
               ),

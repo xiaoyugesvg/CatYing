@@ -56,6 +56,13 @@ class DoubanService {
       'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 '
       'Safari/604.1';
 
+  /// 豆瓣图床反爬头：无 Referer/手机 UA 会返回 HTTP 418（同 douban_ranking_page 实测），
+  /// CachedNetworkImage 拉封面必须带上，否则全部走 errorWidget 占位图。
+  static const Map<String, String> imageHeaders = {
+    'User-Agent': _ua,
+    'Referer': 'https://m.douban.com/',
+  };
+
   /// 进程内缓存：key = `type|tag|limit`，10 分钟内不重复请求。
   static const Duration _ttl = Duration(minutes: 10);
   final Map<String, _CacheEntry> _cache = {};

@@ -30,10 +30,10 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
   static const List<List<(String, String, String)>> _sections = [
     // 今天
     [('今日热播剧集', 'tv', '热门'), ('今日热门电影', 'movie', '热门')],
-    // 本周
-    [('本周新剧', 'tv', '最新'), ('本周新片', 'movie', '最新')],
+    // 本周（豆瓣 tv 分类没有「最新」标签，用「国产剧」代表近期新剧）
+    [('本周新剧', 'tv', '国产剧'), ('本周新片', 'movie', '最新')],
     // 本月
-    [('本月高分剧集', 'tv', '豆瓣高分'), ('本月热播电影', 'movie', '热门')],
+    [('本月热播剧集', 'tv', '热门'), ('本月高分电影', 'movie', '豆瓣高分')],
   ];
 
   final Map<String, List<DoubanSubject>> _data = {};
@@ -366,6 +366,7 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
                         ? Container(color: AppTheme.backgroundSecondary)
                         : CachedNetworkImage(
                             imageUrl: s.cover,
+                            httpHeaders: DoubanService.imageHeaders,
                             fit: BoxFit.cover,
                             placeholder: (_, __) => Container(
                               color: AppTheme.backgroundSecondary,
@@ -469,6 +470,7 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
                           ? Container(color: AppTheme.backgroundPrimary)
                           : CachedNetworkImage(
                               imageUrl: s.cover,
+                              httpHeaders: DoubanService.imageHeaders,
                               fit: BoxFit.cover,
                               errorWidget: (_, __, ___) =>
                                   Container(color: AppTheme.backgroundPrimary),
