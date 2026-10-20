@@ -16,7 +16,7 @@ class HomePagesSettingsPage extends StatelessWidget {
 
   static const _iconOf = <NavFeature, IconData>{
     NavFeature.home: Icons.home_outlined,
-    NavFeature.live: Icons.live_tv_outlined,
+    NavFeature.live: Icons.live_tv_rounded,
     NavFeature.music: Icons.library_music_outlined,
     NavFeature.books: Icons.menu_book_outlined,
     NavFeature.apps: Icons.storefront_outlined,
@@ -598,7 +598,14 @@ class HomePagesSettingsPage extends StatelessWidget {
               child: f.iconAsset != null
                   ? Padding(
                       padding: const EdgeInsets.all(5),
-                      child: Image.asset(f.iconAsset!, fit: BoxFit.contain),
+                      child: Image.asset(
+                        f.iconAsset!,
+                        fit: BoxFit.contain,
+                        // 音乐是白色蒙版：按强调色着色，与其它 Material 图标一致
+                        color: f.iconAssetTinted ? AppTheme.accentColor : null,
+                        colorBlendMode:
+                            f.iconAssetTinted ? BlendMode.srcIn : null,
+                      ),
                     )
                   : Icon(_iconOf[f] ?? Icons.circle_outlined,
                       size: 17, color: AppTheme.accentColor),

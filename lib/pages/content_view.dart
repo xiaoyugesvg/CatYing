@@ -468,7 +468,9 @@ class _ContentViewState extends State<ContentView> with WidgetsBindingObserver {
                           JellyNavItem(
                             icon: f.activeIcon,
                             label: f.label,
-                            // Emby 用官方图标图片（见 NavFeature.iconAsset）；
+                            // Emby / 音乐用图片图标（见 NavFeature.iconAsset）；
+                            // 音乐是白色蒙版 ⇒ 按前景色着色，跟随选中态与深浅色；
+                            // Emby 是品牌彩色图 ⇒ 原样显示。
                             // 用户上传过自定义图标的仍由 JellyNavBar 优先渲染。
                             iconBuilder: f.iconAsset == null
                                 ? null
@@ -477,6 +479,10 @@ class _ContentViewState extends State<ContentView> with WidgetsBindingObserver {
                                       width: size,
                                       height: size,
                                       fit: BoxFit.contain,
+                                      color: f.iconAssetTinted ? color : null,
+                                      colorBlendMode: f.iconAssetTinted
+                                          ? BlendMode.srcIn
+                                          : null,
                                     ),
                           ),
                       ],

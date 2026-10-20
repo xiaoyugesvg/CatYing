@@ -27,20 +27,25 @@ class NavAppearancePage extends StatefulWidget {
 
 class _NavAppearancePageState extends State<NavAppearancePage> {
   /// 可自定义图标的 tab：主菜单（当前启用的）+ 音乐菜单 + 阅读菜单。
-  List<({String label, IconData icon, String? asset})> get _tabs => [
+  List<({String label, IconData icon, String? asset, bool tinted})> get _tabs => [
         for (final f in NavFeatureService.instance.enabled)
-          (label: f.label, icon: f.activeIcon, asset: f.iconAsset),
+          (
+            label: f.label,
+            icon: f.activeIcon,
+            asset: f.iconAsset,
+            tinted: f.iconAssetTinted,
+          ),
         // 音乐菜单（同样是 JellyNavBar，但标签与主菜单不同）
-        (label: '主页', icon: Icons.home_rounded, asset: null),
-        (label: '乐库', icon: Icons.library_music_rounded, asset: null),
-        (label: '榜单', icon: Icons.leaderboard_rounded, asset: null),
-        (label: '搜索', icon: Icons.search_rounded, asset: null),
+        (label: '主页', icon: Icons.home_rounded, asset: null, tinted: false),
+        (label: '乐库', icon: Icons.library_music_rounded, asset: null, tinted: false),
+        (label: '榜单', icon: Icons.leaderboard_rounded, asset: null, tinted: false),
+        (label: '搜索', icon: Icons.search_rounded, asset: null, tinted: false),
         // 阅读菜单
-        (label: '漫画', icon: Icons.palette_rounded, asset: null),
-        (label: '图书', icon: Icons.book_rounded, asset: null),
-        (label: '书架', icon: Icons.menu_book_rounded, asset: null),
-        (label: '收藏', icon: Icons.favorite_rounded, asset: null),
-        (label: '我的', icon: Icons.person_rounded, asset: null),
+        (label: '漫画', icon: Icons.palette_rounded, asset: null, tinted: false),
+        (label: '图书', icon: Icons.book_rounded, asset: null, tinted: false),
+        (label: '书架', icon: Icons.menu_book_rounded, asset: null, tinted: false),
+        (label: '收藏', icon: Icons.favorite_rounded, asset: null, tinted: false),
+        (label: '我的', icon: Icons.person_rounded, asset: null, tinted: false),
       ];
 
   @override
@@ -112,6 +117,7 @@ class _NavAppearancePageState extends State<NavAppearancePage> {
                                 label: t.label,
                                 icon: t.icon,
                                 asset: t.asset,
+                                assetTinted: t.tinted,
                                 customPath: s.navIconFor(t.label),
                               ),
                             ),
@@ -256,6 +262,7 @@ class _NavAppearancePageState extends State<NavAppearancePage> {
     required IconData icon,
     required String? customPath,
     String? asset,
+    bool assetTinted = false,
   }) {
     final hasCustom = customPath != null && customPath.isNotEmpty;
     return GestureDetector(
@@ -299,7 +306,16 @@ class _NavAppearancePageState extends State<NavAppearancePage> {
                       : (asset != null
                           ? Padding(
                               padding: const EdgeInsets.all(8),
-                              child: Image.asset(asset, fit: BoxFit.contain),
+                              child: Image.asset(
+                                asset,
+                                fit: BoxFit.contain,
+                                // 白色蒙版图（音乐）按图标色着色，与其它图标一致
+                                color: assetTinted
+                                    ? AppTheme.textSecondary
+                                    : null,
+                                colorBlendMode:
+                                    assetTinted ? BlendMode.srcIn : null,
+                              ),
                             )
                           : Icon(icon, size: 24, color: AppTheme.textSecondary)),
                 ),

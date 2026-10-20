@@ -52,7 +52,7 @@ enum NavFeature {
   /// 未选中图标
   IconData get icon => switch (this) {
         NavFeature.home => Icons.home_outlined,
-        NavFeature.live => Icons.live_tv,
+        NavFeature.live => Icons.live_tv_rounded,
         NavFeature.music => Icons.library_music_outlined,
         NavFeature.books => Icons.menu_book_outlined,
         NavFeature.apps => Icons.storefront_outlined,
@@ -66,15 +66,25 @@ enum NavFeature {
 
   /// 默认图标**图片资源**（非 null 时优先于 [icon]/[activeIcon] 的 Material 图标）。
   ///
-  /// 目前只有 Emby —— 它的官方图标是品牌图形，用 `Icons.video_settings`
-  /// 完全看不出是 Emby（用户 2026-10-20 要求换成官方图标）。
-  String? get iconAsset =>
-      this == NavFeature.emby ? 'assets/icons/emby.png' : null;
+  /// · Emby：官方品牌图形（彩色，不跟着主题变色）；
+  /// · 音乐：波形图形（做成了**白色 + 透明背景**的蒙版，可按前景色着色，
+  ///   所以选中/未选中、深浅色主题下颜色会跟着变）。
+  String? get iconAsset => switch (this) {
+        NavFeature.emby => 'assets/icons/emby.png',
+        NavFeature.music => 'assets/icons/music.png',
+        _ => null,
+      };
+
+  /// 图标资源是否用前景色着色（[iconAsset] 对应的图）。
+  ///
+  /// Emby 是品牌彩色图，不能着色（`srcIn` 会糊成一块纯色）；
+  /// 音乐是白色蒙版，必须着色才能与其它图标颜色一致。
+  bool get iconAssetTinted => this == NavFeature.music;
 
   /// 选中图标
   IconData get activeIcon => switch (this) {
         NavFeature.home => Icons.home,
-        NavFeature.live => Icons.live_tv,
+        NavFeature.live => Icons.live_tv_rounded,
         NavFeature.music => Icons.library_music,
         NavFeature.books => Icons.menu_book,
         NavFeature.apps => Icons.storefront_rounded,
