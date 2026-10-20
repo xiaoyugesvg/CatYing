@@ -281,7 +281,11 @@ var java = (function () {
       toString: function () { return this._h; },
       attr: function (n) { return this._a[String(n)] || ''; },
       hasAttr: function (n) { return Object.prototype.hasOwnProperty.call(this._a, String(n)); },
-      select: function () { return null; },
+      select: function (css) { return __jsoupSelect(this._h, css); },
+      selectFirst: function (css) {
+        var a = __jsoupSelect(this._h, css);
+        return a.length ? a[0] : null;
+      },
       children: function () { return []; }
     };
   }
@@ -367,6 +371,9 @@ var java = (function () {
       for (var i = 0; i < arr.length; i++) out.push(_wrapElement(arr[i]));
       return out;
     },
+    // `org.jsoup` 桥：parse 拿句柄，select 按句柄 + CSS 拿元素载荷
+    jsoupParse: function (html) { return _call('jsoupParse', [String(html)]); },
+    jsoupSelectPayload: function (id, css) { return _call('jsoupSelect', [id, String(css)]); },
     setContent: function (c) { return _call('setContent', [c]); },
     md5Encode: function (s) { return _call('md5Encode', [s]); },
     md5Encode16: function (s) { return _call('md5Encode16', [s]); },
@@ -462,6 +469,71 @@ var java = (function () {
     }
   };
 })();
+
+// ── 全局元素包装（`org.jsoup` 与 Dart 侧绑定的 DOM 元素共用）──────────
+// `org.jsoup.Jsoup.parse(html).select(css)` 返回的元素要有
+// text()/attr()/html()/select() 等方法（「1:1 娃娃美图秀」等源的规则全靠它）。
+var __wrapElement = function (v) {
+  if (!v || typeof v !== 'object') {
+    v = { t: (v === null || v === undefined) ? '' : String(v), h: '', a: {} };
+  }
+  return {
+    _t: v.t || '', _h: v.h || '', _a: v.a || {},
+    // 元数据别名：元素作为列表结果回传给 Dart 时（QuickJS 只保留普通字段），
+    // 用 `h` 还原成 DOM 元素（见 AnalyzeRule.setContent）。
+    t: v.t || '', h: v.h || '', a: v.a || {},
+    text: function () { return this._t; },
+    ownText: function () { return this._t; },
+    html: function () { return this._h; },
+    outerHtml: function () { return this._h; },
+    toString: function () { return this._h; },
+    attr: function (n) { return this._a[String(n)] || ''; },
+    hasAttr: function (n) { return Object.prototype.hasOwnProperty.call(this._a, String(n)); },
+    select: function (css) { return __jsoupSelect(this._h, css); },
+    selectFirst: function (css) {
+      var a = __jsoupSelect(this._h, css);
+      return a.length ? a[0] : null;
+    },
+    children: function () { return []; }
+  };
+};
+
+// 对一段 HTML 跑 CSS 选择器 → 包装好的元素数组（带 size/get/first/last，
+// 对齐 jsoup 的 Elements API）。宿主侧按句柄缓存解析结果。
+function __jsoupSelect(html, css) {
+  var out = [];
+  try {
+    var doc = java.jsoupParse(String(html || ''));
+    var id = (doc && doc.__handle) ? doc.__handle : 0;
+    var arr = java.jsoupSelectPayload(id, String(css || ''));
+    if (arr && typeof arr.length === 'number') {
+      for (var i = 0; i < arr.length; i++) out.push(__wrapElement(arr[i]));
+    }
+  } catch (e) {
+    // 宿主调用标记必须冒泡给 Dart 侧重放，不能被这里吞掉
+    var msg = String(e && e.message ? e.message : e);
+    if (msg.indexOf('__LEGADO_') >= 0) throw e;
+  }
+  out.size = function () { return out.length; };
+  out.get = function (i) { return out[i]; };
+  out.first = function () { return out.length ? out[0] : null; };
+  out.last = function () { return out.length ? out[out.length - 1] : null; };
+  // jsoup Elements 的取值面
+  out.text = function () {
+    var s = [];
+    for (var i = 0; i < out.length; i++) s.push(out[i].text());
+    return s.join(' ');
+  };
+  out.attr = function (n) { return out.length ? out[0].attr(n) : ''; };
+  out.html = function () { return out.length ? out[0].html() : ''; };
+  out.outerHtml = function () { return out.length ? out[0].outerHtml() : ''; };
+  out.eachText = function () {
+    var s = [];
+    for (var j = 0; j < out.length; j++) s.push(out[j].text());
+    return s;
+  };
+  return out;
+}
 
 // ── source 对象（书源级变量与身份；实测 9 种成员）────────────
 var source = {
@@ -751,7 +823,47 @@ var cookie = {
     }
     var Packages = _javaProxy('Packages');
     var com = _javaProxy('com');
-    var org = _javaProxy('org');
+    // `org` 里 `jsoup` 是真实实现（大量分享源用 org.jsoup 解析 HTML），
+    // 其余命名空间仍走 Proxy 兜底。
+    var org = (function () {
+      var base = {
+        jsoup: {
+          Jsoup: {
+            parse: function (html) {
+              var src = String(html === null || html === undefined ? '' : html);
+              return {
+                _h: src,
+                select: function (css) { return __jsoupSelect(src, css); },
+                selectFirst: function (css) {
+                  var a = __jsoupSelect(src, css);
+                  return a.length ? a[0] : null;
+                },
+                text: function () { return __jsoupSelect(src, 'body').first() ?
+                  __jsoupSelect(src, 'body').first().text() : ''; },
+                html: function () { return src; },
+                outerHtml: function () { return src; },
+                title: function () {
+                  var a = __jsoupSelect(src, 'title');
+                  return a.length ? a[0].text() : '';
+                },
+                body: function () {
+                  var a = __jsoupSelect(src, 'body');
+                  return a.length ? a[0] : __wrapElement({ t: '', h: src, a: {} });
+                }
+              };
+            }
+          }
+        }
+      };
+      try {
+        return new Proxy(base, {
+          get: function (t, p) {
+            if (Object.prototype.hasOwnProperty.call(t, p)) return t[p];
+            return _javaProxy('org.' + String(p));
+          }
+        });
+      } catch (e) { return base; }
+    })();
     // java.lang.String：直接调用返回字符串；new 调用返回包装对象（toString/
     // valueOf 委托），保证 `new java.lang.String(bytes,'UTF-8') + 'x'` 与 Java 一致
     function _cryptoBytesToStr(bytes) {

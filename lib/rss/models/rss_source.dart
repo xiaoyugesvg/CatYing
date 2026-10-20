@@ -33,6 +33,7 @@ class RssSource {
     required this.url,
     this.group = '',
     this.icon = '',
+    this.sourceComment = '',
     this.sortUrl = '',
     this.ruleArticles,
     this.ruleTitle,
@@ -71,6 +72,10 @@ class RssSource {
   final String group;
 
   final String icon;
+
+  /// 源备注（`sourceComment`）—— 规则里的 JS 会读 `source.sourceComment`
+  /// （清渠社这类源用它存图片 CDN 编号）。
+  final String sourceComment;
 
   /// 分类列表原文（`名称::url`，可多行 / `&&` 分隔；可带 `{{page}}`）。
   final String sortUrl;
@@ -150,14 +155,13 @@ class RssSource {
     final t = sortUrl.trim();
     if (t.isEmpty) return false;
     return t.startsWith('<js>') ||
-        t.startsWith('@js:') ||
-        t.startsWith('@css:') ||
-        t.startsWith('@xpath:') ||
-        t.startsWith('@json:') ||
+        t.startsWith('@') || // @js: / @css: / @xpath: / @json: 等
         t.startsWith('@@') ||
         t.startsWith(r'$.') ||
         t.startsWith(r'$[') ||
-        t.startsWith('//');
+        t.startsWith('//') ||
+        t.startsWith('[') || // JSON 数组（规则链会当 JSON 求值）
+        t.startsWith('{'); // JSON 对象
   }
 
   /// 把"分类清单文本"拆成分类（`名称::url`，多行或 `&&` 分隔）。
@@ -177,10 +181,10 @@ class RssSource {
       if (t.isEmpty) continue;
       final i = t.lastIndexOf('::');
       if (i <= 0) {
-        // 没写 `名称::`，整条当 URL
-        if (t.startsWith('http') || t.startsWith('/')) {
-          out.add(RssChannel(fallbackName, t));
-        }
+        // 没写 `名称::`：整条当 URL（也接受 `index.html` / `./list` 这类相对路径，
+        // 后面统一用源地址补全 —— 之前只认 http 和 `/` 开头，相对路径分类会被丢掉）
+        if (t.contains(RegExp(r'\s'))) continue;
+        out.add(RssChannel(fallbackName, t));
         continue;
       }
       final title = t.substring(0, i).trim();
@@ -220,6 +224,7 @@ class RssSource {
         url: url,
         group: group ?? this.group,
         icon: icon,
+        sourceComment: sourceComment,
         sortUrl: sortUrl ?? this.sortUrl,
         ruleArticles: ruleArticles,
         ruleTitle: ruleTitle,
@@ -253,6 +258,7 @@ class RssSource {
         'url': url,
         'group': group,
         'icon': icon,
+        'sourceComment': sourceComment,
         'sortUrl': sortUrl,
         'ruleArticles': ruleArticles,
         'ruleTitle': ruleTitle,
@@ -296,6 +302,7 @@ class RssSource {
       url: url,
       group: _s(j['sourceGroup'] ?? j['group']),
       icon: _s(j['sourceIcon'] ?? j['icon']),
+      sourceComment: _s(j['sourceComment']),
       sortUrl: _s(j['sortUrl'] ?? j['channels']),
       ruleArticles: _n(j['ruleArticles']),
       ruleTitle: _n(j['ruleTitle']),

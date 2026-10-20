@@ -79,6 +79,17 @@ class AnalyzeRule {
   AnalyzeRule({this.book, this.chapter});
 
   AnalyzeRule setContent(dynamic newContent, [String? newBaseUrl]) {
+    // `org.jsoup.Jsoup.parse(...).select(css)` 在 JS 侧返回的是元素载荷
+    // `{t,h,a}`（QuickJS 出栈后是 Dart Map）—— 这里还原成 DOM 元素，
+    // 否则会被当 JSON 内容，后续 CSS / `@js:` 规则全都取不到值。
+    if (newContent is Map && (newContent['h'] is String || newContent['_h'] is String)) {
+      final html = (newContent['h'] ?? newContent['_h']) as String;
+      final frag = html_parser.parseFragment(html);
+      final first = frag.nodes.whereType<Element>().isEmpty
+          ? null
+          : frag.nodes.whereType<Element>().first;
+      newContent = first ?? html_parser.parse(html).documentElement ?? html;
+    }
     content = newContent;
     if (newContent is! Node) {
       // Map/List 直接来自 `ruleBookInfo.init` 的 JS 返回值（文档：
@@ -623,6 +634,23 @@ class AnalyzeRule {
     }
   }
 
+  /// `org.jsoup.Jsoup.parse(html).select(css)` 用：返回**元素载荷**列表
+  /// （`{t,h,a}`），JS 侧用 `__wrapElement` 包成可继续 `.select()/attr()`
+  /// 的对象（用户 2026-10-20 的「1:1 娃娃美图秀」规则就依赖这一套）。
+  List<Map<String, Object?>> jsoupSelectPayload(int handle, String css) {
+    final root = _jsoupDocs[handle];
+    if (root == null) return const [];
+    try {
+      return root
+          .querySelectorAll(css)
+          .map(_elementPayload)
+          .whereType<Map<String, Object?>>()
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
   /// java.jsoupSelectFirst(handle, css) → 首个元素文本
   String jsoupSelectFirst(int handle, String css) {
     final list = jsoupSelect(handle, css);
@@ -986,6 +1014,14 @@ class AnalyzeRule {
         return _elementPayload(getElement(a0));
       case 'getElements':
         return getElements(a0).map(_elementPayload).toList();
+      // `org.jsoup.Jsoup.parse(html).select(css)` 的宿主通道
+      case 'jsoupParse':
+        return jsoupParse(a0);
+      case 'jsoupSelect':
+        return jsoupSelectPayload(
+          (args.length > 0 && args[0] is num) ? (args[0] as num).toInt() : 0,
+          args.length > 1 && args[1] != null ? '${args[1]}' : '',
+        );
       case 'setContent':
         setContent(args.isNotEmpty ? args[0] : null);
         return true;
@@ -1276,8 +1312,14 @@ class AnalyzeRule {
   // ── 内嵌表达式（{{...}} / @get:{...}）求值期替换 ──
 
   /// 内嵌表达式与变量引用的切分模式（对齐通用书源格式语义）。
+  ///
+  /// 三种写法都要认：
+  ///   · `@get:{key}`    —— 变量引用
+  ///   · `{{规则}}`      —— 内嵌规则 / JS 表达式
+  ///   · `{规则}`        —— **单花括号字符串模板**（RSS/影视源大量使用：
+  ///                        `/{$.username}`、`https://img/{$.ts}/{$.id}_webp`）
   static final RegExp _evalPattern = RegExp(
-    r'@get:\{[^}]+?\}|\{\{[\w\W]*?\}\}',
+    r'@get:\{[^}]+?\}|\{\{[\w\W]*?\}\}|\{(?=[$@/])[^{}]*?\}',
     caseSensitive: false,
   );
 
@@ -1327,7 +1369,10 @@ class AnalyzeRule {
         final key = token.substring(6, token.length - 1);
         return get(key);
       }
-      final expr = token.substring(2, token.length - 2).trim();
+      final doubleBrace = token.startsWith('{{');
+      final expr = doubleBrace
+          ? token.substring(2, token.length - 2).trim()
+          : token.substring(1, token.length - 1).trim();
       if (_isRuleExpr(expr)) {
         return getString(expr);
       }

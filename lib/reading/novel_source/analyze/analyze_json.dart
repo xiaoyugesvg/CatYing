@@ -23,6 +23,8 @@ class AnalyzeByJson {
 
   String getString(String rule) {
     if (rule.isEmpty) return '';
+    // 字段级复合规则（`$.title||$.name` 这类取反规则）同样要拆开求值
+    if (_splitComposite(rule).length > 1) return getStringList(rule).join('\n');
     final result = _resolvePath(rule);
     if (result == null) return '';
     if (result is List) {
@@ -33,6 +35,15 @@ class AnalyzeByJson {
 
   List<String> getStringList(String rule) {
     if (rule.isEmpty) return [];
+    final parts = _splitComposite(rule);
+    if (parts.length > 1) {
+      final out = <String>[];
+      for (final part in parts) {
+        if (part.prevOp == '||' && out.isNotEmpty) break;
+        out.addAll(getStringList(part.path));
+      }
+      return out;
+    }
     final result = _resolvePath(rule);
     if (result == null) return [];
     if (result is List) {
@@ -43,10 +54,80 @@ class AnalyzeByJson {
 
   List<dynamic> getList(String rule) {
     if (rule.isEmpty) return [];
-    final result = _resolvePath(rule);
-    if (result == null) return [];
-    if (result is List) return result;
-    return [result];
+    // `&&` / `||` / `%%` 复合规则：JSON 列表规则里非常常见
+    // （例：`$.blocks..models[*]&&$.models[*]` —— Strip 直播这类源）。
+    // 以前整串被当成一条 JSONPath ⇒ 末尾 `&&$.…` 被解析成一个"键" ⇒ 0 条结果，
+    // 表现正是「没抓到文章」。
+    final parts = _splitComposite(rule);
+    if (parts.length <= 1) {
+      final result = _resolvePath(rule);
+      if (result == null) return [];
+      if (result is List) return result;
+      return [result];
+    }
+    final out = <dynamic>[];
+    final seen = <dynamic>{}; // 按对象身份去重（同一 model 被两条路径命中时只留一份）
+    for (final part in parts) {
+      // `||`：前面的规则已经取到东西 ⇒ 不再试后面的（Legado 语义）
+      if (part.prevOp == '||' && out.isNotEmpty) break;
+      final result = _resolvePath(part.path);
+      if (result == null) continue;
+      final list = result is List ? result : [result];
+      for (final e in list) {
+        if (seen.add(e)) out.add(e);
+      }
+    }
+    return out;
+  }
+
+  /// 顶层 `&&` / `||` / `%%` 切分（跳过引号与 [] () 内的运算符）。
+  ///
+  /// 返回每段的 `path` 与它**前面**的那个运算符（第一段为空串）。
+  static List<({String path, String prevOp})> _splitComposite(String rule) {
+    final out = <({String path, String prevOp})>[];
+    var depth = 0;
+    var quote = false;
+    var quoteChar = '';
+    var last = 0;
+    var op = '';
+    for (var i = 0; i < rule.length; i++) {
+      final c = rule[i];
+      if (quote) {
+        if (c == quoteChar) quote = false;
+        continue;
+      }
+      if (c == "'" || c == '"') {
+        quote = true;
+        quoteChar = c;
+        continue;
+      }
+      if (c == '(' || c == '[') {
+        depth++;
+        continue;
+      }
+      if (c == ')' || c == ']') {
+        depth--;
+        continue;
+      }
+      if (depth != 0 || i + 1 >= rule.length) continue;
+      String? found;
+      if (c == '&' && rule[i + 1] == '&') {
+        found = '&&';
+      } else if (c == '|' && rule[i + 1] == '|') {
+        found = '||';
+      } else if (c == '%' && rule[i + 1] == '%') {
+        found = '%%';
+      }
+      if (found == null) continue;
+      final p = rule.substring(last, i).trim();
+      if (p.isNotEmpty) out.add((path: p, prevOp: op));
+      op = found;
+      i += 1;
+      last = i + 1;
+    }
+    final tail = rule.substring(last).trim();
+    if (tail.isNotEmpty) out.add((path: tail, prevOp: op));
+    return out;
   }
 
   dynamic getObject(String rule) {

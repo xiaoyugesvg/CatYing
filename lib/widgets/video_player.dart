@@ -128,6 +128,13 @@ class VideoPlayerWidget extends StatefulWidget {
   /// 不传则走旧行为 —— 仅保存偏好，下一集或重新播放才生效。
   final ValueChanged<PlayerEngine>? onEngineChanged;
 
+  /// 用户已选的字幕（跨引擎热切换接力用）。
+  /// null = 尚未选择 → 保持内核默认（mpv 会自动选默认轨）。
+  final SubtitleChoice? subtitleChoice;
+
+  /// 字幕选择变化回调（父级持有，供热切换 / 换集后还原）。
+  final ValueChanged<SubtitleChoice>? onSubtitleChoiceChanged;
+
   const VideoPlayerWidget({
     super.key,
     this.player,
@@ -171,6 +178,8 @@ class VideoPlayerWidget extends StatefulWidget {
     this.onSetSkipIntro,
     this.onSetSkipOutro,
     this.onEngineChanged,
+    this.subtitleChoice,
+    this.onSubtitleChoiceChanged,
   });
 
   @override
@@ -500,6 +509,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   /// player.stream 订阅统一持有，dispose 时取消，避免外部注入 Player 时泄漏
   final List<StreamSubscription<dynamic>> _playerSubs = [];
 
+  /// 当前媒体可用的内嵌字幕轨（空 = 隐藏字幕入口）
+  List<SubtitleTrackInfo> _subtitleTracks = const <SubtitleTrackInfo>[];
+
+  /// 已下发给内核的字幕选择 —— 防止父级 rebuild / 轨道列表刷新时重复应用
+  SubtitleChoice? _appliedSubtitleChoice;
+
   /// 播放进度 / 总时长：高频更新走 ValueNotifier，避免 position stream 触发整树 setState
   final ValueNotifier<Duration> _positionVN = ValueNotifier(Duration.zero);
   final ValueNotifier<Duration> _durationVN = ValueNotifier(Duration.zero);
@@ -599,6 +614,16 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     _positionVN.value = _position;
     _durationVN.value = _duration;
     _playbackSpeed = _player.state.rate;
+    _subtitleTracks = _player.subtitleTracks;
+
+    // 字幕轨：内核就绪 / 换源后刷新列表；列表就绪时把父级带来的选择应用一次
+    _playerSubs.add(
+      _player.subtitleTracksStream.listen((tracks) {
+        if (!mounted) return;
+        setState(() => _subtitleTracks = tracks);
+        _maybeApplySubtitleChoice();
+      }),
+    );
 
     _playerSubs.add(
       _player.stream.error.listen((error) {
@@ -919,6 +944,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       // 换集/换源：清掉上一集的进度与缓冲态，避免进度条/转圈残留
       _pendingResumeSeconds = null;
       _lastNotifiedPositionSec = -1;
+      // 字幕：新媒体的轨道还没枚举出来 → 重置「已应用」标记，
+      // 轨道就绪（内核广播新列表）后按父级持有的选择（matchKey）再应用一次
+      _appliedSubtitleChoice = null;
+      _subtitleTracks = _player.subtitleTracks;
       // 弹幕跟随剧集：清空并重新按新 URL 拉取（否则 _danmuLoaded 卡住永远不换）
       _danmuLoaded = false;
       _danmuLoadGen++;
@@ -2319,6 +2348,24 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     return '${speed.toStringAsFixed(2)}X';
   }
 
+  /// 轨道列表就绪/刷新后，把父级持有的字幕选择应用一次。
+  ///
+  /// 引擎热切换后新内核的轨道 id 与旧的完全不同 —— 只能靠 [SubtitleTrackInfo.matchKey]
+  /// （语言标记优先、轨道名兜底）把同一条字幕找回来。
+  void _maybeApplySubtitleChoice() {
+    final want = widget.subtitleChoice;
+    if (want == null || want == _appliedSubtitleChoice) return;
+    if (_subtitleTracks.isEmpty) return;
+    _appliedSubtitleChoice = want;
+    if (want.isOff) {
+      _player.selectSubtitleTrack(-1);
+      return;
+    }
+    final idx =
+        _subtitleTracks.indexWhere((t) => t.matchKey == want.matchKey);
+    _player.selectSubtitleTrack(idx);
+  }
+
   @override
   void dispose() {
     AudioFocus.unregister(_focusKey);
@@ -3253,6 +3300,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             // 放到顶栏与投屏/画中画同一组更合理。底栏右侧因此只剩 5 个。
             _danmuToggleButton(),
             _engineSwitchButton(),
+
+            // 字幕（仅当媒体含内嵌字幕轨时出现；AVPlayer 内核恒无 → 自动隐藏）
+            if (_subtitleTracks.isNotEmpty) _subtitleButton(),
 
             if (_isNativeFullscreen) ...[
               const SizedBox(width: 4),
@@ -5141,6 +5191,137 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         duration: const Duration(seconds: 2),
       );
     }
+  }
+
+  /// 顶栏字幕入口 —— 有内嵌字幕轨时才显示（见 _buildHeaderBar 的条件）。
+  /// 生效中（含内核自动选中的默认轨）显示实心字幕图标，关闭态显示划线图标。
+  Widget _subtitleButton() {
+    final on = _player.selectedSubtitleIndex >= 0;
+    return _iconButton(
+      icon: on ? Icons.subtitles : Icons.subtitles_off_outlined,
+      size: 20,
+      width: 36,
+      onTap: () => _safeTap(_showSubtitleSheet),
+    );
+  }
+
+  /// 字幕选择菜单 —— 底部弹层列出内嵌字幕轨（含「关闭字幕」），
+  /// 当前生效轨打勾；位图字幕额外标注「样式不可调」。
+  /// 弹层样式与「播放器核心」面板一致（深色、上圆角、拖拽条）。
+  Future<void> _showSubtitleSheet() async {
+    final tracks = _subtitleTracks;
+    final selected = _player.selectedSubtitleIndex;
+    final picked = await showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E1E),
+      barrierColor: Colors.black.withValues(alpha: 0.55),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 拖拽条
+                const SizedBox(height: 8),
+                Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Row(
+                    children: [
+                      Text(
+                        '字幕',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: AppTheme.fontHeadline,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                ListTile(
+                  dense: true,
+                  leading: const Icon(
+                    Icons.subtitles_off_outlined,
+                    color: Colors.white70,
+                    size: 20,
+                  ),
+                  title: Text(
+                    '关闭字幕',
+                    style: TextStyle(
+                      color: selected < 0 ? AppTheme.accentColor : Colors.white,
+                      fontSize: AppTheme.fontSubhead,
+                      fontWeight:
+                          selected < 0 ? FontWeight.w600 : FontWeight.w400,
+                    ),
+                  ),
+                  trailing: selected < 0
+                      ? Icon(Icons.check, color: AppTheme.accentColor, size: 20)
+                      : null,
+                  onTap: () => Navigator.of(sheetContext).pop(-1),
+                ),
+                for (var i = 0; i < tracks.length; i++)
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(
+                      Icons.subtitles,
+                      color: Colors.white70,
+                      size: 20,
+                    ),
+                    title: Text(
+                      tracks[i].name,
+                      style: TextStyle(
+                        color:
+                            i == selected ? AppTheme.accentColor : Colors.white,
+                        fontSize: AppTheme.fontSubhead,
+                        fontWeight:
+                            i == selected ? FontWeight.w600 : FontWeight.w400,
+                      ),
+                    ),
+                    subtitle: tracks[i].isImage
+                        ? const Text(
+                            '位图字幕（样式不可调）',
+                            style: TextStyle(
+                              color: Colors.white38,
+                              fontSize: AppTheme.fontCaption,
+                            ),
+                          )
+                        : null,
+                    trailing: i == selected
+                        ? Icon(Icons.check,
+                            color: AppTheme.accentColor, size: 20)
+                        : null,
+                    onTap: () => Navigator.of(sheetContext).pop(i),
+                  ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (picked == null || picked == selected) return;
+    await _player.selectSubtitleTrack(picked);
+    if (!mounted) return;
+    final choice = picked < 0
+        ? SubtitleChoice.off
+        : SubtitleChoice(tracks[picked].matchKey);
+    // 记下已应用的选择，并回写父级（引擎热切换 / 换集后按 matchKey 还原）
+    _appliedSubtitleChoice = choice;
+    widget.onSubtitleChoiceChanged?.call(choice);
+    // 顶栏图标切到「开/关」态
+    setState(() {});
   }
 
   /// 短剧模式按钮 —— 样式参考弹幕按钮：圆角方块内一个「短」字，

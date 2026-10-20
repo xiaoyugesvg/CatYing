@@ -134,6 +134,14 @@ final class KSEngine: NSObject {
         result(nil)
       case "getState":
         result(self.currentState())
+      case "getSubtitleTracks":
+        // 内嵌字幕轨枚举（Dart 侧 onReady 后拉取）
+        result(self.subtitleTracks())
+      case "selectSubtitleTrack":
+        // >=0 选轨；<0 关闭全部字幕轨
+        let idx = (call.arguments as? NSNumber)?.intValue ?? -1
+        self.selectSubtitleTrack(index: idx)
+        result(nil)
       case "enterPip":
         do {
           let args = call.arguments as? [String: Any] ?? [:]
@@ -378,6 +386,48 @@ final class KSEngine: NSObject {
       "videoWidth": 0.0,
       "videoHeight": 0.0,
     ]
+  }
+
+  // MARK: - 字幕轨（内嵌轨道枚举 / 切换）
+
+  /// 枚举当前媒体内嵌字幕轨。位图字幕（PGS/VobSub）也一并列出，
+  /// 其 `image` 字段供 UI 标注「样式不可调」。
+  private func subtitleTracks() -> [[String: Any]] {
+    guard let player = playerLayer?.player else { return [] }
+    let tracks = player.tracks(mediaType: .subtitle)
+    var out = [[String: Any]]()
+    for i in 0 ..< tracks.count {
+      let t = tracks[i]
+      let name = t.name.trimmingCharacters(in: .whitespaces)
+      let lang = (t.languageCode ?? "").trimmingCharacters(in: .whitespaces)
+      out.append([
+        "id": "\(t.trackID)",
+        "name": name.isEmpty ? (lang.isEmpty ? "字幕 \(i + 1)" : lang) : name,
+        "language": lang,
+        "image": t.isImageSubtitle,
+        "enabled": t.isEnabled,
+      ])
+    }
+    return out
+  }
+
+  /// 选轨：`index >= 0` → 选中该轨；`index < 0` → 关闭全部字幕轨。
+  ///
+  /// 关闭用「同类型轨 isEnabled 全部置 false」实现 —— 与 KSMEPlayerItem.select
+  /// 内部的按 isEnabled 切换机制一致，也避开了给 select(track:) 传自造 dummy
+  /// 轨的兼容风险（KSAVPlayer 的实现无法在本机验证）。
+  private func selectSubtitleTrack(index: Int) {
+    guard let player = playerLayer?.player else { return }
+    let tracks = player.tracks(mediaType: .subtitle)
+    guard !tracks.isEmpty else { return }
+    if index < 0 || index >= tracks.count {
+      for t in tracks {
+        t.isEnabled = false
+      }
+      return
+    }
+    // select 内部会按 isEnabled 切换同类型轨并处理位图字幕的 seek
+    player.select(track: tracks[index])
   }
 
   // MARK: - 事件发送（通道回调要求主线程，delegate 可能来自解码线程）

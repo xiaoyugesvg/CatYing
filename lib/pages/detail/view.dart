@@ -108,6 +108,10 @@ class _DetailPageState extends State<DetailPage> {
   /// 再从过期续播位重建一次（表现为"切换不灵/跳进度/黑屏闪一下"）。
   PlayerEngine? _playerEngine;
 
+  /// 用户已选的字幕（跨内核热切换接力）。
+  /// 各内核的字幕轨 id 不同，切换时按语言的 matchKey 把同一条字幕找回。
+  SubtitleChoice? _subtitleChoice;
+
   /// 是否已排队 post-frame 重建 Player，防止 build 内重复 schedule
   bool _playerRecreateScheduled = false;
   Worker? _engineWorker;
@@ -1034,6 +1038,9 @@ class _DetailPageState extends State<DetailPage> {
       key: ObjectKey(_player),
       player: _player,
       onEngineChanged: _onEngineHotSwap,
+      // 字幕选择接力：重建（含热切换）后按 matchKey 还原同一条字幕
+      subtitleChoice: _subtitleChoice,
+      onSubtitleChoiceChanged: (c) => _subtitleChoice = c,
       // 跨全屏/普通模式共享同一个 controller
       initialVideoFit: VideoFitType.contain, // 4:3 容器 + 黑框适配: 画面按原始比例完整显示, 上下黑边
       url: url,

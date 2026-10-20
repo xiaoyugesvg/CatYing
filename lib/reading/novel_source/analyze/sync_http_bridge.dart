@@ -113,14 +113,27 @@ class SyncHttpBridge {
       final m = jsonDecode(raw.substring(start, end + 1));
       if (m is! Map) return null;
       final key = m['k']?.toString() ?? '';
-      final url = m['u']?.toString() ?? '';
+      var url = m['u']?.toString() ?? '';
       if (key.isEmpty || url.isEmpty) return null;
+      var method = (m['m']?.toString() ?? 'GET').toUpperCase();
+      var headers = _asStringMap(m['h']);
+      var body = m['b']?.toString();
+      // Legado 的 `java.ajax('url,{"method":"POST","body":"a=1"}')` 写法：
+      // 地址后面跟请求描述（清渠社的蓝奏云接口就这么写）。以前整串当 URL
+      // 直接发给代理 ⇒ 必然失败。
+      final spec = _splitSpec(url);
+      if (spec != null) {
+        url = spec.url;
+        if (spec.method.isNotEmpty) method = spec.method;
+        if (spec.body.isNotEmpty) body = spec.body;
+        headers = {...headers, ...spec.headers};
+      }
       return SyncNeeds(
         key: key,
-        method: (m['m']?.toString() ?? 'GET').toUpperCase(),
+        method: method,
         url: url,
-        headers: _asStringMap(m['h']),
-        body: m['b']?.toString(),
+        headers: headers,
+        body: body,
         binary: '${m['x'] ?? ''}' == 'b64',
       );
     } catch (_) {
@@ -131,6 +144,38 @@ class SyncHttpBridge {
   static Map<String, String> _asStringMap(Object? raw) {
     if (raw is! Map) return const {};
     return raw.map((k, v) => MapEntry(k.toString(), v?.toString() ?? ''));
+  }
+
+  /// 拆 `地址,{"method":"POST","body":"…","headers":{…}}`（Legado 写法）。
+  static ({String url, String method, String body, Map<String, String> headers})?
+      _splitSpec(String raw) {
+    final m = RegExp(r'^([\s\S]*?),\s*(\{[\s\S]*\})$').firstMatch(raw.trim());
+    if (m == null) return null;
+    try {
+      final d = jsonDecode(m.group(2)!);
+      if (d is! Map) return null;
+      final hs = <String, String>{};
+      final bh = d['headers'] ?? d['header'];
+      if (bh is Map) bh.forEach((k, v) => hs['$k'] = '$v');
+      // `params` 是 Legado 的另一种写法（GET 拼查询串 / POST 表单），
+      // 这里按表单正文处理，避免参数丢失。
+      var body = (d['body'] ?? '').toString();
+      final params = d['params'];
+      if (body.isEmpty && params is Map && params.isNotEmpty) {
+        body = params.entries
+            .map((e) => '${Uri.encodeQueryComponent('${e.key}')}='
+                '${Uri.encodeQueryComponent('${e.value}')}')
+            .join('&');
+      }
+      return (
+        url: m.group(1)!.trim(),
+        method: (d['method'] ?? '').toString().trim().toUpperCase(),
+        body: body,
+        headers: hs,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   /// **同步**抓取 [need]，结果写入 [cache]（成功=响应体字符串；失败=`{'__error': ...}`）。

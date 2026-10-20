@@ -6,6 +6,7 @@ library;
 // （QuickJsService.evaluate 用 SyncHttpClient 同步拿结果），
 // 与上游 2.0.8 自 fork 的 quickjs 方案同源。
 import 'package:quickjs_engine/quickjs_engine.dart';
+import 'package:html/dom.dart' as dom;
 
 import '../novel_chinese_converter.dart';
 import '../../../services/app_log.dart';
@@ -271,6 +272,15 @@ class JsEngine {
 
   String _toJsValue(dynamic value) {
     if (value == null) return 'null';
+    // DOM 元素：包成 legado 风格对象（text/attr/select…），规则里的
+    // `result.select(...)` 才能继续用（如「1:1 娃娃美图秀」的 @js 规则）。
+    if (value is dom.Element) {
+      final attrs = value.attributes.entries
+          .map((e) => '"${_escapeJs('${e.key}')}":"${_escapeJs('${e.value}')}"')
+          .join(',');
+      return '__wrapElement({"t":"${_escapeJs(value.text.trim())}",'
+          '"h":"${_escapeJs(value.outerHtml)}","a":{$attrs}})';
+    }
     if (value is String) return '"${_escapeJs(value)}"';
     if (value is num) return value.toString();
     if (value is bool) return value.toString();

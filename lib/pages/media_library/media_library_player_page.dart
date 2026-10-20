@@ -47,6 +47,9 @@ class MediaLibraryPlayerPage extends StatefulWidget {
 class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
   AppPlayer? _player;
   bool _ownsPlayer = false;
+
+  /// 用户已选的字幕（跨内核热切换接力，见 VideoPlayerWidget.subtitleChoice）
+  SubtitleChoice? _subtitleChoice;
   int _currentIndex = 0;
 
   /// 已 open 过的地址，避免 Obx 重建重复 open
@@ -155,6 +158,9 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
         return VideoPlayerWidget(
           key: ObjectKey(player),
           player: player,
+          // 字幕选择接力：热切换重建后按 matchKey 还原同一条字幕
+          subtitleChoice: _subtitleChoice,
+          onSubtitleChoiceChanged: (c) => _subtitleChoice = c,
           // 核心热切换：记住当前进度，按新偏好重建播放器续播
           // ⚠️ 2026-10-19：必须等 _rebuildPlayer 的 dispose 完成后再继续，
           //   否则旧引擎未死透就创建新实例，导致「黑屏但有声音」。

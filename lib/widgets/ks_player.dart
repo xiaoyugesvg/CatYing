@@ -102,6 +102,8 @@ class KSPlayer extends AppPlayer {
       case 'onReady':
         _buffering = false;
         stream.addBuffering(false);
+        // 内核就绪（含 ME↔AV 回退换实例）→ 枚举内嵌字幕轨
+        unawaited(refreshSubtitleTracks());
         break;
       case 'onBuffering':
         _buffering = true;
@@ -121,12 +123,63 @@ class KSPlayer extends AppPlayer {
   AppPlayerStateView get state => _KsState(this);
 
   @override
+  bool get supportsSubtitles => true;
+
+  /// 枚举原生侧（KSPlayerLayer.player）的内嵌字幕轨。
+  /// 位图字幕（PGS/VobSub）也一并列出 —— FF 内核可直接渲染。
+  @override
+  Future<void> refreshSubtitleTracks() async {
+    // 只有共享 KSEngine 的当前主人才有权查询
+    if (!identical(_activeInstance, this)) return;
+    try {
+      final raw =
+          await _channel.invokeMethod<List<dynamic>>('getSubtitleTracks');
+      if (!identical(_activeInstance, this)) return;
+      final list = <SubtitleTrackInfo>[];
+      var selected = -1;
+      if (raw != null) {
+        for (var i = 0; i < raw.length; i++) {
+          final map = raw[i] is Map
+              ? (raw[i] as Map).cast<dynamic, dynamic>()
+              : const <dynamic, dynamic>{};
+          if (map['enabled'] == true) selected = i;
+          final name = '${map['name'] ?? ''}'.trim();
+          list.add(SubtitleTrackInfo(
+            id: '${map['id'] ?? i}',
+            name: name.isEmpty ? '字幕 ${i + 1}' : name,
+            language: map['language'] as String?,
+            isImage: map['image'] == true,
+          ));
+        }
+      }
+      publishSubtitleTracks(list);
+      setSelectedSubtitleIndex(selected);
+    } catch (_) {
+      // 通道不可用（例如非 iOS）：保持空列表，字幕入口自动隐藏
+    }
+  }
+
+  @override
+  Future<void> selectSubtitleTrack(int index) async {
+    if (!identical(_activeInstance, this)) return;
+    try {
+      await _channel.invokeMethod('selectSubtitleTrack', index);
+      setSelectedSubtitleIndex(index);
+    } catch (_) {
+      // 通道失败不阻断播放
+    }
+  }
+
+  @override
   Future<void> open(AppMedia media, {bool play = true, bool live = false}) async {
     // 谁最后 open，谁就是共享 KSEngine 的当前主人 → 事件归它
     _activeInstance = this;
     _url = media.url;
     _buffering = true;
     stream.addBuffering(true);
+    // 换源：清空旧字幕轨列表，等 onReady 后重新枚举，避免残留上一个源
+    publishSubtitleTracks(const <SubtitleTrackInfo>[]);
+    setSelectedSubtitleIndex(-1);
     // 换台/换集复用同一实例（直播页 _ksPlayer ??= 复用）：旧流的时长/进度
     // 立即清零并广播，避免新流 ready 前 UI 短暂显示上一台的残留时长
     _position = Duration.zero;

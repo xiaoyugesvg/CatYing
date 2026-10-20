@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../common/theme.dart';
 import '../../widgets/app_toast.dart';
+import '../../widgets/card_action_sheet.dart';
 import '../models/book_source.dart';
 import '../models/source_subscription.dart';
 import '../services/book_source_import_parser.dart';
@@ -1285,75 +1286,37 @@ class _WarehouseTabState extends State<_WarehouseTab>
   }
 
   /// 网格 / 卡片长按：编辑、分享、删除、多选
+  ///
+  /// 2026-10-20：统一成全站**卡片式**菜单（一排 2 张卡片）——
+  /// 与 RSS / 影视源 / 本地 Python 源 / 直播源一致，不再用单列 ListTile。
   Future<void> _showGridMenu(BookSource s) async {
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        decoration: BoxDecoration(
-          color: _card,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+    await showCardActions(
+      context,
+      title: s.name,
+      subtitle: s.url,
+      actions: [
+        CardAction(
+          icon: Icons.edit_outlined,
+          label: '编辑',
+          onTap: () => _editEntry(s.id),
         ),
-        child: SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 10),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
-                child: Text(
-                  s.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: _label,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              _gridMenuTile(ctx, Icons.edit_outlined, '编辑', 'edit'),
-              _gridMenuTile(ctx, Icons.ios_share_rounded, '分享', 'share'),
-              _gridMenuTile(ctx, Icons.checklist_rounded, '多选', 'select'),
-              _gridMenuTile(
-                ctx,
-                Icons.delete_outline_rounded,
-                '删除',
-                'delete',
-                danger: true,
-              ),
-              const SizedBox(height: 8),
-            ],
-          ),
+        CardAction(
+          icon: Icons.ios_share_rounded,
+          label: '分享',
+          onTap: () => _shareIds([s.id]),
         ),
-      ),
-    );
-    if (!mounted || action == null) return;
-    if (action == 'edit') {
-      await _editEntry(s.id);
-    } else if (action == 'share') {
-      await _shareIds([s.id]);
-    } else if (action == 'select') {
-      _enterSelect(s.id);
-    } else if (action == 'delete') {
-      await _deleteIds([s.id]);
-    }
-  }
-
-  Widget _gridMenuTile(
-    BuildContext ctx,
-    IconData icon,
-    String label,
-    String value, {
-    bool danger = false,
-  }) {
-    final color = danger ? Colors.redAccent : _label;
-    return ListTile(
-      dense: true,
-      leading: Icon(icon, size: 20, color: color),
-      title: Text(label, style: TextStyle(color: color, fontSize: 14)),
-      onTap: () => Navigator.pop(ctx, value),
+        CardAction(
+          icon: Icons.checklist_rounded,
+          label: '多选',
+          onTap: () => _enterSelect(s.id),
+        ),
+        CardAction(
+          icon: Icons.delete_outline_rounded,
+          label: '删除',
+          danger: true,
+          onTap: () => _deleteIds([s.id]),
+        ),
+      ],
     );
   }
 

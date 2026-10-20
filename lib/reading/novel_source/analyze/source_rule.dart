@@ -108,6 +108,9 @@ class SourceRule {
   }
 
   /// 首个内嵌表达式的起始位置；无则返回 null。
+  ///
+  /// 三种写法：`@get:{…}`、`{{…}}`、**单花括号模板 `{规则}`**
+  /// （如 `https://img/{$.ts}/{$.id}_webp`，RSS/影视源常用）。
   static int? _firstInnerRuleIndex(String ruleStr) {
     int? min;
     final getMatch = RegExp(r'@get:\{').firstMatch(ruleStr);
@@ -115,6 +118,12 @@ class SourceRule {
     final jsMatch = RegExp(r'\{\{').firstMatch(ruleStr);
     if (jsMatch != null && (min == null || jsMatch.start < min)) {
       min = jsMatch.start;
+    }
+    // 单个 `{` 紧跟规则前缀（`$`/`@`/`//`）才算模板；
+    // `{{` 的第二个 `{` 不算（它已由上面的 `\{\{` 覆盖）
+    final single = RegExp(r'\{(?=[$@/])').firstMatch(ruleStr);
+    if (single != null && (min == null || single.start < min)) {
+      min = single.start;
     }
     return min;
   }

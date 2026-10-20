@@ -51,11 +51,46 @@ class RssReader {
     bool ignoreCache = false,
   }) async {
     final ch = channel ?? source.channels.first;
-    final url = (pageUrl != null && pageUrl.trim().isNotEmpty)
+    final target = (pageUrl != null && pageUrl.trim().isNotEmpty)
         ? pageUrl.trim()
-        : resolveUrl(ch.url, source.url, page);
-    final body = await _body(source, url, ignoreCache: ignoreCache);
-    final arts = _blacklist(source, parseArticles(source, body, url));
+        : resolveUrl(ch.url, source.url, page, source: source);
+    // Legado 的 `sortUrl` 允许 `地址,{"method":"POST","body":"..."}` 这种写法
+    // （秀人岛 / 下厨房的搜索分类），以前整串当 URL ⇒ 请求必失败。
+    final spec = splitRequestSpec(target);
+    final url = spec.url;
+    final body = await _body(
+      source,
+      url,
+      ignoreCache: ignoreCache,
+      method: spec.method,
+      postBody: spec.body,
+      extraHeaders: spec.headers,
+    );
+    var arts = _blacklist(source, parseArticles(source, body, url));
+    var effectiveBody = body;
+    var effectiveUrl = url;
+
+    // ── 站点地址自动发现 feed（用户 2026-10-20：「RSS 兼容性总是不够」）──
+    // 很多订阅地址其实是**普通网页**（带 `<link rel="alternate" type="application/rss+xml">`），
+    // 以前一律落到「内嵌网页」；这里先按标准方式找 feed 并改抓它，
+    // 能出文章就正常展示列表，找不到才继续走网页兜底。
+    if (!source.hasRules && arts.isEmpty && body.contains('<')) {
+      final feed = discoverFeedUrl(body, url);
+      if (feed != null && feed != url) {
+        try {
+          final feedBody = await _body(source, feed, ignoreCache: ignoreCache);
+          final feedArts =
+              _blacklist(source, parseArticles(source, feedBody, feed));
+          if (feedArts.isNotEmpty) {
+            arts = feedArts;
+            effectiveBody = feedBody;
+            effectiveUrl = feed;
+          }
+        } catch (_) {
+          // feed 取不到就保持原样（继续走网页兜底）
+        }
+      }
+    }
 
     // `preload`：列表就绪后**预取第一条的正文**进缓存 —— 用户在列表里最可能
     // 点开第一条；配合 `cacheFirst` 就是"点开秒开"。
@@ -66,7 +101,7 @@ class RssReader {
 
     return (
       articles: arts,
-      nextUrl: _nextPageUrl(source, body, url),
+      nextUrl: _nextPageUrl(source, effectiveBody, effectiveUrl),
       // 兜底判定"这个地址其实是个网页"：**没有列表规则** + 一条文章都没解析出来
       // + 返回体不像 feed（没有 <rss>/<feed>/<channel>/<item> 标签）。
       // ⇒ 用户那份 txt 里 5 条站点型源（源仓库 / Yiove / 使用文档…）即使丢了
@@ -76,9 +111,42 @@ class RssReader {
     );
   }
 
-  /// 返回体像不像订阅源（RSS 2.0 / Atom）。
+  /// 从 HTML 里发现 RSS/Atom feed 地址：
+  ///   `<link rel="alternate" type="application/rss+xml" href="/feed">`
+  ///   `<link rel="alternate" type="application/atom+xml" href="/atom.xml">`
+  static String? discoverFeedUrl(String html, String base) {
+    final head = html.length > 200000 ? html.substring(0, 200000) : html;
+    final tagRe = RegExp(r'<link\b[^>]*>', caseSensitive: false);
+    for (final m in tagRe.allMatches(head)) {
+      final tag = m.group(0)!;
+      final type =
+          RegExp(r'type\s*=\s*["'']([^"'']+)["'']', caseSensitive: false)
+              .firstMatch(tag)
+              ?.group(1)
+              ?.toLowerCase() ??
+          '';
+      if (!type.contains('rss+xml') && !type.contains('atom+xml')) continue;
+      final href =
+          RegExp(r'href\s*=\s*["'']([^"'']+)["'']', caseSensitive: false)
+              .firstMatch(tag)
+              ?.group(1)
+              ?.trim() ??
+          '';
+      if (href.isEmpty) continue;
+      final abs = _absUrl(href, base);
+      if (abs.startsWith('http')) return abs;
+    }
+    return null;
+  }
+
+  /// 返回体像不像订阅源（RSS 2.0 / Atom / JSON Feed）。
   static bool _looksLikeFeed(String body) {
     if (body.isEmpty) return false;
+    final t = body.trimLeft();
+    if (t.startsWith('{') || t.startsWith('[')) {
+      final head = t.length > 4096 ? t.substring(0, 4096) : t;
+      return RegExp(r'"(items|articles|list)"\s*:').hasMatch(head);
+    }
     final head = body.length > 4096 ? body.substring(0, 4096) : body;
     return RegExp(r'<\s*(rss|feed|channel|item|entry)[\s>]',
             caseSensitive: false)
@@ -126,6 +194,15 @@ class RssReader {
       );
     } catch (_) {
       // 注入失败不影响规则本身（与阅读模块同一处理）
+    }
+    // 源备注（`sourceComment`）：清渠社这类源的 JS 会读
+    // `source.sourceComment` 决定图片 CDN 编号；不绑定就是 `undefined` ⇒ 整个
+    // 图片规则抛 TypeError（连带封面全空）。
+    try {
+      JsEngine.shared
+          .eval('source.sourceComment = ${jsonEncode(source.sourceComment)};');
+    } catch (_) {
+      // JS 引擎不可用时忽略（规则本身也会走空值兜底）
     }
     // 把**落盘的登录信息**回灌给 JS 侧：`SourceVariableStore` 是内存态，重启会丢，
     // 而源在规则里会用 `source.getLoginInfoMap()` 读它来选源站 / 带鉴权参数。
@@ -234,13 +311,23 @@ class RssReader {
     RssSource source,
     String url, {
     bool ignoreCache = false,
+    String method = 'GET',
+    String? postBody,
+    Map<String, String>? extraHeaders,
   }) async {
-    final key = '${source.id}|$url';
+    final m = method.trim().isEmpty ? 'GET' : method.trim().toUpperCase();
+    final key = '${source.id}|$m|$url|${postBody ?? ''}';
     if (source.cacheFirst && !ignoreCache) {
       final hit = _bodyCache[key];
       if (hit != null) return hit;
     }
-    final body = await _get(url, source);
+    final body = await _get(
+      url,
+      source,
+      method: m,
+      postBody: postBody,
+      extraHeaders: extraHeaders,
+    );
     _bodyCache[key] = body;
     if (_bodyCache.length > 80) _bodyCache.remove(_bodyCache.keys.first);
     return body;
@@ -312,16 +399,30 @@ class RssReader {
   static List<RssArticle> _parseStandardFeed(
       RssSource source, String body, String pageUrl) {
     final out = <RssArticle>[];
-    XmlDocument doc;
+    // JSON Feed / 常见 JSON 接口（用户 2026-10-20：「RSS 里面好多错误，
+    // 兼容性不够」）：不少「订阅源」给的其实是 JSON 而不是 XML。
+    final trimmed = body.trimLeft();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      final jsonArts = _parseJsonFeed(source, body, pageUrl);
+      if (jsonArts.isNotEmpty) return jsonArts;
+    }
+    XmlDocument? doc;
     try {
       doc = XmlDocument.parse(body);
     } catch (_) {
-      return out;
+      // 大量站点输出的 RSS 不是合法 XML（裸 `&`、控制字符、裸 HTML 标签）
+      // → 先修复再解析；还不行就按 <item>/<entry> 正则兜底
+      try {
+        doc = XmlDocument.parse(_repairXml(body));
+      } catch (_) {
+        doc = null;
+      }
     }
     // RSS 2.0 用 item、Atom 用 entry；有些站还会带命名空间前缀
     final nodes = <XmlElement>[
-      ...doc.findAllElements('item'),
-      ...doc.findAllElements('entry'),
+      if (doc != null) ...doc.findAllElements('item'),
+      if (doc != null) ...doc.findAllElements('entry'),
+      if (doc == null) ..._regexItems(body),
     ];
     for (final n in nodes) {
       final title = _txt(n, 'title');
@@ -379,6 +480,158 @@ class RssReader {
     return out;
   }
 
+  /// JSON Feed 1.x / 常见 JSON 列表接口 → 文章列表。
+  ///
+  /// 支持的形态（按优先级找列表）：
+  ///   · 根就是数组；
+  ///   · `{items:[…]}`（JSON Feed 标准）；
+  ///   · `{data:[…]}` / `{list:[…]}` / `{result:[…]}` / `{articles:[…]}`；
+  ///   · `{data:{list:[…]}}` 这类再套一层的。
+  static List<RssArticle> _parseJsonFeed(
+      RssSource source, String body, String pageUrl) {
+    final out = <RssArticle>[];
+    dynamic root;
+    try {
+      root = jsonDecode(body);
+    } catch (_) {
+      return out;
+    }
+    List<dynamic>? items;
+    if (root is List) {
+      items = root;
+    } else if (root is Map) {
+      for (final k in const ['items', 'data', 'list', 'result', 'articles']) {
+        final v = root[k];
+        if (v is List) {
+          items = v;
+          break;
+        }
+        if (v is Map) {
+          for (final k2 in const ['items', 'list', 'data', 'articles']) {
+            final v2 = v[k2];
+            if (v2 is List) {
+              items = v2;
+              break;
+            }
+          }
+          if (items != null) break;
+        }
+      }
+    }
+    if (items == null) return out;
+
+    String pick(Map m, List<String> keys) {
+      for (final k in keys) {
+        final v = m[k];
+        if (v is String && v.trim().isNotEmpty) return v.trim();
+        if (v is num) return '$v';
+      }
+      return '';
+    }
+
+    for (final e in items) {
+      if (e is! Map) continue;
+      final m = e.cast<dynamic, dynamic>();
+      var link = pick(m, const [
+        'url', 'link', 'external_url', 'html_url', 'url_str', 'href',
+      ]);
+      if (link.isEmpty) continue;
+      link = _absUrl(link, pageUrl);
+      final title = pick(m, const ['title', 'name', 'headline']);
+      final image = _absUrl(
+        pick(m, const [
+          'image', 'banner_image', 'cover', 'pic', 'thumbnail', 'img',
+        ]),
+        pageUrl,
+      );
+      final date = pick(m, const [
+        'date_published', 'date_modified', 'pubDate', 'published',
+        'created_at', 'time', 'date',
+      ]);
+      final rawContent = pick(m, const [
+        'content_html', 'content', 'description', 'summary', 'content_text',
+      ]);
+      out.add(RssArticle(
+        title: title.isEmpty ? link : title,
+        link: link,
+        image: image,
+        pubDate: friendlyTime(date),
+        description: _stripHtml(rawContent),
+        contentHtml: rawContent.contains('<') ? rawContent : '',
+        sourceId: source.id,
+        sourceName: source.name,
+      ));
+    }
+    return out;
+  }
+
+  /// 修复「不是合法 XML」的常见问题：BOM、前置杂字符、控制字符、HTML 命名实体、裸 `&`。
+  static String _repairXml(String s) {
+    var out = _stripBom(s);
+    // XML 声明必须位于文档最前面；有些源在它前面还塞了注释/空白 ⇒ 直接删掉声明
+    //（声明本身对解析没有必要）
+    out = out.replaceFirst(RegExp(r'<\?xml[^>]*\?>', caseSensitive: false), '');
+    // 第一个 '<' 之前的 BOM/说明文字会让解析器报 "Unexpected character"
+    final lt = out.indexOf('<');
+    if (lt > 0) out = out.substring(lt);
+    out = out.replaceAll(RegExp(r'[\x00-\x08\x0B\x0C\x0E-\x1F]'), '');
+    // ⚠️ 最常见的「XML 解析直接失败」原因：标题/摘要里写了 `&nbsp;` `&hellip;`
+    //   这类 **HTML 命名实体**，而 XML 只认 amp/lt/gt/quot/apos 五个
+    //   ⇒ 解析器抛 "undefined entity"，整篇 feed 变 0 条。
+    //   认识的换成字符，不认识的一律转义成字面量（至少不整篇失败）。
+    const xmlSafe = {'amp', 'lt', 'gt', 'quot', 'apos'};
+    const htmlNamed = {
+      'nbsp': ' ',
+      'hellip': '…',
+      'mdash': '—',
+      'ndash': '–',
+      'ldquo': '“',
+      'rdquo': '”',
+      'lsquo': '‘',
+      'rsquo': '’',
+      'middot': '·',
+      'copy': '©',
+      'reg': '®',
+      'times': '×',
+      'divide': '÷',
+      'bull': '•',
+      'deg': '°',
+    };
+    out = out.replaceAllMapped(
+      RegExp(r'&([a-zA-Z][a-zA-Z0-9]*);'),
+      (m) {
+        final name = m.group(1)!;
+        if (xmlSafe.contains(name)) return m.group(0)!;
+        final ch = htmlNamed[name.toLowerCase()];
+        return ch ?? '&amp;$name;';
+      },
+    );
+    out = out.replaceAllMapped(
+      RegExp(r'&(?!(?:#\d+|#x[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);)'),
+      (_) => '&amp;',
+    );
+    return out;
+  }
+
+  /// XML 彻底解析不了时的兜底：按 `<item>` / `<entry>` 块逐个提取。
+  static List<XmlElement> _regexItems(String body) {
+    final out = <XmlElement>[];
+    final re = RegExp(
+      r'<(item|entry)\b[^>]*>[\s\S]*?</\1\s*>',
+      caseSensitive: false,
+    );
+    for (final m in re.allMatches(body)) {
+      try {
+        final doc = XmlDocument.parse('<x>${_repairXml(m.group(0)!)}</x>');
+        final el = doc.rootElement.children.whereType<XmlElement>().first;
+        out.add(el);
+      } catch (_) {
+        // 单条坏掉就跳过，不影响其它条目
+      }
+    }
+    return out;
+  }
+
   /// 取正文。返回 (内容, 文章里的第一张图, 是不是 HTML)。
   ///
   /// [isHtml] 为 true 时 `text` 字段装的是**原始 HTML**，调用方要用网页渲染
@@ -432,14 +685,46 @@ class RssReader {
 
   // ── 网络 ────────────────────────────────────────────────────────
 
-  static Future<String> _get(String url, RssSource source) async {
+  static Future<String> _get(
+    String url,
+    RssSource source, {
+    String method = 'GET',
+    String? postBody,
+    Map<String, String>? extraHeaders,
+  }) async {
+    final headers = _headers(source);
+    // `地址,{"method":"POST","body":"...","headers":{...}}` 里的自定义请求头
+    // （秀人岛 / 下厨房这类源）优先于源级 header。
+    if (extraHeaders != null) {
+      for (final e in extraHeaders.entries) {
+        final k = e.key.trim();
+        if (k.isNotEmpty) headers[k] = e.value;
+      }
+    }
+    final m = method.trim().isEmpty ? 'GET' : method.trim().toUpperCase();
+    final bodyText = postBody ?? '';
+    // 站点常见的防盗链判断：没有 Referer 直接 403（用户 2026-10-20 截图里的
+    // DioException 403 就是这一类）。补一个同源 Referer。
+    headers.putIfAbsent('Referer', () => _originOf(url));
+    headers.putIfAbsent(
+      'Accept',
+      () => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    );
+    // ── Cookie jar（`enabledCookieJar`）──────────────────────────
+    // 规则引擎里的 `java.ajax` 一直带着源的 cookie，而这里直接抓取原来**完全没带**
+    // ⇒ 需要登录态/校验 cookie 的源必然 403 或空内容。现在补上：
+    // 发请求带 `Cookie`，收响应吸收 `Set-Cookie`（与规则链共用同一个 jar）。
+    SourceCookieStore.instance.enabled = source.enabledCookieJar;
+    if (source.enabledCookieJar) {
+      final cookie = SourceCookieStore.instance.getCookie(url);
+      if (cookie.isNotEmpty) headers.putIfAbsent('Cookie', () => cookie);
+    }
     final dio = Dio(BaseOptions(
       connectTimeout: const Duration(seconds: 15),
       receiveTimeout: const Duration(seconds: 30),
       // ⚠️ 取**字节**自己解编码：中文站/RSS 常见 GBK，Dio 默认按 utf8 解会整篇乱码
       responseType: ResponseType.bytes,
       followRedirects: true,
-      headers: _headers(source),
     ));
     // ⚠️ **必须**套全局代理（「设置 → 网络代理」）—— 全项目 27 处请求都这么做
     //   （书源 / 漫画源 / z-library / 豆瓣…）。RSS 原来漏了这一句 ⇒ 用户开了
@@ -447,12 +732,62 @@ class RssReader {
     //   （用户 2026-10-15 实测）。
     applyGlobalProxy(dio);
     try {
-      final resp = await dio.get<List<int>>(url);
+      Future<Response<List<int>>> send(Map<String, String> h) {
+        final bodyless = m == 'GET' || m == 'HEAD' || bodyText.isEmpty;
+        // 请求体裁剪：JSON 直接用 application/json，其余按表单（legado 默认）。
+        final t = bodyText.trimLeft();
+        final json = t.startsWith('{') || t.startsWith('[');
+        return dio.request<List<int>>(
+          url,
+          data: bodyless ? null : bodyText,
+          // 4xx 不抛异常：交给下面决定是换头重试还是抛出可读错误
+          options: Options(
+            method: m,
+            headers: h,
+            contentType: bodyless
+                ? null
+                : (json ? Headers.jsonContentType : Headers.formUrlEncodedContentType),
+            validateStatus: (s) => s != null && s < 500,
+          ),
+        );
+      }
+      var resp = await send(headers);
+      var status = resp.statusCode ?? 0;
+      if (status == 401 || status == 403 || status == 406 || status == 429) {
+        // 换一套「桌面浏览器」身份再试一次：不少站点只放行 PC UA + Referer
+        final retry = Map<String, String>.from(headers)
+          ..['User-Agent'] = _desktopUa
+          ..['Referer'] = _originOf(url)
+          ..['Accept-Language'] = 'zh-CN,zh;q=0.9,en;q=0.8';
+        resp = await send(retry);
+        status = resp.statusCode ?? 0;
+      }
+      if (status >= 400) {
+        throw RssHttpException(status, _originOf(url));
+      }
+      // 吸收登录/校验 cookie，后续请求（含规则引擎里的 java.ajax）共用
+      if (source.enabledCookieJar) {
+        SourceCookieStore.instance
+            .ingestResponseHeader(url, resp.headers.value('set-cookie'));
+      }
       return _decode(resp.data ?? const <int>[],
           resp.headers.value('content-type') ?? '');
     } finally {
       dio.close(force: true);
     }
+  }
+
+  static const String _desktopUa =
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
+      '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+  /// `https://host/path` → `https://host/`
+  static String _originOf(String url) {
+    try {
+      final u = Uri.parse(url.trim());
+      if (u.hasScheme && u.host.isNotEmpty) return '${u.scheme}://${u.host}/';
+    } catch (_) {}
+    return '';
   }
 
   /// 按 charset 解码（content-type → 页面内 `charset=` → 兜底 utf8 / gbk）。
@@ -478,7 +813,7 @@ class RssReader {
     final lower = (cs ?? '').toLowerCase();
     if (lower.contains('gb') || lower.contains('big5')) {
       try {
-        return gbk.decode(bytes, allowMalformed: true);
+        return _stripBom(gbk.decode(bytes, allowMalformed: true));
       } catch (_) {/* 解不了就走下面的 utf8 兜底 */}
     }
     final utf8Str = utf8.decode(bytes, allowMalformed: true);
@@ -486,11 +821,16 @@ class RssReader {
     if (utf8Str.contains('\uFFFD')) {
       try {
         final g = gbk.decode(bytes, allowMalformed: true);
-        if (!g.contains('\uFFFD')) return g;
+        if (!g.contains('\uFFFD')) return _stripBom(g);
       } catch (_) {}
     }
-    return utf8Str;
+    return _stripBom(utf8Str);
   }
+
+  /// 去掉 UTF-8 BOM（`\uFEFF`）—— 带 BOM 的 XML/JSON 会让解析器**直接失败**，
+  /// 表现成「没抓到内容」。
+  static String _stripBom(String s) =>
+      s.startsWith('\uFEFF') ? s.substring(1) : s;
 
   static Map<String, String> _headers(RssSource source) {
     final h = <String, String>{
@@ -532,7 +872,8 @@ class RssReader {
   ///
   /// 只认 `page`/`关键词` 与 `+ - * / ( )` 数字运算（够覆盖分享出来的源），
   /// 不引 JS —— 待求值表达式是数据，不是代码，没必要为此拉起 JS 引擎。
-  static String resolveUrl(String template, String base, int page) {
+  static String resolveUrl(String template, String base, int page,
+      {RssSource? source}) {
     var u = template.trim();
     if (u.isEmpty) u = base;
     final m = RegExp(r'\{\{([^}]*)\}\}');
@@ -541,10 +882,53 @@ class RssReader {
       if (expr == 'page') return '$page';
       if (expr == 'key' || expr == 'keyword') return '';
       final v = _evalArith(expr, page);
-      return v == null ? '' : '$v';
+      if (v != null) return '$v';
+      // 非算术表达式（`{{source.getVariable("token")}}` 这类）交给 JS 引擎，
+      // 与 Legado 的 sortUrl 语义一致；求值失败退回空串。
+      if (source != null) {
+        try {
+          final js = expr.replaceAll(RegExp(r'\bpage\b'), '$page');
+          return _ruleFor(source, '', base)
+              .getString('@js:$js')
+              .trim();
+        } catch (_) {/* 落空串 */}
+      }
+      return '';
     });
     if (u.startsWith('http')) return u;
     return _absUrl(u, base);
+  }
+
+  /// 拆 `地址,{"method":"POST","body":"a=1","headers":{…}}`（Legado 写法）。
+  ///
+  /// 秀人岛 / 下厨房的搜索分类把 POST 参数直接写在 `sortUrl` 里，以前整串当
+  /// URL 抓 ⇒ 必然失败。没有逗号+JSON 尾巴时按纯地址返回。
+  static ({String url, String method, String body, Map<String, String> headers})
+      splitRequestSpec(String raw) {
+    final t = raw.trim();
+    const noHeaders = <String, String>{};
+    final m = RegExp(r'^([\s\S]*?),\s*(\{[\s\S]*\})$').firstMatch(t);
+    if (m == null) {
+      return (url: t, method: 'GET', body: '', headers: noHeaders);
+    }
+    final urlPart = m.group(1)!.trim();
+    try {
+      final d = jsonDecode(m.group(2)!);
+      if (d is Map) {
+        final method = (d['method'] ?? 'GET').toString().trim().toUpperCase();
+        final body = (d['body'] ?? '').toString();
+        final hs = <String, String>{};
+        final bh = d['headers'];
+        if (bh is Map) bh.forEach((k, v) => hs['$k'] = '$v');
+        return (
+          url: urlPart,
+          method: method.isEmpty ? 'GET' : method,
+          body: body,
+          headers: hs,
+        );
+      }
+    } catch (_) {/* 不是合法 JSON ⇒ 当纯地址 */}
+    return (url: t, method: 'GET', body: '', headers: noHeaders);
   }
 
   /// 极简算术求值（只允许 `page` 和数字 + `+-*/()`）。
@@ -718,11 +1102,23 @@ class RssReader {
       for (final e in n.children.whereType<XmlElement>()) {
         if (e.name.local.toLowerCase() == tag.toLowerCase()) {
           final s = e.innerXml.trim();
-          if (s.isNotEmpty) return s;
+          if (s.isNotEmpty) return _unwrapCdata(s);
         }
       }
     }
     return '';
+  }
+
+  /// 去掉 `<![CDATA[ … ]]>` 外壳。
+  ///
+  /// `innerXml` 会把 CDATA 原样序列化成 `<![CDATA[<p>…</p>]]>`；不剥掉的话
+  /// 正文 HTML 塞给 WebView 会被当成「伪注释」→ 正文整段不显示（兼容性坑）。
+  static String _unwrapCdata(String s) {
+    var out = s.trim();
+    final m = RegExp(r'^<!\[CDATA\[([\s\S]*)\]\]>$').firstMatch(out);
+    if (m != null) out = m.group(1)!;
+    out = out.replaceAll('<![CDATA[', '').replaceAll(']]>', '');
+    return out.trim();
   }
 
   /// Atom 的 link 在属性里：`<link rel="alternate" href="..."/>`
@@ -758,6 +1154,31 @@ class RssReader {
     final s = e.toString().replaceAll('\n', ' ');
     return s.length > 80 ? s.substring(0, 80) : s;
   }
+}
+
+/// HTTP 状态异常（可读文案：不再把 DioException 原文甩到界面上）。
+class RssHttpException implements Exception {
+  RssHttpException(this.statusCode, this.origin);
+
+  final int statusCode;
+  final String origin;
+
+  String get hint {
+    switch (statusCode) {
+      case 401:
+      case 403:
+        return '站点拒绝访问（$statusCode）—— 可能需要登录、换 UA 或代理';
+      case 404:
+        return '地址不存在（404）';
+      case 429:
+        return '请求太频繁（429），稍后再试';
+      default:
+        return '请求失败（$statusCode）';
+    }
+  }
+
+  @override
+  String toString() => hint;
 }
 
 /// 极简算术求值器（递归下降；只允许数字与 `+ - * / ( )`）。

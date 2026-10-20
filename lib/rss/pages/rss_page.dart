@@ -301,12 +301,18 @@ class _RssPageState extends State<RssPage> {
     if (src == null || _articles.isEmpty) return false;
     // 规则接力翻页：上一页算出了"下一页地址"就还能继续
     if (_nextUrl.isNotEmpty) return true;
-    // 配了 ruleNextPage 却没算出下一页地址 ⇒ 到底了（该规则里没有 {{page}}）
-    if ((src.ruleNextPage ?? '').trim().isNotEmpty) return false;
     // 行内模板翻页：地址里必须真有引用 page 的 {{…}} 才算
+    //
+    // ⚠️ 必须放在 ruleNextPage 判断**之前**：不少源（如 XAnime）的
+    // `ruleNextPage` 写了 `page`（实际取不到值），但分类地址本身是
+    // `/page/{{page}}/` —— 以前被 ruleNextPage 非空直接判成"到底了"，
+    // 上拉永远不加页。
     final chs = _channels.isNotEmpty ? _channels : src.channels;
     final ch = chs[_channel.clamp(0, chs.length - 1)];
-    return RssReader.isPagedUrl(ch.url);
+    if (RssReader.isPagedUrl(ch.url)) return true;
+    // 配了 ruleNextPage 却没算出下一页地址 ⇒ 到底了（该规则里没有 {{page}}）
+    if ((src.ruleNextPage ?? '').trim().isNotEmpty) return false;
+    return false;
   }
 
   void _openManage() {
@@ -375,13 +381,17 @@ class _RssPageState extends State<RssPage> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => _RssSourceSwitchSheet(
-        sources: list,
-        selectedId: store.selectedId,
-        onPick: (id) {
-          if (id != store.selectedId) store.select(id);
-        },
-        onManage: _openManage,
+      // ⚠️ 必须套 kbSheet：否则点搜索框时键盘会直接盖住整个面板
+      //   （与影视「搜索源」面板一致的处理）
+      builder: (ctx) => kbSheet(
+        _RssSourceSwitchSheet(
+          sources: list,
+          selectedId: store.selectedId,
+          onPick: (id) {
+            if (id != store.selectedId) store.select(id);
+          },
+          onManage: _openManage,
+        ),
       ),
     );
   }
@@ -565,6 +575,10 @@ class _RssPageState extends State<RssPage> {
               hint: _error.isEmpty ? '下拉可以刷新，或换一个订阅源' : _error,
               btnText: '换一个订阅源',
               onBtn: _pickSource,
+              // 抓不到时的兜底出口：直接内嵌打开源站网页
+              // （用户 2026-10-20：「RSS 里面好多错误，兼容性不够」）
+              btn2Text: '用网页打开',
+              onBtn2: () => setState(() => _siteLike = true),
             ),
           ],
         ),
@@ -592,6 +606,8 @@ class _RssPageState extends State<RssPage> {
     required String hint,
     String? btnText,
     VoidCallback? onBtn,
+    String? btn2Text,
+    VoidCallback? onBtn2,
   }) {
     return Center(
       child: Padding(
@@ -625,6 +641,10 @@ class _RssPageState extends State<RssPage> {
                         horizontal: 22, vertical: 12)),
                 child: Text(btnText),
               ),
+            ],
+            if (btn2Text != null && onBtn2 != null) ...[
+              const SizedBox(height: 8),
+              TextButton(onPressed: onBtn2, child: Text(btn2Text)),
             ],
           ],
         ),
@@ -1173,34 +1193,55 @@ class _RssSourceSwitchSheetState extends State<_RssSourceSwitchSheet> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Container(
-                height: 36,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                height: 30,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
                 decoration: BoxDecoration(
-                  color: AppTheme.backgroundTertiary,
-                  borderRadius: BorderRadius.circular(18),
+                  // 与影视「搜索源」面板一致：透明底 + 细边胶囊，
+                  // 不再用灰色块（用户要求整体统一）
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(15),
+                  border: Border.all(
+                    color: AppTheme.borderLight,
+                    width: 0.5,
+                  ),
                 ),
                 child: Row(
                   children: [
                     Icon(Icons.search,
-                        size: 16, color: AppTheme.textTertiary),
-                    const SizedBox(width: 8),
+                        size: 14, color: AppTheme.textTertiary),
+                    const SizedBox(width: 5),
                     Expanded(
                       child: TextField(
                         controller: _search,
                         onChanged: (v) => setState(() => _kw = v.trim()),
+                        textAlignVertical: TextAlignVertical.center,
                         style: TextStyle(
-                            fontSize: AppTheme.fontSubhead,
-                            color: AppTheme.textPrimary),
+                            fontSize: 12, color: AppTheme.textPrimary),
                         decoration: InputDecoration(
                           isDense: true,
                           border: InputBorder.none,
-                          hintText: '搜索订阅源',
+                          contentPadding:
+                              const EdgeInsets.symmetric(vertical: 6),
+                          hintText: '搜索订阅源…',
                           hintStyle: TextStyle(
-                              fontSize: AppTheme.fontSubhead,
-                              color: AppTheme.textTertiary),
+                              fontSize: 12, color: AppTheme.textTertiary),
                         ),
                       ),
                     ),
+                    if (_kw.isNotEmpty)
+                      GestureDetector(
+                        onTap: () {
+                          _search.clear();
+                          setState(() => _kw = '');
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.all(5),
+                          child: Icon(Icons.cancel,
+                              size: 13, color: AppTheme.textTertiary),
+                        ),
+                      )
+                    else
+                      const SizedBox(width: 6),
                   ],
                 ),
               ),

@@ -17,6 +17,9 @@ class MpvAppPlayer extends AppPlayer {
   bool _disposed = false;
   bool _completedNotified = false;
 
+  /// 原始字幕轨（保留 media_kit 的 SubtitleTrack 对象，选轨时直接回传内核）。
+  List<SubtitleTrack> _rawSubtitleTracks = const [];
+
   MpvAppPlayer({super.config}) {
     _mpv = Player(
       configuration: PlayerConfiguration(title: config.title),
@@ -60,6 +63,51 @@ class MpvAppPlayer extends AppPlayer {
     _subs.add(_mpv.stream.rate.listen((v) {
       stream.addRate(v);
     }));
+    // 字幕轨：tracks 是全量列表（前两条是 media_kit 合成的 auto / no，要滤掉），
+    // track 是当前生效轨（no = 已关闭；auto = 内核自行选择，Dart 侧按「未选中」处理）
+    _subs.add(_mpv.stream.tracks.listen((t) {
+      _rawSubtitleTracks = t.subtitle
+          .where((s) => s.id != 'auto' && s.id != 'no')
+          .toList(growable: false);
+      publishSubtitleTracks(
+        _rawSubtitleTracks.map(_toSubtitleInfo).toList(growable: false),
+      );
+    }));
+    _subs.add(_mpv.stream.track.listen((t) {
+      final sub = t.subtitle;
+      setSelectedSubtitleIndex(
+        sub.id == 'auto'
+            ? -1
+            : _rawSubtitleTracks.indexWhere((s) => s.id == sub.id),
+      );
+    }));
+  }
+
+  @override
+  bool get supportsSubtitles => true;
+
+  SubtitleTrackInfo _toSubtitleInfo(SubtitleTrack t) {
+    final title = t.title?.trim() ?? '';
+    final lang = t.language?.trim() ?? '';
+    return SubtitleTrackInfo(
+      id: t.id,
+      name: title.isNotEmpty
+          ? title
+          : (lang.isNotEmpty ? lang : '字幕 ${t.id}'),
+      language: t.language,
+      isImage: t.image == true,
+    );
+  }
+
+  @override
+  Future<void> selectSubtitleTrack(int index) async {
+    if (index < 0 || index >= _rawSubtitleTracks.length) {
+      await _mpv.setSubtitleTrack(SubtitleTrack.no());
+      setSelectedSubtitleIndex(-1);
+      return;
+    }
+    await _mpv.setSubtitleTrack(_rawSubtitleTracks[index]);
+    setSelectedSubtitleIndex(index);
   }
 
   Player get mpv => _mpv;
@@ -96,6 +144,11 @@ class MpvAppPlayer extends AppPlayer {
   @override
   Future<void> open(AppMedia media, {bool play = true}) async {
     _completedNotified = false;
+    // 换源：旧的字幕轨列表立即清空，等新媒体的 tracks 事件回来再填充，
+    // 避免 UI 短暂显示上一个源的轨道
+    _rawSubtitleTracks = const [];
+    publishSubtitleTracks(const <SubtitleTrackInfo>[]);
+    setSelectedSubtitleIndex(-1);
     _mpv.open(Media(
       media.url,
       httpHeaders: media.httpHeaders,

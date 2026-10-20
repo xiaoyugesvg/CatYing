@@ -13,6 +13,7 @@ import '../../../services/app_log.dart';
 import '../../../services/local_python_sources.dart';
 import '../../../services/python_manager.dart';
 import '../../../widgets/app_toast.dart';
+import '../../../widgets/card_action_sheet.dart';
 import '../../../widgets/common_widgets.dart';
 import '../../../reading/widgets/swipe_action_tile.dart';
 import 'settings_shared.dart';
@@ -74,10 +75,20 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
   bool _selectMode = false;
   final Set<String> _picked = <String>{};
 
+  /// 搜索关键词（用户 2026-10-20：「py 本地源设置里面加个搜索功能」）
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _keyword = '';
+
   @override
   void initState() {
     super.initState();
     _restorePrefs();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _restorePrefs() async {
@@ -120,6 +131,18 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
         list.sort((a, b) => b.usage.compareTo(a.usage));
     }
     return list;
+  }
+
+  /// 排序 + 搜索后的可见列表
+  List<LocalPythonSource> get _visible {
+    final all = _sorted;
+    final kw = _keyword.trim().toLowerCase();
+    if (kw.isEmpty) return all;
+    return all
+        .where((s) =>
+            s.name.toLowerCase().contains(kw) ||
+            s.key.toLowerCase().contains(kw))
+        .toList();
   }
 
   // ============================================================
@@ -502,8 +525,8 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
     });
   }
 
-  void _toggleAll() {
-    final all = _sorted.map((e) => e.key).toSet();
+  void _toggleAll(List<LocalPythonSource> list) {
+    final all = list.map((e) => e.key).toSet();
     setState(() {
       if (_picked.length == all.length) {
         _picked.clear();
@@ -581,8 +604,9 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
           ApiConfig.instance.localVideoSources.length;
           // 空态看**清单**而不是 beans：开关关闭时 list 仍会读取，
           // 管理页要能继续看到并编辑已导入的脚本（用户 2026-10-18）。
-          final list = _sorted;
-          if (list.isEmpty) {
+          final all = _sorted;
+          final list = _visible;
+          if (all.isEmpty) {
             // 空态：不要只留一行字（用户 2026-10-18：下面像一条长空白条）
             return Padding(
               padding: const EdgeInsets.only(top: 12, bottom: 8),
@@ -645,10 +669,21 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              _searchField(),
               if (_selectMode) _selectBar(list),
-              _headerRow(list.length),
+              _headerRow(list.length, total: all.length),
               const SizedBox(height: 6),
-              if (_view.isList)
+              if (list.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Center(
+                    child: Text(
+                      '未找到匹配的源',
+                      style: TextStyle(color: AppTheme.textTertiary),
+                    ),
+                  ),
+                )
+              else if (_view.isList)
                 ...list.map((s) => _listRow(s, currentKey: currentKey))
               else
                 _grid(list, currentKey),
@@ -660,11 +695,64 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
     );
   }
 
-  Widget _headerRow(int count) {
+  /// 搜索框（用户 2026-10-20：「py 本地源设置里面加个搜索功能」）
+  Widget _searchField() {
+    return Container(
+      height: 36,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundSecondary,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppTheme.borderLight, width: 0.5),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.search, size: 16, color: AppTheme.textTertiary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: _searchCtrl,
+              onChanged: (v) => setState(() => _keyword = v.trim()),
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: AppTheme.fontSubhead,
+              ),
+              decoration: InputDecoration(
+                hintText: '搜索源名称…',
+                hintStyle: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontSubhead,
+                ),
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 9),
+              ),
+            ),
+          ),
+          if (_keyword.isNotEmpty)
+            GestureDetector(
+              onTap: () {
+                _searchCtrl.clear();
+                setState(() => _keyword = '');
+              },
+              child: Icon(
+                Icons.cancel,
+                size: 15,
+                color: AppTheme.textTertiary,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _headerRow(int count, {int? total}) {
+    final filtered = total != null && count != total;
     return Row(
       children: [
         Text(
-          '已导入（$count）',
+          filtered ? '匹配（$count / $total）' : '已导入（$count）',
           style: TextStyle(
             fontSize: AppTheme.fontSubhead,
             fontWeight: FontWeight.w600,
@@ -816,7 +904,7 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
           ),
           const Spacer(),
           TextButton(
-            onPressed: _toggleAll,
+            onPressed: () => _toggleAll(list),
             child: Text(
               all ? '取消全选' : '全选',
               style: const TextStyle(fontSize: AppTheme.fontSubhead),
@@ -900,7 +988,8 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
                 _select(src);
               }
             },
-            onLongPress: () => _enterSelect(src.key),
+            // 长按 = 卡片式菜单（编辑 / 分享 / 多选 / 删除），与网格卡一致
+            onLongPress: _selectMode ? null : () => _showCardMenu(src),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
               child: Row(
@@ -992,7 +1081,7 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
           _select(src);
         }
       },
-      onLongPress: () => _showCardMenu(src),
+      onLongPress: _selectMode ? null : () => _showCardMenu(src),
       child: Container(
         height: height,
         padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
@@ -1060,75 +1149,38 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
     );
   }
 
-  /// 卡片长按菜单：编辑 / 分享 / 多选 / 删除（与仓库页一致）
+  /// 卡片长按菜单：编辑 / 分享 / 多选 / 删除
+  ///
+  /// 2026-10-20：用户指出「py 本地设置里面那个源长按不是卡片式的呢」——
+  /// 原来是一列 ListTile，现在统一走全站同一套 [showCardActions]（一排 2 张卡片）。
   Future<void> _showCardMenu(LocalPythonSource src) async {
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: AppTheme.backgroundSecondary,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        top: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 12),
-            ListTile(
-              leading: Icon(
-                Icons.drive_file_rename_outline,
-                color: AppTheme.textSecondary,
-              ),
-              title: Text(
-                '编辑（重命名）',
-                style: TextStyle(color: AppTheme.textPrimary),
-              ),
-              onTap: () => Navigator.pop(ctx, 'edit'),
-            ),
-            ListTile(
-              leading: Icon(
-                Icons.ios_share_rounded,
-                color: AppTheme.textSecondary,
-              ),
-              title: Text(
-                '分享脚本',
-                style: TextStyle(color: AppTheme.textPrimary),
-              ),
-              onTap: () => Navigator.pop(ctx, 'share'),
-            ),
-            ListTile(
-              leading: Icon(
-                Icons.checklist_rounded,
-                color: AppTheme.textSecondary,
-              ),
-              title: Text('多选', style: TextStyle(color: AppTheme.textPrimary)),
-              onTap: () => Navigator.pop(ctx, 'select'),
-            ),
-            ListTile(
-              leading: const Icon(
-                Icons.delete_outline_rounded,
-                color: Colors.redAccent,
-              ),
-              title: const Text(
-                '删除',
-                style: TextStyle(color: Colors.redAccent),
-              ),
-              onTap: () => Navigator.pop(ctx, 'delete'),
-            ),
-            const SizedBox(height: 8),
-          ],
+    await showCardActions(
+      context,
+      title: src.name,
+      subtitle: '本地 Python · ${src.key}.py',
+      actions: [
+        CardAction(
+          icon: Icons.drive_file_rename_outline,
+          label: '编辑',
+          onTap: () => _renameKey(src.key, src.name),
         ),
-      ),
+        CardAction(
+          icon: Icons.ios_share_rounded,
+          label: '分享',
+          onTap: () => _shareKey(src.key),
+        ),
+        CardAction(
+          icon: Icons.checklist_rounded,
+          label: '多选',
+          onTap: () => _enterSelect(src.key),
+        ),
+        CardAction(
+          icon: Icons.delete_outline_rounded,
+          label: '删除',
+          danger: true,
+          onTap: () => _deleteKey(src.key),
+        ),
+      ],
     );
-    switch (action) {
-      case 'edit':
-        await _renameKey(src.key, src.name);
-      case 'share':
-        await _shareKey(src.key);
-      case 'select':
-        _enterSelect(src.key);
-      case 'delete':
-        await _deleteKey(src.key);
-    }
   }
 }

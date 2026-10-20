@@ -18,6 +18,58 @@ class AppConfig {
   const AppConfig({this.title = 'TVBox'});
 }
 
+/// 内嵌字幕轨（跨内核统一视图）。
+class SubtitleTrackInfo {
+  /// 内核内部的轨道 id（mpv 的 `1`/`2`、KSPlayer 的 trackID）。
+  final String id;
+
+  /// 展示名：优先轨道标题，其次语言名，最后「字幕 N」。
+  final String name;
+
+  /// 语言标记（ISO/BCP-47，如 `zh`、`en`）。可能为空。
+  final String? language;
+
+  /// 位图字幕（PGS / VobSub / XSUB）：解码器逐帧叠加的图片，样式不可改。
+  final bool isImage;
+
+  const SubtitleTrackInfo({
+    required this.id,
+    required this.name,
+    this.language,
+    this.isImage = false,
+  });
+
+  /// 跨内核匹配键。
+  ///
+  /// 切换播放核心（MPV ⇄ KSPlayer）后轨道 id 完全不同，靠这个键把用户选中的
+  /// 同一条字幕找回来：优先用语言标记（同一片源的语言最稳），
+  /// 无语言标记时退化为轨道名。
+  String get matchKey {
+    final l = language?.trim().toLowerCase() ?? '';
+    if (l.isNotEmpty) return 'lang:$l';
+    return 'name:${name.trim().toLowerCase()}';
+  }
+}
+
+/// 用户选定的字幕（引擎热切换后接力还原）。
+/// `matchKey == null` 表示「关闭字幕」。
+class SubtitleChoice {
+  final String? matchKey;
+  const SubtitleChoice(this.matchKey);
+
+  /// 关闭字幕
+  static const SubtitleChoice off = SubtitleChoice(null);
+
+  bool get isOff => matchKey == null;
+
+  @override
+  bool operator ==(Object other) =>
+      other is SubtitleChoice && other.matchKey == matchKey;
+
+  @override
+  int get hashCode => matchKey.hashCode;
+}
+
 class _AppPlayerState {
   bool playing = false;
   bool buffering = true;
@@ -38,6 +90,8 @@ class AppPlayerStreams {
   final _completed = StreamController<bool>.broadcast();
   final _error = StreamController<String>.broadcast();
   final _rate = StreamController<double>.broadcast();
+  final _subtitleTracks =
+      StreamController<List<SubtitleTrackInfo>>.broadcast();
 
   Stream<bool> get playing => _playing.stream;
   Stream<bool> get buffering => _buffering.stream;
@@ -46,6 +100,7 @@ class AppPlayerStreams {
   Stream<bool> get completed => _completed.stream;
   Stream<String> get error => _error.stream;
   Stream<double> get rate => _rate.stream;
+  Stream<List<SubtitleTrackInfo>> get subtitleTracks => _subtitleTracks.stream;
 
   void addPlaying(bool v) => _playing.add(v);
   void addBuffering(bool v) => _buffering.add(v);
@@ -54,6 +109,7 @@ class AppPlayerStreams {
   void addCompleted(bool v) => _completed.add(v);
   void addError(String v) => _error.add(v);
   void addRate(double v) => _rate.add(v);
+  void addSubtitleTracks(List<SubtitleTrackInfo> v) => _subtitleTracks.add(v);
 
   void dispose() {
     _playing.close();
@@ -63,6 +119,7 @@ class AppPlayerStreams {
     _completed.close();
     _error.close();
     _rate.close();
+    _subtitleTracks.close();
   }
 }
 
@@ -122,6 +179,46 @@ class AppPlayer {
   bool _disposed = false;
   bool _completedNotified = false;
   bool _ownsController = true;
+
+  // ── 字幕轨（内嵌）────────────────────────────────────────────
+  //
+  // 默认不支持：AVPlayer 后端（video_player）只能吃 MP4/MOV 的文本轨，
+  // 恒返回空列表 → 播放器自动隐藏字幕入口。MPV / KSPlayer 各自 override。
+
+  /// 是否支持内嵌字幕轨枚举 / 切换
+  bool get supportsSubtitles => false;
+
+  List<SubtitleTrackInfo> _subtitleTracks = const <SubtitleTrackInfo>[];
+
+  /// 当前媒体可用的字幕轨（空 = 无内嵌字幕）
+  List<SubtitleTrackInfo> get subtitleTracks => _subtitleTracks;
+
+  int _selectedSubtitleIndex = -1;
+
+  /// 当前生效的字幕轨下标；`-1` = 关闭字幕
+  int get selectedSubtitleIndex => _selectedSubtitleIndex;
+
+  /// 字幕轨列表变化（内核就绪后 / 换源后）
+  Stream<List<SubtitleTrackInfo>> get subtitleTracksStream =>
+      stream.subtitleTracks;
+
+  /// 重新枚举字幕轨（内核就绪后由子类触发）
+  Future<void> refreshSubtitleTracks() async {}
+
+  /// 切换字幕轨：`index < 0` 关闭字幕
+  Future<void> selectSubtitleTrack(int index) async {}
+
+  /// 子类枚举到字幕轨后广播给 UI
+  void publishSubtitleTracks(List<SubtitleTrackInfo> tracks) {
+    _subtitleTracks = tracks;
+    if (_selectedSubtitleIndex >= tracks.length) _selectedSubtitleIndex = -1;
+    if (!_disposed) stream.addSubtitleTracks(tracks);
+  }
+
+  /// 子类在原生侧确认当前生效轨后同步
+  void setSelectedSubtitleIndex(int index) {
+    _selectedSubtitleIndex = index;
+  }
 
   AppPlayer({this.config = const AppConfig()});
 

@@ -3,8 +3,11 @@ import 'package:flutter/services.dart';
 import 'common_widgets.dart';
 import 'package:get/get.dart';
 import '../common/theme.dart';
+import '../models/local_python_source.dart';
 import '../models/source_bean.dart';
+import '../models/subscription.dart';
 import '../services/api_config.dart';
+import '../services/local_python_sources.dart';
 import '../services/source_kind.dart';
 import 'app_toast.dart';
 import 'card_action_sheet.dart';
@@ -51,6 +54,12 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
 
   /// 是否正在看「失效线路」分类（顶部「失效 N」切换）
   bool _showInvalid = false;
+
+  /// 0 = 本地 Python / 1 = 订阅线路（用户 2026-10-20：源面板要像漫源仓库那样分 tab）
+  int _tab = 1;
+
+  /// 首次构建时按当前主页源决定默认 tab（本地源 → 本地 tab）
+  bool _tabInited = false;
 
   /// 长按一条线路 → 移入「失效」（用户 2026-10-15：
   /// 「删除后不再加载」「或者是移入失效分类，不加载不显示呢」）。
@@ -123,6 +132,133 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
         ),
       ],
     );
+  }
+
+  /// 本地源 bean → 本地脚本（key 带 `localpy_` 前缀）
+  LocalPythonSource? _localOf(SourceBean bean) =>
+      LocalPythonSources.instance.sources
+          .firstWhereOrNull((s) => s.sourceKey == bean.key);
+
+  /// 长按本地 Python 源 → **卡片式**菜单（用户 2026-10-20：
+  /// 「本地 py 源这个上面也加个长按弹窗分享、编辑、删除等」）
+  Future<void> _localSourceMenu(SourceBean bean) async {
+    final local = _localOf(bean);
+    if (local == null) return;
+    await showCardActions(
+      context,
+      title: bean.name,
+      subtitle: '本地 Python · ${local.key}.py',
+      actions: [
+        CardAction(
+          icon: Icons.drive_file_rename_outline,
+          label: '编辑',
+          onTap: () => _renameLocal(local),
+        ),
+        CardAction(
+          icon: Icons.ios_share_rounded,
+          label: '分享',
+          onTap: () => _shareLocal(local),
+        ),
+        CardAction(
+          icon: Icons.delete_outline_rounded,
+          label: '删除',
+          danger: true,
+          onTap: () => _deleteLocal(local),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _renameLocal(LocalPythonSource local) async {
+    final ctrl = TextEditingController(text: local.name);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        title: Text(
+          '重命名',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontHeadline,
+          ),
+        ),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          style: TextStyle(color: AppTheme.textPrimary),
+          decoration: const InputDecoration(hintText: '显示名称'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty) return;
+    final r = await LocalPythonSources.instance.rename(local.key, name);
+    if (!r.ok) {
+      AppToast.error(r.message ?? '改名失败');
+      return;
+    }
+    await ApiConfig.instance.reloadLocalVideoSources();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _shareLocal(LocalPythonSource local) async {
+    final code = await LocalPythonSources.instance.readCode(local.key);
+    if (code == null || code.isEmpty) {
+      AppToast.error('找不到脚本文件');
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: code));
+    AppToast.message('脚本内容已复制到剪贴板');
+  }
+
+  Future<void> _deleteLocal(LocalPythonSource local) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        title: Text(
+          '删除本地源？',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontHeadline,
+          ),
+        ),
+        content: Text(
+          '「${local.name}」的脚本文件会被删除并从引擎卸载，不可恢复。',
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: AppTheme.fontSubhead,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await LocalPythonSources.instance.remove(local.key);
+    // 删的是当前主页源时，reload 会自动切回订阅线路或下一条本地源
+    await ApiConfig.instance.reloadLocalVideoSources();
+    if (!mounted) return;
+    setState(() {});
+    AppToast.message('已删除');
   }
 
   /// 按住把手拖到另一条线路上 → 重排并落盘
@@ -230,25 +366,41 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
 
   /// 定位到当前选中的源（用户 2026-10-13：「搜索源页面要加个定位功能」）。
   ///
-  /// 网格/单列两种形态都按**算术**算行偏移（不用 GlobalKey + ensureVisible：
-  /// 选中的源常常在很下面、还没被 build，拿不到 context 就定位不了）。
-  void _locateSelected(List<SourceBean> list, String? selectedKey) {
-    if (selectedKey == null || !_scrollController.hasClients) return;
-    // 本地 Python 源单独排在最上面，直接回到顶部
-    if (selectedKey.startsWith('localpy_')) {
-      _scrollController.animateTo(
-        0,
-        duration: const Duration(milliseconds: 260),
-        curve: Curves.easeOut,
-      );
-      return;
+  /// 2026-10-20 修「定位不准」：原来把「本地源 + 分组标题」也算进订阅线路的
+  /// 下标偏移里，且本地源固定滚到顶部 —— 现在按 **tab 分组**定位：
+  ///   ① 先切到选中源所在的 tab；
+  ///   ② 再按该 tab 内的下标算行偏移（tab 内没有分组标题，算术才准）。
+  void _locateSelected() {
+    final key = _selectedKey;
+    if (key == null) return;
+    final local = _filteredSourcesFrom(
+      // ignore: invalid_use_of_protected_member
+      ApiConfig.instance.localVideoSources.value,
+    );
+    final subs = _filteredSourcesFrom(
+      // ignore: invalid_use_of_protected_member
+      ApiConfig.instance.sourceBeanList.value,
+    );
+    final targetTab = local.any((s) => s.key == key) ? 0 : 1;
+    final list = targetTab == 0 && local.isNotEmpty ? local : subs;
+    if (_tab != targetTab) {
+      setState(() => _tab = targetTab);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _scrollToKey(list, key);
+      });
+    } else {
+      _scrollToKey(list, key);
     }
-    final idx = list.indexWhere((s) => s.key == selectedKey);
+  }
+
+  void _scrollToKey(List<SourceBean> list, String key) {
+    if (!_scrollController.hasClients) return;
+    final idx = list.indexWhere((s) => s.key == key);
     if (idx < 0) return;
     final panelW = context.size?.width ?? MediaQuery.of(context).size.width;
     double offset;
     if (_gridMode) {
-      // 与 _buildBody 的网格参数保持一致：2 列 / 间距 10 / 纵横比 3.4 / 行距 8
+      // 与列表体的网格参数保持一致：2 列 / 间距 10 / 纵横比 3.4 / 行距 8
       final itemW = (panelW - 32 - 10) / 2;
       final rowH = itemW / 3.4 + 8;
       offset = 4 + (idx ~/ 2) * rowH;
@@ -278,29 +430,164 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
     return all.where((s) => s.name.toLowerCase().contains(kw)).toList();
   }
 
-  /// 分组小标题（只有「本地 Python / 订阅线路」两处用）
-  Widget _sectionHeader(String text) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: AppTheme.fontCaption,
-          color: AppTheme.textTertiary,
-          fontWeight: FontWeight.w600,
+  /// tab 胶囊（与漫源仓库 / RSS 分类同一套样式）
+  Widget _tabPill(String label, bool on, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 30,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: on ? AppTheme.accentColor : AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(15),
+          border: on
+              ? null
+              : Border.all(color: AppTheme.borderLight, width: 0.5),
+        ),
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: on ? Colors.white : AppTheme.textSecondary,
+            fontSize: AppTheme.fontSubhead,
+            fontWeight: on ? FontWeight.w600 : FontWeight.w400,
+          ),
         ),
       ),
     );
   }
 
-  void _selectSource(SourceBean source) {
-    ApiConfig.instance.setHomeSource(source);
+  /// 当前 tab 的源列表（本地源 / 订阅线路共用同一套网格与单列形态）。
+  ///
+  /// 本地源：长按 = 卡片菜单（编辑 / 分享 / 删除），不参与订阅线路的拖动排序；
+  /// 订阅线路：长按 = 卡片菜单（分享 / 失效），把手长按拖动排序。
+  Widget _buildSourceList(
+    List<SourceBean> list,
+    String? selectedKey, {
+    required bool isLocal,
+  }) {
+    Widget tileOf(SourceBean source) {
+      if (isLocal) {
+        return _SourceTile(
+          name: source.name,
+          api: source.api,
+          selected: source.key == selectedKey,
+          onTap: () => _selectSource(source),
+          onLongPress: () => _localSourceMenu(source),
+        );
+      }
+      return DragTarget<String>(
+        onWillAcceptWithDetails: (d) => d.data != source.key,
+        onAcceptWithDetails: (d) => _moveSource(d.data, source.key),
+        builder: (_, candidate, _) {
+          final tile = _SourceTile(
+            name: source.name,
+            api: source.api,
+            selected: source.key == selectedKey,
+            onTap: () => _selectSource(source),
+            onLongPress: () => _sourceMenu(source),
+            dragHandle: CardDragHandle(
+              data: source.key,
+              label: source.name,
+            ),
+          );
+          return _dropHighlight(tile, candidate);
+        },
+      );
+    }
+
+    Widget rowOf(SourceBean source) {
+      if (isLocal) {
+        return _SourceRow(
+          name: source.name,
+          api: source.api,
+          selected: source.key == selectedKey,
+          onTap: () => _selectSource(source),
+          onLongPress: () => _localSourceMenu(source),
+        );
+      }
+      return DragTarget<String>(
+        onWillAcceptWithDetails: (d) => d.data != source.key,
+        onAcceptWithDetails: (d) => _moveSource(d.data, source.key),
+        builder: (_, candidate, _) {
+          final row = _SourceRow(
+            name: source.name,
+            api: source.api,
+            selected: source.key == selectedKey,
+            onTap: () => _selectSource(source),
+            onLongPress: () => _sourceMenu(source),
+            dragHandle: CardDragHandle(
+              data: source.key,
+              label: source.name,
+            ),
+          );
+          return _dropHighlight(row, candidate);
+        },
+      );
+    }
+
+    return ListView(
+      controller: _scrollController,
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        if (_gridMode)
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 10,
+              childAspectRatio: 3.4,
+            ),
+            itemCount: list.length,
+            itemBuilder: (context, index) => tileOf(list[index]),
+          )
+        else
+          for (final source in list) rowOf(source),
+      ],
+    );
+  }
+
+  /// 拖动悬停时的高亮外框
+  Widget _dropHighlight(Widget child, List<String?> candidate) {
+    if (candidate.isEmpty) return child;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: AppTheme.accentColor.withValues(alpha: 0.6),
+          width: 1.4,
+        ),
+      ),
+      child: child,
+    );
+  }
+
+  Future<void> _selectSource(SourceBean source) async {
+    // 选本地源 ⇒ 顺手打开「本地爬虫」开关（与本地源管理页同一语义），
+    // 否则主页源会被订阅线路覆盖。
+    if (source.key.startsWith('localpy_') &&
+        !ApiConfig.instance.localSourcesEnabled.value) {
+      await ApiConfig.instance.setLocalSourcesEnabled(true);
+    }
+    await ApiConfig.instance.setHomeSource(source);
+    if (!mounted) return;
     Navigator.of(context).pop(true);
   }
 
   @override
   Widget build(BuildContext context) {
     final h = MediaQuery.of(context).size.height;
+    // 首次打开：当前主页源是本地源 → 直接落在「本地」tab
+    if (!_tabInited) {
+      _tabInited = true;
+      final key = _selectedKey;
+      if (key != null && key.startsWith('localpy_')) _tab = 0;
+    }
     // 面板高度 = 1/3 屏 × 1.2（用户要求"变成现在的 1.2 倍"）：
     // 1/3 屏时标题+搜索框占掉大半，源网格只剩一点点高（看起来"底部遮住一部分"），
     // 加高后常规屏 3 行源可以完整显示；矮屏仍可滚动兜底。
@@ -387,14 +674,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                     }),
                     // 定位：滚到当前选中的源（用户 2026-10-13 要求）
                     GestureDetector(
-                      onTap: () {
-                        // ignore: invalid_use_of_protected_member
-                        final all = ApiConfig.instance.sourceBeanList.value;
-                        _locateSelected(
-                          _filteredSourcesFrom(all),
-                          _selectedKey,
-                        );
-                      },
+                      onTap: _locateSelected,
                       child: Container(
                         width: 30,
                         height: 30,
@@ -440,6 +720,36 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                   onChanged: (v) => setState(() => _keyword = v.trim()),
                 ),
               ),
+              // tab：本地 / 订阅（用户 2026-10-20：「源切换加个 tab，
+              // 就是本地以及订阅激活线路的名称」）—— 与漫源仓库同一套胶囊样式。
+              // 本地源即使「本地爬虫」开关关着也显示：用户点它即会打开开关。
+              Obx(() {
+                // ignore: invalid_use_of_protected_member
+                final localCount = ApiConfig.instance.localVideoSources.length;
+                if (localCount == 0) return const SizedBox.shrink();
+                final subName =
+                    SubscriptionService.instance.active?.name ?? '订阅线路';
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: Row(
+                    children: [
+                      _tabPill(
+                        '本地 $localCount',
+                        _tab == 0,
+                        () => setState(() => _tab = 0),
+                      ),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: _tabPill(
+                          subName,
+                          _tab == 1,
+                          () => setState(() => _tab = 1),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
               // 源列表：占满剩余空间，随时可滚动（搜索中/键盘弹起时也一样）
               Expanded(
                 child: Obx(() {
@@ -448,155 +758,28 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                   // ignore: invalid_use_of_protected_member
                   final all = ApiConfig.instance.sourceBeanList.value;
                   final selectedKey = _selectedKey;
-                  final list = _filteredSourcesFrom(all);
-                  // 本地 Python 源：单独一组（用户 2026-10-17），不跟订阅线路混排。
-                  // 仅在「本地爬虫」开关打开时显示（用户 2026-10-18：默认优先订阅）。
-                  final local = ApiConfig.instance.localSourcesEnabled.value
-                      ? _filteredSourcesFrom(
-                          // ignore: invalid_use_of_protected_member
-                          ApiConfig.instance.localVideoSources.value,
-                        )
-                      : const <SourceBean>[];
-                  if (list.isEmpty && local.isEmpty) {
-                    return Padding(
-                      padding: EdgeInsets.symmetric(vertical: 32),
-                      child: Center(
-                        child: Text(
-                          '未找到匹配的源',
-                          style: TextStyle(color: AppTheme.textTertiary),
-                        ),
+                  final subs = _filteredSourcesFrom(all);
+                  // 本地 Python 源单独一个 tab（用户 2026-10-17/20），不跟订阅线路混排。
+                  // 管理页里的脚本即使「本地爬虫」开关关着也要能在这里看到并选择
+                  //（选中时会自动打开开关，见 _selectSource）。
+                  final local = _filteredSourcesFrom(
+                    // ignore: invalid_use_of_protected_member
+                    ApiConfig.instance.localVideoSources.value,
+                  );
+                  final isLocal = _tab == 0 && local.isNotEmpty;
+                  final list = isLocal ? local : subs;
+                  if (list.isEmpty) {
+                    return Center(
+                      child: Text(
+                        _keyword.isEmpty ? '这里还没有源' : '未找到匹配的源',
+                        style: TextStyle(color: AppTheme.textTertiary),
                       ),
                     );
                   }
-                  // 用户 2026-10-13：「搜索源里面不要需要区分分类，例如 CMS 还有 js 这些」
-                  // ⇒ 订阅线路仍然平铺；只有「本地 Python」单独放在最上面一组。
-                  return ListView(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    children: [
-                      if (local.isNotEmpty) ...[
-                        _sectionHeader('本地 Python（${local.length}）'),
-                        if (_gridMode)
-                          GridView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            gridDelegate:
-                                const SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: 2,
-                                  mainAxisSpacing: 8,
-                                  crossAxisSpacing: 10,
-                                  childAspectRatio: 3.4,
-                                ),
-                            itemCount: local.length,
-                            itemBuilder: (context, index) {
-                              final source = local[index];
-                              return _SourceTile(
-                                name: source.name,
-                                api: source.api,
-                                selected: source.key == selectedKey,
-                                onTap: () => _selectSource(source),
-                                // 本地源不走「移入失效」，删除在设置页里
-                                onLongPress: null,
-                              );
-                            },
-                          )
-                        else
-                          for (final source in local)
-                            _SourceRow(
-                              name: source.name,
-                              api: source.api,
-                              selected: source.key == selectedKey,
-                              onTap: () => _selectSource(source),
-                              onLongPress: null,
-                            ),
-                        const SizedBox(height: 10),
-                      ],
-                      if (list.isNotEmpty && local.isNotEmpty)
-                        _sectionHeader('订阅线路'),
-                      if (_gridMode)
-                        GridView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: 2,
-                                mainAxisSpacing: 8,
-                                crossAxisSpacing: 10,
-                                childAspectRatio: 3.4,
-                              ),
-                          itemCount: list.length,
-                          itemBuilder: (context, index) {
-                            final source = list[index];
-                            return DragTarget<String>(
-                              onWillAcceptWithDetails: (d) =>
-                                  d.data != source.key,
-                              onAcceptWithDetails: (d) =>
-                                  _moveSource(d.data, source.key),
-                              builder: (_, candidate, _) {
-                                final tile = _SourceTile(
-                                  name: source.name,
-                                  api: source.api,
-                                  selected: source.key == selectedKey,
-                                  onTap: () => _selectSource(source),
-                                  onLongPress: () => _sourceMenu(source),
-                                  dragHandle: CardDragHandle(
-                                    data: source.key,
-                                    label: source.name,
-                                  ),
-                                );
-                                if (candidate.isEmpty) return tile;
-                                return DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(14),
-                                    border: Border.all(
-                                      color: AppTheme.accentColor.withValues(
-                                        alpha: 0.6,
-                                      ),
-                                      width: 1.4,
-                                    ),
-                                  ),
-                                  child: tile,
-                                );
-                              },
-                            );
-                          },
-                        )
-                      else
-                        for (final source in list)
-                          DragTarget<String>(
-                            onWillAcceptWithDetails: (d) =>
-                                d.data != source.key,
-                            onAcceptWithDetails: (d) =>
-                                _moveSource(d.data, source.key),
-                            builder: (_, candidate, _) {
-                              final row = _SourceRow(
-                                name: source.name,
-                                api: source.api,
-                                selected: source.key == selectedKey,
-                                onTap: () => _selectSource(source),
-                                onLongPress: () => _sourceMenu(source),
-                                dragHandle: CardDragHandle(
-                                  data: source.key,
-                                  label: source.name,
-                                ),
-                              );
-                              if (candidate.isEmpty) return row;
-                              return DecoratedBox(
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(
-                                    color: AppTheme.accentColor.withValues(
-                                      alpha: 0.6,
-                                    ),
-                                    width: 1.4,
-                                  ),
-                                ),
-                                child: row,
-                              );
-                            },
-                          ),
-                    ],
+                  return _buildSourceList(
+                    list,
+                    selectedKey,
+                    isLocal: isLocal,
                   );
                 }),
               ),
