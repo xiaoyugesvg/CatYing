@@ -66,19 +66,20 @@ enum NavFeature {
 
   /// 默认图标**图片资源**（非 null 时优先于 [icon]/[activeIcon] 的 Material 图标）。
   ///
-  /// 两张图都做成了**白色 + 透明背景的蒙版**，渲染时按当前前景色着色
+  /// 这几张图都做成了**白色 + 透明背景的蒙版**，渲染时按当前前景色着色
   /// ⇒ 选中/未选中、深色/浅色主题下颜色都会跟着变，与其它 Material 图标一致。
   /// （Emby 原来用彩色品牌图，暗色下深藏青底会糊进背景、浅色下又发灰，
   ///  用户 2026-10-20 要求「图标也根据主题变换」。）
   String? get iconAsset => switch (this) {
         NavFeature.emby => 'assets/icons/emby.png',
         NavFeature.music => 'assets/icons/music.png',
+        NavFeature.books => 'assets/icons/books.png',
         _ => null,
       };
 
   /// 图标资源是否用前景色着色（[iconAsset] 对应的图）。
   ///
-  /// 目前两张都是白色蒙版，必须着色才能与其它图标颜色一致；
+  /// 目前都是白色蒙版，必须着色才能与其它图标颜色一致；
   /// 以后若加彩色品牌图（不能着色），在这里返回 false 即可。
   bool get iconAssetTinted => iconAsset != null;
 
