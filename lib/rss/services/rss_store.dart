@@ -53,12 +53,18 @@ class RssStore {
 
   Future<void> load() async {
     var seeded = false;
+    var needPersist = false;
     try {
       final p = await SharedPreferences.getInstance();
       seeded = p.getBool(_kSeeded) == true;
       final raw = p.getString(_kSources) ?? '';
       if (raw.isNotEmpty) {
-        _sources = parseRssSources(raw);
+        // 历史数据里可能残留**同一地址的多条记录**（早期导入不去重）。
+        // 不去重的话会出现：删掉一条 → 另一条同名 URL 还在 → 重新导入
+        // 一直提示「这些源都已经有了」（用户 2026-10-20 反馈）。
+        final parsed = parseRssSources(raw);
+        _sources = _dedupeByUrl(parsed);
+        if (_sources.length != parsed.length) needPersist = true;
       }
       _selectedId = (p.getString(_kSelected) ?? '').trim();
     } catch (_) {
@@ -70,6 +76,9 @@ class RssStore {
       _sources = List<RssSource>.of(kBuiltinRssSources);
       _selectedId = _sources.first.id;
       await _persist(seeded: true);
+    } else if (needPersist) {
+      // 去重后的结果写回，避免每次启动都再算一遍
+      await _persist();
     }
     if (_selectedId.isEmpty || byId(_selectedId) == null) {
       _selectedId = _sources.isEmpty ? '' : _sources.first.id;
@@ -109,7 +118,9 @@ class RssStore {
   Future<({int added, int skipped})> addAll(List<RssSource> list) async {
     var added = 0, skipped = 0;
     for (final s in list) {
-      if (_sources.any((e) => e.url == s.url)) {
+      final key = _normUrl(s.url);
+      if (key.isNotEmpty &&
+          _sources.any((e) => _normUrl(e.url) == key)) {
         skipped++;
         continue;
       }
@@ -150,7 +161,7 @@ class RssStore {
   }
 
   Future<void> remove(String id) async {
-    _sources.removeWhere((s) => s.id == id);
+    _removeIds({id});
     if (_selectedId == id) {
       _selectedId = _sources.isEmpty ? '' : _sources.first.id;
     }
@@ -161,11 +172,62 @@ class RssStore {
   Future<void> removeAll(Iterable<String> ids) async {
     final set = ids.toSet();
     if (set.isEmpty) return;
-    _sources.removeWhere((s) => set.contains(s.id));
+    _removeIds(set);
     if (set.contains(_selectedId)) {
       _selectedId = _sources.isEmpty ? '' : _sources.first.id;
     }
     await _persist();
+  }
+
+  /// 真正从内存列表里摘掉这些 id，**并连带删掉同地址的残余记录**。
+  ///
+  /// 早期版本的导入没做 URL 去重，库里可能留着同一地址的两条（其中一条
+  /// 在源切换面板里看不到，因为面板只列启用中的源）⇒ 用户删掉看得见的那条
+  /// 再重新导入，仍会提示「这些源都已经有了」。
+  void _removeIds(Set<String> ids) {
+    final urls = <String>{};
+    for (final s in _sources) {
+      if (!ids.contains(s.id)) continue;
+      final k = _normUrl(s.url);
+      if (k.isNotEmpty) urls.add(k);
+    }
+    _sources.removeWhere((s) {
+      if (ids.contains(s.id)) return true;
+      final k = _normUrl(s.url);
+      return k.isNotEmpty && urls.contains(k);
+    });
+  }
+
+  /// 同一 URL 只保留第一条（空 URL 的不参与去重，原样保留）。
+  static List<RssSource> _dedupeByUrl(List<RssSource> list) {
+    final seen = <String>{};
+    final out = <RssSource>[];
+    for (final s in list) {
+      final k = _normUrl(s.url);
+      if (k.isEmpty || seen.add(k)) out.add(s);
+    }
+    return out;
+  }
+
+  /// 地址归一（仅用于去重比较）：去空白、末尾 `/`，scheme/host 小写。
+  static String _normUrl(String u) {
+    var s = u.trim();
+    if (s.isEmpty) return '';
+    while (s.endsWith('/')) {
+      s = s.substring(0, s.length - 1);
+    }
+    try {
+      final p = Uri.parse(s);
+      if (p.hasScheme && p.host.isNotEmpty) {
+        return p
+            .replace(
+              scheme: p.scheme.toLowerCase(),
+              host: p.host.toLowerCase(),
+            )
+            .toString();
+      }
+    } catch (_) {}
+    return s;
   }
 
   /// 批量启用/停用（管理页多选栏用）—— 只写一次盘。
