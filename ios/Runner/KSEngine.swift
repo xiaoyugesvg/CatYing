@@ -413,21 +413,21 @@ final class KSEngine: NSObject {
 
   /// 选轨：`index >= 0` → 选中该轨；`index < 0` → 关闭全部字幕轨。
   ///
-  /// 关闭用「同类型轨 isEnabled 全部置 false」实现 —— 与 KSMEPlayerItem.select
-  /// 内部的按 isEnabled 切换机制一致，也避开了给 select(track:) 传自造 dummy
-  /// 轨的兼容风险（KSAVPlayer 的实现无法在本机验证）。
+  /// ⚠️ 不能用 `player.select(track:)`：KSPlayer 的签名是
+  /// `func select(track: some MediaPlayerTrack)`（泛型参数），而 `tracks(mediaType:)`
+  /// 返回的是 `[any MediaPlayerTrack]` —— Swift 5.9 起 existential 不再自洽，
+  /// 直接传会编译失败（`Type 'any MediaPlayerTrack' cannot conform to ...`）。
+  ///
+  /// 这里按 KSAVPlayer.select 的**等价实现**处理：同类型轨全部关掉，
+  /// 再把目标轨打开（KSAVPlayer 内部就是这么做的；KSMEPlayer 同样按 isEnabled
+  /// 决定是否解码该轨）。
   private func selectSubtitleTrack(index: Int) {
     guard let player = playerLayer?.player else { return }
     let tracks = player.tracks(mediaType: .subtitle)
     guard !tracks.isEmpty else { return }
-    if index < 0 || index >= tracks.count {
-      for t in tracks {
-        t.isEnabled = false
-      }
-      return
+    for (i, t) in tracks.enumerated() {
+      t.isEnabled = (index >= 0 && i == index)
     }
-    // select 内部会按 isEnabled 切换同类型轨并处理位图字幕的 seek
-    player.select(track: tracks[index])
   }
 
   // MARK: - 事件发送（通道回调要求主线程，delegate 可能来自解码线程）
