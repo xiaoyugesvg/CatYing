@@ -468,11 +468,18 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     );
   }
 
-  /// 读磁盘缓存；没有 / 解析失败返回 null。
+  /// 读磁盘缓存；没有 / 过期 / 解析失败返回 null。
   Future<List<DanmuItem>?> _danmuReadDiskCache(String key) async {
     try {
       final f = await _danmuDiskFile(key);
       if (f == null || !await f.exists()) return null;
+      // 超过 2 天的缓存直接丢掉（用户 2026-10-20：整集落盘不能长期占空间）
+      if (_isDanmuCacheExpired(await f.stat())) {
+        try {
+          await f.delete();
+        } catch (_) {}
+        return null;
+      }
       final decoded = jsonDecode(await f.readAsString());
       if (decoded is! List) return null;
       final out = <DanmuItem>[];
@@ -491,9 +498,16 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }
   }
 
-  /// 写磁盘缓存（失败静默）；目录内最多保留 [_danmuDiskLimit] 集。
+  /// 磁盘缓存保留时长：2 天（写入/读取/清理三处共用）。
+  static const Duration _danmuDiskMaxAge = Duration(days: 2);
+
+  /// 目录内最多保留集数（2 天内的上限；防止短时间狂刷把磁盘塞满）。
   static const int _danmuDiskLimit = 80;
 
+  bool _isDanmuCacheExpired(FileStat stat) =>
+      DateTime.now().difference(stat.modified) > _danmuDiskMaxAge;
+
+  /// 写磁盘缓存（失败静默）；写完后清理 2 天前的旧文件 + 超出上限的最旧条目。
   Future<void> _danmuWriteDiskCache(String key, List<DanmuItem> list) async {
     if (list.isEmpty) return;
     try {
@@ -509,11 +523,23 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           .where((e) => e is File && e.path.endsWith('.json'))
           .cast<File>()
           .toList();
-      if (files.length <= _danmuDiskLimit) return;
-      files.sort((a, b) => a.statSync().modified.compareTo(b.statSync().modified));
-      for (var i = 0; i < files.length - _danmuDiskLimit; i++) {
+      // ① 先按 2 天过期清理（每次写盘顺带做，不会留一堆积压文件）
+      final alive = <File>[];
+      for (final old in files) {
         try {
-          await files[i].delete();
+          if (_isDanmuCacheExpired(await old.stat())) {
+            await old.delete();
+            continue;
+          }
+        } catch (_) {}
+        alive.add(old);
+      }
+      // ② 再按条数上限淘汰最旧的
+      if (alive.length <= _danmuDiskLimit) return;
+      alive.sort((a, b) => a.statSync().modified.compareTo(b.statSync().modified));
+      for (var i = 0; i < alive.length - _danmuDiskLimit; i++) {
+        try {
+          await alive[i].delete();
         } catch (_) {}
       }
     } catch (e) {
