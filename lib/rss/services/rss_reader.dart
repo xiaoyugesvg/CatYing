@@ -58,14 +58,25 @@ class RssReader {
     // （秀人岛 / 下厨房的搜索分类），以前整串当 URL ⇒ 请求必失败。
     final spec = splitRequestSpec(target);
     final url = spec.url;
-    final body = await _body(
-      source,
-      url,
-      ignoreCache: ignoreCache,
-      method: spec.method,
-      postBody: spec.body,
-      extraHeaders: spec.headers,
-    );
+    String body;
+    try {
+      body = await _body(
+        source,
+        url,
+        ignoreCache: ignoreCache,
+        method: spec.method,
+        postBody: spec.body,
+        extraHeaders: spec.headers,
+      );
+    } on RssHttpException catch (e) {
+      // Cloudflare / 防盗链质询：直连（纯 HTTP）一律 403/503，但内置 WebView
+      // 会执行 JS、带 Cookie，能正常打开 ⇒ 直接交给「内嵌网页」，
+      // 而不是甩一行错误（用户 2026-10-20：「为啥能打开网页」）。
+      if (e.statusCode == 403 || e.statusCode == 429 || e.statusCode == 503) {
+        return (articles: const <RssArticle>[], nextUrl: '', siteLike: true);
+      }
+      rethrow;
+    }
     var arts = _blacklist(source, parseArticles(source, body, url));
     // 规则**全部失效**（站点改版 / 换域名）时按页面结构兜底。
     // 用户 2026-10-20：「嗨漫之家看不了，但网页能打开」—— 站点从
