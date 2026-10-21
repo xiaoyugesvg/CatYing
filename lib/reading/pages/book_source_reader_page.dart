@@ -1608,29 +1608,39 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               padding: EdgeInsets.only(top: extraTop, bottom: extraBottom),
               child: Stack(
               children: [
-                Column(
-                  children: [
-                    // ✅ 顶栏改成**布局内子项**（不再是 Positioned 覆盖）——
-                    //   用户 2026-10-21：「顶栏哪怕去掉状态栏也是遮住了字」。
-                    //   覆盖式会让正文第一行永远躲在悬浮卡片底下 ✗；
-                    //   放进 Column 后它**占位**，正文从它下面开始 ✓
-                    if (_showBar) _topBarCard(bg[1]),
-                    // ✅ 点击判定从 GestureDetector 换成 Listener 手动判定：
-                    //   单指点击正文一定响应（呼出/翻页/收起），不再被
-                    //   PageView/ListView 的 drag 竞技场抢走（"两指才出现" ✗）。
-                    Expanded(
-                      child: Listener(
-                        behavior: HitTestBehavior.translucent,
-                        onPointerDown: _onPointerDown,
-                        onPointerUp: _onPointerUp,
-                        child: _contentArea(bg[1]),
-                      ),
-                    ),
-                    _ttsMiniBar(bg[1]),
-                    // ✅ 底部功能栏同样改为**布局内子项**（原来 Positioned 覆盖
-                    //   正文最后几行 ⇒ 底部也"遮住了字" ✗）
-                    if (_showBar) _bottomNav(bg[1]),
-                  ],
+                // 正文始终占满整块区域：顶栏 / 底部功能栏都是**悬浮覆盖层**，
+                // 呼出/收起菜单时正文不重排、不跳动（用户 2026-10-21 要求：
+                // 「面板是悬浮在正文上面，不是挤压正文」）。
+                Positioned.fill(
+                  child: Listener(
+                    behavior: HitTestBehavior.translucent,
+                    onPointerDown: _onPointerDown,
+                    onPointerUp: _onPointerUp,
+                    child: _contentArea(bg[1]),
+                  ),
+                ),
+                // 顶栏：悬浮在正文之上（不占布局高度）
+                if (_showBar)
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: _topBarCard(bg[1]),
+                  ),
+                // 底部功能栏：悬浮在正文之上
+                if (_showBar)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: _bottomNav(bg[1]),
+                  ),
+                // TTS 迷你条：浮在底部功能栏**上方**；功能栏收起时贴底
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: _showBar ? 198 : 0,
+                  child: _ttsMiniBar(bg[1]),
                 ),
                 // 右侧竖向悬浮栏（朗读 / 亮度 / 白夜 / 编辑）：与漫画阅读器同款。
                 // 设置面板从底部盖上来时让位（否则会被面板压住 ✗）。
