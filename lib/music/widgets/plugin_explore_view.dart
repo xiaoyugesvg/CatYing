@@ -10,11 +10,15 @@
 // 归一化后的 Map 存下来，点进详情时**原样回传**给插件
 //（例如 `getMusicSheetInfo(sheetItem)` 需要它自己那套字段）。
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../common/theme.dart';
+import '../models/models.dart';
 import '../models/third_party_source.dart';
 import '../services/music_api.dart';
+import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
 import 'music_components.dart';
 import '../pages/plugin_song_list_page.dart';
@@ -67,6 +71,16 @@ class _PGroup {
   final List<_PItem> items;
 }
 
+/// 推荐歌单的一个标签。
+///
+/// `value` 是**插件原始形态**（字符串 或 `{id,title}` 对象），点标签时原样回传：
+/// 汽水这类插件靠对象里的 `id`（频道号）取歌单，转成字符串就查不到。
+class _PTag {
+  const _PTag({required this.title, required this.value});
+  final String title;
+  final Object? value;
+}
+
 class PluginExploreView extends StatefulWidget {
   const PluginExploreView({super.key, required this.source});
 
@@ -83,9 +97,18 @@ class _PluginExploreViewState extends State<PluginExploreView> {
   String _error = '';
 
   List<_PGroup> _groups = const [];
-  List<({String name, List<String> tags})> _tagGroups = const [];
-  String _tag = '';
+  List<({String name, List<_PTag> tags})> _tagGroups = const [];
+
+  /// 当前选中的标签：`title` 只用于显示/高亮，`value` 原样回传给插件
+  String _tagTitle = '';
+  Object? _tagValue;
+
   List<_PItem> _sheets = const [];
+
+  /// 「热门单曲」：从第一个榜单取前 10 首。
+  /// 汽水这类插件只给 3 个榜单、没有别的入口，不加这块整页就是一大片空白。
+  List<Song> _hotSongs = const [];
+  bool _hotLoading = false;
 
   /// 推荐歌单分页状态（支持「加载更多」）
   int _sheetPage = 1;
@@ -130,13 +153,19 @@ class _PluginExploreViewState extends State<PluginExploreView> {
         }
       }
 
-      final tagGroups = <({String name, List<String> tags})>[];
+      final tagGroups = <({String name, List<_PTag> tags})>[];
       for (final g in (tags['list'] as List? ?? const [])) {
         if (g is! Map) continue;
-        final ts = (g['tags'] as List? ?? const [])
-            .map((e) => e.toString())
-            .where((e) => e.trim().isNotEmpty)
-            .toList();
+        final ts = <_PTag>[];
+        for (final e in (g['tags'] as List? ?? const [])) {
+          if (e is Map) {
+            final title = (e['title'] ?? '').toString().trim();
+            if (title.isNotEmpty) ts.add(_PTag(title: title, value: e['value']));
+          } else {
+            final title = e.toString().trim();
+            if (title.isNotEmpty) ts.add(_PTag(title: title, value: e));
+          }
+        }
         if (ts.isNotEmpty) {
           tagGroups.add((name: (g['name'] ?? '标签').toString(), tags: ts));
         }
@@ -152,9 +181,10 @@ class _PluginExploreViewState extends State<PluginExploreView> {
         }
       });
 
-      final firstTag =
-          tagGroups.isNotEmpty ? tagGroups.first.tags.first : '';
-      if (firstTag.isNotEmpty) await _loadSheets(firstTag);
+      final firstTag = tagGroups.isNotEmpty ? tagGroups.first.tags.first : null;
+      if (firstTag != null) await _loadSheets(firstTag.value, firstTag.title);
+      // 热门单曲不阻塞首屏：骨架先出来，回来再补
+      unawaited(_loadHotSongs());
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -164,9 +194,10 @@ class _PluginExploreViewState extends State<PluginExploreView> {
     }
   }
 
-  Future<void> _loadSheets(String tag) async {
+  Future<void> _loadSheets(Object? value, String title) async {
     setState(() {
-      _tag = tag;
+      _tagValue = value;
+      _tagTitle = title;
       _sheets = const [];
       _sheetPage = 1;
       _sheetEnd = false;
@@ -174,7 +205,7 @@ class _PluginExploreViewState extends State<PluginExploreView> {
     final r = await api.musicFreeAction(
       widget.source,
       'musicFreeRecommendSheets',
-      params: {'tag': tag, 'page': 1},
+      params: {'tag': value, 'page': 1},
     );
     if (!mounted) return;
     setState(() {
@@ -185,13 +216,13 @@ class _PluginExploreViewState extends State<PluginExploreView> {
 
   /// 加载下一页推荐歌单并**追加**
   Future<void> _loadMoreSheets() async {
-    if (_loadingMore || _sheetEnd || _tag.isEmpty) return;
+    if (_loadingMore || _sheetEnd || _tagTitle.isEmpty) return;
     setState(() => _loadingMore = true);
     final next = _sheetPage + 1;
     final r = await api.musicFreeAction(
       widget.source,
       'musicFreeRecommendSheets',
-      params: {'tag': _tag, 'page': next},
+      params: {'tag': _tagValue, 'page': next},
     );
     if (!mounted) return;
     final more = _parseSheets(r);
@@ -200,6 +231,35 @@ class _PluginExploreViewState extends State<PluginExploreView> {
       _sheetPage = next;
       _sheets = [..._sheets, ...more];
       _sheetEnd = r['isEnd'] == true || more.isEmpty;
+    });
+  }
+
+  /// 「热门单曲」：取第一个榜单的前 10 首
+  Future<void> _loadHotSongs() async {
+    if (_groups.isEmpty) return;
+    setState(() => _hotLoading = true);
+    final first = _groups.first.items.first;
+    final r = await api.musicFreeAction(
+      widget.source,
+      'musicFreeTopListDetail',
+      params: {'topListItem': first.raw},
+    );
+    if (!mounted) return;
+    final songs = <Song>[];
+    for (final e in (r['list'] as List? ?? const [])) {
+      if (e is! Map) continue;
+      try {
+        // 插件歌没有平台归属 → 打上 pluginId，播放时问这个插件要地址
+        songs.add(Song.fromJson(Map<String, dynamic>.from(e))
+            .withPluginId(widget.source.id));
+      } catch (_) {
+        // 单条坏数据不影响整块
+      }
+      if (songs.length >= 10) break;
+    }
+    setState(() {
+      _hotSongs = songs;
+      _hotLoading = false;
     });
   }
 
@@ -323,17 +383,49 @@ class _PluginExploreViewState extends State<PluginExploreView> {
                 );
               },
             )
-          else if (_tag.isNotEmpty)
+          else if (_tagTitle.isNotEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Text(
-                '「$_tag」下没有歌单',
+                '「$_tagTitle」下没有歌单',
                 style: TextStyle(
                   color: MusicTheme.secondary,
                   fontSize: AppTheme.fontSubhead,
                 ),
               ),
             ),
+          // ── 热门单曲 ────────────────────────────────────────────
+          //   插件只给榜单（汽水就 3 个榜）时，光靠横向卡片整页很空；
+          //   这里把第一个榜单的前 10 首铺成可点的歌曲行，直接可播。
+          if (_hotSongs.isNotEmpty) ...[
+            SectionTitle(
+              title: '热门单曲',
+              action: '播放全部',
+              onAction: () =>
+                  MusicPlayerManager.instance.playQueue(_hotSongs, index: 0),
+            ),
+            for (var i = 0; i < _hotSongs.length; i++)
+              SongCell(
+                song: _hotSongs[i],
+                index: i,
+                playbackContext: _hotSongs,
+              ),
+          ] else if (_hotLoading) ...[
+            const SectionTitle(title: '热门单曲'),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: MusicTheme.tint,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -379,10 +471,10 @@ class _PluginExploreViewState extends State<PluginExploreView> {
     );
   }
 
-  Widget _tagChip(String tag) {
-    final on = tag == _tag;
+  Widget _tagChip(_PTag tag) {
+    final on = tag.title == _tagTitle;
     return GestureDetector(
-      onTap: () => _loadSheets(tag),
+      onTap: () => _loadSheets(tag.value, tag.title),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
@@ -390,7 +482,7 @@ class _PluginExploreViewState extends State<PluginExploreView> {
           borderRadius: BorderRadius.circular(999),
         ),
         child: Text(
-          tag,
+          tag.title,
           style: TextStyle(
             color: on ? Colors.white : MusicTheme.label,
             fontSize: AppTheme.fontSubhead,

@@ -691,8 +691,10 @@ export async function recommendSheetTagsByMusicFree(source) {
 
 /** 标签下的推荐歌单：`getRecommendSheetsByTag(tag, page)` */
 export async function recommendSheetsByMusicFree(source, tag, page = 1) {
+    // tag 可能是字符串（多数插件）也可能是对象 {id,title}（汽水：id 是频道号）
+    // ⇒ 必须**原样**交给插件；之前统一 String() 会让汽水拿不到 id，返回空列表。
     const r = await runMusicFreeAction(source, 'recommendSheets', [
-        String(tag || ''),
+        tag == null ? '' : tag,
         page,
     ]);
     return r.ok ? normalizeSheets(r.result) : r;

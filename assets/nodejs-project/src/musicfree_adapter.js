@@ -404,16 +404,56 @@ export function normalizeTopLists(raw) {
  * 形状：`{ data: [{ title: '语种', data: ['华语', …] }] }`
  */
 export function normalizeSheetTags(raw) {
-    const { arr } = unwrapList(raw);
+    // 🔴 2026-10-21：必须同时读 `pinned`。
+    //   MusicFree 规范里 getRecommendSheetTags 返回
+    //     { data: [{ title, data: [tag] }], pinned: [tag] }
+    //   汽水插件把**全部**标签放在 pinned 里、data 恒为空
+    //   ⇒ 只读 data 时这个源的「推荐歌单」整块消失（用户看到的空页面）。
+    //
+    //   tag 有两种形态：
+    //     · 字符串（网易/酷狗等大多数插件）—— 直接把字符串交给 getRecommendSheetsByTag
+    //     · 对象 { id, title }（汽水：id 是频道号）—— 必须原样回传对象，
+    //       转成 String 后插件拿不到 id，会请求到空列表
+    //   ⇒ 这里保留 `value`（原始形态），Dart 侧只负责显示 `title`+原样带回。
     const out = [];
-    for (const g of arr) {
-        if (!g || typeof g !== 'object') continue;
-        const tags = Array.isArray(g.data)
-            ? g.data
-                  .map((t) => (typeof t === 'string' ? t : str(t && (t.title || t.name))))
-                  .filter(Boolean)
-            : [];
-        if (tags.length) out.push({ name: str(g.title || g.name), tags });
+    const seen = new Set();
+    const collect = (name, items) => {
+        const tags = [];
+        for (const t of Array.isArray(items) ? items : []) {
+            let title = '';
+            let value = t;
+            if (typeof t === 'string') {
+                title = t.trim();
+                value = t;
+            } else if (t && typeof t === 'object') {
+                title = str(t.title || t.name);
+                value = t;
+            }
+            if (!title || seen.has(title)) continue;
+            seen.add(title);
+            tags.push({ title, value });
+        }
+        if (tags.length) out.push({ name: str(name) || '标签', tags });
+    };
+
+    if (Array.isArray(raw)) {
+        for (const g of raw) {
+            if (!g || typeof g !== 'object') continue;
+            collect(g.title || g.name, g.data);
+        }
+        return { ok: true, list: out };
+    }
+    if (raw && typeof raw === 'object') {
+        collect('推荐', raw.pinned);
+        const groups = Array.isArray(raw.data)
+            ? raw.data
+            : Array.isArray(raw.list)
+              ? raw.list
+              : [];
+        for (const g of groups) {
+            if (!g || typeof g !== 'object') continue;
+            collect(g.title || g.name, g.data);
+        }
     }
     return { ok: true, list: out };
 }
@@ -424,7 +464,20 @@ export function normalizeSheetTags(raw) {
 export function normalizeSheets(raw) {
     const { arr, isEnd } = unwrapList(raw);
     const list = arr.map(mapSheetItem).filter(Boolean);
-    return { ok: true, list, isEnd: isEnd || list.length === 0 };
+    // 有的插件用 `hasMore` 表示还有下一页（汽水），不读它就会一直显示「加载更多」
+    const hasMore =
+        raw && typeof raw === 'object' && !Array.isArray(raw)
+            ? raw.hasMore !== undefined
+                ? raw.hasMore
+                : raw.data && typeof raw.data === 'object'
+                  ? raw.data.hasMore
+                  : undefined
+            : undefined;
+    return {
+        ok: true,
+        list,
+        isEnd: isEnd || list.length === 0 || hasMore === false,
+    };
 }
 
 /**
