@@ -460,8 +460,15 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     return Color.alphaBlend(Colors.white.withValues(alpha: 0.78), _bgTop);
   }
 
-  /// 面板专用底色（语义别名，见 [_bgTop]）。
-  Color get _panelBg => _bgTop;
+  /// 信息栏可选项（顺序 = 横向滑动的顺序）
+  static const List<String> _statusItemKeys = [
+    '时间',
+    '章节',
+    '电量',
+    '书名',
+    '页码',
+    '进度',
+  ];
 
   /// 底部面板顶部的拖动条（视觉锚点，纯装饰）✓
   Widget _sheetHandle() => Padding(
@@ -3461,8 +3468,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   ///     · 自下而上的**渐变**填充（亮度越低越淡）
   ///     · 小圆点拇指（带描边 + 轻微投影）
   ///   高度固定 [_brightnessTrackH]，比原来 130 短得多 ✓。
-  static const double _brightnessTrackH = 92;
-  static const double _brightnessThumb = 14;
+  static const double _brightnessTrackH = 84;
 
   void _applyDockBrightness(double dy) {
     // dy 从轨道顶端往下量；亮度是「越往上越亮」
@@ -3475,68 +3481,57 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   Widget _dockBrightness(Color fg) {
     final t = ((_dockBrightnessValue - 0.1) / 0.9).clamp(0.0, 1.0);
-    const w = 24.0;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapDown: (d) => _applyDockBrightness(d.localPosition.dy),
-      onVerticalDragStart: (d) => _applyDockBrightness(d.localPosition.dy),
-      onVerticalDragUpdate: (d) => _applyDockBrightness(d.localPosition.dy),
-      child: SizedBox(
-        width: w,
-        height: _brightnessTrackH,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            // 轨道底
-            Container(
-              width: 5,
-              height: _brightnessTrackH,
-              decoration: BoxDecoration(
-                color: fg.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(2.5),
-              ),
-            ),
-            // 已填充部分（自底向上渐变 = 亮度隐喻）
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: Container(
-                width: 5,
-                height: (_brightnessTrackH * t).clamp(0.0, _brightnessTrackH),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.bottomCenter,
-                    end: Alignment.topCenter,
-                    colors: [
-                      fg.withValues(alpha: 0.35),
-                      fg.withValues(alpha: 0.9),
-                    ],
-                  ),
-                  borderRadius: BorderRadius.circular(2.5),
-                ),
-              ),
-            ),
-            // 拇指
-            Positioned(
-              top: (_brightnessTrackH - _brightnessThumb) * (1 - t),
-              child: Container(
-                width: _brightnessThumb,
-                height: _brightnessThumb,
-                decoration: BoxDecoration(
-                  color: fg,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.18),
-                      blurRadius: 4,
-                      offset: const Offset(0, 1),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // 实心太阳（与竖栏其它实心图标同一套）
+        Icon(
+          Icons.brightness_5,
+          size: 16,
+          color: fg.withValues(alpha: 0.85),
         ),
-      ),
+        const SizedBox(height: 6),
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: (d) => _applyDockBrightness(d.localPosition.dy),
+          onVerticalDragStart: (d) => _applyDockBrightness(d.localPosition.dy),
+          onVerticalDragUpdate: (d) => _applyDockBrightness(d.localPosition.dy),
+          child: SizedBox(
+            width: 30,
+            height: _brightnessTrackH,
+            child: Center(
+              // 参考图样式：**粗胶囊**轨道，已调到的部分是一段更深的圆角填充，
+              // 没有小圆点拇指（比细线+圆点更稳、更好看）
+              child: Stack(
+                children: [
+                  Container(
+                    width: 12,
+                    height: _brightnessTrackH,
+                    decoration: BoxDecoration(
+                      color: fg.withValues(alpha: 0.13),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                  ),
+                  Align(
+                    alignment: Alignment.bottomCenter,
+                    child: Container(
+                      width: 12,
+                      height: (_brightnessTrackH * t).clamp(
+                        0.0,
+                        _brightnessTrackH,
+                      ),
+                      decoration: BoxDecoration(
+                        color: fg.withValues(alpha: 0.45),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -3587,33 +3582,26 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               _dockButton(
-                Icons.record_voice_over_outlined,
+                Icons.record_voice_over,
                 '朗读',
                 () => _showTtsSheet(),
                 fg,
               ),
-              const SizedBox(height: 10),
-              // 亮度：**直接给滑杆**（不再是"按钮点开→弹层里再拖"，见 _dockBrightness）
-              // 上方补一个小太阳图标（参考用户截图的线性图标风格 ✓）
-              Icon(
-                Icons.brightness_5_outlined,
-                size: 18,
-                color: fg.withValues(alpha: 0.75),
-              ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 12),
+              // 亮度：一个和圆形按钮同语言的竖胶囊（内含太阳图标 + 滑杆）
               _dockBrightness(fg),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               _dockButton(
-                ink ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+                ink ? Icons.light_mode : Icons.dark_mode,
                 ink ? '切换白天' : '切换夜间',
                 _toggleDayNight,
                 fg,
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               // 对齐 Cmbok：书源书籍的阅读器「编辑」= 编辑该书源
               // （划线与笔记入口在底部宫格「笔记」里，不冲突）
               // 图标用齿轮（用户 2026-10-21 指定）✓
-              _dockButton(Icons.settings_outlined, '书源编辑', () {
+              _dockButton(Icons.settings, '书源编辑', () {
                 Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => BookSourceEditorPage(source: widget.source),
@@ -3642,13 +3630,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       child: GestureDetector(
         onTap: onTap,
         child: Container(
-          width: 36,
-          height: 36,
+          width: 38,
+          height: 38,
           decoration: BoxDecoration(
-            color: fg.withValues(alpha: 0.08),
+            // 参考图：**实心浅灰圆底 + 实心图标**（去掉了描边）
+            color: fg.withValues(alpha: 0.10),
             shape: BoxShape.circle,
           ),
-          child: Icon(icon, size: 20, color: fg.withValues(alpha: 0.9)),
+          child: Icon(icon, size: 19, color: fg.withValues(alpha: 0.95)),
         ),
       ),
     );
@@ -8133,7 +8122,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 上下 = 不分页改滚动；其余 4 种 = 分页。
   Widget _settingsPanel(Color fg) {
     return Positioned(
-      bottom: 0,
+      // ⚠️ 面板挂在 SafeArea 里的 Stack 上：`bottom: 0` = 底部安全区上沿，
+      //   于是 Home 指示条那一截会露出正文（用户 2026-10-21：「没延伸到底」✗）。
+      //   往下多铺一个安全区高度，面板内部再靠 SafeArea 把按钮顶上来 ✓
+      bottom: -MediaQuery.of(context).padding.bottom,
       left: 0,
       right: 0,
       child: Container(
@@ -8412,20 +8404,29 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                         ],
                       ),
                     ),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (final k in ['时间', '章节', '电量', '书名', '页码', '进度'])
-                          _chip(k, _rs.statusItems.contains(k), () {
-                            final next = Set<String>.of(_rs.statusItems);
-                            if (!next.remove(k)) next.add(k);
-                            setState(
-                              () => _rs = _rs.copyWith(statusItems: next),
-                            );
-                            _scheduleSavePrefs();
-                          }),
-                      ],
+                    // 信息栏选项：**横向滑动**（用户 2026-10-21 参考图）
+                    // 一行放不下时左右滑，而不是换行把面板撑高 ✓
+                    SizedBox(
+                      height: 38,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        physics: const BouncingScrollPhysics(),
+                        itemCount: _statusItemKeys.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 8),
+                        itemBuilder: (c, i) {
+                          final k = _statusItemKeys[i];
+                          return Center(
+                            child: _chip(k, _rs.statusItems.contains(k), () {
+                              final next = Set<String>.of(_rs.statusItems);
+                              if (!next.remove(k)) next.add(k);
+                              setState(
+                                () => _rs = _rs.copyWith(statusItems: next),
+                              );
+                              _scheduleSavePrefs();
+                            }),
+                          );
+                        },
+                      ),
                     ),
                     const SizedBox(height: 8),
                     // 信息栏字号/图标缩放（用户 2026-10-21）
@@ -9053,6 +9054,26 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     );
   }
 
+  /// 目录右侧「到顶 / 到底」竖条里的一个按钮
+  Widget _tocJumpBtn(IconData icon, String tip, VoidCallback onTap) {
+    return Tooltip(
+      message: tip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: SizedBox(
+          width: 32,
+          height: 34,
+          child: Icon(
+            icon,
+            size: 20,
+            color: _fg.withValues(alpha: 0.72),
+          ),
+        ),
+      ),
+    );
+  }
+
   /// 目录抽屉（截图 IMG_8077）。
   ///
   /// ── 三个 tab ──────────────────────────────────────────────────
@@ -9082,6 +9103,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     var dragTipName = '';
     var dragTipY = 0.0;
     var didAutoScrollToc = false;
+    // 滚动时浮现「到顶 / 到底」竖条：滚动开始显示、静止 900ms 后淡出
+    var tocScrolling = false;
+    Timer? tocHideTimer;
 
     // 和漫画阅读器一致：目录 / 书签 / 笔记从**右侧滑入**（不是底部弹层）。
     final drawerWidth = MediaQuery.sizeOf(context).width * 0.78;
@@ -9289,7 +9313,24 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     Flexible(
                       child: Stack(
                         children: [
-                          ScrollConfiguration(
+                          NotificationListener<ScrollNotification>(
+                            onNotification: (n) {
+                              // 一滚动就让「到顶/到底」竖条浮现，静止后淡出
+                              if (!tocScrolling) {
+                                setSheet(() => tocScrolling = true);
+                              }
+                              tocHideTimer?.cancel();
+                              tocHideTimer = Timer(
+                                const Duration(milliseconds: 900),
+                                () {
+                                  if (ctx.mounted) {
+                                    setSheet(() => tocScrolling = false);
+                                  }
+                                },
+                              );
+                              return false;
+                            },
+                            child: ScrollConfiguration(
                             // 关掉系统滚动条：目录动辄上千章，原生 thumb 会拉成
                             // 一条很长的灰条压在云朵图标上（用户反馈"太长"）✗
                             behavior: ScrollConfiguration.of(
@@ -9349,6 +9390,72 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                             },
                           ),
                           ),
+                          ),
+                          // 滚动时浮现的「到顶 / 到底」竖条
+                          Positioned(
+                            right: 2,
+                            top: 0,
+                            bottom: 0,
+                            child: Center(
+                              child: IgnorePointer(
+                                ignoring: !tocScrolling,
+                                child: AnimatedOpacity(
+                                  opacity: tocScrolling ? 1 : 0,
+                                  duration: const Duration(milliseconds: 160),
+                                  child: Container(
+                                    width: 32,
+                                    decoration: BoxDecoration(
+                                      color: _fg.withValues(alpha: 0.10),
+                                      borderRadius: BorderRadius.circular(16),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.08,
+                                          ),
+                                          blurRadius: 8,
+                                        ),
+                                      ],
+                                    ),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        _tocJumpBtn(
+                                          Icons.keyboard_arrow_up_rounded,
+                                          '回到顶部',
+                                          () {
+                                            if (itemScrollController
+                                                .isAttached) {
+                                              itemScrollController.jumpTo(
+                                                index: 0,
+                                              );
+                                            }
+                                          },
+                                        ),
+                                        Container(
+                                          width: 14,
+                                          height: 0.5,
+                                          color: _fg.withValues(alpha: 0.22),
+                                        ),
+                                        _tocJumpBtn(
+                                          Icons.keyboard_arrow_down_rounded,
+                                          '跳到底部',
+                                          () {
+                                            if (itemScrollController
+                                                    .isAttached &&
+                                                chapters.isNotEmpty) {
+                                              itemScrollController.jumpTo(
+                                                index: chapters.length - 1,
+                                              );
+                                            }
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
                           // 右缘快速拖动定位条（Cmbok 同款）：按住上下拖动 →
                           // 列表按比例滚动，浮现章节标题提示；搜索状态隐藏 ✓
                           if (kwToc.isEmpty)
@@ -9356,7 +9463,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                               right: 2,
                               top: 40,
                               bottom: 40,
-                              child: LayoutBuilder(
+                              // 滚动时「到顶/到底」竖条浮现 → 右缘拖动条让位，
+                              // 否则它的透明热区会吃掉竖条上的点击 ✗
+                              child: IgnorePointer(
+                                ignoring: tocScrolling,
+                                child: LayoutBuilder(
                                 builder: (c, cons) {
                                   final h = cons.maxHeight;
                                   return GestureDetector(
@@ -9441,6 +9552,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                     ),
                                   );
                                 },
+                              ),
                               ),
                             ),
                           // 拖动时浮现的章节标题提示（只读 ✓）
@@ -9927,6 +10039,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         return SlideTransition(position: offset, child: child);
       },
     );
+    // 抽屉关闭 → 收掉「到顶/到底」竖条的淡出定时器
+    tocHideTimer?.cancel();
     // ItemScrollController / ItemPositionsListener 是普通对象（非 ChangeNotifier），
     // 不需要 dispose ✓。
     // ⚠️ 三个 TextEditingController 不能在这里立刻 dispose ✗：

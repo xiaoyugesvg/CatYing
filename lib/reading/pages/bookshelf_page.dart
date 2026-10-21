@@ -3468,68 +3468,10 @@ class _BookshelfPageState extends State<BookshelfPage>
           margin: const EdgeInsets.only(bottom: 8),
           child: LayoutBuilder(
             builder: (context, constraints) {
-              // 计算内容总宽度（粗略估算用于判断）
-              // 每个 chip 间距 8，最后一个不加
-              const chipPadding = 22.0; // horizontal 11*2
-              const addChipPadding = 18.0; // horizontal 9*2
-              const spacing = 8.0;
-              const textStyle = TextStyle(
-                fontSize: AppTheme.fontFootnote,
-                fontWeight: FontWeight.w600,
-              );
-              const addTextStyle = TextStyle(
-                fontSize: AppTheme.fontFootnote,
-                fontWeight: FontWeight.w600,
-              );
-
-              double totalWidth = 0;
-              {
-                final allCount = _visibleShelves(_currentTab).fold<int>(
-                  0,
-                  (sum, sh) =>
-                      sum + BookshelfService().countInShelf(sh.id, currentType),
-                );
-                final allPainter = TextPainter(
-                  text: const TextSpan(text: '全部', style: textStyle),
-                  textDirection: TextDirection.ltr,
-                )..layout();
-                final numPainter = TextPainter(
-                  text: TextSpan(text: '$allCount', style: textStyle),
-                  textDirection: TextDirection.ltr,
-                )..layout();
-                totalWidth +=
-                    chipPadding +
-                    allPainter.width +
-                    4 +
-                    numPainter.width +
-                    spacing;
-              }
-              for (int i = 0; i < shelves.length; i++) {
-                final shelf = shelves[i];
-                final displayName = _shelfDisplayName(shelf, currentType);
-                final count = BookshelfService().countInShelf(
-                  shelf.id,
-                  currentType,
-                );
-                final textPainter = TextPainter(
-                  text: TextSpan(text: displayName, style: textStyle),
-                  textDirection: TextDirection.ltr,
-                )..layout();
-                final numPainter = TextPainter(
-                  text: TextSpan(text: '$count', style: textStyle),
-                  textDirection: TextDirection.ltr,
-                )..layout();
-                totalWidth +=
-                    chipPadding + textPainter.width + 4 + numPainter.width;
-                if (i < shelves.length) totalWidth += spacing;
-              }
-              // 新建按钮
-              final addTextPainter = TextPainter(
-                text: const TextSpan(text: '新建', style: addTextStyle),
-                textDirection: TextDirection.ltr,
-              )..layout();
-              totalWidth += addChipPadding + 14 + 2 + addTextPainter.width + 16;
-
+              // ⚠️ 这里原来会先估算"所有 chip 的总宽度"，放得下就 Center ——
+              //   用户 2026-10-21 反馈：删掉几个分组后剩余标签跑到了中间 ✗。
+              //   `Expanded + 横向 ScrollView` 本身就占满剩余宽度、内容左对齐，
+              //   不需要再判断，所以整段宽度估算已删除 ✓。
               // 标签行：正在读/想读/已读完/全部…… 可横向滑动
               final scrollView = SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
@@ -3602,19 +3544,14 @@ class _BookshelfPageState extends State<BookshelfPage>
                 ),
               );
 
-              // 固定按钮在**左侧**（用户多次点名"管理/排序移到左边"），
-              // 标签行占满剩余宽度；内容不足时居中，超出则横向滚动
-              const fixedWidth = 20.0 + btnSize * 2 + 8;
+              // 固定按钮在**左侧**（用户多次点名"管理/排序移到左边"）；
+              // 标签行始终**左对齐**（用户 2026-10-21：删掉分组后剩余标签
+              // 跑到中间了 ✗ —— 原来是"内容放得下就 Center"的写法）
               return Row(
                 children: [
                   fixedButtons,
                   const SizedBox(width: 8),
-                  Expanded(
-                    child:
-                        totalWidth + 16 + fixedWidth + 8 <= constraints.maxWidth
-                        ? Center(child: scrollView)
-                        : scrollView,
-                  ),
+                  Expanded(child: scrollView),
                 ],
               );
             },

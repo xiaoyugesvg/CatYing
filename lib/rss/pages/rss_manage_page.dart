@@ -35,10 +35,11 @@ import '../services/rss_reader.dart';
 import '../services/rss_store.dart';
 import 'rss_source_edit_page.dart';
 
-/// 列表展示方式（与书源仓 / 漫源仓库同款：列表 / 卡片 / 一行两个）
+/// 列表展示方式（与书源仓 / 漫源仓库同款：列表 / 一行两个）
+///
+/// ⚠️ 「卡片」（一行一张的大卡片）已按用户要求移除 —— 现在只剩两种视图。
 enum _RssView {
   list('列表', Icons.view_list_rounded),
-  card('卡片', Icons.view_agenda_rounded),
   two('一行两个', Icons.apps_rounded);
 
   const _RssView(this.label, this.icon);
@@ -502,8 +503,6 @@ class _RssManagePageState extends State<RssManagePage> {
         const SizedBox(height: 4),
         if (_view == _RssView.list)
           for (final s in list) _dragWrap(s, _tile(s))
-        else if (_view == _RssView.card)
-          for (final s in list) _dragWrap(s, _cardTile(s))
         else
           GridView.builder(
             padding: EdgeInsets.zero,
@@ -941,104 +940,36 @@ class _RssManagePageState extends State<RssManagePage> {
     );
   }
 
-  /// 卡片视图：一行一张的大卡片
-  ///
-  /// 布局（用户 2026-10-21 要求）：
-  ///   左上 = 选择框   右上 = ⋮
-  ///   中间 = 只显示名称文字（**不显示链接**），水平居中
-  ///   右下 = 开关；标签留在左下
-  Widget _cardTile(RssSource s) {
-    final cur = s.id == store.selectedId;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () => _togglePick(s.id),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.fromLTRB(6, 6, 6, 8),
-        decoration: _cardDecoration(s),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                _pickIcon(s),
-                const SizedBox(width: 6),
-                _avatar(s, size: 26),
-                const Spacer(),
-                _menuBtn(s),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(
-              s.name,
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: AppTheme.fontHeadline,
-                fontWeight: FontWeight.w600,
-                color: s.enabled ? AppTheme.textPrimary : AppTheme.textTertiary,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Expanded(
-                  child: Wrap(
-                    spacing: 4,
-                    runSpacing: 4,
-                    children: [
-                      if (cur) _tag('当前', highlight: true),
-                      _tag(_groupOf(s)),
-                      if (s.hasRules) _tag('规则'),
-                    ],
-                  ),
-                ),
-                // 开关挪到**右下角**
-                SizedBox(
-                  width: 44,
-                  height: 28,
-                  child: FittedBox(
-                    child: Switch(
-                      value: s.enabled,
-                      activeThumbColor: AppTheme.accentColor,
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      onChanged: (v) => store.setEnabled(s.id, v),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   /// 一行两个：紧凑卡片
+  ///
+  /// 布局（用户 2026-10-21）：
+  ///   左上 = 选择框   右上 = ⋮
+  ///   中间 = 只显示名称（**不显示链接**），水平居中
+  ///   右下 = 开关；标签留在左下
   Widget _gridTile(RssSource s) {
     final cur = s.id == store.selectedId;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () => _togglePick(s.id),
       child: Container(
-        padding: const EdgeInsets.fromLTRB(10, 9, 6, 8),
+        padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
         decoration: _cardDecoration(s),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
               children: [
-                _avatar(s, size: 32),
+                _pickIcon(s, size: 20),
+                const SizedBox(width: 5),
+                _avatar(s, size: 28),
                 const Spacer(),
-                _pickIcon(s, size: 18),
-                _menuBtn(s, size: 17),
+                _menuBtn(s, size: 18),
               ],
             ),
-            const SizedBox(height: 7),
+            const SizedBox(height: 8),
             Text(
               s.name,
+              textAlign: TextAlign.center,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -1049,18 +980,9 @@ class _RssManagePageState extends State<RssManagePage> {
                     s.enabled ? AppTheme.textPrimary : AppTheme.textTertiary,
               ),
             ),
-            const SizedBox(height: 2),
-            Text(
-              s.url,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: AppTheme.fontCaption,
-                color: AppTheme.textTertiary,
-              ),
-            ),
             const Spacer(),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Flexible(
                   child: Wrap(
@@ -1072,9 +994,10 @@ class _RssManagePageState extends State<RssManagePage> {
                     ],
                   ),
                 ),
+                // 开关放右下角
                 SizedBox(
-                  width: 42,
-                  height: 28,
+                  width: 40,
+                  height: 26,
                   child: FittedBox(
                     child: Switch(
                       value: s.enabled,
