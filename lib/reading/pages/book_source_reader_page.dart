@@ -1948,7 +1948,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 _go(-1);
               }
             },
-            onTapCenter: () => setState(() => _showBar = !_showBar),
+            onTapCenter: () => _setBar(!_showBar),
           );
         }
 
@@ -2011,7 +2011,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   _go(-1);
                 }
               },
-              onTapCenter: () => setState(() => _showBar = !_showBar),
+              onTapCenter: () => _setBar(!_showBar),
             ),
           );
         }
@@ -3279,6 +3279,20 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   // ── 点击判定（与漫画阅读器同一套：GestureDetector.onTapUp）──────
   // 用户 2026-10-21：「书源阅读器的功能面板打开方式参照漫画的来」。
+  //
+  /// 面板显隐防抖：同一次点击可能被**两个通道**各触发一次
+  /// （外层 GestureDetector.onTapUp + 仿真/覆盖组件内部的 onTapCenter），
+  /// 结果是"面板闪一下就消失"。300ms 内的第二次显隐直接丢掉。
+  DateTime? _lastBarToggleAt;
+
+  void _setBar(bool show) {
+    final now = DateTime.now();
+    final last = _lastBarToggleAt;
+    if (last != null && now.difference(last).inMilliseconds < 300) return;
+    _lastBarToggleAt = now;
+    setState(() => _showBar = show);
+  }
+
   void _onTapUp(TapUpDetails d) {
     final pos = d.globalPosition;
     final size = MediaQuery.of(context).size;
@@ -3290,7 +3304,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         _closeSettingsPanel();
         return;
       }
-      setState(() => _showBar = false);
+      _setBar(false);
       return;
     }
     // 漫画模式：固定 左/右 1/3 翻章、中间 1/3 呼出（保持原漫画交互）
@@ -3315,7 +3329,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           _nextPageOrChapter();
         }
       } else {
-        setState(() => _showBar = true);
+        _setBar(true);
       }
       return;
     }
@@ -3348,7 +3362,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       case TapAction.next:
         _nextPageOrChapter();
       case TapAction.menu:
-        setState(() => _showBar = true);
+        _setBar(true);
       case TapAction.none:
         break;
     }
