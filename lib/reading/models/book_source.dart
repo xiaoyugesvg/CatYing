@@ -652,14 +652,22 @@ class BookSourceStore {
   List<BookSource> sorted() {
     final list = List<BookSource>.of(_items);
     final hasOrder = list.any((e) => e.order != 0);
-    if (hasOrder) {
-      list.sort((a, b) {
-        final c = a.order.compareTo(b.order);
-        // order 相同或都为 0 时保持原顺序（稳定排序）
-        return c != 0 ? c : list.indexOf(a).compareTo(list.indexOf(b));
-      });
+    if (!hasOrder) return list;
+    // 🔴 不能在 comparator 里 `list.indexOf(a)`：
+    //    Dart 的排序会就地搬元素，排序过程中 indexOf 可能返回 -1，
+    //    随后 `compareTo` 结果自相矛盾 → 抛
+    //    `RangeError (length): Invalid value: Not in inclusive range ...: -1`
+    //    （用户 2026-10-21 的书源页灰白就是这个）。
+    //    先把原始下标固化成记录，再排序。
+    final indexed = <({BookSource src, int pos})>[];
+    for (var i = 0; i < list.length; i++) {
+      indexed.add((src: list[i], pos: i));
     }
-    return list;
+    indexed.sort((a, b) {
+      final c = a.src.order.compareTo(b.src.order);
+      return c != 0 ? c : a.pos.compareTo(b.pos);
+    });
+    return [for (final e in indexed) e.src];
   }
 
   /// 按分组聚合（管理页按组展示）

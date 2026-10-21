@@ -30,6 +30,7 @@ import '../widgets/swipe_action_tile.dart';
 import '../widgets/import_box_icon.dart';
 import '../theme/jelly_theme.dart';
 import '../../common/theme.dart';
+import '../../services/app_log.dart';
 import '../../services/python_manager.dart';
 import '../../services/python_sources_service.dart';
 
@@ -205,25 +206,77 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
       body: ListenableBuilder(
         listenable: store.revision,
         builder: (context, _) {
-          final list = _visible;
-          // 「有没有书源」只看本仓（书源 + 从书源仓导入的漫画源）；
-          // 漫源仓库的源不参与，避免只剩另一边时误显示「无匹配」。
-          final noBooks = store.sorted().every((s) => !s.belongsToBook);
-          return Column(
-            children: [
-              // 搜索 + 分组操作固定在顶栏下面（不随列表滚动）
-              if (!noBooks) _pinnedFilters(list),
-              Expanded(
-                child: noBooks
-                    ? _emptyState()
-                    : (list.isEmpty ? _noMatchState() : _sourceList(list)),
-              ),
-            ],
-          );
+          // 兜住构建期异常：release 下 Flutter 只会把这块画成灰白，
+          // 用户完全看不到原因（2026-10-20 反馈「书源页一片灰白」）。
+          try {
+            final list = _visible;
+            // 「有没有书源」只看本仓（书源 + 从书源仓导入的漫画源）；
+            // 漫源仓库的源不参与，避免只剩另一边时误显示「无匹配」。
+            final noBooks = store.sorted().every((s) => !s.belongsToBook);
+            return Column(
+              children: [
+                // 搜索 + 分组操作固定在顶栏下面（不随列表滚动）
+                if (!noBooks) _pinnedFilters(list),
+                Expanded(
+                  child: noBooks
+                      ? _emptyState()
+                      : (list.isEmpty ? _noMatchState() : _sourceList(list)),
+                ),
+              ],
+            );
+          } catch (e, st) {
+            AppLog.instance.w('[书源仓库] 页面构建失败: $e');
+            AppLog.instance.w('$st');
+            return _buildError(e);
+          }
         },
       ),
       // 多选模式：底部圆角浮动操作栏（统一替代原来的 FAB）。
       bottomNavigationBar: _selectMode ? _multiSelectBar() : null,
+    );
+  }
+
+  /// 构建异常时的可见兜底（替代 release 下的一片灰白）
+  Widget _buildError(Object e) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.error_outline_rounded,
+              size: 40,
+              color: JellyTheme.textSecondary.withValues(alpha: 0.6),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '书源页渲染出错',
+              style: TextStyle(
+                fontSize: AppTheme.fontHeadline,
+                fontWeight: FontWeight.w600,
+                color: _titleColor,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '$e',
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: AppTheme.fontFootnote,
+                color: JellyTheme.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: () => setState(() {}),
+              child: const Text('重新加载'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

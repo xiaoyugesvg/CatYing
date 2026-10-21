@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../common/theme.dart';
+import '../../services/app_log.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/card_action_sheet.dart';
 import '../models/book_source.dart';
@@ -1327,7 +1328,10 @@ class _WarehouseTabState extends State<_WarehouseTab>
     super.build(context);
     final titleColor = _isDark ? Colors.white : JellyTheme.textPrimaryLight;
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      // 原来这里是 Colors.transparent：push 进来时没有下层可透，
+      // 一旦 body 构建异常就只剩一片灰白。给一个实体底色兜住。
+      backgroundColor:
+          _isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -1436,7 +1440,16 @@ class _WarehouseTabState extends State<_WarehouseTab>
               listenable: Listenable.merge([_subStore, SourceManager()]),
               builder: (context, _) => ValueListenableBuilder<int>(
                 valueListenable: _sourceStore.revision,
-                builder: (context, _, _) => _buildBody(),
+                builder: (context, _, _) {
+                  // 兜住构建期异常：release 下否则只剩一片灰白
+                  try {
+                    return _buildBody();
+                  } catch (e, st) {
+                    AppLog.instance.w('[书源仓] 页面构建失败: $e');
+                    AppLog.instance.w('$st');
+                    return _bodyError(e);
+                  }
+                },
               ),
             ),
     );
@@ -1455,6 +1468,50 @@ class _WarehouseTabState extends State<_WarehouseTab>
         const SizedBox(height: 2),
         Expanded(child: _content()),
       ],
+    );
+  }
+
+  /// 构建异常时的可见兜底（替代 release 下的一片灰白）
+  Widget _bodyError(Object e) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.error_outline_rounded,
+              size: 40,
+              color: JellyTheme.textSecondary.withValues(alpha: 0.6),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '源仓库渲染出错',
+              style: TextStyle(
+                fontSize: AppTheme.fontHeadline,
+                fontWeight: FontWeight.w600,
+                color: _label,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '$e',
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: AppTheme.fontFootnote,
+                color: JellyTheme.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: () => setState(() {}),
+              child: const Text('重新加载'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

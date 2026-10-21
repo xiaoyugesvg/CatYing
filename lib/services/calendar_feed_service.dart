@@ -352,23 +352,40 @@ class CalendarFeedService {
     return out;
   }
 
+  /// 榜单 JSON 里的数字偶尔是字符串（`"7.2"` / `"301494"`），
+  /// 直接 `as num?` 会抛 `type 'String' is not a subtype of type 'num?'`。
+  static double _toDouble(dynamic v) {
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v.trim()) ?? 0;
+    return 0;
+  }
+
+  static int _toInt(dynamic v) {
+    if (v is num) return v.toInt();
+    if (v is String) {
+      final s = v.trim();
+      return int.tryParse(s) ?? double.tryParse(s)?.toInt() ?? 0;
+    }
+    return 0;
+  }
+
   CalendarFeedItem? _fromMap(Map<String, dynamic> j) {
     final title = (j['title'] ?? '').toString().trim();
     if (title.isEmpty) return null;
     return CalendarFeedItem(
-      tmdbId: (j['tmdbId'] as num?)?.toInt() ?? 0,
+      tmdbId: _toInt(j['tmdbId']),
       title: title,
       posterPath: (j['posterPath'] ?? '').toString(),
-      rating: (j['rating'] as num?)?.toDouble() ?? 0,
-      voteCount: (j['voteCount'] as num?)?.toInt() ?? 0,
-      popularity: (j['popularity'] as num?)?.toDouble().round() ?? 0,
+      rating: _toDouble(j['rating']),
+      voteCount: _toInt(j['voteCount']),
+      popularity: _toDouble(j['popularity']).round(),
       releaseDate: (j['releaseDate'] ?? '').toString(),
       lastUpdateDate: (j['lastUpdateDate'] ?? '').toString(),
       genre: (j['genreTitle'] ?? '').toString(),
       region: (j['regionTitle'] ?? '').toString(),
       mediaType: (j['mediaType'] ?? 'tv').toString(),
-      heat: (j['heat'] as num?)?.toInt() ?? 0,
-      rank: (j['rank'] as num?)?.toInt() ?? 0,
+      heat: _toInt(j['heat']),
+      rank: _toInt(j['rank']),
       category: (j['category'] ?? '').toString(),
     );
   }

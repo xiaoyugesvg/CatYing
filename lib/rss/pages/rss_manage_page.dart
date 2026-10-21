@@ -845,12 +845,6 @@ class _RssManagePageState extends State<RssManagePage> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 5),
-                  GestureDetector(
-                    onTap: () => _showSourceMenu(s),
-                    child: Icon(Icons.info_outline_rounded,
-                        size: 16, color: AppTheme.textTertiary),
-                  ),
                 ],
               ),
               subtitle: Column(
@@ -883,14 +877,37 @@ class _RssManagePageState extends State<RssManagePage> {
                 ],
               ),
               onTap: () => _togglePick(s.id),
-              trailing: Switch(
-                value: s.enabled,
-                activeThumbColor: AppTheme.accentColor,
-                onChanged: (v) => store.setEnabled(s.id, v),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _menuBtn(s),
+                  const SizedBox(width: 2),
+                  Switch(
+                    value: s.enabled,
+                    activeThumbColor: AppTheme.accentColor,
+                    onChanged: (v) => store.setEnabled(s.id, v),
+                  ),
+                ],
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 统一的「更多」按钮（长按已用于拖动排序，菜单收在这里）
+  Widget _menuBtn(RssSource s, {double size = 18}) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _showSourceMenu(s),
+      child: Padding(
+        padding: const EdgeInsets.all(4),
+        child: Icon(
+          Icons.more_horiz_rounded,
+          size: size,
+          color: AppTheme.textTertiary,
+        ),
       ),
     );
   }
@@ -970,11 +987,6 @@ class _RssManagePageState extends State<RssManagePage> {
                               ),
                             ),
                           ),
-                          GestureDetector(
-                            onTap: () => _showSourceMenu(s),
-                            child: Icon(Icons.info_outline_rounded,
-                                size: 16, color: AppTheme.textTertiary),
-                          ),
                         ],
                       ),
                       const SizedBox(height: 3),
@@ -990,21 +1002,28 @@ class _RssManagePageState extends State<RssManagePage> {
                     ],
                   ),
                 ),
+                _menuBtn(s),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: Wrap(
+                    spacing: 4,
+                    runSpacing: 4,
+                    children: [
+                      if (cur) _tag('当前', highlight: true),
+                      _tag(_groupOf(s)),
+                      if (s.hasRules) _tag('规则'),
+                    ],
+                  ),
+                ),
                 Switch(
                   value: s.enabled,
                   activeThumbColor: AppTheme.accentColor,
                   onChanged: (v) => store.setEnabled(s.id, v),
                 ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 4,
-              runSpacing: 4,
-              children: [
-                if (cur) _tag('当前', highlight: true),
-                _tag(_groupOf(s)),
-                if (s.hasRules) _tag('规则'),
               ],
             ),
           ],
@@ -1030,6 +1049,7 @@ class _RssManagePageState extends State<RssManagePage> {
                 _avatar(s, size: 32),
                 const Spacer(),
                 _pickIcon(s, size: 18),
+                _menuBtn(s, size: 17),
               ],
             ),
             const SizedBox(height: 7),
@@ -1066,16 +1086,6 @@ class _RssManagePageState extends State<RssManagePage> {
                       if (cur) _tag('当前', highlight: true),
                       _tag(_groupOf(s)),
                     ],
-                  ),
-                ),
-                // 长按已改为拖动排序 ⇒ 菜单入口放这里
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => _showSourceMenu(s),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Icon(Icons.more_horiz_rounded,
-                        size: 17, color: AppTheme.textTertiary),
                   ),
                 ),
                 SizedBox(

@@ -96,6 +96,24 @@ void main() async {
     AppLog.instance.log('[FlutterError] ${details.exceptionAsString()}');
     if (details.stack != null) AppLog.instance.log('${details.stack}');
   };
+  // release 下构建/布局异常默认只画一块灰白，用户完全看不到原因。
+  // 改成把异常文案直接画出来（同时上面已写入软件日志）。
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    return Container(
+      color: const Color(0xFFEFEFEF),
+      alignment: Alignment.center,
+      padding: const EdgeInsets.all(24),
+      child: Text(
+        '界面渲染出错\n\n${details.exceptionAsString()}',
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: Color(0xFF333333),
+          fontSize: 13,
+          height: 1.5,
+        ),
+      ),
+    );
+  };
   PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
     AppLog.instance.log('[未捕获异步异常] $error');
     AppLog.instance.log('$stack');

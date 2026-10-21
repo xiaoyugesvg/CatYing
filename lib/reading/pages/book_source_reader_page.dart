@@ -8468,12 +8468,37 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     var dragTipName = '';
     var dragTipY = 0.0;
 
-    await showModalBottomSheet<void>(
+    // 和漫画阅读器一致：目录 / 书签 / 笔记从**右侧滑入**（不是底部弹层）。
+    final drawerWidth = MediaQuery.sizeOf(context).width * 0.78;
+    await showGeneralDialog<void>(
       context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) {
+      barrierDismissible: true,
+      barrierLabel: '目录',
+      transitionDuration: const Duration(milliseconds: 260),
+      pageBuilder: (ctx, anim, secondary) => Align(
+        alignment: Alignment.centerRight,
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            width: drawerWidth,
+            height: double.infinity,
+            decoration: BoxDecoration(
+              color: _bgTop,
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(22),
+                bottomLeft: Radius.circular(22),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.22),
+                  blurRadius: 26,
+                  offset: const Offset(-4, 0),
+                ),
+              ],
+            ),
+            child: SafeArea(
+              child: StatefulBuilder(
+                builder: (ctx, setSheet) {
           final chapters = <int>[
             for (var i = 0; i < widget.chapters.length; i++)
               if (kwToc.isEmpty || widget.chapters[i].name.contains(kwToc)) i,
@@ -8496,20 +8521,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             dragTipY = localY;
           }
 
-          return Container(
-            constraints:
-                // 最高半屏（用户 2026-10-12）：章节列表自带滚动 ✓
-                BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.5),
-            decoration: BoxDecoration(
-              color: _bgTop,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(22),
-              ),
-            ),
-            child: SafeArea(
-              top: false,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+          return Column(
+            mainAxisSize: MainAxisSize.max,
                 children: [
                   const SizedBox(height: 8),
                   Row(
@@ -9246,11 +9259,22 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     ),
                   ],
                 ],
+          );
+                },
               ),
             ),
-          );
-        },
+          ),
+        ),
       ),
+      transitionBuilder: (ctx, anim, secondary, child) {
+        final offset = Tween<Offset>(
+          begin: const Offset(1, 0),
+          end: Offset.zero,
+        ).animate(
+          CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
+        );
+        return SlideTransition(position: offset, child: child);
+      },
     );
     tocCtrl.dispose();
   }

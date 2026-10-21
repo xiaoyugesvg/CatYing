@@ -663,7 +663,7 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
                       behavior: HitTestBehavior.opaque,
                       onTap: onMenu,
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        padding: const EdgeInsets.only(left: 4, right: 2),
                         child: Icon(
                           Icons.more_horiz_rounded,
                           size: 18,
@@ -671,11 +671,6 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
                         ),
                       ),
                     ),
-                  Icon(
-                    Icons.chevron_right_rounded,
-                    size: 18,
-                    color: AppTheme.textTertiary,
-                  ),
                 ],
               ),
             ),
@@ -1627,26 +1622,26 @@ class _MiniAppCard extends StatelessWidget {
                 ),
               ),
             ),
-            // 菜单按钮（右上角）：长按卡片 = 拖动排序，菜单放这里
+            // 菜单按钮（右上角）：轻量图标 + 投影，压深色底也能看清
             if (onMenu != null)
               Positioned(
-                top: 2,
-                right: 2,
+                top: 0,
+                right: 0,
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: onMenu,
-                  child: Container(
-                    width: 24,
-                    height: 24,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.18),
-                      shape: BoxShape.circle,
-                    ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
                     child: Icon(
                       Icons.more_horiz_rounded,
-                      size: 15,
+                      size: 18,
                       color: Colors.white.withValues(alpha: 0.9),
+                      shadows: [
+                        Shadow(
+                          color: Colors.black.withValues(alpha: 0.35),
+                          blurRadius: 4,
+                        ),
+                      ],
                     ),
                   ),
                 ),

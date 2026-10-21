@@ -87,21 +87,125 @@ class _RssPageState extends State<RssPage> {
   /// 不能直接用 `src.channels` 的静态文本解析）。
   List<RssChannel> _channels = const [];
 
+  /// 内嵌网页的浏览历史状态（右侧竖排导航栏用）
+  bool _webCanBack = false;
+  bool _webCanForward = false;
+
   WebViewController _webFor(String url) {
     if (_web != null && _webUrl == url) return _web!;
     _webUrl = url;
+    _webCanBack = false;
+    _webCanForward = false;
     _web = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(AppTheme.backgroundPrimary)
       ..setNavigationDelegate(NavigationDelegate(
         // 去广告：站点型 RSS 源就是直接开网站，广告最多的一类
         onPageStarted: (u) => AdBlockService.instance.injectInto(_web!, u),
-        onPageFinished: (u) => AdBlockService.instance.injectInto(_web!, u),
+        onPageFinished: (u) {
+          AdBlockService.instance.injectInto(_web!, u);
+          _refreshWebNavState();
+        },
       ));
     AdBlockService.attach(_web!);
     AdBlockService.instance.ensureLoaded();
     _web!.loadRequest(Uri.parse(url));
     return _web!;
+  }
+
+  Future<void> _refreshWebNavState() async {
+    final c = _web;
+    if (c == null || !mounted) return;
+    try {
+      final back = await c.canGoBack();
+      final forward = await c.canGoForward();
+      if (!mounted) return;
+      if (back != _webCanBack || forward != _webCanForward) {
+        setState(() {
+          _webCanBack = back;
+          _webCanForward = forward;
+        });
+      }
+    } catch (_) {}
+  }
+
+  /// 站点型 RSS 的右侧竖排导航（上一页 / 下一页 / 刷新 / 回主页）。
+  ///
+  /// 内嵌网页点进二级页后原来没有返回入口，也回不到源站首页。
+  Widget _webNavBar(RssSource src) {
+    final c = _webFor(src.url);
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundSecondary.withValues(alpha: 0.94),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppTheme.borderLight, width: 0.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _webNavBtn(
+            Icons.arrow_back_ios_new_rounded,
+            '上一页',
+            _webCanBack,
+            () async {
+              if (await c.canGoBack()) await c.goBack();
+            },
+          ),
+          _webNavBtn(
+            Icons.arrow_forward_ios_rounded,
+            '下一页',
+            _webCanForward,
+            () async {
+              if (await c.canGoForward()) await c.goForward();
+            },
+          ),
+          _webNavBtn(Icons.refresh_rounded, '刷新', true, () => c.reload()),
+          Container(
+            width: 20,
+            height: 0.5,
+            margin: const EdgeInsets.symmetric(vertical: 2),
+            color: AppTheme.borderLight,
+          ),
+          _webNavBtn(
+            Icons.home_rounded,
+            '回到主页',
+            true,
+            () => c.loadRequest(Uri.parse(src.url)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _webNavBtn(
+    IconData icon,
+    String tip,
+    bool enabled,
+    VoidCallback onTap,
+  ) {
+    final color = enabled
+        ? AppTheme.textPrimary
+        : AppTheme.textTertiary.withValues(alpha: 0.35);
+    return Tooltip(
+      message: tip,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: enabled ? onTap : null,
+        child: SizedBox(
+          width: 38,
+          height: 36,
+          child: Icon(icon, size: 17, color: color),
+        ),
+      ),
+    );
   }
 
   /// ── 懒启动（用户 2026-10-15：「RSS、网页以及海阔默认关闭」）──────────
@@ -578,6 +682,16 @@ class _RssPageState extends State<RssPage> {
       return Stack(
         children: [
           Positioned.fill(child: WebViewWidget(controller: _webFor(src.url))),
+          // 右侧竖排浏览器导航：上一页 / 下一页 / 刷新 / 回主页
+          Positioned(
+            right: 8,
+            top: 0,
+            bottom: 0,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: _webNavBar(src),
+            ),
+          ),
           // 去广告悬浮球：点它 → 点页面上的广告 → 存规则（重启后仍生效）
           ListenableBuilder(
             listenable: AdBlockService.instance,
