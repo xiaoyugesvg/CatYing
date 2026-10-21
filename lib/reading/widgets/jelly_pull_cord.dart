@@ -82,20 +82,24 @@ class _JellyPullCordState extends State<JellyPullCord> {
 
     if (widget.onTap == null) return _constrain(cord);
 
-    return _constrain(GestureDetector(
+    // 🔴 热区：绳子本体只有 6×20，手指很难点中（"拉绳点击没反应"的根因）。
+    //   · 横向：左右各垫 9px → 24 宽（Padding 在 GestureDetector 里面）；
+    //   · 纵向：GestureDetector 必须包在 `_constrain` **外面** ——
+    //     之前包在里面时，`_constrain` 给的 8px 余高在 GestureDetector 之外，
+    //     那 8px 根本点不到，热区实际只有 24×20。包在外面才是 24×28。
+    return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTapDown: (_) => setState(() => _pressed = true),
       onTapUp: (_) => setState(() => _pressed = false),
       onTapCancel: () => setState(() => _pressed = false),
       onTap: widget.enabled ? widget.onTap : null,
-      // 🔴 热区扩宽：绳子本体只有 6px 宽（环外径），裸热区 6×20
-      //    手指根本点不中（"拉绳点击没反应"的根因）。左右各垫 9px →
-      //    热区 24 宽，视觉不变（Padding 在 GestureDetector 里面）。
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 9),
-        child: cord,
+      child: _constrain(
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 9),
+          child: cord,
+        ),
       ),
-    ));
+    );
   }
 
   /// 把绳子限制在给定高度内。

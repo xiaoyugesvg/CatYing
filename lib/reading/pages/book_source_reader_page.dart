@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:screen_brightness/screen_brightness.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/book_source.dart';
@@ -1001,6 +1002,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         // 先清旧分页再重算 ✓（与 :1911 的 `_pages = const []` 同款 ✓）
         setState(() => _pages = const []);
         _paginate();
+        // 🔴 缓存命中也必须「回到第 1 页 + 落盘进度」✗ —— 原来只有未命中分支
+        //    有这两步 ✓ ⇒ 从目录点到一个**读过/已预取**的章节时：
+        //      · 上下滚动模式：`_scrollView` 的滚动位置保持上一章的 ✗
+        //        （落到新章中间/底部，看着像"跳错章"）；
+        //      · 进度键没更新 ✗ ⇒ 退出再进还是回到旧章。
+        //    `_paginate()` 里换章已把 `_pageIndex` 归零 ✓，这里同步 PageView。
+        if (_pageCtrl.hasClients) _pageCtrl.jumpToPage(0);
+        await _saveProgress();
       }
       _prefetch(i + 1);
       return;
@@ -2021,6 +2030,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 上下模式 / 分页失败时的兜底：整章滚动
   Widget _scrollView(Color fg) {
     return SingleChildScrollView(
+      // 🔴 换章必须重建滚动视图（= 回到章首）✗：
+      //    未命中缓存时会先走 `_loading` 分支（滚动视图被移除 ✓），所以看着正常；
+      //    但**缓存命中**时没有 loading 帧 ⇒ 同一个 `SingleChildScrollView`
+      //    被复用、滚动偏移留在上一章 ✗（目录跳转会"落在新章中间"）。
+      key: ValueKey('reader-scroll-$_index'),
       padding: EdgeInsets.fromLTRB(_padLeft, _padTop, _padRight, _padBottom),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -8463,10 +8477,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     const tabNames = ['目录', '书签', '笔记'];
     // 目录 tab 右缘快速拖动定位（Cmbok 同款）：拖动只滚动列表不跳转 ✓，
     // 拖动时浮现章节标题提示 ✓，搜索状态不可用 ✓。
-    final tocCtrl = ScrollController();
+    // 定位/滚动改用漫画阅读器同款 ScrollablePositionedList ✓：
+    // jumpTo(index:) 按条目下标精确跳，不再估行高 ✓。
+    final itemScrollController = ItemScrollController();
+    final itemPositionsListener = ItemPositionsListener.create();
     var showDragTip = false;
     var dragTipName = '';
     var dragTipY = 0.0;
+    var didAutoScrollToc = false;
 
     // 和漫画阅读器一致：目录 / 书签 / 笔记从**右侧滑入**（不是底部弹层）。
     final drawerWidth = MediaQuery.sizeOf(context).width * 0.78;
@@ -8509,14 +8527,31 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               ..clear()
               ..addAll(rev);
           }
-          // 右缘拖动 → 按比例滚动章节列表（只滚动不跳转 ✓），并记录提示章节名
+          // 首次打开：定位到「当前章」（漫画阅读器同款 ✓）。
+          //   · jumpTo(index:) 按条目下标精确跳，100% 命中 ✓；
+          //   · ⚠️ 只跳一次（didAutoScrollToc）—— 搜索/切排序重建列表时
+          //     不重新定位，否则会边打字边乱滚 ✓；
+          //   · 必须等首帧（列表 attach 后）再跳 ✓。
+          if (!didAutoScrollToc) {
+            didAutoScrollToc = true;
+            final cur = chapters.indexOf(_index);
+            if (cur > 0) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (itemScrollController.isAttached) {
+                  itemScrollController.jumpTo(index: cur);
+                }
+              });
+            }
+          }
+          // 右缘拖动 → 按比例换算成章节下标精确跳 ✓
+          //（比旧版按偏移比例滚动更准：目标章一定贴在列表顶部），并记录提示章节名
           void dragTocTo(double localY, double stripH) {
-            if (!tocCtrl.hasClients || chapters.isEmpty) return;
-            final m = tocCtrl.position.maxScrollExtent;
-            if (m <= 0) return;
+            if (chapters.isEmpty) return;
             final ratio = (localY / stripH).clamp(0.0, 1.0);
-            tocCtrl.jumpTo(ratio * m);
             final idx = (ratio * (chapters.length - 1)).round();
+            if (itemScrollController.isAttached) {
+              itemScrollController.jumpTo(index: idx);
+            }
             dragTipName = widget.chapters[chapters[idx]].name;
             dragTipY = localY;
           }
@@ -8657,8 +8692,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     Flexible(
                       child: Stack(
                         children: [
-                          ListView.builder(
-                            controller: tocCtrl,
+                          ScrollablePositionedList.builder(
+                            itemScrollController: itemScrollController,
+                            itemPositionsListener: itemPositionsListener,
                             itemCount: chapters.length,
                             itemBuilder: (c, i) {
                               final ci = chapters[i];
@@ -8759,31 +8795,52 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                             color: _fgMuted,
                                           ),
                                         ),
-                                        // 拖动指示块（按滚动比例定位）
-                                        if (tocCtrl.hasClients &&
-                                            tocCtrl.position.maxScrollExtent >
-                                                0)
-                                          Positioned(
-                                            top:
-                                                (tocCtrl.offset /
-                                                        tocCtrl
-                                                            .position
-                                                            .maxScrollExtent *
-                                                        (h - 34))
-                                                    .clamp(0.0, h - 34),
-                                            left: 3,
-                                            child: Container(
-                                              width: 20,
-                                              height: 34,
-                                              decoration: BoxDecoration(
-                                                color: _fg.withValues(
-                                                  alpha: 0.35,
+                                        // 拖动指示块（按当前可见章下标比例定位；
+                                        // 监听 ItemPositions，滚动时自动刷新 ✓）
+                                        Positioned(
+                                          top: 0,
+                                          left: 3,
+                                          child: ValueListenableBuilder<
+                                              Iterable<ItemPosition>>(
+                                            valueListenable:
+                                                itemPositionsListener
+                                                    .itemPositions,
+                                            builder: (c, positions, _) {
+                                              final ratio =
+                                                  positions.isEmpty ||
+                                                          chapters.length <= 1
+                                                      ? 0.0
+                                                      : (positions
+                                                            .reduce((a, b) =>
+                                                                a.index <
+                                                                        b.index
+                                                                    ? a
+                                                                    : b)
+                                                            .index /
+                                                        (chapters.length - 1));
+                                              return Transform.translate(
+                                                offset: Offset(
+                                                  0,
+                                                  (ratio.clamp(0.0, 1.0) *
+                                                          (h - 34))
+                                                      .clamp(0.0, h - 34),
                                                 ),
-                                                borderRadius:
-                                                    BorderRadius.circular(8),
-                                              ),
-                                            ),
+                                                child: Container(
+                                                  width: 20,
+                                                  height: 34,
+                                                  decoration: BoxDecoration(
+                                                    color: _fg.withValues(
+                                                      alpha: 0.35,
+                                                    ),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            8),
+                                                  ),
+                                                ),
+                                              );
+                                            },
                                           ),
+                                        ),
                                       ],
                                     ),
                                   );
@@ -9276,12 +9333,33 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         return SlideTransition(position: offset, child: child);
       },
     );
-    tocCtrl.dispose();
+    // ItemScrollController / ItemPositionsListener 是普通对象（非 ChangeNotifier），
+    // 不需要 dispose ✓。
+    // ⚠️ 三个 TextEditingController 不能在这里立刻 dispose ✗：
+    //   `await showGeneralDialog` 在**退场动画开始**时就返回了 ✓，
+    //   接下来 260ms 内 TextField 还挂在 Overlay 上 ⇒ 提前 dispose 会让
+    //   TextField 在重建/销毁时用到已销毁的 controller（"used after being
+    //   disposed" ✗）。等退场动画走完再回收 ✓。
+    Future<void>.delayed(const Duration(milliseconds: 320), () {
+      ctrlToc.dispose();
+      ctrlBm.dispose();
+      ctrlNote.dispose();
+    });
   }
 
   /// 段落 → 所在页下标（书签跳转用）
   int? _pageOfParagraph(int pi) {
     if (pi >= _paragraphs.length) return null;
+    // 优先用「块下标」定位：`_pages` 是由 `[章标题, 段0, 段1, …]` 分页来的
+    // ⇒ 段落 pi 对应块 pi+1（见 `_paginate` 里构造 blocks 的地方）。
+    // 原来按「段落文本相等」匹配 ✗ —— 同一章出现重复句子（"……"、"他说"）时
+    // 会命中第一处 ⇒ 书签跳到错误页。
+    for (var i = 0; i < _pages.length; i++) {
+      for (final e in _pages[i].entries) {
+        if (e.blockIndex >= 0 && e.blockIndex - 1 == pi) return i;
+      }
+    }
+    // 兜底：极少数旧分页数据没有 blockIndex，仍按文本匹配
     final text = _paragraphs[pi];
     for (var i = 0; i < _pages.length; i++) {
       for (final e in _pages[i].entries) {

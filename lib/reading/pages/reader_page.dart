@@ -1616,14 +1616,17 @@ class _ReaderPageState extends State<ReaderPage> {
 
   // ---------------- 目录 ----------------
 
+  /// 目录「自动定位当前话」的一次性守卫 ✓
+  /// （原来写在 build 里每次重建都跳 ✗，搜索后 index 还会对不上而乱滚）
+  bool _tocDidAutoScroll = false;
+
   /// 章节目录抽屉（同图书阅读器：右侧滑入，自动定位当前话）。
   /// 双 tab：目录（搜索章节 + ↑↓ + 每行☁已缓存） / 书签（搜索书签 + 全部 + 空态）。
   void _showToc() {
     final chapters = _allChapters;
     if (chapters.isEmpty) return;
     final drawerWidth = MediaQuery.sizeOf(context).width * 0.78;
-    final currentIndex =
-        chapters.indexWhere((c) => c.id == _currentChapter.id);
+    _tocDidAutoScroll = false; // 每次打开抽屉重新允许定位一次 ✓
     final itemScrollController = ItemScrollController();
     final bookmarkService = MangaBookmarkService();
     showGeneralDialog(
@@ -1835,7 +1838,6 @@ class _ReaderPageState extends State<ReaderPage> {
                               ? _buildTocChapterList(
                                   ctx,
                                   filteredChapters,
-                                  currentIndex,
                                   itemScrollController,
                                   textColor,
                                   subColor,
@@ -1914,16 +1916,23 @@ class _ReaderPageState extends State<ReaderPage> {
   Widget _buildTocChapterList(
     BuildContext ctx,
     List<ComicChapter> chapters,
-    int currentIndex,
     ItemScrollController itemScrollController,
     Color textColor,
     Color subColor,
   ) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (itemScrollController.isAttached) {
-        itemScrollController.jumpTo(index: currentIndex);
-      }
-    });
+    // 🔴 打开时定位到「当前话」——修两个问题：
+    //   1. 原来跳的 index 是按**全量**章节算的 ✗，搜索过滤后 filteredChapters
+    //      变短，index 对不上 ⇒ 边打字列表边乱跳；现在按**筛选后列表**取下标 ✓；
+    //   2. 原来写在 build 里每次重建都跳 ✗ ⇒ 加 `_tocDidAutoScroll` 只跳一次 ✓。
+    final idx = chapters.indexWhere((c) => c.id == _currentChapter.id);
+    if (!_tocDidAutoScroll && idx >= 0) {
+      _tocDidAutoScroll = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (itemScrollController.isAttached) {
+          itemScrollController.jumpTo(index: idx);
+        }
+      });
+    }
     return ScrollablePositionedList.builder(
       itemScrollController: itemScrollController,
       padding: const EdgeInsets.symmetric(vertical: 4),

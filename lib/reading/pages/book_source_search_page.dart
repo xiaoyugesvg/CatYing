@@ -721,7 +721,11 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                 // 原注释保留 ✓：用 pop 而不是再 push 一个图书页：否则连点几下会在栈里
                 // 堆出一串页面，返回键要按很多次才出得去。
                 onTap: () {
-                  if (shellEmbeddedPage.value != null) {
+                  // ⚠️ 只有「当前内嵌的确实是本页」才走 closeEmbeddedPage：
+                  //    否则（比如别的 tab 里还挂着一个内嵌页，本页是 push 进来的）
+                  //    会把别人的内嵌页关掉，自己却留在栈里 → 看起来像"点了没反应"。
+                  final embedded = shellEmbeddedPage.value;
+                  if (embedded != null && identical(embedded, widget)) {
                     closeEmbeddedPage();
                   } else {
                     Navigator.maybePop(context);
