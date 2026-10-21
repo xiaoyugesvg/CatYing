@@ -3286,47 +3286,40 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   // 手动判定"点击"（位移小 + 时长短），单指一定响应 ✓。
   Offset? _tapDownPos;
   DateTime? _tapDownTime;
-  // 当前按下的指针数：多指（漫画双指缩放 / 两指同时点）时不判定点击，
-  // 避免抬起瞬间被误判成翻页 / 呼出。
-  int _activePointers = 0;
+  // 只认「第一根手指」的 down/up（按 pointer id 配对，不用计数器）。
+  // 计数器在指针被 cancel 时会漏减 → 之后单指点击永远被当成"还有手指按着"
+  // 直接丢弃（用户 2026-10-21：单指死活呼不出面板，双指反而能出来）。
+  int? _tapPointer;
 
   void _onPointerDown(PointerDownEvent e) {
-    _activePointers++;
-    // 只记录第一根手指：双指缩放 / 双指点击时第二根手指的 down 不覆盖基准
-    if (_activePointers == 1) {
-      _tapDownPos = e.position;
-      _tapDownTime = DateTime.now();
-    }
+    // 已有手指按着（双指缩放 / 两指同时点）→ 第二根手指不参与点击判定
+    if (_tapPointer != null) return;
+    _tapPointer = e.pointer;
+    _tapDownPos = e.position;
+    _tapDownTime = DateTime.now();
   }
 
   /// 指针被取消（滚动/翻页抢走手势、来电、切后台等）。
-  ///
-  /// 🔴 必须处理：以前只监听 up，一旦某次手势以 cancel 结束，
-  /// `_activePointers` 就永远停在 1 ⇒ 之后每次点击在 up 时都判定成
-  /// "还有手指按着"被丢弃 ⇒ **功能面板越来越难呼出**（用户 2026-10-21）。
   void _onPointerCancel(PointerCancelEvent e) {
-    _activePointers--;
-    if (_activePointers < 0) _activePointers = 0;
+    if (e.pointer != _tapPointer) return;
+    _tapPointer = null;
     _tapDownPos = null;
     _tapDownTime = null;
   }
 
   void _onPointerUp(PointerUpEvent e) {
-    _activePointers--;
-    if (_activePointers < 0) _activePointers = 0;
-    // 还有其它手指按着（双指缩放 / 双指点击过程中）→ 不是单指点击，跳过
-    if (_activePointers > 0) {
-      _tapDownPos = null;
-      _tapDownTime = null;
-      return;
-    }
+    // 抬起的不是基准手指（两指先后抬起）→ 忽略
+    if (e.pointer != _tapPointer) return;
+    _tapPointer = null;
     final down = _tapDownPos;
     final t0 = _tapDownTime;
     _tapDownPos = null;
     _tapDownTime = null;
     if (down == null || t0 == null) return;
     final dt = DateTime.now().difference(t0).inMilliseconds;
-    if (dt > 350) return; // 长按选字/长按书签，不是点击
+    // 450ms：iOS 上正常单指点击很容易超过 350ms（尤其正文里有 SelectableText
+    // 参与手势竞技场时）→ 之前 350ms 会把它当长按直接丢弃，表现为"单指点了没反应"。
+    if (dt > 450) return; // 长按选字/长按书签，不是点击
     final dist = (e.position - down).distance;
     if (dist > 24) return; // 滑动翻页中，不是点击
     final size = MediaQuery.of(context).size;

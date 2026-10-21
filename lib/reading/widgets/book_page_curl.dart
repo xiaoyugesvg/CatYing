@@ -111,8 +111,8 @@ class _BookPageCurlState extends State<BookPageCurl>
     if (pos == null || t == null) return;
     final dist = (e.position - pos).distance;
     final dt = DateTime.now().difference(t).inMilliseconds;
-    // 长按选字(>350ms)或拖动选区(位移大)交给下层 SelectableText，仅短按单击才翻页
-    if (dist > 18 || dt > 350) return;
+    // 长按选字(>450ms)或拖动选区(位移大)交给下层 SelectableText，仅短按单击才翻页
+    if (dist > 18 || dt > 450) return;
     final w = _width;
     if (w <= 0) return;
     final dx = e.position.dx;
