@@ -348,6 +348,27 @@ class ThirdPartySourceStore {
     await _persist();
   }
 
+  /// 把某个源挪到**同类源（kind 相同）的第一位**。
+  ///
+  /// 用于「五源合一」这类要作为洛雪**首选**的源：新装时它本来就在 `_loadLxSources`
+  /// 的第一位，但老设备上 `addAll` 只会**追加**到列表末尾 ⇒ 播放时排在所有洛雪源
+  /// 后面。这里统一挪一次；已经在第一位就不写盘。
+  Future<void> moveToSameKindFront(String id) async {
+    final idx = _items.indexWhere((e) => e.id == id);
+    if (idx < 0) return;
+    final item = _items[idx];
+    final firstSame = _items.indexWhere((e) => e.kind == item.kind);
+    if (firstSame == idx) return;
+    _items.removeAt(idx);
+    final target = _items.indexWhere((e) => e.kind == item.kind);
+    if (target < 0) {
+      _items.add(item);
+    } else {
+      _items.insert(target, item);
+    }
+    await _persist();
+  }
+
   Future<void> setEnabled(String id, bool enabled) async {
     final idx = _items.indexWhere((e) => e.id == id);
     if (idx < 0) return;

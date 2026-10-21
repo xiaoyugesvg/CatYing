@@ -70,8 +70,8 @@ class PluginMarketService {
   static const _indexKey = 'music.pluginIndex.v1';
   static const _versionsKey = 'music.pluginVersions.v1';
 
-  /// 单个脚本大小上限（与 BuiltinSourcesService 保持一致）
-  static const int _maxScriptBytes = 2 * 1024 * 1024;
+  /// 单个脚本大小上限（与 BuiltinSourcesService 保持一致：agg 已到 2.9MB）
+  static const int _maxScriptBytes = 4 * 1024 * 1024;
 
   final _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 10),
@@ -256,7 +256,7 @@ class PluginMarketService {
             ? resp.data as String
             : (resp.data?.toString() ?? '');
         if (script.trim().isEmpty) return '下载内容为空';
-        if (script.length > _maxScriptBytes) return '插件脚本过大（>2MB）';
+        if (script.length > _maxScriptBytes) return '插件脚本过大（>4MB）';
         await PluginScriptCache.instance.write(e.fileName, script);
       }
       if (cur != null) {

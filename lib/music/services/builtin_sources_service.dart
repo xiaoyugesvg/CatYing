@@ -80,6 +80,9 @@ class BuiltinSourcesService {
         await store.addAll(need);
       }
     }
+    // ✅ 2026-10-21：「五源合一」固定为**洛雪第一个源**
+    //   （新装时按 _lxCandidates 顺序就在最前；老设备是追加的，这里挪一次）
+    await store.moveToSameKindFront('builtin_lx_five');
     // ✅ 2026-10-19：把**实测失效**的内置源关掉。
     //   init 只补"缺失"的、从不改"已存在"的 ⇒ 老设备里那些死源仍是启用状态，
     //   每次播放都先撞一次死源（试播超时 + 最后失败）。这里显式关一遍 ✓
@@ -130,6 +133,10 @@ class BuiltinSourcesService {
       'https://ghproxy.net/raw.githubusercontent.com/pdone/lx-music-source/main';
 
   static const _lxCandidates = <({String path, String name})>[
+    // ✅ 用户 2026-10-21 提供：五源合一（洛雪自定义源，仅 musicUrl）
+    //   tx/wy/kg/kw/mg 五家竞速取链，Node 沙箱实测 tx/wy/kw/mg 均能出真直链。
+    //   放在**第一位**：它是纯取链源，试播时优先命中。
+    (path: 'five', name: '五源合一'),
     (path: 'sixyin', name: 'SixYin'),
     (path: 'huibq', name: 'Huibq'),
     (path: 'flower', name: 'Flower'),
@@ -153,6 +160,14 @@ class BuiltinSourcesService {
     (path: 'stellarwave', name: 'StellarWave星澜'),
     (path: 'hywmusic', name: 'HYWMusic'),
   ];
+
+  /// 个别洛雪源不在 pdone 仓库里（没有 `<path>/latest.js`），更新地址单独给。
+  static const Map<String, String> _lxUpdateUrls = {
+    'five': 'https://hebijunge.github.io/musicfree-plugins/plugins/five-source-lx.plugin.v1.2.0.js',
+  };
+
+  static String _lxUpdateUrl(String path) =>
+      _lxUpdateUrls[path] ?? '$_lxRawBase/$path/latest.js';
 
   /// **失效源名单**（洛雪源 path）：后端已停服 ⇒ 注册时**默认禁用**，
   /// 避免用户误选、也避免每次试播先撞一次死源。
@@ -193,7 +208,7 @@ class BuiltinSourcesService {
           // ✅ 2026-10-19：失效源（后端已停服）默认**禁用** ⇒ 不参与试播
           enabled: !_isDeadLx(c.path),
           isBuiltin: true,
-          updateUrl: '$_lxRawBase/${c.path}/latest.js',
+          updateUrl: _lxUpdateUrl(c.path),
         ));
       } catch (e) {
         debugPrint('[BuiltinSources] 加载洛雪源 ${c.name} 失败: $e');
@@ -207,7 +222,7 @@ class BuiltinSourcesService {
     for (final c in _lxCandidates) {
       try {
         final resp =
-            await _dio.get('$_lxRawBase/${c.path}/latest.js');
+            await _dio.get(_lxUpdateUrl(c.path));
         final script = resp.data is String
             ? resp.data as String
             : (resp.data?.toString() ?? '');
@@ -233,9 +248,9 @@ class BuiltinSourcesService {
 
   /// 单个插件脚本的**大小上限**（超过就跳过，防被塞垃圾）
   ///
-  /// 实测最大的 `agg-source.plugin` 约 1.7 MB，所以 2 MB 足够；
-  /// 原来是 512 KB —— 那个值会**误杀** agg 这类大插件。
-  static const _mfMaxScriptBytes = 2 * 1024 * 1024;
+  /// 实测最大的 `agg-source.plugin` 已到 2.9 MB（v1.9.18），所以上限提到 4 MB；
+  /// 与 Node 侧 `lx_engine.js` 的 `MAX_MF_SCRIPT_CHARS` 对齐。
+  static const _mfMaxScriptBytes = 4 * 1024 * 1024;
 
   /// 单次 [checkForUpdates] 最多**新增**多少个插件。
   ///

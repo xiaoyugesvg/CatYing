@@ -177,11 +177,11 @@ flutter:
     #   对应代码已去掉内置兜底（SourceConfigStore.loadLocal / BookSourceStore）。
     # ── 🔴 出厂内置**音乐源**（之前漏声明 → 从没打进包）───────────────
     #
-    # 用户 2026 要求：「这些源全部要加进去」（MusicFree 官方索引里的 50 个）。
+    # 用户 2026 要求：「这些源全部要加进去」（MusicFree 官方索引里的全部插件）。
     #
     # 原来这一条**不存在**：
-    #   · `assets/music/lx/`          10 个洛雪源
-    #   · `assets/music/musicfree/`   50 个 MusicFree 插件 + `.index.json`
+    #   · `assets/music/lx/`          15 个洛雪源（含「五源合一」）
+    #   · `assets/music/musicfree/`   34 个 MusicFree 插件 + `.index.json`
     # 两者都只在磁盘上、**从未被 pubspec 声明** →
     # `rootBundle.loadString('assets/music/…')` 在**真机/发布包**里必然失败 →
     # 而 `BuiltinSourcesService._loadMusicFreeSources()` 里

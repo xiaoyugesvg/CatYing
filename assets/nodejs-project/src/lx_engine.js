@@ -62,12 +62,12 @@ const MAX_SCRIPT_CHARS = 512 * 1024;
 /**
  * MusicFree 插件的上限（2026-10-21）。
  *
- * 实测 `agg-source` 有 **1.43 MB**（聚合十几个通道），用 512K 的上限会
- * 直接报「脚本过大」——它明明是内置源却永远加载不了 ✗。
- * 这里与 Dart 侧 `BuiltinSourcesService._mfMaxScriptBytes`（2 MB）对齐。
+ * 实测 `agg-source` 已涨到 **2.9 MB**（聚合十几个通道），原先的 1.43MB→2MB
+ * 上限都会直接报「脚本过大」——它明明是内置源却永远加载不了 ✗。
+ * 这里与 Dart 侧 `BuiltinSourcesService._mfMaxScriptBytes`（4 MB）对齐。
  * LX 脚本不受影响（仍走上面的 512K）。
  */
-const MAX_MF_SCRIPT_CHARS = 2 * 1024 * 1024;
+const MAX_MF_SCRIPT_CHARS = 4 * 1024 * 1024;
 
 /** 单次请求超时 */
 const REQUEST_TIMEOUT_MS = 12000;
