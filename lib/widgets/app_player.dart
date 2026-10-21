@@ -3,13 +3,36 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:video_player/video_player.dart';
 
+import '../services/media_proxy_service.dart';
+
 /// 封装 video_player（iOS/macOS/Android = AVPlayer）的播放内核。
 /// API 对齐 media_kit 的调用面，方便 VideoPlayerWidget / 详情页无感切换。
 class AppMedia {
   final String url;
   final Map<String, String>? httpHeaders;
   final Duration? start;
-  AppMedia(this.url, {this.httpHeaders, this.start});
+
+  /// 统一走**本机播放代理**（2026-10-21）：
+  ///   · 带请求头（Referer/UA/Cookie）→ 必须代理，播放器内核不一定支持自定义头
+  ///   · m3u8 → 代理里把相对路径/密钥/分片改写成代理地址
+  /// 不需要代理时（本地文件 / 无头且非 m3u8）直接用原地址。
+  factory AppMedia(
+    String url, {
+    Map<String, String>? httpHeaders,
+    Duration? start,
+  }) {
+    final proxied = MediaProxyService.instance.proxify(
+      url,
+      headers: httpHeaders,
+    );
+    if (proxied != null) {
+      return AppMedia._(proxied, const {}, start);
+    }
+    return AppMedia._(url, httpHeaders, start);
+  }
+
+  const AppMedia._(this.url, this.httpHeaders, this.start);
+
   String get uri => url;
 }
 

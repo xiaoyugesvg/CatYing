@@ -34,6 +34,7 @@ import 'widgets/video_player_pip.dart';
 import 'common/appearance_sync.dart';
 import 'common/theme_mode_store.dart';
 import 'services/main_tab_controller.dart';
+import 'services/media_proxy_service.dart';
 import 'pages/content_view.dart';
 // ✅ **隐藏 WebView 的挂载点**（本轮 ✓）—— 见下方根 builder 里的说明 ✓
 import 'reading/source/webview_image_fetcher.dart';
@@ -86,6 +87,10 @@ class _TVBoxAppState extends State<TVBoxApp> with WidgetsBindingObserver {
 
     // 系统亮暗变化（「跟随系统」模式要用）
     WidgetsBinding.instance.addObserver(this);
+
+    // 本机播放代理：给播放器补 Referer/UA + 改写 m3u8（异步启动，
+    // 没起来时 AppMedia 会自动回落到原地址，不影响播放）
+    MediaProxyService.instance.start();
   }
 
   @override
