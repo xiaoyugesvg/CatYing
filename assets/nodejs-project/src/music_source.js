@@ -30,7 +30,12 @@ import axios from 'axios';
 // LX 脚本引擎（沙箱 + 超时，见文件头说明为什么不会像 flutter_tts 那样闪退）
 import { loadScript, runAction, engineInfo } from './lx_engine.js';
 // 第三方音源解析（模板法 / 脚本法）
-import { resolveSource, searchByMusicFree, lyricByMusicFree } from './source_resolver.js';
+import { resolveSource, searchByMusicFree, lyricByMusicFree,
+         topListsByMusicFree, topListDetailByMusicFree,
+         recommendSheetTagsByMusicFree, recommendSheetsByMusicFree,
+         sheetInfoByMusicFree, artistWorksByMusicFree,
+         musicInfoByMusicFree, variablesByMusicFree,
+         albumInfoByMusicFree } from './source_resolver.js';
 // ── 多平台：酷狗（第三方库 KuGouMusicApi 的 ESM 桥接层）──────────
 // 见 `kugou_source.js` 文件头（来源/许可/设备身份 bootstrap）。
 // 这里只 import 函数；上游 CJS 代码在桥接层内部用 createRequire 加载。
@@ -331,6 +336,31 @@ async function lyricByMusicFreeAction(source, song) {
 }
 
 /**
+ * MusicFree 插件类 action 的统一前置校验（2026-10-21 第一阶段）。
+ *
+ * 返回 null = 校验通过；否则返回失败结果（上层原样透传）。
+ * 与 [searchByMusicFreeAction] / [lyricByMusicFreeAction] 的判据一致：
+ * 只有 `kind:'musicfree'` 能用（LX 脚本的能力面是 request，不是这些 action）。
+ */
+function musicFreeGuard(source, action) {
+    if (!source || typeof source !== 'object') {
+        return { ok: false, error: '音源数据无效' };
+    }
+    if (source.enabled === false) {
+        return { ok: false, error: '该音源已停用' };
+    }
+    if (source.kind !== 'musicfree') {
+        return {
+            ok: false,
+            error:
+                `该音源不是 MusicFree 插件（kind=${source.kind || '未设置'}），` +
+                `不支持 ${action}`,
+        };
+    }
+    return null;
+}
+
+/**
  * 平台别名归一化。
  *
  * ⚠️ 为什么要有这个函数（而不是直接在 switch 里比字符串）：
@@ -431,6 +461,63 @@ async function handleMusicApi(body) {
     }
     if (action === 'lyricByMusicFree') {
         return lyricByMusicFreeAction(body.source, body.song);
+    }
+    // ── MusicFree 插件：榜单 / 推荐歌单 / 歌单详情 / 歌手作品 / 元信息 ──
+    //
+    // 2026-10-21 第一阶段「插件运行时补全」：这些 action 让插件从
+    // 「只给某首歌取地址的兜底源」变成**一个完整平台**。
+    // 全部只对 kind:'musicfree' 生效（见 musicFreeGuard）。
+    if (action === 'musicFreeTopLists') {
+        const bad = musicFreeGuard(body.source, 'getTopLists');
+        if (bad) return bad;
+        return topListsByMusicFree(body.source);
+    }
+    if (action === 'musicFreeTopListDetail') {
+        const bad = musicFreeGuard(body.source, 'getTopListDetail');
+        if (bad) return bad;
+        return topListDetailByMusicFree(body.source, body.topListItem);
+    }
+    if (action === 'musicFreeRecommendSheetTags') {
+        const bad = musicFreeGuard(body.source, 'getRecommendSheetTags');
+        if (bad) return bad;
+        return recommendSheetTagsByMusicFree(body.source);
+    }
+    if (action === 'musicFreeRecommendSheets') {
+        const bad = musicFreeGuard(body.source, 'getRecommendSheetsByTag');
+        if (bad) return bad;
+        return recommendSheetsByMusicFree(body.source, body.tag, body.page);
+    }
+    if (action === 'musicFreeSheetInfo') {
+        const bad = musicFreeGuard(body.source, 'getMusicSheetInfo');
+        if (bad) return bad;
+        return sheetInfoByMusicFree(body.source, body.sheetItem, body.page);
+    }
+    if (action === 'musicFreeArtistWorks') {
+        const bad = musicFreeGuard(body.source, 'getArtistWorks');
+        if (bad) return bad;
+        return artistWorksByMusicFree(
+            body.source,
+            body.artistItem,
+            body.page,
+            body.type || 'music',
+        );
+    }
+    if (action === 'musicFreeMusicInfo') {
+        const bad = musicFreeGuard(body.source, 'getMusicInfo');
+        if (bad) return bad;
+        return musicInfoByMusicFree(body.source, body.song);
+    }
+    // 插件声明的用户变量（登录 Cookie / 卡密 / 服务器地址…）
+    if (action === 'musicFreeVariables') {
+        const bad = musicFreeGuard(body.source, 'userVariables');
+        if (bad) return bad;
+        return variablesByMusicFree(body.source);
+    }
+    // 插件专辑详情（含曲目）—— 搜索"专辑"分类点进去用
+    if (action === 'musicFreeAlbumInfo') {
+        const bad = musicFreeGuard(body.source, 'getAlbumInfo');
+        if (bad) return bad;
+        return albumInfoByMusicFree(body.source, body.albumItem);
     }
     if (action === 'lxSelfTest') {
         return lxSelfTest();

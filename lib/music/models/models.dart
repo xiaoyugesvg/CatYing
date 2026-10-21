@@ -164,6 +164,26 @@ class Song {
   /// 直链需要带的请求头（如博听的 UA）。与 [directUrl] 配合使用。
   final Map<String, String> directHeaders;
 
+  /// **产出这首歌的 MusicFree 插件 id**（空串 = 不是插件来源）。
+  ///
+  /// ── 为什么需要（2026-10-21 第二阶段）──────────────────────────
+  /// 插件搜索出来的歌**没有平台归属**：Node 侧归一化后 `source` 缺省，
+  /// `Song.fromJson` 会落到 `netease` ⇒ 播放时拿插件自己的 id 去查网易云，
+  /// 必然取不到地址（和之前"QQ 歌被当成网易云"是同一类错）。
+  ///
+  /// 有了这个字段，播放器就能**先用这个插件解析**（见 `player_manager._load`），
+  /// `identityKey` 也把插件 id 算进去 —— 否则两个插件里同 id 的歌会被
+  /// 收藏/队列当成同一首。
+  final String pluginId;
+
+  /// MusicFree 插件条目里的 `_src`（多档 hash 等**插件私有字段**）。
+  ///
+  /// 酷狗等插件的 `getMediaSource` 只从 `musicItem._src` 取源，
+  /// 顶层扁平字段它根本不读。插件搜索/榜单产出的条目自带 `_src`，
+  /// 必须**原样存下来**并在取地址时回传，否则"能搜到但播不了"。
+  /// 非插件来源时为空表，序列化时省略。
+  final Map<String, dynamic> srcMap;
+
   const Song({
     required this.id,
     required this.name,
@@ -176,7 +196,44 @@ class Song {
     this.songmid = '',
     this.directUrl = '',
     this.directHeaders = const {},
+    this.pluginId = '',
+    this.srcMap = const {},
   });
+
+  /// 补上"这首歌来自哪个插件"（其它字段不变）
+  ///
+  /// ⚠️ 插件给的原生 id 经常是**字符串**（如 `kr_9092283E…`），而 `Song.id`
+  /// 是 int ⇒ `asInt` 会得到 0。这样所有插件歌的 `identityKey` 都会变成
+  /// `plugin:<插件>-0`（收藏/队列互相覆盖）✗。所以这里用 [stableHash]
+  /// 把字符串 id 映射成一个**跨进程稳定**的 int。
+  Song withPluginId(String id) => Song(
+        id: this.id == 0 && songmid.isNotEmpty
+            ? stableHash(songmid)
+            : this.id,
+        name: name,
+        artists: artists,
+        album: album,
+        coverUrl: coverUrl,
+        duration: duration,
+        source: source,
+        fee: fee,
+        songmid: songmid,
+        directUrl: directUrl,
+        directHeaders: directHeaders,
+        pluginId: id,
+        srcMap: srcMap,
+      );
+
+  /// FNV-1a 32 位哈希（**跨进程稳定**，不用 `String.hashCode`）——
+  /// 插件字符串 id → int，供 `Song.id` / `identityKey` 使用。
+  static int stableHash(String s) {
+    var h = 0x811c9dc5;
+    for (final c in s.codeUnits) {
+      h ^= c;
+      h = (h * 0x01000193) & 0xffffffff;
+    }
+    return h & 0x7fffffff;
+  }
 
   String get formattedDuration {
     final t = duration < 0 ? 0 : duration.toInt();
@@ -184,7 +241,10 @@ class Song {
   }
 
   /// 跨平台唯一标识（避免不同平台 id 撞车）
-  String get identityKey => '${source.key}-$id';
+  ///
+  /// 插件来源额外带 `plugin:` 前缀 —— 不同插件可能有相同的数字 id。
+  String get identityKey =>
+      pluginId.isEmpty ? '${source.key}-$id' : 'plugin:$pluginId-$id';
 
   /// 是否 VIP / 付费单曲（列表与播放器角标用）
   ///
@@ -208,6 +268,8 @@ class Song {
         'songmid': songmid,
         'directUrl': directUrl,
         'directHeaders': directHeaders,
+        if (pluginId.isNotEmpty) 'pluginId': pluginId,
+        if (srcMap.isNotEmpty) '_src': srcMap,
       };
 
   factory Song.fromJson(Map<String, dynamic> j) => Song(
@@ -251,6 +313,10 @@ class Song {
         // 博听直链（bookanAlbum 填充）：JSON 里可能是空串或缺失，容忍。
         directUrl: (j['directUrl'] ?? '').toString(),
         directHeaders: _stringMap(j['directHeaders']),
+        pluginId: (j['pluginId'] ?? '').toString(),
+        srcMap: j['_src'] is Map
+            ? Map<String, dynamic>.from(j['_src'] as Map)
+            : const {},
       );
 
   /// 按顺序取第一个非空字符串字段（兼容不同接口的字段命名）。

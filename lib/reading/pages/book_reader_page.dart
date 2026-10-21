@@ -1001,7 +1001,20 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   Widget _buildBody(bool isDark, Color textColor, Color bgColor) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      // 与书源阅读器统一的加载背景（用户 2026-10-21 提供素材）
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            'assets/icons/reader/loading_bg.png',
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => ColoredBox(color: bgColor),
+          ),
+          const Center(
+            child: CircularProgressIndicator(color: Colors.white70),
+          ),
+        ],
+      );
     }
     if (_error != null) {
       return Center(

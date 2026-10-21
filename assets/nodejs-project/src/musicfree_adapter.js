@@ -29,11 +29,44 @@
 
 import axios from 'axios';
 import { decodeHTML } from 'entities';
+import * as cheerioNs from 'cheerio';
+import CryptoJS from 'crypto-js';
+import dayjs from 'dayjs';
+import bigInt from 'big-integer';
+import * as pako from 'pako';
+import iconv from 'iconv-lite';
 
-/** 允许 MusicFree 插件 require 的模块（白名单，就这两个） */
+const cheerio = cheerioNs.default ?? cheerioNs;
+
+/**
+ * 允许 MusicFree 插件 require 的模块（白名单）。
+ *
+ * ── 2026-10-21 扩容（第一阶段：插件运行时补全）────────────────
+ * 原来只有 axios / he ⇒ 用 `require('cheerio')` 解析 HTML 的插件会直接
+ * 抛「脚本不允许 require('cheerio')」，只能被下架（见 Dart 侧
+ * `BuiltinSourcesService._blockedNames` 的历史注释）。
+ *
+ * 现在按 MusicFree 生态的常用模块补齐 —— **全部是项目里已有的真包**，
+ * 不新增依赖；`fs` / `child_process` / `process` / `vm` 依然拒绝：
+ *   · cheerio       —— HTML 解析（相声评书 / 172Mix / 电音阁 等 6 个源）
+ *   · crypto-js     —— MD5 / AES（大量站点的签名参数）
+ *   · dayjs         —— 日期（榜单、播放量筛选）
+ *   · big-integer   —— QQ 系 `songmid` 转换
+ *   · pako          —— zlib/gzip 响应解压
+ *   · iconv-lite    —— GBK 页面解码（老站点）
+ */
 export const MUSICFREE_MODULES = {
     axios,
     he: { decode: decodeHTML, decodeHTML },
+    cheerio,
+    'crypto-js': CryptoJS,
+    cryptoJs: CryptoJS,
+    dayjs,
+    'big-integer': bigInt,
+    bigInt,
+    pako,
+    'iconv-lite': iconv,
+    iconv,
 };
 
 /**
@@ -62,16 +95,52 @@ export function looksLikeMusicFree(script) {
  *
  * @returns {{ok:boolean, plugin?:object, error?:string, actions?:string[]}}
  */
-export async function loadMusicFreePlugin(script, loadScript) {
-    const loaded = await loadScript(script, { modules: MUSICFREE_MODULES });
+export async function loadMusicFreePlugin(script, loadScript, variables) {
+    const loaded = await loadScript(script, {
+        modules: MUSICFREE_MODULES,
+        // 2026-10-21 第三期：插件变量 → sandbox.env.getUserVariables()
+        variables: variables && typeof variables === 'object' ? variables : {},
+    });
     if (!loaded.ok) {
         return { ok: false, error: loaded.error };
     }
     // ⚠️ loadScript 会把 module.exports 里的函数平铺进 handlers，
     // 但 MusicFree 插件还需要**非函数字段**（platform / supportedSearchType /
-    // hints），所以这里直接读 handlers 里的函数 + 让调用方用 actions 判断。
+    // hints / userVariables），所以这里把原始导出也带出去。
     const actions = loaded.actions || [];
-    return { ok: true, actions, handlers: loaded.handlers, loaded };
+    return {
+        ok: true,
+        actions,
+        handlers: loaded.handlers,
+        exports: (loaded.handlers && loaded.handlers.__exports) || null,
+        loaded,
+    };
+}
+
+/**
+ * 取插件声明的**用户变量**（`userVariables: [{key,name,hint}]`）。
+ *
+ * 这是「登录变量」页要渲染的字段 —— 例如 B 站插件的 `biliCookie`、
+ * Apple Music 的 `appleMediaUserToken`、聚合源的 `hywCardKey`。
+ *
+ * @param {object|null} exports 插件的原始 module.exports
+ * @returns {Array<{key:string,name:string,hint:string}>}
+ */
+export function pluginUserVariables(exports) {
+    const raw = exports && exports.userVariables;
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    for (const v of raw) {
+        if (!v || typeof v !== 'object') continue;
+        const key = str(v.key).trim();
+        if (!key) continue;
+        out.push({
+            key,
+            name: str(v.name || v.label || key),
+            hint: str(v.hint || v.description || ''),
+        });
+    }
+    return out;
 }
 
 /**
@@ -112,6 +181,16 @@ export function pickAction(handlers, action) {
         lyric: ['getLyric', 'getLyricNew'],
         albumInfo: ['getAlbumInfo', 'getAlbumInfoNew'],
         musicInfo: ['getMusicInfo'],
+        // ── 2026-10-21 补齐（第一阶段：插件运行时补全）──────────────
+        // 这些是 MusicFree 插件生态里的标准导出，补齐后插件才算一个
+        // 完整平台（榜单 / 推荐歌单 / 歌单详情 / 歌手作品），
+        // 而不是只能给"某首歌"取播放地址。
+        topLists: ['getTopLists'],
+        topListDetail: ['getTopListDetail'],
+        recommendSheetTags: ['getRecommendSheetTags'],
+        recommendSheets: ['getRecommendSheetsByTag'],
+        sheetInfo: ['getMusicSheetInfo'],
+        artistWorks: ['getArtistWorks'],
     };
     for (const name of map[action] || []) {
         if (typeof handlers[name] === 'function') {
@@ -217,6 +296,280 @@ export function normalizeLyric(raw) {
 function str(v) {
     return v == null ? '' : String(v);
 }
+
+// ============================================================
+// 列表类 action 的归一化（2026-10-21 第一阶段新增）
+// ============================================================
+
+/**
+ * MusicFree 的通用分页壳。
+ *
+ * 各插件的返回形态不统一，实测有这几种：
+ *   · `{ isEnd, data: [item, …] }`      —— 标准
+ *   · `{ isEnd, data: { list: [...] } }`
+ *   · `[item, …]`                        —— 早期插件
+ */
+function unwrapList(raw) {
+    if (raw == null) return { arr: [], isEnd: true };
+    if (Array.isArray(raw)) return { arr: raw, isEnd: false };
+    if (typeof raw === 'object') {
+        if (Array.isArray(raw.data)) {
+            return { arr: raw.data, isEnd: raw.isEnd === true };
+        }
+        if (raw.data && Array.isArray(raw.data.list)) {
+            return {
+                arr: raw.data.list,
+                isEnd: raw.isEnd === true || raw.data.isEnd === true,
+            };
+        }
+        if (Array.isArray(raw.list)) {
+            return { arr: raw.list, isEnd: raw.isEnd === true };
+        }
+    }
+    return { arr: [], isEnd: true };
+}
+
+/** 单条音乐项 → 本 App 的字段名（与 normalizeSearchResult 同语义） */
+export function mapMusicItem(it) {
+    if (!it || typeof it !== 'object') return null;
+    const id = it.id != null ? String(it.id) : '';
+    if (!id) return null;
+    return {
+        id,
+        // 插件取址常读 songmid（QQ 系），保留
+        songmid: str(it.songmid || it.mid || id),
+        name: str(it.title || it.name || it.songName),
+        artist: str(it.artist || it.artists || it.singer),
+        artists: str(it.artist || it.artists || it.singer),
+        album: str(it.album || it.albumName),
+        albumId: str(it.albumId || ''),
+        cover: str(it.artwork || it.coverUrl || it.cover || it.picUrl),
+        duration: Number(it.duration) || 0,
+        fee: 0,
+        // `_src` 必须原样带出（酷狗等插件只从它取源，见 normalizeSearchResult）
+        ...(it._src && typeof it._src === 'object' ? { _src: it._src } : {}),
+    };
+}
+
+/** 单条歌单 / 专辑项归一化 */
+function mapSheetItem(it) {
+    if (!it || typeof it !== 'object') return null;
+    const id = it.id != null ? String(it.id) : '';
+    if (!id) return null;
+    return {
+        id,
+        name: str(it.title || it.name),
+        cover: str(it.artwork || it.coverImg || it.cover || it.picUrl),
+        description: str(it.description || it.desc),
+        worksNum: Number(it.worksNum || it.worksNumber || it.trackCount) || 0,
+        playCount: Number(it.playCount) || 0,
+        artist: str(it.artist || it.artists || it.singer),
+        date: str(it.date || ''),
+        // ── 🔴 `_raw` 必须原样带出（2026-10-21 修 "未知榜单: undefined"）──
+        //
+        // 插件详情接口 `getTopListDetail(topListItem)` / `getMusicSheetInfo(
+        // sheetItem)` 读的是**它自己那套字段**（例如酷狗插件要 `topId`、
+        // 有的要 `_src`）。我们归一化后只保留 id/name/cover ⇒ 回传过去
+        // 插件认不出来，直接报「未知榜单: undefined」。
+        // 所以把原始对象随条目一起带给 Dart，点进详情时**原样回传**。
+        _raw: it,
+    };
+}
+
+/**
+ * `getTopLists()` —— 榜单分组。
+ * MusicFree 形状：`[{ title: '平台榜', data: [{id, title, coverImg, …}] }]`
+ */
+export function normalizeTopLists(raw) {
+    const { arr } = unwrapList(raw);
+    const out = [];
+    for (const g of arr) {
+        if (!g || typeof g !== 'object') continue;
+        const items = Array.isArray(g.data) ? g.data : [];
+        out.push({
+            name: str(g.title || g.name),
+            list: items.map(mapSheetItem).filter(Boolean),
+        });
+    }
+    // 没有分组壳、直接给一组榜单的插件：兜一层
+    if (out.length === 0) {
+        const direct = arr.map(mapSheetItem).filter(Boolean);
+        if (direct.length) out.push({ name: '榜单', list: direct });
+    }
+    return { ok: true, list: out };
+}
+
+/**
+ * `getRecommendSheetTags()` —— 推荐歌单的标签分组。
+ * 形状：`{ data: [{ title: '语种', data: ['华语', …] }] }`
+ */
+export function normalizeSheetTags(raw) {
+    const { arr } = unwrapList(raw);
+    const out = [];
+    for (const g of arr) {
+        if (!g || typeof g !== 'object') continue;
+        const tags = Array.isArray(g.data)
+            ? g.data
+                  .map((t) => (typeof t === 'string' ? t : str(t && (t.title || t.name))))
+                  .filter(Boolean)
+            : [];
+        if (tags.length) out.push({ name: str(g.title || g.name), tags });
+    }
+    return { ok: true, list: out };
+}
+
+/**
+ * `getRecommendSheetsByTag(tag, page)` —— 某个标签下的推荐歌单。
+ */
+export function normalizeSheets(raw) {
+    const { arr, isEnd } = unwrapList(raw);
+    const list = arr.map(mapSheetItem).filter(Boolean);
+    return { ok: true, list, isEnd: isEnd || list.length === 0 };
+}
+
+/**
+ * `getMusicSheetInfo(sheetItem, page)` —— 歌单详情（含歌曲）。
+ * 形状：`{ isEnd, sheetInfo: {...}, musicList: [musicItem] }`
+ * 少数插件把两者塞在 `data` 里。
+ */
+export function normalizeSheetInfo(raw) {
+    if (raw == null) return { ok: true, sheet: null, list: [], isEnd: true };
+    const body = raw && typeof raw === 'object' && raw.data ? raw.data : raw;
+    const sheet =
+        body && typeof body === 'object'
+            ? mapSheetItem(body.sheetInfo || body.info || body.sheet || body)
+            : null;
+    const musicList = Array.isArray(body && body.musicList)
+        ? body.musicList
+        : Array.isArray(body && body.data)
+          ? body.data
+          : [];
+    const list = musicList.map(mapMusicItem).filter(Boolean);
+    return {
+        ok: true,
+        sheet,
+        list,
+        isEnd: (body && body.isEnd === true) || list.length === 0,
+    };
+}
+
+/**
+ * `getTopListDetail(topListItem)` —— 榜单详情（歌曲列表）。
+ *
+ * ⚠️ 实测各插件返回形状不同（2026-10-21 修"榜单点进去 0 首"）：
+ *   · 酷狗插件：`{ isEnd, musicList: [...], topListItem: {...} }`
+ *   · 其它插件：`{ isEnd, data: [...] }` / 裸数组
+ * 原来的 `normalizeSearchResult` 只认 `data` ⇒ 酷狗榜单全空 ✗。
+ */
+export function normalizeTopListDetail(raw) {
+    if (raw == null) return { ok: true, list: [], isEnd: true };
+    let arr = null;
+    if (Array.isArray(raw)) {
+        arr = raw;
+    } else if (typeof raw === 'object') {
+        if (Array.isArray(raw.musicList)) arr = raw.musicList;
+        else if (raw.data && Array.isArray(raw.data.musicList)) arr = raw.data.musicList;
+        else if (Array.isArray(raw.data)) arr = raw.data;
+        else if (Array.isArray(raw.list)) arr = raw.list;
+    }
+    const list = (arr || []).map(mapMusicItem).filter(Boolean);
+    return {
+        ok: true,
+        list,
+        isEnd: (raw && raw.isEnd === true) || list.length === 0,
+    };
+}
+
+/**
+ * `search(query, page, type)` 的**分类**归一化（2026-10-21 补歌手/专辑）。
+ *
+ * MusicFree 的 type：'music' | 'album' | 'sheet' | 'artist'
+ *   · music  —— 走原来的 normalizeSearchResult（歌曲）
+ *   · artist —— `{id, name, avatar}`
+ *   · album  —— `{id, title/name, artwork/cover, artist, worksNum}`
+ *   · sheet  —— 歌单，复用 mapSheetItem
+ *
+ * ⚠️ 歌手/专辑的 id 也可能是**字符串**，Dart 侧会把它原样保留在原始 Map 里，
+ * 点进详情时再回传给插件（见 `_raw` 的说明）—— 所以这里不强行转数字。
+ */
+export function normalizePluginSearch(raw, type = 'music') {
+    if (!type || type === 'music') return normalizeSearchResult(raw);
+    const { arr, isEnd } = unwrapList(raw);
+    const list = [];
+    for (const it of arr) {
+        if (!it || typeof it !== 'object') continue;
+        const id = it.id != null ? String(it.id) : '';
+        if (!id) continue;
+        if (type === 'artist') {
+            list.push({
+                id,
+                name: str(it.name || it.title || it.artist),
+                avatar: str(it.avatar || it.artwork || it.cover || it.picUrl),
+                raw: it,
+            });
+        } else if (type === 'album') {
+            list.push({
+                ...mapSheetItem(it),
+                raw: it,
+            });
+        } else {
+            // sheet / 其它：按歌单条目给
+            list.push({ ...mapSheetItem(it), raw: it });
+        }
+    }
+    return { ok: true, list, isEnd: isEnd || list.length === 0 };
+}
+
+/**
+ * `getAlbumInfo(albumItem)` —— 专辑详情（含曲目）。
+ *
+ * 插件返回形状：`{ isEnd, albumItem: {...}, musicList: [...] }`
+ * 也可能只给 `{ data: [...] }`。
+ */
+export function normalizeAlbumInfo(raw) {
+    if (raw == null) return { ok: true, album: null, list: [], isEnd: true };
+    const body = raw && typeof raw === 'object' && raw.data ? raw.data : raw;
+    const album =
+        body && typeof body === 'object'
+            ? mapSheetItem(body.albumItem || body.album || body)
+            : null;
+    const musicList = Array.isArray(body && body.musicList)
+        ? body.musicList
+        : Array.isArray(body && body.data)
+          ? body.data
+          : [];
+    const list = musicList.map(mapMusicItem).filter(Boolean);
+    return {
+        ok: true,
+        album,
+        list,
+        isEnd: (body && body.isEnd === true) || list.length === 0,
+    };
+}
+
+/**
+ * `getArtistWorks(artistItem, page, type)` —— 歌手作品。
+ * type = 'music' → 单曲列表；'album' → 专辑列表。
+ */
+export function normalizeArtistWorks(raw, type = 'music') {
+    const { arr, isEnd } = unwrapList(raw);
+    const list =
+        type === 'album'
+            ? arr.map(mapSheetItem).filter(Boolean)
+            : arr.map(mapMusicItem).filter(Boolean);
+    return { ok: true, list, isEnd: isEnd || list.length === 0 };
+}
+
+/**
+ * `getMusicInfo(musicItem)` —— 补充元信息（封面 / 时长 / 专辑）。
+ * 返回形状通常是**单条 musicItem**，也可能是 `{ data: musicItem }`。
+ */
+export function normalizeMusicInfo(raw) {
+    const body = raw && typeof raw === 'object' && raw.data ? raw.data : raw;
+    const it = mapMusicItem(body);
+    return { ok: true, item: it };
+}
+
 
 /**
  * 把 MusicFree 插件的返回值归一化成播放地址。

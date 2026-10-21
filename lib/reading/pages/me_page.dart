@@ -50,6 +50,32 @@ class _MePageState extends State<MePage> {
   bool _hasShownEntrance = false; // 是否已播过首次入场动画
   String? _switchingTo; // 主题切换中（主题风格面板内 loading 遮罩用）
 
+  /// 内置「登录头像」素材（`assets/avatars/mine/*.jpg`，50 张，来自 Cmbok）。
+  ///
+  /// 用 AssetManifest 动态读取：以后往目录里加图片**不需要改代码**。
+  List<String> _mineAvatars = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMineAvatars();
+  }
+
+  Future<void> _loadMineAvatars() async {
+    if (_mineAvatars.isNotEmpty) return;
+    try {
+      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      final list = manifest
+          .listAssets()
+          .where((a) => a.startsWith('assets/avatars/mine/'))
+          .toList()
+        ..sort();
+      if (mounted) setState(() => _mineAvatars = list);
+    } catch (_) {
+      // 读不到就只用生肖插画，不影响其它功能
+    }
+  }
+
   @override
   void didUpdateWidget(covariant MePage oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -464,6 +490,17 @@ class _MePageState extends State<MePage> {
           );
         }
       }
+    } else if (id.startsWith('asset://')) {
+      // 内置头像素材（assets/avatars/mine/*.jpg）
+      return ClipOval(
+        child: Image.asset(
+          id.substring(8),
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => _defaultAvatarIcon(size),
+        ),
+      );
     } else if (id.startsWith('img://')) {
       return InkPetAvatar(speciesId: id.substring(6), size: size);
     } else if (id.startsWith('ink://')) {
@@ -488,6 +525,9 @@ class _MePageState extends State<MePage> {
   /// 选择头像面板：拖拽条 → 「选择头像」+ 说明 → **4 列圆形网格**
   /// （首格 = 上传自定义头像，与用户给的目标样式一致）。
   Future<void> _showAvatarSheet() async {
+    // 素材没加载完就打开面板时，先等一次（避免只显示生肖插画）
+    await _loadMineAvatars();
+    if (!mounted) return;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final fg = isDark ? Colors.white : JellyTheme.textPrimaryLight;
     final sub = isDark
@@ -532,7 +572,8 @@ class _MePageState extends State<MePage> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '共 $_kAvatarCount 款内置生肖插画，可点首张上传自定义头像',
+                      '共 ${_mineAvatars.length + _kAvatarCount} 款内置头像'
+                      '（可点首张上传自定义头像）',
                       style: TextStyle(
                         fontSize: AppTheme.fontCaption,
                         color: sub,
@@ -559,7 +600,8 @@ class _MePageState extends State<MePage> {
                             mainAxisSpacing: 14,
                             crossAxisSpacing: 14,
                           ),
-                      itemCount: _kAvatarCount + 1,
+                      // 首格 = 上传；紧接着是 50 张内置插画头像；最后是生肖头像
+                      itemCount: 1 + _mineAvatars.length + _kAvatarCount,
                       itemBuilder: (c, i) {
                         if (i == 0) {
                           return _avatarCell(
@@ -569,7 +611,18 @@ class _MePageState extends State<MePage> {
                             selected: false,
                           );
                         }
-                        final id = 'img://${_avatarSpecies[i - 1].id}';
+                        final mineIdx = i - 1;
+                        if (mineIdx < _mineAvatars.length) {
+                          final id = 'asset://${_mineAvatars[mineIdx]}';
+                          return _avatarCell(
+                            ctx: ctx,
+                            isDark: isDark,
+                            id: id,
+                            selected: cur == id,
+                          );
+                        }
+                        final sp = _avatarSpecies[mineIdx - _mineAvatars.length];
+                        final id = 'img://${sp.id}';
                         return _avatarCell(
                           ctx: ctx,
                           isDark: isDark,

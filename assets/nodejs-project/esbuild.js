@@ -39,6 +39,44 @@ if (result.errors.length > 0) {
 const bytes = fs.statSync('dist/main.js').size;
 console.log(`构建完成：dist/main.js ${bytes} 字节`);
 
+// ============================================================
+// QuickJS 书源引擎 bundle（2026-10-21）
+// ============================================================
+// 把 book_source.js + book_rule.js（含 cheerio / crypto-js）打成一份 IIFE，
+// 供 Flutter 的 quickjs_engine 加载；Node 专有模块用 qjs_shims 顶掉。
+const qjs = await esbuild.build({
+    entryPoints: ['src/book_qjs_entry.js'],
+    outfile: '../../assets/js/book_engine_qjs.js',
+    bundle: true,
+    minify: true,
+    write: true,
+    format: 'iife',
+    platform: 'browser',
+    target: 'es2020',
+    define: { global: 'globalThis' },
+    inject: ['./src/qjs_shims/buffer.js'],
+    alias: {
+        axios: './src/qjs_shims/axios.js',
+        vm: './src/qjs_shims/vm.js',
+        'node:vm': './src/qjs_shims/vm.js',
+        crypto: './src/qjs_shims/crypto.js',
+        'node:crypto': './src/qjs_shims/crypto.js',
+        buffer: './src/qjs_shims/buffer.js',
+        'node:buffer': './src/qjs_shims/buffer.js',
+    },
+    logLevel: 'silent',
+});
+
+if (qjs.errors.length > 0) {
+    console.error(`QuickJS bundle 构建失败：${qjs.errors.length} 个错误`);
+    for (const e of qjs.errors) {
+        console.error(' -', e.text, e.location ? `@ ${e.location.file}:${e.location.line}` : '');
+    }
+    process.exit(1);
+}
+const qbytes = fs.statSync('../../assets/js/book_engine_qjs.js').size;
+console.log(`构建完成：assets/js/book_engine_qjs.js ${qbytes} 字节`);
+
 if (process.env.NODE_MD5 === '1') {
     const md5 = createHash('md5').update(fs.readFileSync('dist/main.js')).digest('hex');
     fs.writeFileSync('dist/main.js.md5', md5);

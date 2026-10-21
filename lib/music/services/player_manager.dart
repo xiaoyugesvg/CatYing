@@ -590,6 +590,37 @@ class MusicPlayerManager extends ChangeNotifier {
 
 
     // ══════════════════════════════════════════════════════════
+    // ①.5 插件来源：先用**产出这首歌的那个插件**解析（2026-10-21 第二阶段）
+    // ══════════════════════════════════════════════════════════
+    //
+    // 插件搜索出来的歌没有真实平台归属（`source` 会落到 netease），
+    // 拿它的 id 去查内置接口必然取不到地址 ⇒ 必须先问插件本身。
+    // 失败不要紧：下面还会按原有链路（固定源 → 内置 → 全源试播）继续。
+    if (localPath.isEmpty &&
+        song.pluginId.isNotEmpty &&
+        SettingsStore.instance.useThirdPartySources.value) {
+      final plugin = ThirdPartySourceStore.instance.byId(song.pluginId);
+      if (plugin != null && plugin.enabled) {
+        triedBoundIds.add(plugin.id);
+        lastError.value = '正在用「${plugin.name}」…';
+        final one = await UnblockService.instance.testOne(plugin, song);
+        switching.value = false;
+        if (epoch != _loadEpoch) return;
+        if (one.ok && one.url.isNotEmpty) {
+          url = one.url;
+          fromSource = plugin.name;
+          quality = one.source?.quality ?? '';
+          sourceHeaders = one.headers.isNotEmpty
+              ? one.headers
+              : (one.source?.headers ?? const {});
+          fromBound = true;
+          AppLog.instance.log(
+              '[Music] 插件来源命中：${plugin.name} → 《${song.name}》');
+        }
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════
     // ② 试**平台固定源**（设置页「音乐源」给平台绑定的第三方源，可多个）
     // ══════════════════════════════════════════════════════════
     //
@@ -922,7 +953,7 @@ class MusicPlayerManager extends ChangeNotifier {
     if (stale()) return;
 
     // 3) 取歌词（失败不影响播放）。歌词也要按**这首歌自己的平台**取。
-    unawaited(_loadLyric(song.id, song.source));
+    unawaited(_loadLyric(song));
 
     // #4：记入最近播放（新的在前、按 identityKey 去重、上限 100）。
     // 放在"真正开始播"之后 —— 只是点开列表不算听过。
@@ -937,10 +968,21 @@ class MusicPlayerManager extends ChangeNotifier {
   ///（表现就是"**歌词串到上一首**"，而且不会自愈）。
   ///
   /// 默认参数取**调用瞬间**的 `_loadEpoch`，所以调用点不用改。
-  Future<void> _loadLyric(int id, SongSource source, [int? epoch]) async {
+  Future<void> _loadLyric(Song song, [int? epoch]) async {
     final mine = epoch ?? _loadEpoch;
     try {
-      final l = await MusicApi.instance.lyric(id, source: source);
+      MusicLyric? l;
+      // ── 插件来源：先问**产出这首歌的插件**（2026-10-21）──────────
+      // 插件歌没有真实平台归属（source 会落到 netease）⇒ 拿插件 id 去
+      // 查内置歌词接口必然查不到；能查到也是另一首歌的歌词 ✗。
+      if (song.pluginId.isNotEmpty) {
+        final src = ThirdPartySourceStore.instance.byId(song.pluginId);
+        if (src != null) {
+          l = await MusicApi.instance.lyricByMusicFree(src, song);
+          if (mine != _loadEpoch) return;
+        }
+      }
+      l ??= await MusicApi.instance.lyric(song.id, source: song.source);
       if (mine != _loadEpoch) return; // 已经切歌 → 丢弃这次结果
       if (l == null) return;
       // #9：**优先逐字歌词（YRC）**，拿不到再回落到标准 LRC。
@@ -957,7 +999,8 @@ class MusicPlayerManager extends ChangeNotifier {
     } catch (e) {
       // 歌词拿不到不打扰用户（不弹窗），但**要能查**：
       // 否则"所有歌都没歌词"这种系统性故障完全不可排查。
-      AppLog.instance.log('[Music] 歌词获取失败 id=$id: $e');
+      AppLog.instance.log(
+          '[Music] 歌词获取失败 id=${song.id} plugin=${song.pluginId}: $e');
     }
   }
 

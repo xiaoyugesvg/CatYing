@@ -10,6 +10,8 @@ import '../theme/music_theme.dart';
 import '../widgets/floating_play_button.dart';
 import 'music_log_page.dart';
 import 'music_source_settings_page.dart';
+import 'plugin_market_page.dart';
+import 'plugin_subscription_page.dart';
 import 'source_manager_page.dart';
 import '../../common/module_theme_store.dart';
 import '../../common/module_theme_sync.dart';
@@ -67,6 +69,7 @@ class ProfilePage extends StatelessWidget {
           const _GroupTitle('播放'),
           _groupCard([
           _qualityTile(store),
+          _pluginEngineTile(store),
           _switchTile(
             // 不叫"第三方音源" —— 用户导入的就是"洛雪音乐源"和"MusicFree 源"，
             // 统称"导入的音乐源"更贴近他的心智模型
@@ -162,6 +165,39 @@ class ProfilePage extends StatelessWidget {
                   )),
                 );
               },
+            ),
+            // ── 插件市场 / 插件订阅（2026-10-21 第三期）──────────────
+            ListTile(
+              leading: _iconBox(Icons.storefront_rounded),
+              title: Text('插件市场',
+                  style: TextStyle(
+                      color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
+              subtitle: Text('浏览订阅里的 MusicFree 插件，按需安装 / 更新 / 卸载',
+                  style: TextStyle(
+                      color: MusicTheme.secondary,
+                      fontSize: AppTheme.fontFootnote)),
+              trailing: Icon(Icons.chevron_right,
+                  size: 18, color: MusicTheme.secondary),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                settings: const RouteSettings(name: 'music:page'),
+                builder: (_) => const PluginMarketPage(),
+              )),
+            ),
+            ListTile(
+              leading: _iconBox(Icons.rss_feed_rounded),
+              title: Text('插件订阅',
+                  style: TextStyle(
+                      color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
+              subtitle: Text('管理插件清单地址（registry.json / plugins.json）',
+                  style: TextStyle(
+                      color: MusicTheme.secondary,
+                      fontSize: AppTheme.fontFootnote)),
+              trailing: Icon(Icons.chevron_right,
+                  size: 18, color: MusicTheme.secondary),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                settings: const RouteSettings(name: 'music:page'),
+                builder: (_) => const PluginSubscriptionPage(),
+              )),
             ),
           // ── 音乐运行日志（用户 2026 要求）────────────────────────
           //
@@ -390,6 +426,70 @@ class ProfilePage extends StatelessWidget {
             if (picked is AudioQuality) await store.setAudioQuality(picked);
           },
         ),
+      );
+
+  /// 插件执行引擎（2026-10-21）：自动 / Node / QuickJS。
+  ///
+  /// 「自动」= 先试 QuickJS（只支持 axios/he 的插件），跑不了自动回退 Node；
+  /// 想排查兼容问题时可固定成 Node，想对比性能可固定成 QuickJS。
+  Widget _pluginEngineTile(SettingsStore store) => ValueListenableBuilder(
+        valueListenable: store.pluginEngine,
+        builder: (context, v, _) {
+          final label = switch (v) {
+            'node' => 'Node（兼容性最好）',
+            'quickjs' => 'QuickJS（实验）',
+            _ => '自动（QuickJS 优先，失败回退 Node）',
+          };
+          return ListTile(
+            leading: _iconBox(Icons.memory_rounded),
+            title: Text('插件引擎',
+                style: TextStyle(
+                    color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
+            subtitle: Text(label,
+                style: TextStyle(
+                    color: MusicTheme.secondary,
+                    fontSize: AppTheme.fontFootnote)),
+            trailing: Icon(Icons.chevron_right,
+                size: 18, color: MusicTheme.secondary),
+            onTap: () async {
+              final picked = await showMusicSheet<String>(
+                context: context,
+                backgroundColor: MusicTheme.card,
+                builder: (ctx) => SafeArea(
+                  top: false,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(height: 12),
+                      for (final e in const [
+                        ('auto', '自动（推荐）', 'QuickJS 优先，插件不支持时自动回退 Node'),
+                        ('node', 'Node', '全部插件走 Node，兼容性最好'),
+                        ('quickjs', 'QuickJS', '实验引擎：仅支持 axios / he 类插件'),
+                      ])
+                        ListTile(
+                          title: Text(e.$2,
+                              style: TextStyle(
+                                  color: v == e.$1
+                                      ? MusicTheme.tint
+                                      : MusicTheme.label)),
+                          subtitle: Text(e.$3,
+                              style: TextStyle(
+                                  color: MusicTheme.secondary,
+                                  fontSize: AppTheme.fontFootnote)),
+                          trailing: v == e.$1
+                              ? Icon(Icons.check,
+                                  color: MusicTheme.tint, size: 18)
+                              : null,
+                          onTap: () => Navigator.pop(ctx, e.$1),
+                        ),
+                    ],
+                  ),
+                ),
+              );
+              if (picked is String) await store.setPluginEngine(picked);
+            },
+          );
+        },
       );
 
   Widget _coverStyleTile() => ValueListenableBuilder(

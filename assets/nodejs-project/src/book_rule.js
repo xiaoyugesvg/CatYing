@@ -619,22 +619,40 @@ function runJs(expr, ctx) {
       hexDecodeToString: (s) => Buffer.from(String(s), 'hex').toString('utf8'),
 
       /**
-       * java.createSymmetricCrypto(algo, mode, pad, key, iv) —— 对称加解密。
-       * 目前覆盖 AES-CBC（Legado 目录/正文解密最常见的组合），
+       * java.createSymmetricCrypto —— 对称加解密。
+       *
+       * 支持两种调用形式：
+       *   · Legado 原生：createSymmetricCrypto('AES/CBC/PKCS5Padding', key, iv)
+       *   · 旧写法：createSymmetricCrypto('AES', 'CBC', 'PKCS5Padding', key, iv)
        * key 16 字节 → AES-128，32 字节 → AES-256；密文自动识别 hex / base64。
        * 返回 { decryptStr, encryptStr }。
        */
-      createSymmetricCrypto: (algo, mode, pad, key, iv) => {
-        const alg = String(algo || '').toUpperCase();
+      createSymmetricCrypto: (...args) => {
+        let algo;
+        let key;
+        let iv;
+        if (args.length >= 5) {
+          const [a, m, p, k, v] = args;
+          algo = [a, m, p].filter(Boolean).join('/');
+          key = k;
+          iv = v;
+        } else {
+          algo = args[0];
+          key = args[1];
+          iv = args[2];
+        }
+        const segs = String(algo || '').toUpperCase().split('/');
+        const alg = segs[0] || 'AES';
+        const modeName = (segs[1] || 'CBC').toUpperCase();
         const keyBuf = Buffer.from(String(key || ''), 'utf8');
         const ivBuf = Buffer.from(String(iv || ''), 'utf8');
-        const cipherName = alg.includes('AES')
-          ? (keyBuf.length === 32 ? 'aes-256-cbc'
-            : keyBuf.length === 16 ? 'aes-128-cbc' : null)
+        const bits = keyBuf.length === 32 ? 256 : keyBuf.length === 24 ? 192 : keyBuf.length === 16 ? 128 : 0;
+        const cipherName = alg.includes('AES') && bits
+          ? `aes-${bits}-${modeName.toLowerCase()}`
           : null;
         if (!cipherName) {
           throw new Error(
-            `createSymmetricCrypto: 不支持的算法/密钥长度 (${alg}, key=${keyBuf.length}B)`
+            `createSymmetricCrypto: 不支持的算法/密钥长度 (${algo}, key=${keyBuf.length}B)`
           );
         }
         return {

@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import '../../services/nodejs_manager.dart';
 import '../models/models.dart';
 import '../models/third_party_source.dart';
+import 'mf_quickjs_engine.dart';
+import 'settings_store.dart';
 
 /// 播放地址解析结果
 class MusicUrlInfo {
@@ -1181,6 +1183,38 @@ class MusicApi {
     ThirdPartySource source,
     Song song,
   ) async {
+    // ── QuickJS 实验引擎（2026-10-21）──────────────────────────
+    //   · auto    → 先试 QuickJS（只支持 axios/he 的插件），不支持再走 Node
+    //   · quickjs → 只走 QuickJS（失败就返回明确错误，便于对比测试）
+    //   · node    → 完全保持旧行为
+    final engine = SettingsStore.instance.pluginEngine.value;
+    if (engine != 'node' && source.isMusicFree) {
+      try {
+        final q = await MfQuickJsEngine.instance.resolveMedia(
+          source,
+          song,
+          source.quality,
+        );
+        if (q != null) {
+          return MusicResolveResult(
+            ok: true,
+            url: q.url,
+            kind: 'musicfree',
+            headers: q.headers,
+          );
+        }
+      } catch (_) {
+        // QuickJS 内部异常 → auto 模式继续回退 Node
+      }
+      if (engine == 'quickjs') {
+        return const MusicResolveResult(
+          ok: false,
+          url: '',
+          kind: 'musicfree',
+          message: 'QuickJS 引擎无法解析这个插件（需要 cheerio 等模块时可改用 Node 引擎）',
+        );
+      }
+    }
     final r = await _call({
       'action': 'resolveBySource',
       'source': source.toJson(),
@@ -1216,6 +1250,11 @@ class MusicApi {
         // 那个换源后端查不到 → 返回空 → **"QQ 的歌播不了"** ✗
         // 补上之后同一后端正常返回真实音频地址 ✓
         'songmid': song.songmid,
+        // ── 插件私有字段 `_src` 必须回传（2026-10-21 第二阶段）────────
+        // 插件搜索/榜单产出的条目自带 `_src`（多档 hash），酷狗等插件的
+        // `getMediaSource` **只从它取源**（顶层扁平字段根本不读）。
+        // 不回传 ⇒ "能搜到、点了播不了"。
+        if (song.srcMap.isNotEmpty) '_src': song.srcMap,
       },
     });
     final m = _asMap(r);
@@ -1261,6 +1300,27 @@ class MusicApi {
     if (keyword.trim().isEmpty) {
       return const MusicListResult(ok: false, message: '请输入关键词');
     }
+    // QuickJS 实验引擎：只接歌曲搜索（歌手/专辑仍走 Node，字段归一化在 Node 侧）
+    final engine = SettingsStore.instance.pluginEngine.value;
+    if (engine != 'node' && type == 'music') {
+      try {
+        final list = await MfQuickJsEngine.instance.search(source, keyword, page);
+        if (list != null) {
+          return MusicListResult<Song>(
+            ok: true,
+            list: list.map(Song.fromJson).toList(),
+          );
+        }
+      } catch (_) {
+        // 回退 Node
+      }
+      if (engine == 'quickjs') {
+        return const MusicListResult(
+          ok: false,
+          message: 'QuickJS 引擎无法运行这个插件（可改用 Node 引擎）',
+        );
+      }
+    }
     final r = await _call({
       'action': 'searchByMusicFree',
       'source': source.toJson(),
@@ -1281,6 +1341,51 @@ class MusicApi {
     );
   }
 
+  /// 插件搜索的**原始条目**（歌手 / 专辑分类用，2026-10-21）。
+  ///
+  /// 插件返回的歌手/专辑字段与歌曲不同（`avatar` / `worksNum`…），
+  /// 而且 id 往往是字符串 —— 所以这里不做强类型转换，把归一化后的 Map
+  /// 原样给 UI；点进详情时再把整条 Map 回传给插件。
+  Future<
+      ({
+        bool ok,
+        String message,
+        List<Map<String, dynamic>> list,
+        bool isEnd,
+      })> searchRawByMusicFree(
+    ThirdPartySource source,
+    String keyword, {
+    int page = 1,
+    String type = 'music',
+  }) async {
+    if (keyword.trim().isEmpty) {
+      return (
+        ok: false,
+        message: '请输入关键词',
+        list: const <Map<String, dynamic>>[],
+        isEnd: true,
+      );
+    }
+    final r = await _call({
+      'action': 'searchByMusicFree',
+      'source': source.toJson(),
+      'keyword': keyword,
+      'page': page,
+      'type': type,
+    });
+    final m = _asMap(r);
+    final list = <Map<String, dynamic>>[];
+    for (final e in (m['list'] as List? ?? const [])) {
+      if (e is Map) list.add(Map<String, dynamic>.from(e));
+    }
+    return (
+      ok: m['ok'] == true,
+      message: (m['error'] ?? '').toString(),
+      list: list,
+      isEnd: m['isEnd'] == true,
+    );
+  }
+
   /// 用 **MusicFree 插件**取歌词。
   ///
   /// 返回 null 表示"拿不到"（插件不支持 / 该曲无歌词 / 服务端限流）——
@@ -1289,6 +1394,19 @@ class MusicApi {
     ThirdPartySource source,
     Song song,
   ) async {
+    // QuickJS 优先（拿不到再让 Node 再试一次）
+    final engine = SettingsStore.instance.pluginEngine.value;
+    if (engine != 'node') {
+      try {
+        final q = await MfQuickJsEngine.instance.lyric(source, song);
+        if (q != null && q.lyric.trim().isNotEmpty) {
+          return MusicLyric(lyric: q.lyric, translation: q.tlyric);
+        }
+      } catch (_) {
+        // 回退 Node
+      }
+      if (engine == 'quickjs') return null;
+    }
     final r = await _call({
       'action': 'lyricByMusicFree',
       'source': source.toJson(),
@@ -1305,6 +1423,65 @@ class MusicApi {
     final lyric = (m['lyric'] ?? '').toString();
     if (lyric.trim().isEmpty) return null;
     return MusicLyric(lyric: lyric, translation: (m['tlyric'] ?? '').toString());
+  }
+
+  /// **MusicFree 插件的列表类 action**（2026-10-21 第一阶段新增）。
+  ///
+  /// Node 侧已补齐这些 action（见 `musicfree_adapter.js` 的 `pickAction`）：
+  ///   · `musicFreeTopLists`          → 榜单分组
+  ///   · `musicFreeTopListDetail`     → {topListItem} 榜单歌曲
+  ///   · `musicFreeRecommendSheetTags`→ 推荐歌单标签
+  ///   · `musicFreeRecommendSheets`   → {tag, page} 推荐歌单
+  ///   · `musicFreeSheetInfo`         → {sheetItem, page} 歌单详情
+  ///   · `musicFreeArtistWorks`       → {artistItem, page, type} 歌手作品
+  ///   · `musicFreeMusicInfo`         → {song} 单曲元信息
+  ///
+  /// 这里**不包一层一方法**：这些 action 的入参/出参形态差异大，
+  /// 第二阶段（插件平台化 UI）会按页面各自解析；先提供统一的原始入口，
+  /// 避免现在造一堆没人用的模型 ✗
+  Future<Map<String, dynamic>> musicFreeAction(
+    ThirdPartySource source,
+    String action, {
+    Map<String, dynamic>? params,
+  }) async {
+    final r = await _call({
+      'action': action,
+      'source': source.toJson(),
+      ...?params,
+    });
+    return _asMap(r);
+  }
+
+  /// 插件的**用户变量声明**（登录 Cookie / 卡密 / 服务器地址）。
+  ///
+  /// Node 侧只加载插件、读 `module.exports.userVariables`，不发网络请求。
+  Future<List<({String key, String name, String hint})>> musicFreeVariables(
+    ThirdPartySource source,
+  ) async {
+    // QuickJS 能直接读 module.exports.userVariables（不需要执行网络）
+    final engine = SettingsStore.instance.pluginEngine.value;
+    if (engine != 'node') {
+      try {
+        final q = await MfQuickJsEngine.instance.variables(source);
+        if (q != null) return q;
+      } catch (_) {
+        // 回退 Node
+      }
+    }
+    final m = await musicFreeAction(source, 'musicFreeVariables');
+    if (m['ok'] != true) return const [];
+    final out = <({String key, String name, String hint})>[];
+    for (final e in (m['list'] as List? ?? const [])) {
+      if (e is! Map) continue;
+      final key = (e['key'] ?? '').toString();
+      if (key.isEmpty) continue;
+      out.add((
+        key: key,
+        name: (e['name'] ?? key).toString(),
+        hint: (e['hint'] ?? '').toString(),
+      ));
+    }
+    return out;
   }
 
   // ============================================================

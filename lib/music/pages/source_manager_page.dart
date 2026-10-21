@@ -12,6 +12,7 @@ import '../services/settings_store.dart';
 import '../services/source_import_parser.dart';
 import '../services/unblock_service.dart';
 import '../theme/music_theme.dart';
+import 'plugin_variables_page.dart';
 import '../../common/theme.dart';
 import '../../widgets/app_toast.dart';
 
@@ -628,9 +629,14 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     final builtinTag = s.isBuiltin ? '内置' : null;
     // 固定平台徽标：该源被绑定为哪些平台的固定第三方源（如 固定:酷狗/QQ）
     final boundLabel = _boundPlatformsLabel(s.id);
-    final tagText = [builtinTag, s.kindLabel, s.quality, boundLabel]
-        .where((t) => t != null && t.isNotEmpty)
-        .join('·');
+    final tagText = [
+      builtinTag,
+      s.kindLabel,
+      s.quality,
+      boundLabel,
+      // 插件变量（Cookie/卡密）配过没有 —— 配过给个提示，方便排查"能搜不能播"
+      if (s.isMusicFree && s.variables.isNotEmpty) '已配变量',
+    ].where((t) => t != null && t.isNotEmpty).join('·');
     // 有脚本的再把脚本类型也拼上（保留原来的 urlPath 信息）
     // final tagText = '${s.kindLabel}·${s.quality}'
     //     '${s.usesScript ? "" : "·${s.urlPath}"}';
@@ -691,6 +697,14 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
             children: [
               _action(Icons.play_circle_outline, '测试',
                   () => testSource(context, s)),
+              // MusicFree 插件：登录变量（Cookie / Token / 卡密）
+              if (s.isMusicFree)
+                _action(Icons.tune_rounded, '变量', () {
+                  Navigator.of(context).push(MaterialPageRoute(
+                    settings: const RouteSettings(name: 'music:page'),
+                    builder: (_) => PluginVariablesPage(source: s),
+                  ));
+                }),
               _action(Icons.edit_outlined, '编辑',
                   () => _showDetail(context, s)),
               _action(Icons.swap_vert, '排序',

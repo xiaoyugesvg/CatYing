@@ -52,8 +52,18 @@ class ThirdPartySource {
   /// 这一字段为 false（与旧数据兼容：老 JSON 没有该字段 → 默认为 false）。
   final bool isBuiltin;
 
-  /// 内置源的更新源 URL（用于「检查更新」/ 自动更新；用户源为空）
+  /// 内置源的更新源 URL（用于「检查更新」/自动更新；用户源为空）
   final String updateUrl;
+
+  /// 插件的**用户变量**（登录态 / Cookie / 卡密 / 服务器地址…）。
+  ///
+  /// ── 2026-10-21 第三期 ────────────────────────────────────────
+  /// MusicFree 插件可以在导出里声明 `userVariables: [{key,name,hint}]`，
+  /// 运行时通过 `global.env.getUserVariables()` 读取。宿主要做的就是把
+  /// 用户填的值注入进去（见 `musicfree_adapter.js` / `lx_engine.js`）。
+  ///
+  /// 空表 = 该插件没配任何变量（或用户没填）。
+  final Map<String, String> variables;
 
   const ThirdPartySource({
     required this.id,
@@ -67,6 +77,7 @@ class ThirdPartySource {
     this.enabled = true,
     this.isBuiltin = false,
     this.updateUrl = '',
+    this.variables = const {},
   });
 
   /// 是不是 **LX 脚本**（`lx.on(...)` / `module.exports.musicUrl`）
@@ -106,6 +117,7 @@ class ThirdPartySource {
     String? script,
     bool? enabled,
     bool clearScript = false,
+    Map<String, String>? variables,
   }) {
     return ThirdPartySource(
       id: id,
@@ -119,6 +131,7 @@ class ThirdPartySource {
       enabled: enabled ?? this.enabled,
       isBuiltin: isBuiltin,
       updateUrl: updateUrl,
+      variables: variables ?? this.variables,
     );
   }
 
@@ -134,6 +147,7 @@ class ThirdPartySource {
         'enabled': enabled,
         if (isBuiltin) 'isBuiltin': true,
         if (updateUrl.isNotEmpty) 'updateUrl': updateUrl,
+        if (variables.isNotEmpty) 'variables': variables,
       };
 
   /// 宽松解析：原版对每个字段都有默认值，缺字段不报错
@@ -143,6 +157,16 @@ class ThirdPartySource {
     final rawHeaders = j['headers'];
     if (rawHeaders is Map) {
       rawHeaders.forEach((k, v) => headers[k.toString()] = v.toString());
+    }
+    // 用户变量（插件登录态等）：只收字符串键值，坏数据忽略
+    final variables = <String, String>{};
+    final rawVars = j['variables'];
+    if (rawVars is Map) {
+      rawVars.forEach((k, v) {
+        final key = k.toString().trim();
+        if (key.isEmpty || v == null) return;
+        variables[key] = v.toString();
+      });
     }
     final quality = (j['quality'] ?? headers['quality'] ?? '320k').toString();
     return ThirdPartySource(
@@ -157,6 +181,7 @@ class ThirdPartySource {
       enabled: _asBool(j['enabled']),
       isBuiltin: _asBool(j['isBuiltin'], fallback: false),
       updateUrl: (j['updateUrl'] ?? '').toString(),
+      variables: variables,
     );
   }
 

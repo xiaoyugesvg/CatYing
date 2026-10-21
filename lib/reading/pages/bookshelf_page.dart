@@ -110,10 +110,16 @@ class BookshelfPage extends StatefulWidget {
 class _BookshelfPageState extends State<BookshelfPage>
     with TickerProviderStateMixin {
   late TabController _tabController;
-  String _currentShelfId = BookshelfService.presetReading;
 
-  /// 上次选中的分组（重新打开书架时恢复；分组被删则回落到第一个）
+  /// 分组默认值：**第一次打开 = 「全部」**；之后打开 = 上次选中的分组。
+  ///
+  /// 用户 2026-10-21：「默认点开进去那个全部分类么，再开就是上次的分组」
+  ///   · 没有存过分组（首次安装 / 之前没切过）→ 「全部」
+  ///   · 存过且分组还在 → 恢复它；分组被删了 → 回落到「全部」
+  String _currentShelfId = kAllShelfId;
+
   static const String _shelfPrefKey = 'bookshelf.current_shelf';
+
   final ScrollController _comicScrollController = ScrollController();
   final ScrollController _bookScrollController = ScrollController();
   bool _showComicBackToTop = false;
@@ -156,12 +162,12 @@ class _BookshelfPageState extends State<BookshelfPage>
       duration: const Duration(milliseconds: 300),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final shelves = BookshelfService().bookshelves;
-      if (shelves.isEmpty) return;
-      var next = shelves.first.id;
+      // 默认「全部」；上次选过的分组仍然存在就恢复它
+      var next = kAllShelfId;
       try {
         final sp = await SharedPreferences.getInstance();
         final saved = sp.getString(_shelfPrefKey);
+        final shelves = BookshelfService().bookshelves;
         if (saved != null &&
             (saved == kAllShelfId || shelves.any((s) => s.id == saved))) {
           next = saved;
@@ -1138,7 +1144,7 @@ class _BookshelfPageState extends State<BookshelfPage>
     _ensureShelfChipVisible(shelfId);
   }
 
-  /// 记住当前分组，下次打开书架时恢复
+  /// 记住当前分组（下次打开书架恢复；没有记录时用「全部」）
   void _persistShelf(String shelfId) {
     SharedPreferences.getInstance()
         .then((sp) => sp.setString(_shelfPrefKey, shelfId))
@@ -3491,7 +3497,11 @@ class _BookshelfPageState extends State<BookshelfPage>
 
         // 用 IntrinsicWidth 测出内容总宽度，判断是否需要滚动
         return Container(
-          height: 40,
+          // 用户 2026-10-21：分组标签的尺寸对齐「漫画仓 / 书源仓 / 书源仓库」
+          //   那几个 tab（行高 34、胶囊高 34、字号 fontSubhead）——
+          //   原来这里是 40 高、chip 只有 24 左右（SingleChildScrollView 不会
+          //   像横向 ListView 那样把子项拉满行高），比别的页小一圈 ✗
+          height: 34,
           margin: const EdgeInsets.only(bottom: 8),
           child: LayoutBuilder(
             builder: (context, constraints) {
@@ -3523,7 +3533,8 @@ class _BookshelfPageState extends State<BookshelfPage>
               //   · 右：排序方式（上下箭头）
               //   用户 2026-10-18 二次反馈：太靠左、比旁边 chips 显大 ⇒
               //   左侧留 16 与标签行对齐，直径收到 30、图标 17。
-              const btnSize = 30.0;
+              //   2026-10-21：chips 现在高 34，按钮同步放大到 32 保持齐平感 ✓
+              const btnSize = 32.0;
               Widget roundBtn(IconData icon, String tip, VoidCallback onTap) {
                 return Tooltip(
                   message: tip,
@@ -3603,12 +3614,14 @@ class _BookshelfPageState extends State<BookshelfPage>
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 4),
+          // 尺寸对齐漫画仓 / 书源仓 / 书源仓库的 tab：高 34、左右 12、胶囊圆角
+          height: 34,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
             color: selected
                 ? JellyTheme.primary
                 : (isDark ? JellyTheme.cardDark : JellyTheme.cardLight),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(17),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.05),
@@ -3624,7 +3637,7 @@ class _BookshelfPageState extends State<BookshelfPage>
               Text(
                 '全部',
                 style: TextStyle(
-                  fontSize: AppTheme.fontFootnote,
+                  fontSize: AppTheme.fontSubhead,
                   fontWeight: FontWeight.w600,
                   color: selected
                       ? Colors.white
@@ -3635,7 +3648,7 @@ class _BookshelfPageState extends State<BookshelfPage>
               Text(
                 '$count',
                 style: TextStyle(
-                  fontSize: AppTheme.fontCaption,
+                  fontSize: AppTheme.fontFootnote,
                   color: selected
                       ? Colors.white.withValues(alpha: 0.7)
                       : (isDark
@@ -3667,12 +3680,14 @@ class _BookshelfPageState extends State<BookshelfPage>
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 4),
+          // 同「全部」：高 34 / 左右 12 / 胶囊圆角（对齐漫画仓、书源仓的 tab）
+          height: 34,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
             color: selected
                 ? JellyTheme.primary
                 : (isDark ? JellyTheme.cardDark : JellyTheme.cardLight),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(17),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.05),
@@ -3688,7 +3703,7 @@ class _BookshelfPageState extends State<BookshelfPage>
               Text(
                 _shelfDisplayName(shelf, currentType),
                 style: TextStyle(
-                  fontSize: AppTheme.fontFootnote,
+                  fontSize: AppTheme.fontSubhead,
                   fontWeight: FontWeight.w600,
                   color: selected
                       ? Colors.white
@@ -3699,7 +3714,7 @@ class _BookshelfPageState extends State<BookshelfPage>
               Text(
                 '$count',
                 style: TextStyle(
-                  fontSize: AppTheme.fontCaption,
+                  fontSize: AppTheme.fontFootnote,
                   color: selected
                       ? Colors.white.withValues(alpha: 0.7)
                       : (isDark
@@ -3721,10 +3736,12 @@ class _BookshelfPageState extends State<BookshelfPage>
       child: GestureDetector(
         onTap: _createShelf,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+          // 同分组标签：高 34 / 左右 12 / 胶囊圆角
+          height: 34,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
             color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(17),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.05),
@@ -3738,14 +3755,14 @@ class _BookshelfPageState extends State<BookshelfPage>
             children: [
               Icon(
                 Icons.add_rounded,
-                size: 14,
+                size: 16,
                 color: isDark ? Colors.white70 : JellyTheme.textSecondary,
               ),
               const SizedBox(width: 2),
               Text(
                 '新建',
                 style: TextStyle(
-                  fontSize: AppTheme.fontFootnote,
+                  fontSize: AppTheme.fontSubhead,
                   fontWeight: FontWeight.w600,
                   color: isDark ? Colors.white70 : JellyTheme.textSecondary,
                 ),

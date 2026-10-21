@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/models.dart';
+import '../models/third_party_source.dart';
 import '../services/music_api.dart';
 import '../services/player_manager.dart';
 import '../services/settings_store.dart';
@@ -10,6 +11,7 @@ import 'ximalaya_category_page.dart';
 import 'ximalaya_album_page.dart';
 import '../theme/music_theme.dart';
 import '../widgets/music_components.dart';
+import '../widgets/music_sheet.dart';
 import '../../widgets/app_page_loading.dart';
 import '../../common/theme.dart';
 
@@ -42,9 +44,20 @@ class _SearchPageState extends State<SearchPage>
   bool _loading = false;
   String _error = '';
 
+  /// 当前选中的 **MusicFree 插件源**（null = 用内置平台）。
+  ///
+  /// 2026-10-21 第二阶段：插件从"播放兜底"变成**可搜索的平台**。
+  /// 歌曲结果会带上 `pluginId`（播放器据此优先用同一个插件取地址）；
+  /// 第三阶段补齐：歌手 / 专辑分类也走插件（type=artist/album）。
+  ThirdPartySource? _plugin;
+
   List<Song> _songs = const [];
   List<Artist> _artists = const [];
   List<Album> _albums = const [];
+
+  /// 插件搜索的**原始歌手/专辑条目**（字段与内置模型不同，点详情时原样回传）
+  List<Map<String, dynamic>> _pluginArtists = const [];
+  List<Map<String, dynamic>> _pluginAlbums = const [];
 
   List<String> _history = const [];
   List<String> _hot = const [];
@@ -123,6 +136,8 @@ class _SearchPageState extends State<SearchPage>
       _songs = const [];
       _artists = const [];
       _albums = const [];
+      _pluginArtists = const [];
+      _pluginAlbums = const [];
     });
     // 🔴 `_pushHistory` **必须放进 try**：
     // 它原本在 try **之外**（下一行才是 `try {`）→ 一旦它抛异常（写历史失败），
@@ -132,6 +147,39 @@ class _SearchPageState extends State<SearchPage>
     try {
       await _pushHistory(k);
       if (!mounted || epoch != _runEpoch) return;
+      // ── 插件源：走该插件的 search()（2026-10-21 第二阶段）──────────
+      //    2026-10-21 补充：歌手 / 专辑分类也走插件（type=artist/album）
+      final plugin = _plugin;
+      if (plugin != null) {
+        if (_kind == _Kind.song) {
+          final r = await api.searchByMusicFree(plugin, k, type: 'music');
+          if (!mounted || epoch != _runEpoch) return;
+          setState(() {
+            _loading = false;
+            // ⚠️ 必须打上 pluginId：插件歌没有真实平台归属，
+            //   播放时要靠它找到"产出这首歌的插件"（见 player_manager._load）
+            _songs = r.list.map((s) => s.withPluginId(plugin.id)).toList();
+            if (!r.ok) _error = r.message;
+          });
+        } else {
+          final r = await api.searchRawByMusicFree(
+            plugin,
+            k,
+            type: _kind == _Kind.artist ? 'artist' : 'album',
+          );
+          if (!mounted || epoch != _runEpoch) return;
+          setState(() {
+            _loading = false;
+            if (_kind == _Kind.artist) {
+              _pluginArtists = r.list;
+            } else {
+              _pluginAlbums = r.list;
+            }
+            if (!r.ok) _error = r.message;
+          });
+        }
+        return;
+      }
       switch (_kind) {
         case _Kind.song:
           // 平台由「平台切换条」决定（默认网易云；不传时 Node 侧也默认 netease）
@@ -200,8 +248,11 @@ class _SearchPageState extends State<SearchPage>
   Widget _platformBar() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      child: Row(
-        children: [
+      // 平台多了（内置 3 个 + 插件源）→ 横向滑动，不再挤出屏幕
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
           // 「有声书」**不是"平台切换"**，而是进分类页：
           // 喜马拉雅是**专辑模型**（专辑→单集），跟"单曲搜索"不是一回事；
           // 直接切换搜索平台会让搜索结果出现"点一下播不了"的假可用。
@@ -247,10 +298,11 @@ class _SearchPageState extends State<SearchPage>
                   final on = cur == s;
                   return GestureDetector(
                     onTap: () async {
-                      if (on) return;
+                      if (on && _plugin == null) return;
                       await SettingsStore.instance.setMusicSource(s);
                       if (!mounted) return;
-                      setState(() {});
+                      // 切回内置平台 ⇒ 退出插件搜索模式
+                      setState(() => _plugin = null);
                       // 已有关键词就立刻用新平台重搜
                       final k = ctrl.text.trim();
                       if (k.isNotEmpty) unawaited(_run(k));
@@ -275,9 +327,104 @@ class _SearchPageState extends State<SearchPage>
                 },
               ),
             ),
+          // 插件源（2026-10-21 第二阶段）：点开选择已启用的 MusicFree 插件
+          _pluginChip(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 「插件源」胶囊 + 选择弹层。
+  ///
+  /// 只列**已启用**的 MusicFree 插件（LX 脚本没有 search，不参与）。
+  Widget _pluginChip() {
+    final plugins =
+        ThirdPartySourceStore.instance.enabled.where((s) => s.isMusicFree).toList();
+    final on = _plugin != null;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: GestureDetector(
+        onTap: plugins.isEmpty ? null : () => _pickPlugin(plugins),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: on ? MusicTheme.tint : MusicTheme.fill,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.extension_rounded,
+                size: 13,
+                color: on ? Colors.white : MusicTheme.secondary,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                on ? _plugin!.name : '插件源${plugins.isEmpty ? '' : ' ${plugins.length}'}',
+                style: TextStyle(
+                  color: on ? Colors.white : MusicTheme.label,
+                  fontSize: AppTheme.fontCaption,
+                  fontWeight: on ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickPlugin(List<ThirdPartySource> plugins) async {
+    final id = await showMusicSheet<String>(
+      context: context,
+      backgroundColor: MusicTheme.card,
+      isScrollControlled: true,
+      builder: (ctx) => ListView(
+        shrinkWrap: true,
+        children: [
+          ListTile(
+            leading: Icon(Icons.apps_rounded, color: MusicTheme.secondary),
+            title: Text('内置平台', style: TextStyle(color: MusicTheme.label)),
+            subtitle: Text('网易云 / 酷狗 / 喜马拉雅',
+                style: TextStyle(color: MusicTheme.secondary, fontSize: 12)),
+            trailing: _plugin == null
+                ? Icon(Icons.check_rounded, color: MusicTheme.tint, size: 20)
+                : null,
+            onTap: () => Navigator.pop(ctx, '__builtin__'),
+          ),
+          const Divider(height: 1),
+          for (final p in plugins)
+            ListTile(
+              leading: Icon(Icons.extension_rounded, color: MusicTheme.secondary),
+              title: Text(p.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: MusicTheme.label)),
+              subtitle: p.quality.isEmpty
+                  ? null
+                  : Text('音质 ${p.quality}',
+                      style:
+                          TextStyle(color: MusicTheme.secondary, fontSize: 12)),
+              trailing: _plugin?.id == p.id
+                  ? Icon(Icons.check_rounded, color: MusicTheme.tint, size: 20)
+                  : null,
+              onTap: () => Navigator.pop(ctx, p.id),
+            ),
         ],
       ),
     );
+    if (!mounted || id == null) return;
+    setState(() {
+      _plugin = id == '__builtin__'
+          ? null
+          : ThirdPartySourceStore.instance.byId(id);
+      // 换源后回到「单曲」，避免把上一源的分类结果当成本源的结果
+      _kind = _Kind.song;
+    });
+    final k = ctrl.text.trim();
+    if (k.isNotEmpty) unawaited(_run(k));
   }
 
   Widget _searchBar() {
@@ -627,6 +774,8 @@ class _SearchPageState extends State<SearchPage>
           ),
         );
       case _Kind.artist:
+        // 插件模式：歌手条目是插件原始 Map（字段与内置 Artist 不同）
+        if (_plugin != null) return _pluginPeopleList(artist: true);
         if (_artists.isEmpty) return _empty();
         return ListView.builder(
           padding: const EdgeInsets.only(bottom: 150),
@@ -646,6 +795,8 @@ class _SearchPageState extends State<SearchPage>
           },
         );
       case _Kind.album:
+        // 插件模式：专辑条目同样是插件原始 Map
+        if (_plugin != null) return _pluginPeopleList(artist: false);
         if (_albums.isEmpty) return _empty();
         return ListView.builder(
           padding: const EdgeInsets.only(bottom: 150),
@@ -672,6 +823,104 @@ class _SearchPageState extends State<SearchPage>
         child: Text('没有找到相关结果',
             style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead)),
       );
+
+  /// 插件搜索的歌手 / 专辑列表（条目是插件的原始 Map）。
+  Widget _pluginPeopleList({required bool artist}) {
+    final list = artist ? _pluginArtists : _pluginAlbums;
+    if (list.isEmpty) return _empty();
+    return ListView.builder(
+      padding: const EdgeInsets.only(bottom: 150),
+      itemCount: list.length,
+      itemBuilder: (c, i) {
+        final m = list[i];
+        final name = (m['name'] ?? '').toString();
+        final cover = artist
+            ? (m['avatar'] ?? '').toString()
+            : (m['cover'] ?? '').toString();
+        final sub = artist
+            ? '歌手'
+            : ((m['artist'] ?? '').toString().isEmpty
+                ? '专辑'
+                : (m['artist'] ?? '').toString());
+        return ListTile(
+          leading: CoverImage(
+            url: cover.isEmpty ? null : cover,
+            size: 46,
+            cornerRadius: artist ? 23 : 8,
+          ),
+          title: Text(name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
+          subtitle: Text(sub,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  color: MusicTheme.secondary,
+                  fontSize: AppTheme.fontFootnote)),
+          trailing:
+              Icon(Icons.chevron_right, size: 18, color: MusicTheme.secondary),
+          onTap: () =>
+              artist ? _openPluginArtist(m) : _openPluginAlbum(m),
+        );
+      },
+    );
+  }
+
+  /// 插件歌手 → 作品列表（`getArtistWorks(type:'music')`）
+  Future<void> _openPluginArtist(Map<String, dynamic> raw) async {
+    final p = _plugin;
+    if (p == null) return;
+    final r = await api.musicFreeAction(
+      p,
+      'musicFreeArtistWorks',
+      params: {'artistItem': raw, 'page': 1, 'type': 'music'},
+    );
+    _openPluginSongList(r, p, (raw['name'] ?? '歌手').toString());
+  }
+
+  /// 插件专辑 → 曲目列表（`getAlbumInfo`）
+  Future<void> _openPluginAlbum(Map<String, dynamic> raw) async {
+    final p = _plugin;
+    if (p == null) return;
+    final r = await api.musicFreeAction(
+      p,
+      'musicFreeAlbumInfo',
+      params: {'albumItem': raw, 'page': 1},
+    );
+    _openPluginSongList(r, p, (raw['name'] ?? '专辑').toString());
+  }
+
+  /// 把插件返回的歌曲列表变成 Song（带 pluginId）并打开列表页。
+  void _openPluginSongList(
+    Map<String, dynamic> r,
+    ThirdPartySource p,
+    String title,
+  ) {
+    if (!mounted) return;
+    final songs = <Song>[];
+    for (final e in (r['list'] as List? ?? const [])) {
+      if (e is! Map) continue;
+      try {
+        songs.add(
+          Song.fromJson(Map<String, dynamic>.from(e)).withPluginId(p.id),
+        );
+      } catch (_) {
+        // 单条坏数据不影响整页
+      }
+    }
+    if (songs.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('「$title」没有可播放的歌曲')),
+      );
+      return;
+    }
+    Navigator.of(context).push(MaterialPageRoute(
+      settings: const RouteSettings(name: 'music:page'),
+      builder: (_) => _SongListPage(title: title, songs: songs),
+    ));
+  }
 
   Future<void> _openArtist(Artist a) async {
     final songs = await api.artistSongs(a.id);

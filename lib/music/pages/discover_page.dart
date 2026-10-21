@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../widgets/music_sheet.dart';
 
 import '../models/models.dart';
+import '../models/third_party_source.dart';
 import '../services/library_store.dart';
 import '../services/music_api.dart';
 import '../services/player_manager.dart';
@@ -11,6 +12,7 @@ import '../theme/discover_preset.dart';
 import '../widgets/music_components.dart';
 import '../widgets/discover_sections.dart';
 import 'playlist_detail_page.dart';
+import 'plugin_explore_page.dart';
 import 'ximalaya_album_page.dart';
 import 'bookan_album_page.dart';
 import 'ting15_album_page.dart';
@@ -444,6 +446,8 @@ class _DiscoverPageState extends State<DiscoverPage>
               //   · 每日推荐 → 直接播当天「新歌速递」
               //   · 私人漫游 → 从「我的收藏」随机漫游（没收藏就明确提示）
               SliverToBoxAdapter(child: _bigCards(style)),
+              // 插件推荐（2026-10-21 第二阶段）：第三方 MusicFree 插件的榜单/歌单
+              SliverToBoxAdapter(child: _pluginSection()),
               if (_error.isNotEmpty)
                 SliverToBoxAdapter(child: _errorBox()),
               ..._buildSections(style),
@@ -458,6 +462,87 @@ class _DiscoverPageState extends State<DiscoverPage>
   // ============================================================
   // 顶部
   // ============================================================
+
+  // ============================================================
+  // 顶栏 / 平台切换
+  // ============================================================
+
+  /// 「插件推荐」：已启用的 MusicFree 插件（点进去看它的榜单 / 推荐歌单）。
+  ///
+  /// 没有启用的插件时**整段不渲染**（不占位、不留空标题）。
+  /// 监听 `ThirdPartySourceStore.revision` —— 在设置里启用/停用插件后
+  /// 回到发现页会立刻反映，不用重启。
+  Widget _pluginSection() {
+    return ValueListenableBuilder<int>(
+      valueListenable: ThirdPartySourceStore.instance.revision,
+      builder: (c, _, __) {
+        final plugins = ThirdPartySourceStore.instance.enabled
+            .where((s) => s.isMusicFree)
+            .toList();
+        if (plugins.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SectionTitle(title: '插件推荐（${plugins.length}）'),
+            SizedBox(
+              height: 118,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: plugins.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                itemBuilder: (c, i) {
+                  final p = plugins[i];
+                  return GestureDetector(
+                    onTap: () => Navigator.of(context).push<void>(
+                      MaterialPageRoute<void>(
+                        settings: const RouteSettings(name: 'music:page'),
+                        builder: (_) => PluginExplorePage(source: p),
+                      ),
+                    ),
+                    child: Container(
+                      width: 120,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: MusicTheme.fill,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.extension_rounded,
+                              size: 20, color: MusicTheme.tint),
+                          const Spacer(),
+                          Text(
+                            p.name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: MusicTheme.label,
+                              fontSize: AppTheme.fontBody,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '榜单 · 歌单',
+                            style: TextStyle(
+                              color: MusicTheme.secondary,
+                              fontSize: AppTheme.fontCaption,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   // ============================================================
   // 顶部两张并排大卡（对齐 Beans 主页排版）

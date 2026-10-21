@@ -1802,21 +1802,36 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     if (_images.isNotEmpty) return _mangaView(fg);
 
     if (_loading) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(strokeWidth: 2),
-            const SizedBox(height: 14),
-            Text(
-              '正在加载正文...',
-              style: TextStyle(
-                fontSize: AppTheme.fontSubhead,
-                color: fg.withValues(alpha: 0.6),
-              ),
+      // 加载页背景（用户 2026-10-21 提供）：打开的书 + 暗底，
+      // 转圈与文字用白色，保证在深色背景上可读
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            'assets/icons/reader/loading_bg.png',
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => ColoredBox(color: _bgTop),
+          ),
+          Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white70,
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  '正在加载正文...',
+                  style: TextStyle(
+                    fontSize: AppTheme.fontSubhead,
+                    color: Colors.white.withValues(alpha: 0.78),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       );
     }
     if (_error != null) {
@@ -3640,6 +3655,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 ink ? '切换白天' : '切换夜间',
                 _toggleDayNight,
                 fg,
+                // 用户 2026-10-21 提供的图标：夜→日 用太阳，日→夜 用月亮
+                imageAsset: ink
+                    ? 'assets/icons/reader/day.png'
+                    : 'assets/icons/reader/night.png',
               ),
               const SizedBox(height: 12),
               // 对齐 Cmbok：书源书籍的阅读器「编辑」= 编辑该书源
@@ -3663,12 +3682,16 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   }
 
   /// 竖条里的圆形按钮。
+  ///
+  /// [imageAsset]：用图片代替 Material 图标（竖栏的日夜切换按钮，
+  /// 用户 2026-10-21 提供素材）。图片加载失败时自动回落到 [icon]。
   Widget _dockButton(
     IconData icon,
     String tooltip,
     VoidCallback onTap,
-    Color fg,
-  ) {
+    Color fg, {
+    String? imageAsset,
+  }) {
     return Tooltip(
       message: tooltip,
       child: GestureDetector(
@@ -3681,7 +3704,21 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             color: fg.withValues(alpha: 0.10),
             shape: BoxShape.circle,
           ),
-          child: Icon(icon, size: 19, color: fg.withValues(alpha: 0.95)),
+          child: imageAsset == null
+              ? Icon(icon, size: 19, color: fg.withValues(alpha: 0.95))
+              : Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: ClipOval(
+                    child: Image.asset(
+                      imageAsset,
+                      width: 26,
+                      height: 26,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) =>
+                          Icon(icon, size: 19, color: fg.withValues(alpha: 0.95)),
+                    ),
+                  ),
+                ),
         ),
       ),
     );

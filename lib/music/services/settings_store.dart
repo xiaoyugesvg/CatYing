@@ -5,9 +5,11 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/models.dart';
+import '../models/plugin_subscription.dart';
 import '../models/third_party_source.dart';
 import '../theme/discover_preset.dart';
 import 'builtin_sources_service.dart';
+import 'plugin_market_service.dart';
 import '../../services/app_log.dart';
 
 /// 音乐模块的设置存储 —— 对应 Beans 的 `@AppStorage` / `PlatformPreferenceStore`。
@@ -22,6 +24,13 @@ class SettingsStore {
   static const _kSourceEnabled = 'music.sourceEnabled';
   static const String _kCrossPlatform = 'music.crossPlatformMatch';
   static const String _kAutoPlayOnLaunch = 'music.autoPlayOnLaunch';
+
+  /// MusicFree 插件执行引擎（2026-10-21）
+  ///   · `auto`    —— QuickJS 优先，插件不支持就自动回退 Node（默认）
+  ///   · `node`    —— 只用 Node（与之前完全一致）
+  ///   · `quickjs` —— 只用 QuickJS（不支持的插件会返回明确失败）
+  static const String _kPluginEngine = 'music.pluginEngine';
+  final pluginEngine = ValueNotifier<String>('auto');
 
   /// 发现页视觉预设（aurora / paper / midnight）。
   ///
@@ -153,6 +162,11 @@ class SettingsStore {
         }
       }
       if (parsed != null) audioQuality.value = parsed;
+      // 插件引擎：没存过 / 未知值 → auto（QuickJS 优先、自动回退 Node）
+      final pe = prefs.getString(_kPluginEngine);
+      if (pe == 'auto' || pe == 'node' || pe == 'quickjs') {
+        pluginEngine.value = pe!;
+      }
       useThirdPartySources.value = prefs.getBool(_kSourceEnabled) ?? true;
       // ── ⚠️ **强制关闭**，并清掉可能存在的历史 true ────────────────
       //
@@ -210,6 +224,14 @@ class SettingsStore {
     } catch (e) {
       AppLog.instance.log('[Music] 内置源注册失败: $e');
     }
+    // 插件订阅 + 市场缓存（2026-10-21 第三期）：只读本地，不发网络请求；
+    // 真正的"刷新清单"由插件市场/订阅管理页在打开时触发。
+    try {
+      await PluginSubscriptionStore.instance.init();
+      await PluginMarketService.instance.init();
+    } catch (e) {
+      AppLog.instance.log('[Music] 插件订阅/市场缓存初始化失败: $e');
+    }
     unawaited(BuiltinSourcesService.instance.checkForUpdates());
   }
 
@@ -252,6 +274,13 @@ class SettingsStore {
     final old = audioQuality.value;
     audioQuality.value = q;
     await _write(_kQuality, q.name, () => audioQuality.value = old);
+  }
+
+  Future<void> setPluginEngine(String v) async {
+    if (v != 'auto' && v != 'node' && v != 'quickjs') return;
+    final old = pluginEngine.value;
+    pluginEngine.value = v;
+    await _write(_kPluginEngine, v, () => pluginEngine.value = old);
   }
 
   Future<void> setUseThirdPartySources(bool v) async {

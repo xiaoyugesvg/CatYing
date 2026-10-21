@@ -59,6 +59,16 @@ const ACTION_TIMEOUT_MS = 20000;
 /** 脚本大小上限（字符）。超过直接拒绝，避免解析本身把内存吃爆。 */
 const MAX_SCRIPT_CHARS = 512 * 1024;
 
+/**
+ * MusicFree 插件的上限（2026-10-21）。
+ *
+ * 实测 `agg-source` 有 **1.43 MB**（聚合十几个通道），用 512K 的上限会
+ * 直接报「脚本过大」——它明明是内置源却永远加载不了 ✗。
+ * 这里与 Dart 侧 `BuiltinSourcesService._mfMaxScriptBytes`（2 MB）对齐。
+ * LX 脚本不受影响（仍走上面的 512K）。
+ */
+const MAX_MF_SCRIPT_CHARS = 2 * 1024 * 1024;
+
 /** 单次请求超时 */
 const REQUEST_TIMEOUT_MS = 12000;
 
@@ -399,8 +409,9 @@ export async function loadScript(script, opts) {
     const extraModules = (opts && opts.modules) || null;
     const src = String(script || '');
     if (!src.trim()) return { ok: false, error: '脚本为空' };
-    if (src.length > MAX_SCRIPT_CHARS) {
-        return { ok: false, error: `脚本过大（${src.length} 字符，上限 ${MAX_SCRIPT_CHARS}）` };
+    if (src.length > (extraModules ? MAX_MF_SCRIPT_CHARS : MAX_SCRIPT_CHARS)) {
+        const limit = extraModules ? MAX_MF_SCRIPT_CHARS : MAX_SCRIPT_CHARS;
+        return { ok: false, error: `脚本过大（${src.length} 字符，上限 ${limit}）` };
     }
 
     // 脚本通过 on(event, handler) 注册各 action 的处理函数
@@ -628,6 +639,22 @@ export async function loadScript(script, opts) {
     sandbox.window = sandbox;
     sandbox.self = sandbox;
 
+    // ── MusicFree 插件变量注入（2026-10-21 第三期）─────────────────
+    // 插件约定：`global.env.getUserVariables()` 返回 { key: value }。
+    // 实测 apple-music / bilibili / agg 等插件都是这么读的（含
+    // `typeof global !== 'undefined' && global.env` 的安全判空）。
+    //
+    // ⚠️ **只给 MusicFree 路径注入**：LX 的 `env` 是字符串（`lx.env`），
+    //   这里若无条件改成对象会破坏洛雪脚本的平台判断。
+    if (extraModules && opts && opts.variables &&
+        typeof opts.variables === 'object') {
+        const vars = { ...opts.variables };
+        sandbox.env = {
+            getUserVariables: () => ({ ...vars }),
+            getUserVariable: (k) => vars[String(k)] ?? '',
+        };
+    }
+
     try {
         // timeout 是硬中断：脚本死循环会在 SCRIPT_TIMEOUT_MS 后被终止，
         // 不会把 Node 事件循环（也就是整个 App）卡死。
@@ -641,6 +668,9 @@ export async function loadScript(script, opts) {
         // 兼容两种写法：lx.on(...) 注册 / module.exports = { ... }
         const exported = sandbox.module && sandbox.module.exports;
         if (exported && typeof exported === 'object' && !Array.isArray(exported)) {
+            // MusicFree 的 `userVariables` / `supportedSearchType` 等是
+            // **非函数字段** —— 留一份原始导出，供适配层读取（LX 路径不存）
+            if (extraModules) handlers.__exports = exported;
             // LX 常见：module.exports = { getMediaSource, search, getLyric, ... }
             for (const k of Object.keys(exported)) {
                 if (typeof exported[k] === 'function') handlers[k] = exported[k];

@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../services/bookshelf_service.dart';
+import '../services/book_quickjs_engine.dart';
 import '../services/settings_service.dart';
 import '../services/sync_service.dart';
 import '../theme/jelly_theme.dart';
@@ -60,6 +61,25 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
               ),
               const SizedBox(height: 12),
 
+              // ── 引擎（2026-10-21）───────────────────────────
+              _sectionTitle('引擎'),
+              const SizedBox(height: 8),
+              ValueListenableBuilder<String>(
+                valueListenable: BookQuickJsEngine.instance.mode,
+                builder: (context, mode, _) => _buildNavCard(
+                  isDark: _isDark,
+                  icon: Icons.memory_rounded,
+                  title: '书源引擎',
+                  subtitle: switch (mode) {
+                    'quickjs' => 'QuickJS（实验，失败不回落）',
+                    'auto' => '自动：QuickJS 优先，失败回落 Node',
+                    _ => 'Node（默认，兼容性最好）',
+                  },
+                  onTap: _pickBookEngine,
+                ),
+              ),
+              const SizedBox(height: 12),
+
               // ── 运行维护 ────────────────────────────────────
               _sectionTitle('运行维护'),
               const SizedBox(height: 8),
@@ -97,6 +117,42 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
         },
       ),
     );
+  }
+
+  /// 选择书源执行引擎（Node / 自动 / QuickJS）
+  Future<void> _pickBookEngine() async {
+    await BookQuickJsEngine.instance.ensureInit();
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (ctx) {
+        final cur = BookQuickJsEngine.instance.mode.value;
+        Widget tile(String value, String title, String subtitle) {
+          return RadioListTile<String>(
+            value: value,
+            groupValue: cur,
+            onChanged: (v) => Navigator.pop(ctx, v),
+            title: Text(title),
+            subtitle: Text(subtitle),
+          );
+        }
+
+        return SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              tile('node', 'Node', '默认，兼容性最好'),
+              tile('auto', '自动', 'QuickJS 优先，失败自动回落 Node'),
+              tile('quickjs', 'QuickJS', '实验引擎：失败不回落（便于对比测试）'),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+    if (picked != null) await BookQuickJsEngine.instance.setMode(picked);
   }
 
   /// 分组标题（与「阅读设置」页一致：fontSubhead/w600）

@@ -16,6 +16,7 @@ import '../utils/html_text.dart';
 import '../utils/source_fail_text.dart';
 import 'book_source_dart_engine.dart';
 import 'book_source_python_engine.dart';
+import 'book_quickjs_engine.dart';
 
 /// 书源搜索到的一本书。
 ///
@@ -359,6 +360,22 @@ class BookSourceService {
     // 与 Dart 引擎同构：返回 null（非 Python 源/动作未接管/失败）⇒ 回落 Node。
     final pythonHandled = await BookSourcePythonEngine.instance.handle(body);
     if (pythonHandled != null) return pythonHandled;
+    // ── QuickJS 书源引擎（实验，2026-10-21）────────────────────────
+    // Dart / Python 都没接管时，按设置决定要不要先试 QuickJS；
+    // 失败 / 返回 null 继续回落 Node（默认 node，完全保持旧行为）。
+    await BookQuickJsEngine.instance.ensureInit();
+    final qjsMode = BookQuickJsEngine.instance.mode.value;
+    if (qjsMode != 'node') {
+      final action = (body['action'] ?? '').toString();
+      final q = await BookQuickJsEngine.instance.call(action, body);
+      if (q != null) return q;
+      if (qjsMode == 'quickjs') {
+        return {
+          'ok': false,
+          'error': 'QuickJS 书源引擎执行失败（设置 → 通用 → 书源引擎 可切回 Node）',
+        };
+      }
+    }
     // ── [PATCH-24-REVERT] 恢复 **Node 回退** ─────────────────────────────
     // 背景（实机证据）：我一度把这里改成"只走 Dart 引擎"，结果用户手机上
     // 《校花的贴身高手》(QQ阅读) 与《不死神王书城》的**目录直接报错**：

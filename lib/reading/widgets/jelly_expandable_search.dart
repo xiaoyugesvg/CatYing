@@ -154,7 +154,14 @@ class _JellyExpandableSearchState extends State<JellyExpandableSearch> {
           fontSize: AppTheme.fontSubhead,
           color: hintColor,
         ),
+        // 🔴 必须显式关掉填充：`JellyTheme` 的 inputDecorationTheme 是
+        //   `filled: true + fillColor: primary@8%`（给普通表单输入框用的）⇒
+        //   这里不写就会在提示文字后面画出一块**灰色圆角底**（用户截图里
+        //   "搜索书架"后面那层灰，2026-10-21）。胶囊自己有实底，内层必须透明。
+        filled: false,
         border: InputBorder.none,
+        enabledBorder: InputBorder.none,
+        focusedBorder: InputBorder.none,
         isDense: true,
         contentPadding: EdgeInsets.zero,
       ),

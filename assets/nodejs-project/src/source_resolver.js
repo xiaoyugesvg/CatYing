@@ -23,10 +23,80 @@ import axios from 'axios';
 import { loadScript, runAction } from './lx_engine.js';
 // MusicFree 插件适配层（独立一套入口，不影响上面的 LX 路径）
 import { looksLikeMusicFree, loadMusicFreePlugin, pickMediaGetter, normalizeMedia,
-         pickAction, normalizeSearchResult, normalizeLyric } from './musicfree_adapter.js';
+         pickAction, normalizeSearchResult, normalizeLyric,
+         normalizeTopLists, normalizeSheetTags, normalizeSheets,
+         normalizeSheetInfo, normalizeArtistWorks, normalizeMusicInfo,
+         normalizeTopListDetail, pluginUserVariables,
+         normalizePluginSearch, normalizeAlbumInfo } from './musicfree_adapter.js';
 
 /** 模板法请求超时 */
 const TEMPLATE_TIMEOUT_MS = 12000;
+
+// ============================================================
+// 插件实例缓存（2026-10-21）
+// ============================================================
+//
+// 原来**每个动作**（搜索 / 歌词 / 取地址 / 榜单…）都会重新
+// `loadMusicFreePlugin`：把整份脚本丢进 vm 里再执行一遍。
+// `agg-source` 这种 1.7 MB 的插件，一次搜索就要重新解析执行一次，
+// 切歌、翻页、试源时累积起来非常明显。
+//
+// 这里按「脚本内容 hash + 变量 hash」缓存加载结果（handlers / exports /
+// actions）：
+//   · 同一插件 + 同一变量 → 后续调用直接复用（插件内部的缓存也能生效）
+//   · 用户改了 Cookie 等变量 → key 变化，自动重新加载
+//   · LRU 上限 12：vm context 会随 handler 存活，不能无限攒
+const MF_PLUGIN_CACHE_LIMIT = 12;
+const _mfPluginCache = new Map();
+
+function _fnv1a(str, seed) {
+    let h = seed >>> 0;
+    const s = String(str || '');
+    for (let i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h >>> 0;
+}
+
+function _mfPluginKey(script, variables) {
+    const s = String(script || '');
+    const v = JSON.stringify(variables || {});
+    // 同时带上长度，降低"内容变了但 hash 撞车"的概率
+    return `${s.length}:${v.length}:${_fnv1a(s, 0x811c9dc5).toString(16)}:${_fnv1a(v, 0x811c9dc5).toString(16)}`;
+}
+
+/**
+ * 带缓存的 MusicFree 插件加载。
+ * 失败结果**不缓存**（网络/变量问题修好后应能立刻重试）。
+ */
+async function loadPluginCached(source) {
+    const script = String((source && source.script) || '');
+    if (!script.trim()) return { ok: false, error: '插件没有内容' };
+
+    const key = _mfPluginKey(script, source && source.variables);
+    const hit = _mfPluginCache.get(key);
+    if (hit) {
+        // LRU：命中后挪到队尾
+        _mfPluginCache.delete(key);
+        _mfPluginCache.set(key, hit);
+        return hit;
+    }
+
+    const loaded = await loadMusicFreePlugin(
+        script,
+        loadScript,
+        source && source.variables,
+    );
+    if (loaded.ok) {
+        _mfPluginCache.set(key, loaded);
+        if (_mfPluginCache.size > MF_PLUGIN_CACHE_LIMIT) {
+            const oldest = _mfPluginCache.keys().next().value;
+            if (oldest !== undefined) _mfPluginCache.delete(oldest);
+        }
+    }
+    return loaded;
+}
 
 /** 播放地址常见的字段名（`urlPath` 没命中时按顺序兜底找） */
 const URL_KEYS = ['url', 'src', 'play_url', 'playUrl', 'link', 'location', 'data'];
@@ -235,7 +305,7 @@ async function resolveMusicFree(source, song) {
         return { ok: false, error: '插件没有内容' };
     }
 
-    const loaded = await loadMusicFreePlugin(script, loadScript);
+    const loaded = await loadPluginCached(source);
     if (!loaded.ok) {
         return { ok: false, error: loaded.error };
     }
@@ -319,6 +389,14 @@ async function resolveMusicFree(source, song) {
     //      所以只填**基础档** `hash`。插件多数通道用它就能取到免费档，
     //      高音质档取不到时会自己降级（它本来就有 fallback 链）。
     const srcMapForPlugin = (() => {
+        // ── 优先用**插件自己给的** `_src`（2026-10-21 第二阶段）─────────
+        // 插件搜索/榜单产出的条目自带 `_src`（含 hash320 / hashSq / hashHires
+        // 多档），Dart 侧 `Song.srcMap` 会把它原样存下来并在这里回传。
+        // 它比下面"按 songmid 拼的最小 `_src`"完整得多 —— 有就用它 ✓
+        if (song && song._src && typeof song._src === 'object' &&
+            Object.keys(song._src).length > 0) {
+            return song._src;
+        }
         const v = midForPlugin != null ? String(midForPlugin) : '';
         if (!v) return null;
         // LX 平台码 → 插件 `_src` 的键名。
@@ -489,11 +567,11 @@ async function resolveMusicFree(source, song) {
  * @param action 'search' | 'lyric'
  * @param args   该 action 的位置参数
  */
-async function resolveMusicFreeAction(source, action, args) {
+async function resolveMusicFreeAction(source, action, args, opts) {
     const script = String(source.script || '');
     if (!script.trim()) return { ok: false, error: '插件没有内容' };
 
-    const loaded = await loadMusicFreePlugin(script, loadScript);
+    const loaded = await loadPluginCached(source);
     if (!loaded.ok) return { ok: false, error: loaded.error };
 
     const picked = pickAction(loaded.handlers, action);
@@ -513,7 +591,8 @@ async function resolveMusicFreeAction(source, action, args) {
     if (!r.ok) return { ok: false, error: r.error };
 
     if (action === 'search') {
-        const n = normalizeSearchResult(r.result);
+        // 2026-10-21：按 type 归一化（music / artist / album / sheet）
+        const n = normalizePluginSearch(r.result, (opts && opts.type) || 'music');
         return { ok: true, list: n.list, isEnd: n.isEnd };
     }
     if (action === 'lyric') {
@@ -528,7 +607,12 @@ async function resolveMusicFreeAction(source, action, args) {
  * 签名：`search(query, page, type)` —— `type` 默认 'music'。
  */
 export async function searchByMusicFree(source, keyword, page = 1, type = 'music') {
-    return resolveMusicFreeAction(source, 'search', [String(keyword || ''), page, type]);
+    return resolveMusicFreeAction(
+        source,
+        'search',
+        [String(keyword || ''), page, type],
+        { type },
+    );
 }
 
 /**
@@ -536,14 +620,133 @@ export async function searchByMusicFree(source, keyword, page = 1, type = 'music
  * 签名：`getLyric(musicItem)`。
  */
 export async function lyricByMusicFree(source, song) {
-    const musicItem = {
+    return resolveMusicFreeAction(source, 'lyric', [musicItemFromSong(song)]);
+}
+
+/** Dart 侧 Song → MusicFree 的 musicItem（歌词 / 元信息都吃这一份） */
+function musicItemFromSong(song) {
+    return {
         id: song && song.id != null ? String(song.id) : '',
+        songmid: song && song.songmid ? String(song.songmid) : '',
         title: song && song.name ? String(song.name) : '',
         artist: song && song.artists ? String(song.artists) : '',
         album: song && song.album ? String(song.album) : '',
+        artwork: song && song.cover ? String(song.cover) : '',
         duration: (song && song.duration) || 0,
     };
-    return resolveMusicFreeAction(source, 'lyric', [musicItem]);
+}
+
+/**
+ * 通用 MusicFree action 执行器（2026-10-21 第一阶段新增）。
+ *
+ * 与 [resolveMusicFreeAction] 的区别：这里**不做归一化**，只负责
+ * 「加载插件 → 找到导出 → 用位置参数调用」，把原始返回值交给
+ * 各自专门的 normalizer。这样榜单/歌单/歌手这些返回形态差异大的
+ * action 就不会被硬塞进 search/lyric 的 switch 里。
+ *
+ * @param action 适配层 `pickAction` 认识的 action 名
+ * @param args   该 action 的位置参数
+ */
+async function runMusicFreeAction(source, action, args) {
+    const script = String((source && source.script) || '');
+    if (!script.trim()) return { ok: false, error: '插件没有内容' };
+
+    const loaded = await loadPluginCached(source);
+    if (!loaded.ok) return { ok: false, error: loaded.error };
+
+    const picked = pickAction(loaded.handlers, action);
+    if (!picked) {
+        return {
+            ok: false,
+            error:
+                `该 MusicFree 插件不支持 ${action}` +
+                `；它提供：${(loaded.actions || []).join(', ') || '无'}`,
+        };
+    }
+
+    const r = await runAction({ [picked.name]: picked.fn }, picked.name, args, {
+        spread: true,
+    });
+    if (!r.ok) return { ok: false, error: r.error };
+    return { ok: true, result: r.result };
+}
+
+/** 榜单分组：`getTopLists()` */
+export async function topListsByMusicFree(source) {
+    const r = await runMusicFreeAction(source, 'topLists', []);
+    return r.ok ? normalizeTopLists(r.result) : r;
+}
+
+/** 榜单详情：`getTopListDetail(topListItem)` */
+export async function topListDetailByMusicFree(source, topListItem) {
+    const r = await runMusicFreeAction(source, 'topListDetail', [topListItem || {}]);
+    return r.ok ? normalizeTopListDetail(r.result) : r;
+}
+
+/** 推荐歌单标签：`getRecommendSheetTags()` */
+export async function recommendSheetTagsByMusicFree(source) {
+    const r = await runMusicFreeAction(source, 'recommendSheetTags', []);
+    return r.ok ? normalizeSheetTags(r.result) : r;
+}
+
+/** 标签下的推荐歌单：`getRecommendSheetsByTag(tag, page)` */
+export async function recommendSheetsByMusicFree(source, tag, page = 1) {
+    const r = await runMusicFreeAction(source, 'recommendSheets', [
+        String(tag || ''),
+        page,
+    ]);
+    return r.ok ? normalizeSheets(r.result) : r;
+}
+
+/** 歌单详情：`getMusicSheetInfo(sheetItem, page)` */
+export async function sheetInfoByMusicFree(source, sheetItem, page = 1) {
+    const r = await runMusicFreeAction(source, 'sheetInfo', [
+        sheetItem || {},
+        page,
+    ]);
+    return r.ok ? normalizeSheetInfo(r.result) : r;
+}
+
+/** 歌手作品：`getArtistWorks(artistItem, page, type)` */
+export async function artistWorksByMusicFree(source, artistItem, page = 1, type = 'music') {
+    const r = await runMusicFreeAction(source, 'artistWorks', [
+        artistItem || {},
+        page,
+        type,
+    ]);
+    return r.ok ? normalizeArtistWorks(r.result, type) : r;
+}
+
+/** 单曲元信息：`getMusicInfo(musicItem)` */
+export async function musicInfoByMusicFree(source, song) {
+    const r = await runMusicFreeAction(source, 'musicInfo', [
+        musicItemFromSong(song),
+    ]);
+    return r.ok ? normalizeMusicInfo(r.result) : r;
+}
+
+/** 专辑详情：`getAlbumInfo(albumItem)`（含曲目） */
+export async function albumInfoByMusicFree(source, albumItem) {
+    const r = await runMusicFreeAction(source, 'albumInfo', [albumItem || {}]);
+    return r.ok ? normalizeAlbumInfo(r.result) : r;
+}
+
+/**
+ * 插件的**用户变量声明**（2026-10-21 第三期「登录变量」）。
+ *
+ * 只加载插件、读 `module.exports.userVariables`，不执行任何网络请求。
+ * 返回 `[{ key, name, hint }]`，UI 按它渲染输入框（值存在 Dart 侧）。
+ */
+export async function variablesByMusicFree(source) {
+    const script = String((source && source.script) || '');
+    if (!script.trim()) return { ok: false, error: '插件没有内容' };
+    const loaded = await loadPluginCached(source);
+    if (!loaded.ok) return { ok: false, error: loaded.error };
+    return {
+        ok: true,
+        list: pluginUserVariables(loaded.exports),
+        actions: loaded.actions || [],
+    };
 }
 
 /** 判断一份脚本是否该走 MusicFree 适配层 */

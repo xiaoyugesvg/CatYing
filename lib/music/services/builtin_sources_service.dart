@@ -298,8 +298,8 @@ class BuiltinSourcesService {
     final out = <ThirdPartySource>[];
     for (final entry in index) {
       final name = entry['name']!;
-      // ✅ 用户 2026-10-07：**下架名单**里的源不注册（远端索引也走这道闸）
-      //   第一批 dj/DJ；第二批 require('cheerio') 的 6 个 ✓
+      // ✅ 下架名单里的源不注册（远端索引也走这道闸）
+      //   现在是"名称含 dj/DJ"的 DJ 类音源（cheerio 那 6 个已于 2026-10-21 恢复）
       if (_isBlockedName(name)) continue;
       final url = entry['url']!;
       final fileName = _fileNameFromUrl(url);
@@ -455,26 +455,21 @@ class BuiltinSourcesService {
 
   /// **下架名单**：这些 MusicFree 源不再内置、也不再注册。
   ///
-  /// 用户 2026-10-07 分两批下架：
-  ///   · 第一批 —— 名称带 `dj/DJ` 的 DJ 类音源（`DJ多多 / 火龙DJ / djuu DJ /
-  ///     SpaceDJ …`）。判据按**名称**而不是 url：像 `水晶舞曲` 当时 url 含
-  ///     `dj14` 但名字里没有，所以那一轮保留了下来 ✓
-  ///   · 第二批（本轮）—— 脚本里写 `const cheerio = require('cheerio')` 的
-  ///     6 个源：`相声评书 / 水晶舞曲 / 172Mix / 黑色音频 / 好听轻音乐 /
-  ///     电音阁`。这 6 个都靠 cheerio 解析 HTML 页面，按要求**一并去掉** ✓
-  static const Set<String> _blockedNames = {
-    '相声评书',
-    '水晶舞曲',
-    '172Mix',
-    '黑色音频',
-    '好听轻音乐',
-    '电音阁',
-  };
-
-  /// 命中下架名单？`dj/DJ` 按包含判断（大小写不敏感），其余按**精确名称**判断。
+  /// 用户 2026-10-07 下架了一批名称带 `dj/DJ` 的 DJ 类音源
+  ///（`DJ多多 / 火龙DJ / djuu DJ / SpaceDJ …`），按**名称包含**判断
+  ///（像 `水晶舞曲` 当时 url 含 `dj14` 但名字里没有，所以没有被这一条误伤）。
+  ///
+  /// ── 2026-10-21 移除「cheerio 下架名单」────────────────────────
+  /// 原来这里还有 6 个名字：`相声评书 / 水晶舞曲 / 172Mix / 黑色音频 /
+  /// 好听轻音乐 / 电音阁` —— 它们都 `require('cheerio')`，而当时插件运行时
+  /// **只注入 axios / he**，require('cheerio') 会直接抛错 ⇒ 只能下架 ✗。
+  ///
+  /// 现在 MusicFree 适配层已补齐 `cheerio / crypto-js / dayjs / big-integer /
+  /// pako / iconv-lite`（见 `assets/nodejs-project/src/musicfree_adapter.js`
+  /// 的 `MUSICFREE_MODULES`）⇒ 这 6 个源能正常解析 HTML 了，
+  /// 所以从下架名单里移除、重新注册 ✓
   static bool _isBlockedName(String name) {
-    if (name.toLowerCase().contains('dj')) return true;
-    return _blockedNames.contains(name.trim());
+    return name.toLowerCase().contains('dj');
   }
 
   /// 清掉**已经注册过**的下架 MusicFree 内置源 + 它们的脚本文件缓存。

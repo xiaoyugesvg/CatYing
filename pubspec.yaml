@@ -159,9 +159,14 @@ flutter:
     #     加载失败（about_page / download_page / source_repo_page / search_page ✓）
     #   2026-10-09：从 cmbok 安装目录把文件补回来 + 这里补声明 ✓
     - assets/icons/
+    # 阅读器素材（2026-10-21 用户提供）：竖栏日夜图标 + 加载页背景
+    - assets/icons/reader/
     # 内置头像 / 桌宠素材（12 生肖风格插画，用户提供）——
     # 「我的」页「选择头像」面板与桌宠皮肤共用；旧的 40 张 DiceBear PNG 已删除。
     - assets/avatars_pets/
+    # 内置登录头像（50 张，来自 Cmbok 的 icons/mine）——
+    # 「我的 → 选择头像」面板里与生肖插画一起展示，id 形如 `asset://<路径>`
+    - assets/avatars/mine/
     # 内置阅读背景壁纸（14 张，来自 cmbok ✓）
     #   ⚠️ 目录式声明**不递归**，所以要单独声明这个子目录 ✓
     - assets/images/reader_bg/
@@ -188,6 +193,8 @@ flutter:
     - assets/music/
     - assets/music/lx/
     - assets/music/musicfree/
+    # 书源 QuickJS 引擎 bundle（2026-10-21，由 nodejs-project/esbuild.js 产出）
+    - assets/js/
 
   # ── 内置字体 ──────────────────────────────────────────────────
   #   ⚠️ 原来整个 pubspec **没有 `fonts:` 段** ✗ ⇒ 图书阅读器字体列表里的
