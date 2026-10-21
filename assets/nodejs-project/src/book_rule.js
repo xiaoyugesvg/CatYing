@@ -81,13 +81,20 @@ function splitRule(rule) {
   const parts = [];
   let buf = '';
   let depth = 0;
+  // 一旦进入 @js: 段，后面的 `@` 都属于脚本（正则/字符串里可能有 a@b），不再切分
+  let jsStarted = false;
   for (let i = 0; i < body.length; i++) {
     const ch = body[i];
     if (ch === '[') depth++;
     if (ch === ']') depth = Math.max(0, depth - 1);
+    if (jsStarted) {
+      buf += ch;
+      continue;
+    }
 
     if (ch === '@' && depth === 0) {
       const rest = body.substring(i + 1);
+      if (/^js:/i.test(rest)) jsStarted = true;
       const mm = /^([\w-]+)/.exec(rest);
       const prev = buf.replace(/\s+$/, '');
       // 路径属性（前面以 / 结尾）不切；其余 @word 都切
@@ -95,7 +102,16 @@ function splitRule(rule) {
       // 元素步骤（Legado 官方：@tag.li / @class.x / @id.y / @children）
       // 也是 @ 分段的一环——不切的话整段被当成一个 CSS 选择器 → 匹配 0。
       const isElementStep = /^(tag|class|id|children|parent|self)\b/.test(rest);
-      if (!isPathAttr && mm && (VALUE_KEY.test(mm[1]) || isElementStep) && buf.trim() !== '') {
+      // 裸标签名（`ul@li`、`div@span`、`td@a`）：Legado 语义同样是「逐级选择」。
+      // 原来只认取值关键字和 tag./class. 前缀 ⇒ `ul@li` 整条被当成一个 CSS
+      // 选择器 → 永远 0 条（奇异书网搜索/目录全空，用户 2026-10-21）。
+      // 属性与子元素同名的极少，交给 walkParts 里"先元素后属性"的判定兜底。
+      const isBareStep = /^[a-z][\w-]*$/i.test(mm ? mm[1] : '') &&
+          !/^(js|css|json|xpath|jsoup)$/i.test(mm ? mm[1] : '');
+      if (!isPathAttr &&
+          mm &&
+          (VALUE_KEY.test(mm[1]) || isElementStep || isBareStep) &&
+          buf.trim() !== '') {
         parts.push(buf.trim());
         buf = '';
         continue; // 丢掉这个 @
@@ -151,9 +167,17 @@ function normLegadoStep(step) {
   // 错拼纠正（包子漫画的 tocUrl 里就有 @harf）
   if (s === 'harf') return 'href';
 
-  // 不含 class./tag./id. 前缀 → 原样返回（标准 CSS / JSONPath / XPath）
+  // 不含 class./tag./id. 前缀 → 先看是不是 Legado 的 `tag.N` 简写，否则原样返回
   const m0 = /^(class|tag|id)\.([\s\S]+)$/i.exec(s);
-  if (!m0) return s;
+  if (!m0) {
+    // Legado 简写：`tag.N` = 当前节点下第 N 个 tag 元素
+    //   例：`a.0@href`、`p.2@text`、`ul.2@li`（奇异书网等大量老源在用）
+    //   ⚠️ 原样交给 CSS 时 `.0` 是"类名 0"（非法）⇒ 永远匹配 0 个，
+    //   表现为「目录 0 章 / 搜索 0 条」。这里转成 jQuery 的 `:eq(N)`。
+    const tn = /^([A-Za-z][\w-]*)\.(-?\d+)$/.exec(s);
+    if (tn) return `${tn[1]}:eq(${tn[2]})`;
+    return s;
+  }
   const kind = m0[1].toLowerCase();
   let rest = m0[2];
 
@@ -1447,7 +1471,21 @@ function walkParts($, nodes, parts, isList) {
     }
 
     // 属性名（@data-src 之类）
-    if (/^[a-z-]+$/.test(p) && !/^[.#\[]/.test(p)) {
+    // ⚠️ 先按**子选择器**找：Legado 的 `ul@li` / `div@span` 就是这个语义。
+    //   原来无条件当属性取 ⇒ `ul@li` 变成"取 ul 的 li 属性" = 空 ⇒
+    //   搜索 0 条 / 目录 0 章（奇异书网，用户 2026-10-21）。
+    //   找不到同名子元素时才退回属性（`a@href`、`img@data-original` 照旧）。
+    if (/^[a-z][\w-]*$/.test(p) && !/^[.#\[]/.test(p)) {
+      let child = null;
+      try {
+        child = cur.find(p);
+      } catch (_) {
+        child = null;
+      }
+      if (child && child.length > 0) {
+        cur = child;
+        continue;
+      }
       const arr = cur.toArray();
       const get = (n) => String($(n).attr(p) || '').trim();
       if (isLast) return isList ? arr.map(get) : (arr.length ? get(arr[0]) : '');

@@ -419,6 +419,11 @@ function applyLegadoVars(str, state) {
       const v = state[e];
       return v == null ? '' : String(v);
     }
+    // Legado 的 `{{cookie.removeCookie(source.getKey())}}` 这类**函数调用**：
+    // 我们的 Cookie 由 axios 的 jar 自己维护，这类调用的语义是「清/读 Cookie」，
+    // 取值按空处理即可。原来的实现会把整段字面量留在 URL 里 ⇒
+    // `{{…}}/search/` 请求必然 404（用户 2026-10-21 反馈的奇异书网）。
+    if (/^[A-Za-z_$][\w$]*\s*[.(]/.test(e)) return '';
     return all;
   });
 }
@@ -1305,6 +1310,16 @@ function cleanText(t) {
 function normalizeLegadoSource(src) {
   if (!src || typeof src !== 'object') return src;
   const s = Object.assign({}, src);
+
+  // 🔴 社区导出的书源经常把地址写成 Markdown 行内代码：`"`http://xxx/`"`。
+  //   带着反引号 new URL() 直接抛 Invalid URL → 搜索/详情/目录全废
+  //   （用户 2026-10-21 的「奇异书网」源就是这个）。
+  //   ⇒ 统一脱掉首尾反引号 + 空白，只对 URL 字段做，不动规则文本。
+  for (const k of ['bookSourceUrl', 'url']) {
+    if (typeof s[k] === 'string') {
+      s[k] = s[k].replace(/^[`\s]+|[`\s]+$/g, '');
+    }
+  }
 
   const rs = Object.assign({}, s.ruleSearch || {});
   const rsMap = {
