@@ -116,7 +116,12 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
       );
   }
 
-  Future<void> _load() async {
+  /// 拉详情 + 目录。
+  ///
+  /// `force=true`（重试按钮 / 下拉刷新）→ **跳过 5 分钟缓存**重新请求：
+  /// 否则站点抽风返回一次空目录后，重试拿的还是缓存里的空结果，
+  /// 看起来就是「点了没反应」（用户 2026-10-21 反馈）。
+  Future<void> _load({bool force = false}) async {
     setState(() {
       _loadingToc = true;
       _error = null;
@@ -124,10 +129,11 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
     final r = _result;
     try {
       // 1) 详情：补全封面/简介/作者，并拿到 tocUrl
-      final info = await BookSourceService.instance.bookInfo(
+      final info = await BookSourceService.instance.bookInfoChecked(
         r.source,
         r.bookUrl,
-      );
+        force: force,
+      ).then((v) => v.info);
       if (!mounted) return;
       if (info != null) _info = info;
       _infoLoadedAt = DateTime.now();
@@ -137,6 +143,7 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
       final t = await BookSourceService.instance.toc(
         r.source,
         tocUrl.isEmpty ? r.bookUrl : tocUrl,
+        force: force,
       );
       if (!mounted) return;
       if (!t.ok) {
@@ -225,11 +232,18 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
           //   0 高，下半页根本滚不到 ✗。
           //   ⇒ 改成**整页一个滚动视图**：头部与目录都进 slivers，
           //     谁长都能滚，`收起` 自然也够得着 ✓。
-          CustomScrollView(
-            slivers: [
-              SliverToBoxAdapter(child: _header()),
-              ..._tocSlivers(),
-            ],
+          RefreshIndicator(
+            color: JellyTheme.primary,
+            // 下拉 = 强制刷新：跳过 5 分钟缓存重新拉详情+目录
+            onRefresh: () => _load(force: true),
+            child: CustomScrollView(
+              // 内容不足一屏（目录失败/为空）时也要能下拉
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                SliverToBoxAdapter(child: _header()),
+                ..._tocSlivers(),
+              ],
+            ),
           ),
         ],
       ),
@@ -1062,7 +1076,7 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                   ),
                   const SizedBox(height: 16),
                   TextButton.icon(
-                    onPressed: _load,
+                    onPressed: () => _load(force: true),
                     icon: const Icon(Icons.refresh_rounded),
                     label: const Text('重试'),
                   ),
@@ -1122,7 +1136,7 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                         ),
                       ),
                       const Spacer(),
-                      _tocIcon(Icons.refresh_rounded, '刷新', _load),
+                      _tocIcon(Icons.refresh_rounded, '刷新', () => _load(force: true)),
                       _tocIcon(
                         Icons.swap_vert_rounded,
                         _descending ? '倒序' : '正序',

@@ -308,15 +308,23 @@ class BookSourceService {
   Future<dynamic> _callCached(
     Map<String, dynamic> body,
     String cacheKey,
-    Duration ttl,
-  ) async {
-    final hit = _cache[cacheKey];
-    if (hit != null) {
-      if (!hit.isExpired) return hit.data;
+    Duration ttl, {
+    /// 手动「重试 / 下拉刷新」时传 true：**跳过缓存**直接重打。
+    /// 不这样的话，5 分钟内点重试拿的还是上一次的缓存结果（用户看到
+    /// 「重试按钮点了没反应」，2026-10-21 反馈）。
+    bool force = false,
+  }) async {
+    if (!force) {
+      final hit = _cache[cacheKey];
+      if (hit != null) {
+        if (!hit.isExpired) return hit.data;
+        _cache.remove(cacheKey);
+      }
+      final running = _inflight[cacheKey];
+      if (running != null) return running;
+    } else {
       _cache.remove(cacheKey);
     }
-    final running = _inflight[cacheKey];
-    if (running != null) return running;
 
     final future = _call(body);
     _inflight[cacheKey] = future;
@@ -580,8 +588,9 @@ class BookSourceService {
   /// 「网络不通 / 解析失败」，用本方法拿 error。
   Future<({Map<String, dynamic>? info, String? error})> bookInfoChecked(
     BookSource source,
-    String bookUrl,
-  ) async {
+    String bookUrl, {
+    bool force = false,
+  }) async {
     // ── 壳模式：qread 服务端执行 ruleBookInfo（解决本地引擎 @js: 垫片/500）──
     // ── config 明文源：Dart 侧引擎 ─────────────────────────────
     final raw = await _callCached(
@@ -592,6 +601,7 @@ class BookSourceService {
       },
       _key('bsBookInfo', '${source.id}|$bookUrl'),
       _detailTtl,
+      force: force,
     );
     final m = _asMap(raw);
     if (m['ok'] == false) {
@@ -607,18 +617,21 @@ class BookSourceService {
   /// 目录
   Future<({bool ok, String? error, List<BookSourceChapter> list})> toc(
     BookSource source,
-    String tocUrl,
-  ) async {
+    String tocUrl, {
+    bool force = false,
+  }) async {
     // ── 壳模式：qread 服务端执行 ruleToc ─────────────────────
     // ── config 明文源：Dart 侧引擎 ─────────────────────────────
+    final cacheKey = _key('bsToc', '${source.id}|$tocUrl');
     final raw = await _callCached(
       {
         'action': 'bsToc',
         'source': source.raw,
         'tocUrl': tocUrl,
       },
-      _key('bsToc', '${source.id}|$tocUrl'),
+      cacheKey,
       _tocTtl,
+      force: force,
     );
     final m = _asMap(raw);
     if (m['ok'] == false) {
@@ -637,6 +650,12 @@ class BookSourceService {
           if (c != null) out.add(c);
         }
       }
+    }
+    if (out.isEmpty) {
+      // 空目录**不进缓存**：站点限流/抽风时经常"这次空、下次有"，
+      // 缓存 5 分钟会让重试永远拿到同一个空结果（用户 2026-10-21 反馈
+      // 「重试点了不重试」「换本书也直接说这个源没有章节」）。
+      _cache.remove(cacheKey);
     }
     return (ok: true, error: null, list: out);
   }
