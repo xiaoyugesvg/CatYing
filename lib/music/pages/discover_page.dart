@@ -47,15 +47,23 @@ class _DiscoverPageState extends State<DiscoverPage>
   // 当前平台
   SongSource _source = SongSource.netease;
 
-  /// 「推荐」Tab（2026-10-21）：内容是**已启用 MusicFree 插件**的榜单/歌单。
-  /// 它不是一个 SongSource，所以单独用布尔标记，不影响 `_source` 的持久化。
-  bool _pluginTab = false;
+  /// 顶部 Tab 模式：
+  ///   · 'source'    —— 网易/QQ/酷狗/喜雅/博看/一五（平台页）
+  ///   · 'recommend' —— 推荐（可切换已启用的插件源）
+  ///   · 'soda'      —— 汽水（固定用「汽水音乐」MusicFree 插件）
+  /// 插件页不是 SongSource，所以单独用字符串标记，不影响 `_source` 的持久化。
+  String _tabMode = 'source';
+
+  bool get _pluginTab => _tabMode != 'source';
 
   /// 当前选中的插件源 id（null = 用列表里第一个）
   String? _pluginId;
 
   // 音乐平台通用数据
   List<Song> _newSongs = const [];
+
+  /// 「榜单热歌」：取第一个榜单的前 N 首（网易/酷狗都能走 `topListSongs`）
+  List<Song> _chartSongs = const [];
   List<Playlist> _recommend = const [];
   List<TopList> _topLists = const [];
   List<Playlist> _square = const [];
@@ -151,11 +159,11 @@ class _DiscoverPageState extends State<DiscoverPage>
   }
 
   Future<void> _switchSource(SongSource s) async {
-    if (s == _source && !_pluginTab) return;
+    if (s == _source && _tabMode == 'source') return;
     await SettingsStore.instance.setMusicSource(s);
     if (!mounted) return;
     setState(() {
-      _pluginTab = false;
+      _tabMode = 'source';
       _source = s;
       _loading = true;
       _error = '';
@@ -164,10 +172,20 @@ class _DiscoverPageState extends State<DiscoverPage>
   }
 
   /// 切到「推荐」Tab：内容是插件源，不需要走平台接口
-  void _openPluginTab() {
-    if (_pluginTab) return;
+  void _openRecommendTab() {
+    if (_tabMode == 'recommend') return;
     setState(() {
-      _pluginTab = true;
+      _tabMode = 'recommend';
+      _loading = false;
+      _error = '';
+    });
+  }
+
+  /// 切到「汽水」Tab：固定用「汽水音乐」插件当内容源
+  void _openSodaTab() {
+    if (_tabMode == 'soda') return;
+    setState(() {
+      _tabMode = 'soda';
       _loading = false;
       _error = '';
     });
@@ -178,6 +196,20 @@ class _DiscoverPageState extends State<DiscoverPage>
       .instance.enabled
       .where((s) => s.isMusicFree)
       .toList();
+
+  /// 是不是「汽水音乐」插件（按名字 / 文件名判断，兼容用户自装的同名源）
+  static bool _isSodaPlugin(ThirdPartySource s) =>
+      s.name.contains('汽水') ||
+      s.id.toLowerCase().contains('qishui') ||
+      s.updateUrl.toLowerCase().contains('qishui');
+
+  /// 已启用的汽水插件（没有 = 没装 / 被停用）
+  ThirdPartySource? get _sodaPlugin {
+    for (final s in _enabledPlugins) {
+      if (_isSodaPlugin(s)) return s;
+    }
+    return null;
+  }
 
   /// 打开插件源切换弹窗（一行两列卡片 + 搜索 + 定位）
   Future<void> _pickPlugin(ThirdPartySource current) async {
@@ -381,8 +413,16 @@ class _DiscoverPageState extends State<DiscoverPage>
     //
     // 注意：必须**每个平台都重取一次** —— 否则从 QQ 切到酷狗时，
     // `_hotKeywords` 还留着 QQ 的热搜词，点下去会用酷狗去搜 QQ 的热搜 ✗
+    //
+    // 「榜单热歌」和热搜并行拉，避免串行多等一个来回。
+    final chartFuture = _topLists.isEmpty
+        ? Future<({bool ok, List<Song> list, String error})>.value(
+            (ok: true, list: const <Song>[], error: ''))
+        : api.topListSongs(_topLists.first.id, limit: 12, source: src);
     final hot = await api.hotSearchResult(source: src);
     _hotKeywords = hot.ok ? hot.list : const [];
+    final chart = await chartFuture;
+    _chartSongs = chart.ok ? chart.list : const [];
     // 后台补封面（不阻塞首屏）
     _ensureHotCovers(src);
   }
@@ -513,52 +553,33 @@ class _DiscoverPageState extends State<DiscoverPage>
     );
   }
 
-  /// 「推荐」Tab 内容：左上角的源切换（显示应用源名称）+ 右上角插件管理
+  /// 「推荐 / 汽水」Tab 内容：左上角显示应用源名称（推荐可切换）+ 右上角插件管理
   Widget _pluginPane(DiscoverStyle style) {
     return ValueListenableBuilder<int>(
       valueListenable: ThirdPartySourceStore.instance.revision,
       builder: (context, _, __) {
+        // ── 汽水：固定绑定「汽水音乐」插件 ──────────────────────
+        if (_tabMode == 'soda') {
+          final soda = _sodaPlugin;
+          if (soda == null) {
+            return _pluginEmpty(
+              style,
+              icon: Icons.local_drink_outlined,
+              title: '还没有汽水音乐插件',
+              hint: '去插件市场安装「汽水音乐」，或在音源管理里启用',
+            );
+          }
+          return _pluginBody(style, soda);
+        }
+
+        // ── 推荐：可切换的插件源 ────────────────────────────────
         final plugins = _enabledPlugins;
         if (plugins.isEmpty) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.extension_off_rounded,
-                      size: 40, color: style.secondary),
-                  const SizedBox(height: 12),
-                  Text(
-                    '还没有启用的插件源',
-                    style: TextStyle(
-                      color: style.primary,
-                      fontSize: AppTheme.fontSubhead,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '去插件市场安装，或在音源管理里启用',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: style.secondary,
-                      fontSize: AppTheme.fontFootnote,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: style.accent,
-                      visualDensity: VisualDensity.compact,
-                    ),
-                    onPressed: _openPluginMarket,
-                    icon: const Icon(Icons.storefront_rounded, size: 18),
-                    label: const Text('插件市场'),
-                  ),
-                ],
-              ),
-            ),
+          return _pluginEmpty(
+            style,
+            icon: Icons.extension_off_rounded,
+            title: '还没有启用的插件源',
+            hint: '去插件市场安装，或在音源管理里启用',
           );
         }
         // 记住的 id 不存在了（被删/被停用）→ 回落到第一个
@@ -570,74 +591,137 @@ class _DiscoverPageState extends State<DiscoverPage>
           // build 内不能 setState：直接记下，下一次重建即生效
           _pluginId = current.id;
         }
-        return Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
-              child: Row(
-                children: [
-                  // 左上角：当前应用源（点开切换弹窗）
-                  Flexible(
-                    child: GestureDetector(
-                      onTap: () => _pickPlugin(current),
-                      child: Container(
-                        padding: const EdgeInsets.fromLTRB(10, 7, 8, 7),
-                        decoration: BoxDecoration(
-                          color: style.cardFill
-                              .withValues(alpha: style.fillAlpha),
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(
-                            color: style.primary.withValues(alpha: 0.10),
-                            width: 0.8,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.extension_rounded,
-                                size: 16, color: style.accent),
-                            const SizedBox(width: 6),
-                            Flexible(
-                              child: Text(
-                                current.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: style.primary,
-                                  fontSize: AppTheme.fontSubhead,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 2),
-                            Icon(Icons.expand_more_rounded,
-                                size: 18, color: style.secondary),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  const Spacer(),
-                  // 右上角：插件管理（→ 插件市场）
-                  IconButton(
-                    tooltip: '插件管理',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: _openPluginMarket,
-                    icon: Icon(Icons.storefront_rounded,
-                        size: 20, color: style.primary),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: PluginExploreView(
-                key: ValueKey(current.id),
-                source: current,
-              ),
-            ),
-          ],
+        return _pluginBody(
+          style,
+          current,
+          onSwitch: () => _pickPlugin(current),
         );
       },
+    );
+  }
+
+  /// 插件 Tab 的通用骨架：源名称胶囊 + 插件管理按钮 + 插件内容
+  Widget _pluginBody(
+    DiscoverStyle style,
+    ThirdPartySource source, {
+    VoidCallback? onSwitch,
+  }) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+          child: Row(
+            children: [
+              // 左上角：当前应用源（推荐页可点开切换弹窗）
+              Flexible(
+                child: GestureDetector(
+                  onTap: onSwitch,
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(10, 7, 8, 7),
+                    decoration: BoxDecoration(
+                      color:
+                          style.cardFill.withValues(alpha: style.fillAlpha),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: style.primary.withValues(alpha: 0.10),
+                        width: 0.8,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.extension_rounded,
+                            size: 16, color: style.accent),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            source.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: style.primary,
+                              fontSize: AppTheme.fontSubhead,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        if (onSwitch != null) ...[
+                          const SizedBox(width: 2),
+                          Icon(Icons.expand_more_rounded,
+                              size: 18, color: style.secondary),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const Spacer(),
+              // 右上角：插件管理（→ 插件市场）
+              IconButton(
+                tooltip: '插件管理',
+                visualDensity: VisualDensity.compact,
+                onPressed: _openPluginMarket,
+                icon: Icon(Icons.storefront_rounded,
+                    size: 20, color: style.primary),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: PluginExploreView(
+            key: ValueKey(source.id),
+            source: source,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 插件 Tab 的空态（没装 / 没启用时给明确的下一步）
+  Widget _pluginEmpty(
+    DiscoverStyle style, {
+    required IconData icon,
+    required String title,
+    required String hint,
+  }) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 40, color: style.secondary),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              style: TextStyle(
+                color: style.primary,
+                fontSize: AppTheme.fontSubhead,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              hint,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: style.secondary,
+                fontSize: AppTheme.fontFootnote,
+              ),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: style.accent,
+                visualDensity: VisualDensity.compact,
+              ),
+              onPressed: _openPluginMarket,
+              icon: const Icon(Icons.storefront_rounded, size: 18),
+              label: const Text('插件市场'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -847,11 +931,13 @@ class _DiscoverPageState extends State<DiscoverPage>
                 Text(
                   // 副标题：不同来源给不同的引导语
                   //（原来这里三元两支**完全一样**，是死代码，一并修掉）
-                  _pluginTab
-                      ? '插件源里的榜单与歌单'
-                      : _source == SongSource.ximalaya
-                          ? '有声书与播客，听点想听的'
-                          : '今天想听点什么？',
+                  _tabMode == 'soda'
+                      ? '汽水音乐的榜单与推荐歌单'
+                      : _pluginTab
+                          ? '插件源里的榜单与歌单'
+                          : _source == SongSource.ximalaya
+                              ? '有声书与播客，听点想听的'
+                              : '今天想听点什么？',
                   style: TextStyle(
                       color: style.secondary, fontSize: AppTheme.fontSubhead),
                 ),
@@ -950,16 +1036,25 @@ class _DiscoverPageState extends State<DiscoverPage>
             _sourceChip(
               style: style,
               label: '推荐',
-              selected: _pluginTab,
-              onTap: _openPluginTab,
+              selected: _tabMode == 'recommend',
+              onTap: _openRecommendTab,
             ),
-            for (final t in tabs)
+            for (final t in tabs) ...[
               _sourceChip(
                 style: style,
                 label: t.label,
-                selected: !_pluginTab && _source == t.source,
+                selected: _tabMode == 'source' && _source == t.source,
                 onTap: () => _switchSource(t.source),
               ),
+              // 「汽水」紧挨着酷狗（同为在线音乐平台，内容来自汽水插件）
+              if (t.source == SongSource.kugou)
+                _sourceChip(
+                  style: style,
+                  label: '汽水',
+                  selected: _tabMode == 'soda',
+                  onTap: _openSodaTab,
+                ),
+            ],
           ],
         ),
       ),
@@ -1593,6 +1688,35 @@ class _DiscoverPageState extends State<DiscoverPage>
             isPlaying: MusicPlayerManager.instance.isPlaying.value,
             onPlay: (i) =>
                 MusicPlayerManager.instance.playQueue(_newSongs, index: i),
+          ),
+        ),
+      ));
+    }
+
+    // ── 榜单热歌（2026-10-21 新增卡片）──────────────────────────────
+    //
+    // 数据 = 当前平台**第一个榜单**的前 12 首（`topListSongs`）。
+    // 网易/酷狗的榜单 id 都能直接查歌（见 music_source.js 的说明），
+    // 不额外引入接口，属于"真实可用"的内容卡。
+    if (_chartSongs.isNotEmpty) {
+      out.add(SliverToBoxAdapter(
+        child: SectionTitle(
+          title: '榜单热歌',
+          action: '播放全部',
+          onAction: () =>
+              MusicPlayerManager.instance.playQueue(_chartSongs, index: 0),
+        ),
+      ));
+      out.add(SliverToBoxAdapter(
+        child: ListenableBuilder(
+          listenable: MusicPlayerManager.instance,
+          builder: (context, _) => DailySongsRow(
+            style: style,
+            songs: _chartSongs,
+            playingKey: MusicPlayerManager.instance.currentSong?.identityKey,
+            isPlaying: MusicPlayerManager.instance.isPlaying.value,
+            onPlay: (i) =>
+                MusicPlayerManager.instance.playQueue(_chartSongs, index: i),
           ),
         ),
       ));
