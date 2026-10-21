@@ -1802,36 +1802,24 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     if (_images.isNotEmpty) return _mangaView(fg);
 
     if (_loading) {
-      // 加载页背景（用户 2026-10-21 提供）：打开的书 + 暗底，
-      // 转圈与文字用白色，保证在深色背景上可读
-      return Stack(
-        fit: StackFit.expand,
-        children: [
-          Image.asset(
-            'assets/icons/reader/loading_bg.png',
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => ColoredBox(color: _bgTop),
-          ),
-          Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white70,
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  '正在加载正文...',
-                  style: TextStyle(
-                    fontSize: AppTheme.fontSubhead,
-                    color: Colors.white.withValues(alpha: 0.78),
-                  ),
-                ),
-              ],
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(
+              strokeWidth: 2,
+              color: fg.withValues(alpha: 0.5),
             ),
-          ),
-        ],
+            const SizedBox(height: 14),
+            Text(
+              '正在加载正文...',
+              style: TextStyle(
+                fontSize: AppTheme.fontSubhead,
+                color: fg.withValues(alpha: 0.6),
+              ),
+            ),
+          ],
+        ),
       );
     }
     if (_error != null) {
