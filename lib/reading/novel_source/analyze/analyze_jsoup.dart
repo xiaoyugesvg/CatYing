@@ -376,6 +376,21 @@ class AnalyzeByJsoup {
       return [];
     }
 
+    // Legado 简写 `tag.N`：当前节点下第 N 个 tag 元素。
+    // 例：`a.0@href`、`p.2@text`、`ul.2@li`（奇异书网等大量老源在用）。
+    // ⚠️ 原样交给 CSS 时 `.0` 是"类名 0"（非法）⇒ 永远 0 个
+    //   ⇒ 搜索书的 bookUrl / 目录 chapterUrl 全是空串
+    //   （用户 2026-10-21：这个源获取不到章节、也没有封面）。
+    final tagIdx = RegExp(r'^([A-Za-z][\w-]*)\.(-?\d+)$').firstMatch(bareRule);
+    if (tagIdx != null) {
+      final els = temp.getElementsByTagName(tagIdx.group(1)!);
+      if (els.isEmpty) return [];
+      final n = int.parse(tagIdx.group(2)!);
+      final i = n < 0 ? els.length + n : n;
+      if (i < 0 || i >= els.length) return [];
+      return [els[i]];
+    }
+
     // 带索引的特殊选择器（如 "tag.div.0"、"class.name.-1"）
     // 语法：'':' 分隔索引，'.' 表示选择，'!' 表示排除
     for (final prefix in ['children', 'tag.', 'class.', 'id.', 'text.']) {

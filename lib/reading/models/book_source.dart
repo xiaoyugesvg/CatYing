@@ -66,10 +66,13 @@ class BookSource {
 
   String get url {
     final c = _configBody;
-    if (c != null) {
-      return (c['url'] ?? '').toString();
-    }
-    return (raw['bookSourceUrl'] ?? raw['url'] ?? '').toString();
+    final v = c != null
+        ? (c['url'] ?? '').toString()
+        : (raw['bookSourceUrl'] ?? raw['url'] ?? '').toString();
+    // 社区导出的源常把地址写成 Markdown 行内代码：`` `http://xxx/` ``。
+    // 反引号会被带进 new URL()（Invalid URL）和 Referer 请求头（图片 403 →
+    // 详情页/书架没封面），这里统一剥掉首尾反引号与空白。
+    return v.replaceAll(RegExp(r'^[`\s]+|[`\s]+$'), '');
   }
 
   String get group {

@@ -1616,6 +1616,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     behavior: HitTestBehavior.translucent,
                     onPointerDown: _onPointerDown,
                     onPointerUp: _onPointerUp,
+                    onPointerCancel: _onPointerCancel,
                     child: _contentArea(bg[1]),
                   ),
                 ),
@@ -3296,6 +3297,18 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       _tapDownPos = e.position;
       _tapDownTime = DateTime.now();
     }
+  }
+
+  /// 指针被取消（滚动/翻页抢走手势、来电、切后台等）。
+  ///
+  /// 🔴 必须处理：以前只监听 up，一旦某次手势以 cancel 结束，
+  /// `_activePointers` 就永远停在 1 ⇒ 之后每次点击在 up 时都判定成
+  /// "还有手指按着"被丢弃 ⇒ **功能面板越来越难呼出**（用户 2026-10-21）。
+  void _onPointerCancel(PointerCancelEvent e) {
+    _activePointers--;
+    if (_activePointers < 0) _activePointers = 0;
+    _tapDownPos = null;
+    _tapDownTime = null;
   }
 
   void _onPointerUp(PointerUpEvent e) {
