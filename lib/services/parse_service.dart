@@ -268,6 +268,17 @@ class ParseService {
         return null;
       }
 
+      // ── 直链可用性探测（2026-10-21 第二批「分级回退」）──────────
+      // 解析站经常"成功返回一个已经时效/防盗链的直链"，播放器一开就 403。
+      // 这里只对**直链**发一个 `Range: bytes=0-0` 探针：
+      //   · 明确 4xx/5xx → 视为本条解析失败，让其它接口的结果顶上
+      //   · 网络异常/超时 → **按可用处理**（不能因为一次探测抖动丢掉结果）
+      if (_isDirectMedia(extracted) &&
+          !await _probeDirect(extracted, beanHeaders)) {
+        AppLog.instance.log('[Parse] 接口「${bean.name}」直链不可用，跳过');
+        return null;
+      }
+
       AppLog.instance.log(
           '[Parse] 接口「${bean.name}」命中 → ${_isDirectMedia(extracted) ? '直链' : '网页'}: $extracted');
       return ParseOutcome(
@@ -470,6 +481,41 @@ class ParseService {
       if (path.endsWith(ext)) return true;
     }
     return false;
+  }
+
+  /// 直链探针：只请求 `Range: bytes=0-0`，拿到状态码立刻断开。
+  ///
+  /// 只有拿到**明确的 4xx/5xx** 才判不可用；网络异常/超时按可用处理 ——
+  /// 探测抖动不该让一条本来能播的链接被丢掉。
+  Future<bool> _probeDirect(String url, Map<String, String>? headers) async {
+    ResponseBody? body;
+    try {
+      final resp = await _client.get<ResponseBody>(
+        url,
+        options: Options(
+          responseType: ResponseType.stream,
+          // 探测只是"筛掉明显坏链"，不能把首播拖慢：最多等 2.5 秒
+          receiveTimeout: const Duration(milliseconds: 2500),
+          sendTimeout: const Duration(milliseconds: 2500),
+          headers: <String, String>{
+            ...?headers,
+            'Range': 'bytes=0-0',
+          },
+          validateStatus: (_) => true,
+        ),
+      );
+      body = resp.data;
+      final code = resp.statusCode ?? 0;
+      if (code >= 400) return false;
+      return true;
+    } catch (e) {
+      AppLog.instance.log('[Parse] 直链探测异常（按可用处理）: $e');
+      return true;
+    } finally {
+      try {
+        await body?.stream.listen(null).cancel();
+      } catch (_) {}
+    }
   }
 }
 

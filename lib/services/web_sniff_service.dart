@@ -26,6 +26,7 @@ import '../common/constants.dart';
 import '../reading/source/global_proxy.dart';
 import 'app_log.dart';
 import 'sniff_filter.dart';
+import 'webview_fetch_service.dart';
 
 class WebSniffService {
   WebSniffService._();
@@ -86,7 +87,27 @@ class WebSniffService {
         if (!visited.add(url)) continue;
         fetched++;
 
-        final html = await _get(url, referer: referer);
+        var html = await _get(url, referer: referer);
+        // ── 兜底：SPA / CF 挑战页交给 WKWebView 渲染后再扫 ──────────
+        //
+        // 纯 HTTP 拿到的是空壳（JS 还没跑）或「Just a moment」挑战页，
+        // 这种页面里一个媒体链接都没有。用通用 WebView 通道打开，
+        // 等 JS 渲染完（尽力等挑战自动过）再取 DOM。
+        if (html == null ||
+            html.isEmpty ||
+            WebViewFetchService.looksLikeChallenge(html)) {
+          final page = await WebViewFetchService.instance.fetchHtml(
+            url,
+            headers: (referer == null || referer.isEmpty)
+                ? null
+                : {'Referer': referer},
+          );
+          if (page != null && page.html.isNotEmpty) {
+            html = page.html;
+            AppLog.instance.log('[WebSniff] WebView 渲染兜底: $url'
+                '${page.challenged ? '（仍是挑战页）' : ''}');
+          }
+        }
         if (html == null || html.isEmpty) continue;
 
         // ① 页面本身（含内联 JS）里就有媒体直链？

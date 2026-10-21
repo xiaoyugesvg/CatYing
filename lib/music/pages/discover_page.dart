@@ -211,7 +211,7 @@ class _DiscoverPageState extends State<DiscoverPage>
     return null;
   }
 
-  /// 打开插件源切换弹窗（一行两列卡片 + 搜索 + 定位）
+  /// 打开插件源切换弹窗（中间弹窗：一行四列 + 搜索 + 定位）
   Future<void> _pickPlugin(ThirdPartySource current) async {
     final picked = await PluginSourceSheet.show(
       context: context,
@@ -220,6 +220,30 @@ class _DiscoverPageState extends State<DiscoverPage>
     );
     if (picked == null || !mounted) return;
     setState(() => _pluginId = picked);
+  }
+
+  /// **长按「推荐」Tab** → 打开插件源选择
+  ///
+  /// 用户 2026-10-21：去掉推荐页顶部那个源切换胶囊，改成 Tab 长按。
+  Future<void> _openRecommendSourcePicker() async {
+    final plugins = _enabledPlugins;
+    if (plugins.isEmpty) {
+      AppToast.show('还没有启用的插件源', '去插件市场安装，或在音源管理里启用');
+      return;
+    }
+    final current = plugins.firstWhere(
+      (p) => p.id == _pluginId,
+      orElse: () => plugins.first,
+    );
+    // 长按即切到推荐页：避免"选完了还停在原平台"的困惑
+    if (_tabMode != 'recommend') {
+      setState(() {
+        _tabMode = 'recommend';
+        _loading = false;
+        _error = '';
+      });
+    }
+    await _pickPlugin(current);
   }
 
   /// 右上角「插件管理」→ 插件市场
@@ -569,7 +593,7 @@ class _DiscoverPageState extends State<DiscoverPage>
               hint: '去插件市场安装「汽水音乐」，或在音源管理里启用',
             );
           }
-          return _pluginBody(style, soda);
+          return _pluginBody(soda);
         }
 
         // ── 推荐：可切换的插件源 ────────────────────────────────
@@ -591,89 +615,16 @@ class _DiscoverPageState extends State<DiscoverPage>
           // build 内不能 setState：直接记下，下一次重建即生效
           _pluginId = current.id;
         }
-        return _pluginBody(
-          style,
-          current,
-          onSwitch: () => _pickPlugin(current),
-        );
+        return _pluginBody(current);
       },
     );
   }
 
-  /// 插件 Tab 的通用骨架：源名称胶囊 + 插件管理按钮 + 插件内容
-  Widget _pluginBody(
-    DiscoverStyle style,
-    ThirdPartySource source, {
-    VoidCallback? onSwitch,
-  }) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
-          child: Row(
-            children: [
-              // 左上角：当前应用源（推荐页可点开切换弹窗）
-              Flexible(
-                child: GestureDetector(
-                  onTap: onSwitch,
-                  child: Container(
-                    padding: const EdgeInsets.fromLTRB(10, 7, 8, 7),
-                    decoration: BoxDecoration(
-                      color:
-                          style.cardFill.withValues(alpha: style.fillAlpha),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(
-                        color: style.primary.withValues(alpha: 0.10),
-                        width: 0.8,
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.extension_rounded,
-                            size: 16, color: style.accent),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            source.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: style.primary,
-                              fontSize: AppTheme.fontSubhead,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        if (onSwitch != null) ...[
-                          const SizedBox(width: 2),
-                          Icon(Icons.expand_more_rounded,
-                              size: 18, color: style.secondary),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const Spacer(),
-              // 右上角：插件管理（→ 插件市场）
-              IconButton(
-                tooltip: '插件管理',
-                visualDensity: VisualDensity.compact,
-                onPressed: _openPluginMarket,
-                icon: Icon(Icons.storefront_rounded,
-                    size: 20, color: style.primary),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: PluginExploreView(
-            key: ValueKey(source.id),
-            source: source,
-          ),
-        ),
-      ],
+  /// 插件 Tab 的内容（源切换已改为**长按「推荐」Tab**，这里不再有顶部胶囊）
+  Widget _pluginBody(ThirdPartySource source) {
+    return PluginExploreView(
+      key: ValueKey(source.id),
+      source: source,
     );
   }
 
@@ -933,8 +884,8 @@ class _DiscoverPageState extends State<DiscoverPage>
                   //（原来这里三元两支**完全一样**，是死代码，一并修掉）
                   _tabMode == 'soda'
                       ? '汽水音乐的榜单与推荐歌单'
-                      : _pluginTab
-                          ? '插件源里的榜单与歌单'
+                      : _tabMode == 'recommend'
+                          ? '长按「推荐」可切换插件源'
                           : _source == SongSource.ximalaya
                               ? '有声书与播客，听点想听的'
                               : '今天想听点什么？',
@@ -944,45 +895,65 @@ class _DiscoverPageState extends State<DiscoverPage>
               ],
             ),
           ),
+          // ── 插件市场（2026-10-21：从推荐页右上角挪到顶栏）──────────
+          //   位置：搜索按钮左边那个按钮（视觉预设）的**左边**
+          _headerIcon(
+            style: style,
+            icon: Icons.storefront_rounded,
+            tooltip: '插件市场',
+            onTap: _openPluginMarket,
+          ),
+          const SizedBox(width: 8),
           // ── 视觉预设切换（三套：青碧玻璃 / 纸感 / 午夜）──────────
           //
           // ⚠️ 放在标题右侧而不是设置页深处：它是**浏览时的即时观感**，
           // 用户想边看边切，不该为了换皮肤去翻设置。
-          GestureDetector(
+          _headerIcon(
+            style: style,
+            icon: Icons.auto_awesome_outlined,
+            tooltip: '切换视觉预设',
+            size: 19,
             onTap: () => _pickPreset(style),
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: style.cardFill.withValues(alpha: style.fillAlpha),
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: style.primary.withValues(alpha: 0.10),
-                  width: 0.8,
-                ),
-              ),
-              child: Icon(Icons.auto_awesome_outlined,
-                  color: style.primary, size: 19),
-            ),
           ),
           const SizedBox(width: 8),
-          GestureDetector(
-            onTap: () => _openSearchAll(),
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: style.cardFill.withValues(alpha: style.fillAlpha),
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: style.primary.withValues(alpha: 0.10),
-                  width: 0.8,
-                ),
-              ),
-              child: Icon(Icons.search_rounded, color: style.primary, size: 21),
-            ),
+          _headerIcon(
+            style: style,
+            icon: Icons.search_rounded,
+            tooltip: '搜索',
+            size: 21,
+            onTap: _openSearchAll,
           ),
         ],
+      ),
+    );
+  }
+
+  /// 顶栏圆形图标按钮（与音乐模块的卡片/胶囊同一套视觉：淡底 + 细描边）
+  Widget _headerIcon({
+    required DiscoverStyle style,
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+    double size = 20,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 40,
+          height: 40,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: style.cardFill.withValues(alpha: style.fillAlpha),
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: style.primary.withValues(alpha: 0.10),
+              width: 0.8,
+            ),
+          ),
+          child: Icon(icon, color: style.primary, size: size),
+        ),
       ),
     );
   }
@@ -1033,11 +1004,13 @@ class _DiscoverPageState extends State<DiscoverPage>
         child: Row(
           children: [
             // 「推荐」（2026-10-21）：内容是已启用插件的榜单/歌单
+            //   长按 → 中间弹窗切换插件源（原来顶部那个胶囊已去掉）
             _sourceChip(
               style: style,
               label: '推荐',
               selected: _tabMode == 'recommend',
               onTap: _openRecommendTab,
+              onLongPress: _openRecommendSourcePicker,
             ),
             for (final t in tabs) ...[
               _sourceChip(
@@ -1066,11 +1039,13 @@ class _DiscoverPageState extends State<DiscoverPage>
     required String label,
     required bool selected,
     required VoidCallback onTap,
+    VoidCallback? onLongPress,
   }) {
     return Expanded(
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
+        onLongPress: onLongPress,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeOut,

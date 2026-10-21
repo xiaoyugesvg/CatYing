@@ -1396,6 +1396,24 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         .toList();
   }
 
+  /// 弹幕去重（2026-10-21 第二批）：
+  /// 同一秒内**内容完全相同**的弹幕只留一条。
+  ///
+  /// 弹幕站上"整屏复制/刷屏"很常见：一集上千条里可能有一半是重复文本，
+  /// 全部上屏既遮挡画面，也让 CustomPainter 每帧多画很多次。
+  /// 只按「秒 + 类型 + 文本」判重，不会误伤正常弹幕（同秒不同内容照常保留）。
+  List<DanmuItem> _dedupeDanmu(List<DanmuItem> src) {
+    if (src.length < 2) return src;
+    final seen = <String>{};
+    final out = <DanmuItem>[];
+    for (final d in src) {
+      final sec = d.time.floor();
+      if (!seen.add('$sec|${d.mode}|${d.text}')) continue;
+      out.add(d);
+    }
+    return out;
+  }
+
   /// 回到前台时重读弹幕显示类设置，并用新的屏蔽词重新过滤**已加载**的弹幕。
   ///
   /// ⚠️ 2026-10-14：屏蔽词原来只在"请求返回时"过滤一次，`DanmuLayer` 也不感知
@@ -1493,8 +1511,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     final disk = await _danmuReadDiskCache(cacheKey);
     if (disk != null) {
       if (!mounted || loadGen != _danmuLoadGen) return;
-      _danmusRaw = disk;
-      final filtered = _filterByBlockWords(disk);
+      final clean = _dedupeDanmu(disk);
+      _danmusRaw = clean;
+      final filtered = _filterByBlockWords(clean);
       AppLog.instance.log(
         '[video_player] danmu 磁盘缓存命中: ${filtered.length} 条 ($cacheKey)',
       );
@@ -1595,6 +1614,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     // ⚠️ 2026-10-14：**先留一份未按屏蔽词过滤的原始列表** —— 播放中修改屏蔽词时
     //   用它重新过滤。原来只在"请求返回时"过滤一次，而 `DanmuLayer` 也不感知
     //   屏蔽词 ⇒ 改屏蔽词对**已加载的这一集**完全无效，必须重进播放页。
+    //
+    // 2026-10-21：先去重再落原始列表（同秒同内容的刷屏只留一条，
+    // 高密度源上能明显减少重叠与绘制压力）。
+    list = _dedupeDanmu(list);
     _danmusRaw = list;
     // 落盘：下次重看这一集直接从磁盘秒出（不阻塞本次上屏）
     if (list.isNotEmpty) unawaited(_danmuWriteDiskCache(cacheKey, list));
