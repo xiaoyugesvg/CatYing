@@ -3,8 +3,8 @@
 // 「插件订阅」页 —— 2026-10-21 第三期。
 //
 // 一个订阅就是一个 registry/plugins.json 地址（MusicFree 生态的插件清单）。
-//   · 默认订阅 = 内置的 hebijunge 清单（可停用，不可删除）
-//   · 用户可添加任意清单地址；刷新后清单条目会出现在「插件市场」里
+//   · 不内置任何订阅，全部由用户自己添加
+//   · 刷新后清单条目会出现在「插件市场」里
 
 import 'package:flutter/material.dart';
 
@@ -133,8 +133,7 @@ class _PluginSubscriptionPageState extends State<PluginSubscriptionPage> {
       ),
     );
     if (yes != true) return;
-    final removed = await _store.remove(sub.id);
-    if (!removed && mounted) AppToast.error('默认订阅只能停用，不能删除');
+    await _store.remove(sub.id);
   }
 
   @override
@@ -185,6 +184,19 @@ class _PluginSubscriptionPageState extends State<PluginSubscriptionPage> {
                 ),
                 const SizedBox(height: 14),
                 for (final s in subs) _subCard(s),
+                if (subs.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 40),
+                    child: Center(
+                      child: Text(
+                        '还没有订阅，点右上角 + 添加',
+                        style: TextStyle(
+                          color: MusicTheme.secondary,
+                          fontSize: AppTheme.fontFootnote,
+                        ),
+                      ),
+                    ),
+                  ),
                 if (_busyId == '')
                   Padding(
                     padding: const EdgeInsets.only(top: 16),
@@ -234,23 +246,6 @@ class _PluginSubscriptionPageState extends State<PluginSubscriptionPage> {
                   ),
                 ),
               ),
-              if (s.isDefault)
-                Container(
-                  margin: const EdgeInsets.only(right: 6),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: MusicTheme.tint.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    '内置',
-                    style: TextStyle(
-                      color: MusicTheme.tint,
-                      fontSize: AppTheme.fontCaption,
-                    ),
-                  ),
-                ),
               Switch(
                 value: s.enabled,
                 activeThumbColor: MusicTheme.tint,
@@ -300,14 +295,13 @@ class _PluginSubscriptionPageState extends State<PluginSubscriptionPage> {
                     ),
                   ),
                 ),
-              if (!s.isDefault)
-                IconButton(
-                  tooltip: '删除订阅',
-                  visualDensity: VisualDensity.compact,
-                  icon: Icon(Icons.delete_outline_rounded,
-                      size: 18, color: MusicTheme.secondary),
-                  onPressed: () => _delete(s),
-                ),
+              IconButton(
+                tooltip: '删除订阅',
+                visualDensity: VisualDensity.compact,
+                icon: Icon(Icons.delete_outline_rounded,
+                    size: 18, color: MusicTheme.secondary),
+                onPressed: () => _delete(s),
+              ),
             ],
           ),
         ],

@@ -2,9 +2,8 @@
 //
 // MusicFree 插件**订阅源**（registry.json）—— 2026-10-21 第三期。
 //
-// 之前只有一个写死的远端索引（hebijunge）。现在支持多条订阅：
-//   · 默认订阅（内置，不可删，可停用）
-//   · 用户添加的任意 registry.json / plugins.json 地址
+// 支持多条订阅，全部由用户自己添加：
+//   · 内置默认源已移除（hebijunge 那个地址经常拉不到清单）
 //
 // 订阅本身只负责"提供插件清单"；安装/更新/卸载在 `PluginMarketService`，
 // 装好的插件仍然是普通的 `ThirdPartySource`（kind: musicfree），
@@ -27,8 +26,6 @@ class PluginSubscription {
     required this.url,
     this.enabled = true,
   });
-
-  bool get isDefault => id == PluginSubscriptionStore.defaultId;
 
   PluginSubscription copyWith({String? name, String? url, bool? enabled}) =>
       PluginSubscription(
@@ -59,10 +56,7 @@ class PluginSubscriptionStore {
   PluginSubscriptionStore._();
   static final PluginSubscriptionStore instance = PluginSubscriptionStore._();
 
-  static const String defaultId = 'default';
-  static const String defaultUrl =
-      'https://hebijunge.github.io/musicfree-plugins/plugins.json';
-
+  static const String defaultId = 'default'; // 旧版内置订阅的 id，仅用于清理
   static const _key = 'music.pluginSubscriptions.v1';
 
   final List<PluginSubscription> _items = [];
@@ -86,7 +80,9 @@ class PluginSubscriptionStore {
               final s = PluginSubscription.fromJson(
                 Map<String, dynamic>.from(e),
               );
-              if (s.url.trim().isNotEmpty) _items.add(s);
+              if (s.url.trim().isNotEmpty) {
+                _items.add(s);
+              }
             }
           }
         }
@@ -94,19 +90,11 @@ class PluginSubscriptionStore {
     } catch (e) {
       debugPrint('[MusicSub] 读取订阅失败: $e');
     }
-    // 默认订阅始终存在（用户删不掉，只可能被停用）
-    if (!_items.any((s) => s.isDefault)) {
-      _items.insert(
-        0,
-        const PluginSubscription(
-          id: defaultId,
-          name: 'MusicFree 插件源',
-          url: defaultUrl,
-        ),
-      );
-    }
+    // 内置订阅已下线：老用户 prefs 里那条 id=default 的记录顺手清掉
+    final before = _items.length;
+    _items.removeWhere((s) => s.id == defaultId);
     revision.value++;
-    await _persist();
+    if (_items.length != before) await _persist();
   }
 
   Future<void> _persist() async {
@@ -153,9 +141,8 @@ class PluginSubscriptionStore {
     await _persist();
   }
 
-  /// 删除订阅（默认订阅只允许停用，不允许删除）。
+  /// 删除订阅。
   Future<bool> remove(String id) async {
-    if (id == defaultId) return false;
     _items.removeWhere((s) => s.id == id);
     await _persist();
     return true;
