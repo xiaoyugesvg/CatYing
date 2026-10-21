@@ -570,40 +570,38 @@ jobs:
           fi
           echo "✅ QuickJS native bridge 已链接：$FOUND"
 
-      - name: Embed NodeMobile.xcframework + main.js + python-home
-        # 关键步骤：把 framework 和 main.js 塞进 Runner.app bundle
-        # 这样 iOS 端 Flutter 调 NodeMobile API 时能 load 框架 + main.js
-        # 注意：**目前 pbxproj 没 link NodeMobile**，所以这只是物理塞进去
-        # 完整集成需要在 ios/Runner.xcodeproj/project.pbxproj 加 link + embed
-        # 详见 ios/Runner/NodeJSBridge.swift 里的 platform channel
+      - name: Embed main.js + python-home（framework 由 Xcode 的 Embed Frameworks 负责）
+        # 关键步骤：把 main.js 和 python-home 塞进 Runner.app bundle
+        #
+        # ⚠️ 这里**不再**拷 NodeMobile.xcframework / Python.xcframework：
+        #    add_nodemobile.rb 已经把这两个 xcframework 登记进 target 的
+        #    「Embed Frameworks」(copy_files_build_phases) ⇒ Xcode 构建时只会把
+        #    **真机 slice 里那个 .framework** 拷到 Runner.app/Frameworks/，
+        #    也就是运行时真正被链接/加载的 NodeMobile.framework、Python.framework。
+        #    旧代码在这里又 `cp -R` 整个 xcframework ⇒ 同一个二进制在包里存两份：
+        #      NodeMobile  52MB ×2、Python(含 stdlib/lib-dynload) 71MB（其中 65MB
+        #      与 python-home 完全重复）—— 合计白占 117MB。
+        #    iOS 运行时**从不读** *.xcframework 这个多平台包装目录：
+        #      · NodeJSBridge.swift 只按框架名 NodeMobile 加载；
+        #      · PythonBridge.swift 的 xcframework 兜底（candidates ② 和
+        #        fwDynload）都带 fileExists 判断，删掉后自动跳过
+        #        （PYTHONHOME 第一候选就是 python-home）。
+        #    ⇒ 2026-10-21 用户确认删除，改为只做存在性校验（缺了直接构建失败）。
         run: |
           set -e
           APP_PATH=${{ steps.locate.outputs.APP_PATH }}
-          FW_SRC="build/ios/Frameworks/NodeMobile.xcframework"
           mkdir -p "$APP_PATH/Frameworks"
-          # 1) NodeMobile.xcframework (TrollStore 接受整包 copy)
-          cp -R "$FW_SRC" "$APP_PATH/Frameworks/"
-          # 2) Python.xcframework
-          if [ -d "build/ios/Frameworks/Python.xcframework" ]; then
-            cp -R build/ios/Frameworks/Python.xcframework "$APP_PATH/Frameworks/"
-          else
-            echo "❌ Python.xcframework 缺失（应已被下载步骤产出）"
+          # 1) 校验 Xcode embed 真的把真机 slice 的 framework 放进来了
+          test -f "$APP_PATH/Frameworks/NodeMobile.framework/NodeMobile" \
+            || { echo "❌ Runner.app 缺 Frameworks/NodeMobile.framework（Embed Frameworks 失效）"; exit 1; }
+          test -f "$APP_PATH/Frameworks/Python.framework/Python" \
+            || { echo "❌ Runner.app 缺 Frameworks/Python.framework（Embed Frameworks 失效）"; exit 1; }
+          # 2) 禁止重复副本回流（加了就会让包凭空大 100MB+）
+          if compgen -G "$APP_PATH/Frameworks/*.xcframework" > /dev/null; then
+            echo "❌ Runner.app/Frameworks 里仍残留 *.xcframework 重复副本："
+            ls -d "$APP_PATH/Frameworks/"*.xcframework
             exit 1
           fi
-          # 2.5) 🔴 删掉 .app 里的**模拟器 / macCatalyst / macOS slice**
-          #      原来是把整个 xcframework 原样塞进 .app ⇒ 模拟器那份（Python 12.6MB、
-          #      NodeMobile 更大）也跟着进了包，真机（TrollStore/arm64）根本用不到。
-          #      这是"软件为啥这么大"的最大单项。Info.plist 里对应条目缺失不影响真机加载。
-          for XCF in "$APP_PATH/Frameworks/"*.xcframework; do
-            [ -d "$XCF" ] || continue
-            rm -rf "$XCF"/ios-arm64_x86_64-simulator \
-                   "$XCF"/ios-x86_64-simulator \
-                   "$XCF"/ios-arm64_x86_64-maccatalyst \
-                   "$XCF"/ios-arm64_i386-simulator \
-                   "$XCF"/macos-arm64_x86_64 \
-                   "$XCF"/macos-arm64 2>/dev/null || true
-            echo "🧹 已清理模拟器 slice: $(basename "$XCF") → $(ls "$XCF" | tr '\n' ' ')"
-          done
           # 3) main.js (NodeMobile 启动入口)
           mkdir -p "$APP_PATH/nodejs-project"
           cp assets/nodejs-project/dist/main.js   "$APP_PATH/nodejs-project/main.js"
