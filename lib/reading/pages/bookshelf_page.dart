@@ -111,6 +111,9 @@ class _BookshelfPageState extends State<BookshelfPage>
     with TickerProviderStateMixin {
   late TabController _tabController;
   String _currentShelfId = BookshelfService.presetReading;
+
+  /// 上次选中的分组（重新打开书架时恢复；分组被删则回落到第一个）
+  static const String _shelfPrefKey = 'bookshelf.current_shelf';
   final ScrollController _comicScrollController = ScrollController();
   final ScrollController _bookScrollController = ScrollController();
   bool _showComicBackToTop = false;
@@ -152,11 +155,21 @@ class _BookshelfPageState extends State<BookshelfPage>
       vsync: this,
       duration: const Duration(milliseconds: 300),
     );
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       final shelves = BookshelfService().bookshelves;
-      if (shelves.isNotEmpty) {
-        setState(() => _currentShelfId = shelves.first.id);
-      }
+      if (shelves.isEmpty) return;
+      var next = shelves.first.id;
+      try {
+        final sp = await SharedPreferences.getInstance();
+        final saved = sp.getString(_shelfPrefKey);
+        if (saved != null &&
+            (saved == kAllShelfId || shelves.any((s) => s.id == saved))) {
+          next = saved;
+        }
+      } catch (_) {}
+      if (!mounted) return;
+      setState(() => _currentShelfId = next);
+      _ensureShelfChipVisible(next);
     });
     // 设置开启「启动时检查书架更新」时后台扫描（服务内有冷却与互斥）
     ShelfUpdateService.instance.scanShelfAndFavorites();
@@ -372,6 +385,7 @@ class _BookshelfPageState extends State<BookshelfPage>
       controller.dispose();
       if (shelf != null) {
         setState(() => _currentShelfId = shelf.id);
+        _persistShelf(shelf.id);
       } else if (mounted) {
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
@@ -468,6 +482,7 @@ class _BookshelfPageState extends State<BookshelfPage>
         final shelves = BookshelfService().bookshelves;
         if (shelves.isNotEmpty) {
           setState(() => _currentShelfId = shelves.first.id);
+          _persistShelf(shelves.first.id);
         }
       }
     }
@@ -1119,7 +1134,15 @@ class _BookshelfPageState extends State<BookshelfPage>
       _isSelecting = false;
       _selectedItemIds.clear();
     });
+    _persistShelf(shelfId);
     _ensureShelfChipVisible(shelfId);
+  }
+
+  /// 记住当前分组，下次打开书架时恢复
+  void _persistShelf(String shelfId) {
+    SharedPreferences.getInstance()
+        .then((sp) => sp.setString(_shelfPrefKey, shelfId))
+        .catchError((_) => false);
   }
 
   void _ensureShelfChipVisible(String shelfId) {
@@ -2878,6 +2901,7 @@ class _BookshelfPageState extends State<BookshelfPage>
         _tabController.animateTo(bookIdx);
       }
       setState(() => _currentShelfId = shelf.id);
+      _persistShelf(shelf.id);
       _ensureShelfChipVisible(shelf.id);
     }
 
@@ -3028,6 +3052,7 @@ class _BookshelfPageState extends State<BookshelfPage>
         _tabController.animateTo(bookIdx);
       }
       setState(() => _currentShelfId = shelf.id);
+      _persistShelf(shelf.id);
       _ensureShelfChipVisible(shelf.id);
     }
 

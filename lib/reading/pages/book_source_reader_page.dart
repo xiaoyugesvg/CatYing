@@ -917,7 +917,15 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     if (_rs.hideStatusBar) {
       if (_readerImmersive) return;
       _readerImmersive = true;
-      SystemUiController.enter('bsr-reader', mode: SystemUiMode.immersiveSticky);
+      // ⚠️ 用 `manual + overlays: []` 而不是 `immersiveSticky`：
+      //   iOS 上后者并不稳定生效（状态栏照旧显示 ⇒ 用户"开了全屏还是有遮盖"）。
+      //   `manual` 明确告诉系统"两个 overlay 都不要" ⇒ iOS / Android 都会
+      //   隐藏状态栏与 Home 指示条，行为一致、可预期 ✓
+      SystemUiController.enter(
+        'bsr-reader',
+        mode: SystemUiMode.manual,
+        overlays: const <SystemUiOverlay>[],
+      );
     } else {
       if (!_readerImmersive) return;
       _readerImmersive = false;
@@ -1556,6 +1564,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   @override
   Widget build(BuildContext context) {
     final bg = _bgs[_bgIndex];
+    // ⚠️ 兜底安全区：iOS 上个别机型/系统版本会把 `MediaQuery.padding` 报成 0
+    //   （用户截图：正文顶到状态栏、底栏压到 Home 条 —— 就是"字被遮住"）。
+    //   `viewPadding` 是设备真实的安全区（不会被上层 SafeArea 消费），
+    //   只在 padding 为 0 时用它补，正常机型完全无影响 ✓
+    final mq = MediaQuery.of(context);
+    final extraTop = mq.padding.top > 0 ? 0.0 : mq.viewPadding.top;
+    final extraBottom = mq.padding.bottom > 0 ? 0.0 : mq.viewPadding.bottom;
     // 自选图片（`_customBgPath`）：优先级最高 ✓
     final useFileBg =
         _customBgPath != null && File(_customBgPath!).existsSync();
@@ -1589,10 +1604,17 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           //   PageView/ListView 的 drag 竞技场抢走 ⇒ "两指才呼出" ✗。
           //   仿真/覆盖模式由组件内部 onTapCenter 自行处理 ✓。
           SafeArea(
-            child: Stack(
+            child: Padding(
+              padding: EdgeInsets.only(top: extraTop, bottom: extraBottom),
+              child: Stack(
               children: [
                 Column(
                   children: [
+                    // ✅ 顶栏改成**布局内子项**（不再是 Positioned 覆盖）——
+                    //   用户 2026-10-21：「顶栏哪怕去掉状态栏也是遮住了字」。
+                    //   覆盖式会让正文第一行永远躲在悬浮卡片底下 ✗；
+                    //   放进 Column 后它**占位**，正文从它下面开始 ✓
+                    if (_showBar) _topBarCard(bg[1]),
                     // ✅ 点击判定从 GestureDetector 换成 Listener 手动判定：
                     //   单指点击正文一定响应（呼出/翻页/收起），不再被
                     //   PageView/ListView 的 drag 竞技场抢走（"两指才出现" ✗）。
@@ -1605,20 +1627,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                       ),
                     ),
                     _ttsMiniBar(bg[1]),
+                    // ✅ 底部功能栏同样改为**布局内子项**（原来 Positioned 覆盖
+                    //   正文最后几行 ⇒ 底部也"遮住了字" ✗）
+                    if (_showBar) _bottomNav(bg[1]),
                   ],
                 ),
-                if (_showBar) _topBar(bg[1]),
-                // ✅ 底部功能栏改为**点菜单区才显示**（跟随 `_showBar` ✓），
-                //    并用 `Positioned` **覆盖**，不再常驻在 Column 里占正文高度 ——
-                //    用户实测："悬浮工具栏为啥一直显示？还占位置" ✗
-                //    （对齐漫画 / 图书两个阅读器：点中间才出上下栏 ✓）。
-                if (_showBar)
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: _bottomNav(bg[1]),
-                  ),
                 // 右侧竖向悬浮栏（朗读 / 亮度 / 白夜 / 编辑）：与漫画阅读器同款。
                 // 设置面板从底部盖上来时让位（否则会被面板压住 ✗）。
                 if (_showBar && !_showSettingsPanel) _sideDock(bg[1]),
@@ -1760,6 +1773,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   }),
               ],
             ),
+            ),
           ),
           // 阅读设置面板：放在外层 Stack（SafeArea 之外）↓
           //   放里面时 `bottom: 0` 是"安全区上沿"，Home 指示条那截会露出正文
@@ -1774,7 +1788,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 ),
               ),
             ),
-          if (_showSettingsPanel) _settingsPanel(bg[1]),
+          if (_showSettingsPanel) _settingsPanel(bg[1], extraBottom: extraBottom),
         ],
       ),
     );
@@ -2178,7 +2192,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   /// 上下模式 / 分页失败时的兜底：整章滚动
   Widget _scrollView(Color fg) {
-    return SingleChildScrollView(
+    final scroll = SingleChildScrollView(
       // 🔴 换章必须重建滚动视图（= 回到章首）✗：
       //    未命中缓存时会先走 `_loading` 分支（滚动视图被移除 ✓），所以看着正常；
       //    但**缓存命中**时没有 loading 帧 ⇒ 同一个 `SingleChildScrollView`
@@ -2207,6 +2221,24 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           ],
         ],
       ),
+    );
+    // ✅ 信息栏在「上下滚动」模式下也要显示（用户 2026-10-21：
+    //   "信息栏开了也不显示"）—— 原来页眉页脚只做在分页的 `_pageBody` 里，
+    //   滚动模式完全没渲染 ✗。这里用 Column **预留**上下两条的位置，
+    //   而不是盖在正文上 ⇒ 不遮挡任何文字 ✓
+    if (_rs.statusItems.isEmpty) return scroll;
+    return Column(
+      children: [
+        _statusHeader(
+          fg,
+          // 滚动模式没有页码，进度用"读到第几章"，至少是个真实数值
+          progressOverride: widget.chapters.isEmpty
+              ? 0
+              : (_index + 1) / widget.chapters.length,
+        ),
+        Expanded(child: scroll),
+        _statusFooter(fg, showPage: false),
+      ],
     );
   }
 
@@ -2922,45 +2954,84 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     );
   }
 
+  /// 页眉（信息栏上排）：时间 · 书名 · 进度
+  ///
+  /// 分页 / 上下滚动两种模式共用（滚动模式没有页码，进度按章节位置算）。
+  Widget _statusHeader(Color fg, {double? progressOverride}) {
+    final items = _rs.statusItems;
+    final progress =
+        progressOverride ??
+        (_pages.isEmpty
+            ? 0.0
+            : (_pageIndex.clamp(0, _pages.length - 1) + 1) / _pages.length);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        _headerPadH,
+        _headerPadTop + 6,
+        _headerPadH,
+        4,
+      ),
+      child: Row(
+        children: [
+          if (items.contains('时间'))
+            _statusText(TimeOfDay.now().format(context), fg),
+          if (items.contains('书名'))
+            Expanded(
+              child: Text(
+                widget.bookName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: _statusStyle(fg),
+              ),
+            ),
+          const Spacer(),
+          if (items.contains('进度'))
+            _statusText('${(progress * 100).round()}%', fg),
+        ],
+      ),
+    );
+  }
+
+  /// 页脚（信息栏下排）：章节 · 电量 · 页码
+  Widget _statusFooter(Color fg, {bool showPage = true}) {
+    final items = _rs.statusItems;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        _footerPadH,
+        4,
+        _footerPadH,
+        _footerPadBottom + 6,
+      ),
+      child: Row(
+        children: [
+          if (items.contains('章节'))
+            Expanded(
+              child: Text(
+                widget.chapters[_index].name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: _statusStyle(fg),
+              ),
+            ),
+          const Spacer(),
+          if (items.contains('电量')) _batteryText(fg),
+          if (showPage && items.contains('页码'))
+            _statusText('${_pageIndex + 1}/${_pages.length}', fg),
+        ],
+      ),
+    );
+  }
+
   /// 一页的**内容本体**（页眉 / 正文 / 页脚）。
   /// 由 [_pageContent] 包上底色（+ 页缘投影）后使用 ✓。
   Widget _pageBody(Color fg, BookPage page) {
     final items = _rs.statusItems;
-    final progress = _pages.isEmpty
-        ? 0.0
-        : (_pageIndex.clamp(0, _pages.length - 1) + 1) / _pages.length;
     // 点击判定统一由正文区 Listener（_onPointerUp）负责，不再注册 onTapUp
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // ── 页眉 ────────────────────────────────────────────
-        if (items.isNotEmpty)
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              _headerPadH,
-              _headerPadTop + 6,
-              _headerPadH,
-              4,
-            ),
-            child: Row(
-              children: [
-                if (items.contains('时间'))
-                  _statusText(TimeOfDay.now().format(context), fg),
-                if (items.contains('书名'))
-                  Expanded(
-                    child: Text(
-                      widget.bookName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: _statusStyle(fg),
-                    ),
-                  ),
-                const Spacer(),
-                if (items.contains('进度'))
-                  _statusText('${(progress * 100).round()}%', fg),
-              ],
-            ),
-          ),
+        if (items.isNotEmpty) _statusHeader(fg),
         // ── 正文 ────────────────────────────────────────────
         Expanded(
           child: Padding(
@@ -3082,32 +3153,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           ),
         ),
         // ── 页脚 ────────────────────────────────────────────
-        if (items.isNotEmpty)
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              _footerPadH,
-              4,
-              _footerPadH,
-              _footerPadBottom + 6,
-            ),
-            child: Row(
-              children: [
-                if (items.contains('章节'))
-                  Expanded(
-                    child: Text(
-                      widget.chapters[_index].name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: _statusStyle(fg),
-                    ),
-                  ),
-                const Spacer(),
-                if (items.contains('电量')) _batteryText(fg),
-                if (items.contains('页码'))
-                  _statusText('${_pageIndex + 1}/${_pages.length}', fg),
-              ],
-            ),
-          ),
+        if (items.isNotEmpty) _statusFooter(fg),
       ],
     );
   }
@@ -3355,13 +3401,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   ///   的 builder 里，每次 rebuild 都被重置回初值 ⇒ 拇指一拖就弹回。
   /// ⇒ 已删除，改为竖条内联滑杆 [_dockBrightness]（值存在 State 字段，不会被重置）。
 
-  Widget _topBar(Color fg) {
-    return Positioned(
-      // ✅ 改成**悬浮卡片**（与底部功能栏同款：四周留白 + 四角圆 + 向下投影 ✓）——
-      //    原来是 top:0 通栏贴边（`color:` 纯色背景 ✓），与底部悬浮卡风格不统一 ✗。
-      top: 8,
-      left: 12,
-      right: 12,
+  Widget _topBarCard(Color fg) {
+    return Padding(
+      // 悬浮卡片外观保留（四周留白 + 圆角 + 投影），但它是**布局内**的，
+      // 占掉的高度由正文让出 ⇒ 永远不会压住文字 ✓
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       child: Container(
         decoration: BoxDecoration(
           color: _bgTop.withValues(alpha: 0.97),
@@ -3453,7 +3497,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   ///     · 自下而上的**渐变**填充（亮度越低越淡）
   ///     · 小圆点拇指（带描边 + 轻微投影）
   ///   高度固定 [_brightnessTrackH]，比原来 130 短得多 ✓。
-  static const double _brightnessTrackH = 84;
+  static const double _brightnessTrackH = 120;
+  /// 轨道宽度（用户 2026-10-21：加宽一点）
+  static const double _brightnessTrackW = 16;
 
   void _applyDockBrightness(double dy) {
     // dy 从轨道顶端往下量；亮度是「越往上越亮」
@@ -3482,36 +3528,49 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           onVerticalDragStart: (d) => _applyDockBrightness(d.localPosition.dy),
           onVerticalDragUpdate: (d) => _applyDockBrightness(d.localPosition.dy),
           child: SizedBox(
-            width: 30,
+            width: 34,
             height: _brightnessTrackH,
             child: Center(
-              // 参考图样式：**粗胶囊**轨道，已调到的部分是一段更深的圆角填充，
-              // 没有小圆点拇指（比细线+圆点更稳、更好看）
-              child: Stack(
-                children: [
-                  Container(
-                    width: 12,
-                    height: _brightnessTrackH,
-                    decoration: BoxDecoration(
-                      color: fg.withValues(alpha: 0.13),
-                      borderRadius: BorderRadius.circular(6),
+              // ⚠️ 必须给内层固定宽度，并用 Positioned 定位填充：
+              //   之前 `Align` 作为 Stack 的非定位子项会**撑满父约束**（34 宽），
+              //   而轨道只有 12 宽 ⇒ 填充被居中到 34 宽里、和轨道错开 ✗
+              //   （用户截图里"背景和条没重合"就是这个）。
+              child: SizedBox(
+                width: _brightnessTrackW,
+                height: _brightnessTrackH,
+                child: Stack(
+                  children: [
+                    // 轨道底
+                    Positioned.fill(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: fg.withValues(alpha: 0.13),
+                          borderRadius: BorderRadius.circular(
+                            _brightnessTrackW / 2,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                  Align(
-                    alignment: Alignment.bottomCenter,
-                    child: Container(
-                      width: 12,
+                    // 已填充部分（自底向上）
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
                       height: (_brightnessTrackH * t).clamp(
                         0.0,
                         _brightnessTrackH,
                       ),
-                      decoration: BoxDecoration(
-                        color: fg.withValues(alpha: 0.45),
-                        borderRadius: BorderRadius.circular(6),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: fg.withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(
+                            _brightnessTrackW / 2,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -4564,9 +4623,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   _sheetHandle(),
-                  // ── 标题行：排版 + 独立排版开关 ────────────────
+                  // ── 标题行：排版 · 独立排版 · 存预设 / 阅读 ──────────
+                  // 用户 2026-10-21：底栏（取消/存预设/阅读）去掉 ——「取消」
+                  // 本来就是即时生效、点了也只是关面板，没用；
+                  // 「存预设」「阅读」提到右上角，「独立排版」左移 ✓
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                    padding: const EdgeInsets.fromLTRB(20, 4, 12, 8),
                     child: Row(
                       children: [
                         Text(
@@ -4617,6 +4679,43 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                 _scheduleSavePrefs();
                                 if (mounted) setState(() {});
                               },
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 2),
+                        TextButton(
+                          onPressed: () => _showSavePresetDialog(ctrl),
+                          style: TextButton.styleFrom(
+                            minimumSize: const Size(0, 32),
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            foregroundColor: _fg,
+                          ),
+                          child: const Text(
+                            '存预设',
+                            style: TextStyle(
+                              fontSize: AppTheme.fontFootnote,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          style: TextButton.styleFrom(
+                            minimumSize: const Size(0, 32),
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            foregroundColor: _bgTop,
+                            backgroundColor: _fg.withValues(alpha: 0.9),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: const Text(
+                            '阅读',
+                            style: TextStyle(
+                              fontSize: AppTheme.fontFootnote,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                         ),
@@ -4749,46 +4848,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                       ),
                     ),
                   ),
-                  // ── 底部按钮：取消 · 存预设 · 阅读 · 确认 ──────
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
-                    child: Row(
-                      children: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx),
-                          child: Text(
-                            '取消',
-                            style: TextStyle(
-                              fontSize: AppTheme.fontBody,
-                              color: _fg,
-                            ),
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: () => _showSavePresetDialog(ctrl),
-                          child: Text(
-                            '存预设',
-                            style: TextStyle(
-                              fontSize: AppTheme.fontBody,
-                              color: _fg,
-                            ),
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx),
-                          child: Text(
-                            '阅读',
-                            style: TextStyle(
-                              fontSize: AppTheme.fontBody,
-                              color: _fg,
-                            ),
-                          ),
-                        ),
-                        // ⚠️ 「确认」按钮已去掉：排版改动本来就是即时生效 ✓
-                        //   （用户 2026-10-21：选了就直接生效，不用再点确认）
-                      ],
-                    ),
-                  ),
+                  const SizedBox(height: 6),
                 ],
               ),
             ),
@@ -8095,7 +8155,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   ///
   /// 其中"阅读模式"是真的会影响渲染的（见 _contentArea）：
   /// 上下 = 不分页改滚动；其余 4 种 = 分页。
-  Widget _settingsPanel(Color fg) {
+  Widget _settingsPanel(Color fg, {double extraBottom = 0}) {
     return Positioned(
       // 面板已在 SafeArea 之外（见 build 末尾）⇒ 这里 bottom:0 就是屏幕最底部 ✓
       bottom: 0,
@@ -8119,6 +8179,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         clipBehavior: Clip.antiAlias,
         child: SafeArea(
           top: false,
+          // 兜底：padding 报 0 时也要给 Home 指示条留出位置（见 build 里的说明）
+          minimum: EdgeInsets.only(bottom: extraBottom),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
