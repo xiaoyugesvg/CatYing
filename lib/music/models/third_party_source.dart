@@ -393,6 +393,30 @@ class ThirdPartySourceStore {
     await _persist();
   }
 
+  /// 按给定顺序重排**其中一部分源**（插件市场里拖动已安装插件用）。
+  ///
+  /// 只重排 `orderedIds` 涉及的那些源，它们占用的“槽位”不变；
+  /// 其它源（用户音源、别的平台内置源）位置原样保留。
+  Future<void> reorderSubset(List<String> orderedIds) async {
+    final ids = orderedIds.toSet();
+    final slots = <int>[];
+    for (var i = 0; i < _items.length; i++) {
+      if (ids.contains(_items[i].id)) slots.add(i);
+    }
+    if (slots.isEmpty) return;
+    final byId = {for (final s in _items) s.id: s};
+    final ordered = <ThirdPartySource>[];
+    for (final id in orderedIds) {
+      final s = byId[id];
+      if (s != null) ordered.add(s);
+    }
+    if (ordered.length != slots.length) return; // 传进来的 id 不完整，忽略
+    for (var k = 0; k < slots.length; k++) {
+      _items[slots[k]] = ordered[k];
+    }
+    await _persist();
+  }
+
   Future<void> removeAll() async {
     _items.clear();
     await _persist();

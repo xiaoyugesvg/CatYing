@@ -13,6 +13,9 @@ import '../widgets/music_components.dart';
 import '../widgets/discover_sections.dart';
 import 'playlist_detail_page.dart';
 import 'plugin_explore_page.dart';
+import 'plugin_market_page.dart';
+import '../widgets/plugin_explore_view.dart';
+import '../widgets/plugin_source_sheet.dart';
 import 'ximalaya_album_page.dart';
 import 'bookan_album_page.dart';
 import 'ting15_album_page.dart';
@@ -44,6 +47,13 @@ class _DiscoverPageState extends State<DiscoverPage>
 
   // 当前平台
   SongSource _source = SongSource.netease;
+
+  /// 「推荐」Tab（2026-10-21）：内容是**已启用 MusicFree 插件**的榜单/歌单。
+  /// 它不是一个 SongSource，所以单独用布尔标记，不影响 `_source` 的持久化。
+  bool _pluginTab = false;
+
+  /// 当前选中的插件源 id（null = 用列表里第一个）
+  String? _pluginId;
 
   // 音乐平台通用数据
   List<Song> _newSongs = const [];
@@ -142,15 +152,52 @@ class _DiscoverPageState extends State<DiscoverPage>
   }
 
   Future<void> _switchSource(SongSource s) async {
-    if (s == _source) return;
+    if (s == _source && !_pluginTab) return;
     await SettingsStore.instance.setMusicSource(s);
     if (!mounted) return;
     setState(() {
+      _pluginTab = false;
       _source = s;
       _loading = true;
       _error = '';
     });
     _loadAll();
+  }
+
+  /// 切到「推荐」Tab：内容是插件源，不需要走平台接口
+  void _openPluginTab() {
+    if (_pluginTab) return;
+    setState(() {
+      _pluginTab = true;
+      _loading = false;
+      _error = '';
+    });
+  }
+
+  /// 已启用且可用的插件源（顺序 = 音源管理里的顺序）
+  List<ThirdPartySource> get _enabledPlugins => ThirdPartySourceStore
+      .instance.enabled
+      .where((s) => s.isMusicFree)
+      .toList();
+
+  /// 打开插件源切换弹窗（一行两列卡片 + 搜索 + 定位）
+  Future<void> _pickPlugin(ThirdPartySource current) async {
+    final picked = await PluginSourceSheet.show(
+      context: context,
+      items: _enabledPlugins,
+      selectedId: current.id,
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _pluginId = picked);
+  }
+
+  /// 右上角「插件管理」→ 插件市场
+  Future<void> _openPluginMarket() async {
+    await Navigator.of(context).push<void>(MaterialPageRoute<void>(
+      settings: const RouteSettings(name: 'music:page'),
+      builder: (_) => const PluginMarketPage(),
+    ));
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadAll() async {
@@ -420,7 +467,7 @@ class _DiscoverPageState extends State<DiscoverPage>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    if (_loading) {
+    if (_loading && !_pluginTab) {
       return AppPageLoading(color: MusicTheme.tint);
     }
     // ── 视觉预设：决定背景与卡片材质（**颜色仍全从全局主题派生**）──
@@ -434,28 +481,166 @@ class _DiscoverPageState extends State<DiscoverPage>
         Positioned.fill(
           child: DiscoverBackdrop(style: style),
         ),
-        RefreshIndicator(
-          color: style.accent,
-          onRefresh: _loadAll,
-          child: CustomScrollView(
-            slivers: [
-              SliverToBoxAdapter(child: _header(style)),
-              SliverToBoxAdapter(child: _sourceTabs(style)),
-              // Beans 主页顶部是**两张并排大卡**（每日推荐 / 私人漫游）。
-              // 这里映射到**真实可用**的功能，不做假入口：
-              //   · 每日推荐 → 直接播当天「新歌速递」
-              //   · 私人漫游 → 从「我的收藏」随机漫游（没收藏就明确提示）
-              SliverToBoxAdapter(child: _bigCards(style)),
-              // 插件推荐（2026-10-21 第二阶段）：第三方 MusicFree 插件的榜单/歌单
-              SliverToBoxAdapter(child: _pluginSection()),
-              if (_error.isNotEmpty)
-                SliverToBoxAdapter(child: _errorBox()),
-              ..._buildSections(style),
-              const SliverToBoxAdapter(child: SizedBox(height: 150)),
+        if (_pluginTab)
+          // 「推荐」Tab：头部+平台栏固定在顶部，内容是插件源自己的可滚动视图
+          Column(
+            children: [
+              _header(style),
+              _sourceTabs(style),
+              Expanded(child: _pluginPane(style)),
             ],
+          )
+        else
+          RefreshIndicator(
+            color: style.accent,
+            onRefresh: _loadAll,
+            child: CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(child: _header(style)),
+                SliverToBoxAdapter(child: _sourceTabs(style)),
+                // Beans 主页顶部是**两张并排大卡**（每日推荐 / 私人漫游）。
+                // 这里映射到**真实可用**的功能，不做假入口：
+                //   · 每日推荐 → 直接播当天「新歌速递」
+                //   · 私人漫游 → 从「我的收藏」随机漫游（没收藏就明确提示）
+                SliverToBoxAdapter(child: _bigCards(style)),
+                // 插件推荐（2026-10-21 第二阶段）：第三方 MusicFree 插件的榜单/歌单
+                SliverToBoxAdapter(child: _pluginSection()),
+                if (_error.isNotEmpty)
+                  SliverToBoxAdapter(child: _errorBox()),
+                ..._buildSections(style),
+                const SliverToBoxAdapter(child: SizedBox(height: 150)),
+              ],
+            ),
           ),
-        ),
       ],
+    );
+  }
+
+  /// 「推荐」Tab 内容：左上角的源切换（显示应用源名称）+ 右上角插件管理
+  Widget _pluginPane(DiscoverStyle style) {
+    return ValueListenableBuilder<int>(
+      valueListenable: ThirdPartySourceStore.instance.revision,
+      builder: (context, _, __) {
+        final plugins = _enabledPlugins;
+        if (plugins.isEmpty) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.extension_off_rounded,
+                      size: 40, color: style.secondary),
+                  const SizedBox(height: 12),
+                  Text(
+                    '还没有启用的插件源',
+                    style: TextStyle(
+                      color: style.primary,
+                      fontSize: AppTheme.fontSubhead,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '去插件市场安装，或在音源管理里启用',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: style.secondary,
+                      fontSize: AppTheme.fontFootnote,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: style.accent,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: _openPluginMarket,
+                    icon: const Icon(Icons.storefront_rounded, size: 18),
+                    label: const Text('插件市场'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+        // 记住的 id 不存在了（被删/被停用）→ 回落到第一个
+        final current = plugins.firstWhere(
+          (p) => p.id == _pluginId,
+          orElse: () => plugins.first,
+        );
+        if (current.id != _pluginId) {
+          // build 内不能 setState：直接记下，下一次重建即生效
+          _pluginId = current.id;
+        }
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+              child: Row(
+                children: [
+                  // 左上角：当前应用源（点开切换弹窗）
+                  Flexible(
+                    child: GestureDetector(
+                      onTap: () => _pickPlugin(current),
+                      child: Container(
+                        padding: const EdgeInsets.fromLTRB(10, 7, 8, 7),
+                        decoration: BoxDecoration(
+                          color: style.cardFill
+                              .withValues(alpha: style.fillAlpha),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: style.primary.withValues(alpha: 0.10),
+                            width: 0.8,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.extension_rounded,
+                                size: 16, color: style.accent),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                current.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: style.primary,
+                                  fontSize: AppTheme.fontSubhead,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 2),
+                            Icon(Icons.expand_more_rounded,
+                                size: 18, color: style.secondary),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  // 右上角：插件管理（→ 插件市场）
+                  IconButton(
+                    tooltip: '插件管理',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: _openPluginMarket,
+                    icon: Icon(Icons.storefront_rounded,
+                        size: 20, color: style.primary),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: PluginExploreView(
+                key: ValueKey(current.id),
+                source: current,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -742,9 +927,11 @@ class _DiscoverPageState extends State<DiscoverPage>
                 Text(
                   // 副标题：不同来源给不同的引导语
                   //（原来这里三元两支**完全一样**，是死代码，一并修掉）
-                  _source == SongSource.ximalaya
-                      ? '有声书与播客，听点想听的'
-                      : '今天想听点什么？',
+                  _pluginTab
+                      ? '插件源里的榜单与歌单'
+                      : _source == SongSource.ximalaya
+                          ? '有声书与播客，听点想听的'
+                          : '今天想听点什么？',
                   style: TextStyle(
                       color: style.secondary, fontSize: AppTheme.fontSubhead),
                 ),
@@ -838,41 +1025,56 @@ class _DiscoverPageState extends State<DiscoverPage>
         ),
         child: Row(
           children: [
+            // 「推荐」（2026-10-21）：内容是已启用插件的榜单/歌单
+            _sourceChip(
+              style: style,
+              label: '推荐',
+              selected: _pluginTab,
+              onTap: _openPluginTab,
+            ),
             for (final t in tabs)
-              Expanded(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => _switchSource(t.source),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    curve: Curves.easeOut,
-                    alignment: Alignment.center,
-                    padding: const EdgeInsets.symmetric(vertical: 9),
-                    decoration: BoxDecoration(
-                      // 选中 = 实心主题色胶囊；未选 = 透明
-                      color: _source == t.source
-                          ? style.accent
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      t.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: _source == t.source
-                            ? Colors.white
-                            : style.secondary,
-                        fontSize: AppTheme.fontSubhead,
-                        fontWeight: _source == t.source
-                            ? FontWeight.w600
-                            : FontWeight.w400,
-                      ),
-                    ),
-                  ),
-                ),
+              _sourceChip(
+                style: style,
+                label: t.label,
+                selected: !_pluginTab && _source == t.source,
+                onTap: () => _switchSource(t.source),
               ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sourceChip({
+    required DiscoverStyle style,
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(vertical: 9),
+          decoration: BoxDecoration(
+            // 选中 = 实心主题色胶囊；未选 = 透明
+            color: selected ? style.accent : Colors.transparent,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: selected ? Colors.white : style.secondary,
+              fontSize: AppTheme.fontSubhead,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+            ),
+          ),
         ),
       ),
     );
