@@ -47,6 +47,14 @@ class MusicPlayerManager extends ChangeNotifier {
   late final Player _player;
   bool _inited = false;
 
+  /// 播放器里**当前是否已经装载了媒体**。
+  ///
+  /// ⚠️ 重启后 `_restoreQueue()` 只恢复「队列 + 当前歌」（不自动播），
+  /// 播放器本身是空的。此时点播放走的是 `toggle()` → `playOrPause()`，
+  /// media_kit 在没有媒体时**什么都不做** ⇒ 用户看到"点了没反应"✗。
+  /// 这个标记用来判断"要不要先真正加载一次"✓。
+  bool _mediaLoaded = false;
+
   /// 当前歌曲
   Song? get currentSong => _currentSong;
   Song? _currentSong;
@@ -513,6 +521,7 @@ class MusicPlayerManager extends ChangeNotifier {
     _index = index;
     final song = _queue[index];
     _currentSong = song;
+    _mediaLoaded = false; // 换歌瞬间旧媒体已作废
     lastError.value = '';
     qualityText.value = '';
     switching.value = false;
@@ -896,6 +905,7 @@ class MusicPlayerManager extends ChangeNotifier {
       // ⚠️ **必须把 headers 透传给播放器**：喜马拉雅的直链没有 User-Agent
       // 会被服务端拒（表现是"地址拿到了但播不了"）。
       await _player.open(Media(url, httpHeaders: headers), play: autoplay);
+      _mediaLoaded = true;
     } catch (e, st) {
       // #15：**不要把异常 toString 直接给用户看** ——
       // 它可能包含堆栈、完整 URL、内部实现细节（用户看不懂，也不该看到）。
@@ -958,6 +968,14 @@ class MusicPlayerManager extends ChangeNotifier {
   Future<void> toggle() async {
     await init();
     if (_currentSong == null) return;
+    // 🔴 重启后队列是恢复出来的，播放器里**没有装载任何媒体** ✗
+    //   此时 playOrPause() 是空操作（用户反馈"点了没反应"）⇒ 先真正加载一次 ✓
+    if (!_mediaLoaded) {
+      if (_index >= 0 && _index < _queue.length) {
+        await _load(_index, autoplay: true);
+      }
+      return;
+    }
     await _player.playOrPause();
   }
 
@@ -968,6 +986,14 @@ class MusicPlayerManager extends ChangeNotifier {
 
   Future<void> resume() async {
     await init();
+    if (_currentSong == null) return;
+    // 同上：重启后没有媒体 ⇒ 不能只 play()，要先加载
+    if (!_mediaLoaded) {
+      if (_index >= 0 && _index < _queue.length) {
+        await _load(_index, autoplay: true);
+      }
+      return;
+    }
     await AudioFocus.request('music');
     await _player.play();
   }
