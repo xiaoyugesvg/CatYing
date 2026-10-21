@@ -36,6 +36,7 @@ import 'tts_engine_page.dart';
 import 'book_source_editor_page.dart';
 import 'tts_full_player_page.dart';
 import '../../common/theme.dart';
+import '../../common/system_ui.dart';
 import '../theme/jelly_theme.dart';
 import '../../widgets/app_image_cache.dart';
 
@@ -180,6 +181,40 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 从 `_showBar` 里**拆出来**：否则点中间弹面板会把底部功能栏整个盖住 ✗。
   /// 现在只有功能栏里的「设置」项才打开它 ✓。
   bool _showSettingsPanel = false;
+
+  /// 打开「阅读设置」面板时的设置快照。
+  ///
+  /// 用户 2026-10-21：「取消」应该真的取消 —— 原来取消/确认都是直接关面板，
+  /// 已经改掉的设置收不回来 ✗。这里在打开时存一份，取消时整体回滚 ✓。
+  ReadingSettings? _settingsSnapshot;
+
+  /// 关闭阅读设置面板。[apply] = true 表示保留改动（确认），false 回滚（取消）。
+  void _closeSettingsPanel({required bool apply}) {
+    final snap = _settingsSnapshot;
+    _settingsSnapshot = null;
+    setState(() {
+      if (!apply && snap != null) _rs = snap;
+      _showSettingsPanel = false;
+    });
+    if (!apply && snap != null) {
+      // 回滚后要把副作用的设置也还原：全屏 / 分页方式
+      _applyReaderSystemUi();
+      _paginate();
+    }
+    _scheduleSavePrefs();
+  }
+
+  /// 切换「独立排版」（设置面板开关与排版面板分段控件共用）。
+  Future<void> _setIndependent(bool v) async {
+    setState(() => _independent = v);
+    if (v) {
+      await BsrIndependentLayout.instance.enable(_indepKey, _layoutSnapshot());
+    } else {
+      await BsrIndependentLayout.instance.disable(_indepKey);
+    }
+    _scheduleSavePrefs();
+    if (mounted) setState(() {});
+  }
 
   // ── 排版（截图 IMG_8491~8499 全文可调）───────────────────────
   double _fontWeight = 400; // 字重
@@ -398,8 +433,50 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 当前背景下的次要前景色（说明文字用）
   Color get _fgMuted => _fg.withValues(alpha: 0.6);
 
-  /// 当前阅读背景色（自定义背景优先，参考图 IMG_8500）
-  Color get _bgTop => _customBgColor ?? _bgs[_bgIndex][0];
+  /// 当前阅读背景色（自定义背景优先，参考图 IMG_8500）。
+  ///
+  /// ⚠️ **强制不透明**：自定义背景色可能是半透明的（取色器允许），
+  /// 而页面背景层用的是 `_bgs[_bgIndex][0]`（不透明常量）——
+  /// 于是只有面板/顶栏/底栏会透出正文（截图里那种发灰的重影字）✗。
+  /// 这里把 alpha 拉满，RGB 不变 ✓。
+  Color get _bgTop =>
+      (_customBgColor ?? _bgs[_bgIndex][0]).withValues(alpha: 1.0);
+
+  /// 当前背景是否为深色（面板层次色用）
+  bool get _isDarkBg => _bgTop.computeLuminance() < 0.4;
+
+  /// 面板卡片底色：**刻意和阅读背景拉开一档**。
+  ///
+  /// 用户 2026-10-21：「弹窗没有层次感，背景和阅读页接上了」——
+  /// 之前面板直接铺 `_bgTop`（= 阅读背景），加上没有遮罩，
+  /// 看起来就像正文的延续 ✗。现在：
+  ///   · 浅底 → 往白里提一档（纸色 → 近白卡片）
+  ///   · 深底 → 往亮里提一档（炭灰 → 浮起的深灰卡片）
+  /// 再配合「背后压一层黑色遮罩 + 向上投影」，层次就出来了 ✓
+  Color get _sheetBg {
+    if (_isDarkBg) {
+      return Color.alphaBlend(Colors.white.withValues(alpha: 0.09), _bgTop);
+    }
+    return Color.alphaBlend(Colors.white.withValues(alpha: 0.78), _bgTop);
+  }
+
+  /// 面板专用底色（语义别名，见 [_bgTop]）。
+  Color get _panelBg => _bgTop;
+
+  /// 底部面板顶部的拖动条（视觉锚点，纯装饰）✓
+  Widget _sheetHandle() => Padding(
+    padding: const EdgeInsets.only(top: 8, bottom: 4),
+    child: Center(
+      child: Container(
+        width: 36,
+        height: 4,
+        decoration: BoxDecoration(
+          color: _fg.withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(2),
+        ),
+      ),
+    ),
+  );
 
   static const _bgs = <List<Color>>[
     [Color(0xFFFFFFFF), Color(0xFF1A1A1A)], // 默认（白）
@@ -565,6 +642,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     //   页面正在销毁 ✓，再排一个 300ms 后的定时器**可能根本不会执行** ✗
     //   → 就变成"拖完立刻退出 = 丢设置" ✗（这正是防抖的命门 ✓）
     _savePrefs();
+    // 退出阅读器必须还原系统状态栏（否则出了阅读器状态栏还是隐藏的 ✗）
+    if (_readerImmersive) {
+      _readerImmersive = false;
+      SystemUiController.exit('bsr-reader');
+    }
     // 🆕 **补上漏掉的定时器取消** ✓ —— 原来 `_ttsTimerHandle` 只在
     //   `_scheduleTtsTimer` 内部被取消 ✗，离开阅读器时**没人取消它** ✗
     //   （定时器会在页面销毁后照常触发 → 潜在泄漏/异常 ✓）
@@ -821,8 +903,31 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       if (_index != widget.initialIndex) _loadChapter(_index);
       // 恢复完偏好要立刻应用屏幕休眠设置
       _applySleepMode();
+      // 以及「隐藏状态栏」（沉浸全屏）设置
+      _applyReaderSystemUi();
     } catch (_) {
       // 偏好读不到就用默认值，不影响阅读
+    }
+  }
+
+  /// 是否已经「进入」沉浸态（避免没进过就调 exit —— exit 在无现场记录时会
+  /// 强制回到默认模式并重置方向，可能覆盖别的页面设的锁 ✗）。
+  bool _readerImmersive = false;
+
+  /// 应用「隐藏状态栏」（沉浸全屏）设置。
+  ///
+  /// 用 [SystemUiController] 的**入栈/出栈**（见 `common/system_ui.dart`）——
+  /// 退出时恢复「进入阅读器之前」的状态，而不是写死 `edgeToEdge` ✗，
+  /// 这样从别的全屏页进来再退出也不会互相覆盖 ✓。
+  void _applyReaderSystemUi() {
+    if (_rs.hideStatusBar) {
+      if (_readerImmersive) return;
+      _readerImmersive = true;
+      SystemUiController.enter('bsr-reader', mode: SystemUiMode.immersiveSticky);
+    } else {
+      if (!_readerImmersive) return;
+      _readerImmersive = false;
+      SystemUiController.exit('bsr-reader');
     }
   }
 
@@ -1420,9 +1525,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   /// A2 设置面板的繁简模式文案
   String _convertLabel(ChineseConvertMode m) => switch (m) {
-    ChineseConvertMode.none => '原始',
-    ChineseConvertMode.traditionalToSimplified => '繁→简',
-    ChineseConvertMode.simplifiedToTraditional => '简→繁',
+    ChineseConvertMode.none => '原文',
+    ChineseConvertMode.traditionalToSimplified => '繁转简',
+    ChineseConvertMode.simplifiedToTraditional => '简转繁',
   };
 
   void _go(int delta) {
@@ -1523,6 +1628,54 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 // 右侧竖向悬浮栏（朗读 / 亮度 / 白夜 / 编辑）：与漫画阅读器同款。
                 // 设置面板从底部盖上来时让位（否则会被面板压住 ✗）。
                 if (_showBar && !_showSettingsPanel) _sideDock(bg[1]),
+                // 分页模式没有"正文末尾插图条"的位置 ⇒ 给一个悬浮入口
+                // （「查看插图」开启且本章有插图时才出现）
+                if (_rs.showIllustrations &&
+                    _chapterImages.isNotEmpty &&
+                    _rs.pageMode.paginates &&
+                    !_showSettingsPanel)
+                  Positioned(
+                    right: 12,
+                    bottom: 110,
+                    child: GestureDetector(
+                      onTap: _showImageMode,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _sheetBg,
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.16),
+                              blurRadius: 10,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.image_outlined,
+                              size: 16,
+                              color: bg[1].withValues(alpha: 0.8),
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              '插图 ${_chapterImages.length}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: bg[1].withValues(alpha: 0.8),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 // 阅读设置面板拆成**独立开关**（只有功能栏里的「设置」打开它 ✓）——
                 // 否则点中间会连面板一起弹出、把刚出现的功能栏整个盖住 ✗。
                 //
@@ -1533,7 +1686,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   Positioned.fill(
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
-                      onTap: () => setState(() => _showSettingsPanel = false),
+                      onTap: () => _closeSettingsPanel(apply: false),
+                      // 背后压一层遮罩：面板才「浮」在正文之上，而不是和正文连成一片
+                      child: Container(
+                        color: Colors.black.withValues(alpha: 0.32),
+                      ),
                     ),
                   ),
                 if (_showSettingsPanel) _settingsPanel(bg[1]),
@@ -2051,8 +2208,76 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           const SizedBox(height: 18),
           for (var pi = 0; pi < _paragraphs.length; pi++)
             _paragraphWidget(pi, fg),
+          // 「查看插图」：正文末尾展示本章插图（点开走既有的大图查看器）
+          if (_rs.showIllustrations && _chapterImages.isNotEmpty) ...[
+            const SizedBox(height: 18),
+            _illustrationStrip(fg),
+          ],
         ],
       ),
+    );
+  }
+
+  /// 本章插图条（设置里的「查看插图」开关控制显隐）。
+  ///
+  /// 说明：文字章附带的插图原本只存在 `_chapterImages` 里，正文流不渲染；
+  /// 这里在**上下滚动模式**末尾补一排缩略图，点任意一张打开既有的
+  /// `_showImageMode()`（可捏合放大）✓。
+  Widget _illustrationStrip(Color fg) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '插图 ${_chapterImages.length} 张',
+          style: TextStyle(
+            fontSize: 12,
+            color: fg.withValues(alpha: 0.5),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final u in _chapterImages)
+              GestureDetector(
+                onTap: _showImageMode,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: CachedNetworkImage(
+                    imageUrl: u,
+                    httpHeaders: _mangaImgHeaders,
+                    width: 92,
+                    height: 92,
+                    fit: BoxFit.cover,
+                    placeholder: (_, __) => Container(
+                      width: 92,
+                      height: 92,
+                      color: fg.withValues(alpha: 0.06),
+                      alignment: Alignment.center,
+                      child: Icon(
+                        Icons.image_outlined,
+                        size: 20,
+                        color: fg.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    errorWidget: (_, __, ___) => Container(
+                      width: 92,
+                      height: 92,
+                      color: fg.withValues(alpha: 0.06),
+                      alignment: Alignment.center,
+                      child: Icon(
+                        Icons.broken_image_outlined,
+                        size: 20,
+                        color: fg.withValues(alpha: 0.3),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -2956,7 +3181,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   }
 
   TextStyle _statusStyle(Color fg) => TextStyle(
-    fontSize: AppTheme.fontCaption,
+    // 用户 2026-10-21：信息栏字号可调（设置面板「信息栏字号」）
+    fontSize: AppTheme.fontCaption * _rs.statusTextScale,
     color: fg.withValues(alpha: 0.5),
   );
 
@@ -2972,11 +3198,32 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 现在走 `tts_engine`（同一个原生文件里加的 `battery` 方法）——
   /// 理由同 TtsService 的注释：新增 Swift 文件要改 pbxproj，风险太高，
   /// 而一个 channel 支持任意多方法名。
+  ///
+  /// 2026-10-21 用户要求：电量**用手机状态栏那种电池图形**（不再只是裸数字）。
+  /// 电池图标与百分比都跟随「信息栏字号」缩放 ✓。
   Widget _batteryText(Color fg) {
     return FutureBuilder<int?>(
       future: _tts.batteryLevel(),
-      builder: (c, snap) =>
-          _statusText(snap.data == null ? '--%' : '${snap.data}%', fg),
+      builder: (c, snap) {
+        final lv = snap.data;
+        final s = _rs.statusTextScale;
+        final color = fg.withValues(alpha: 0.5);
+        return Padding(
+          padding: const EdgeInsets.only(right: 10),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _BatteryGlyph(
+                level: lv == null ? 0 : (lv / 100).clamp(0.0, 1.0),
+                color: color,
+                height: 10 * s,
+              ),
+              SizedBox(width: 3 * s),
+              Text(lv == null ? '--' : '$lv%', style: _statusStyle(fg)),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -3022,10 +3269,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     if (size.width <= 0 || size.height <= 0) return;
     // 面板 / 顶栏打开时：点击正文空白任意位置先收起（不翻页、不误切换）
     if (_showBar || _showSettingsPanel) {
-      setState(() {
-        _showBar = false;
-        _showSettingsPanel = false;
-      });
+      if (_showSettingsPanel) {
+        // 点空白 = 取消（回滚本次面板里的改动）
+        _closeSettingsPanel(apply: false);
+        return;
+      }
+      setState(() => _showBar = false);
       return;
     }
     // 漫画模式：固定 左/右 1/3 翻章、中间 1/3 呼出（保持原漫画交互）
@@ -3189,6 +3438,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               () => _showAddBookmark(0),
               fg,
             ),
+            // ⚠️ 语音朗读**不放顶栏**（用户 2026-10-21 纠正）：
+            //   它在右侧竖栏的最上面（`_sideDock` 第一个按钮）✓。
           ],
         ),
       ),
@@ -3202,28 +3453,88 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   ///   根因是 `var value = v;` 写在了 `StatefulBuilder` 的 builder **里面**，
   ///   每次 rebuild 都被重置回初始值 ⇒ 拇指一拖就被弹回。这里改成竖条内联滑杆，
   ///   值存在 State 字段里，天然不会被重置。
+  ///
+  /// 2026-10-21 重做视觉（用户："弄好看点"）：
+  ///   不再用 Material `Slider`（旋转 90° 后轨道粗、两端留白大、还有一段很长的
+  ///   灰条 ✗）。改成自绘的三件套：
+  ///     · 细胶囊轨道（5 宽、淡底）
+  ///     · 自下而上的**渐变**填充（亮度越低越淡）
+  ///     · 小圆点拇指（带描边 + 轻微投影）
+  ///   高度固定 [_brightnessTrackH]，比原来 130 短得多 ✓。
+  static const double _brightnessTrackH = 92;
+  static const double _brightnessThumb = 14;
+
+  void _applyDockBrightness(double dy) {
+    // dy 从轨道顶端往下量；亮度是「越往上越亮」
+    final t = (1 - dy / _brightnessTrackH).clamp(0.0, 1.0);
+    final v = (0.1 + t * 0.9).clamp(0.1, 1.0);
+    if ((v - _dockBrightnessValue).abs() < 0.005) return;
+    setState(() => _dockBrightnessValue = v);
+    ScreenBrightness().setScreenBrightness(v);
+  }
+
   Widget _dockBrightness(Color fg) {
-    return SizedBox(
-      height: 130,
-      child: RotatedBox(
-        quarterTurns: -1,
-        child: SliderTheme(
-          data: SliderTheme.of(context).copyWith(
-            trackHeight: 3,
-            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-            overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-          ),
-          child: Slider(
-            value: _dockBrightnessValue.clamp(0.1, 1.0),
-            min: 0.1,
-            max: 1.0,
-            activeColor: fg,
-            inactiveColor: fg.withValues(alpha: 0.2),
-            onChanged: (v) {
-              setState(() => _dockBrightnessValue = v);
-              ScreenBrightness().setScreenBrightness(v);
-            },
-          ),
+    final t = ((_dockBrightnessValue - 0.1) / 0.9).clamp(0.0, 1.0);
+    const w = 24.0;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (d) => _applyDockBrightness(d.localPosition.dy),
+      onVerticalDragStart: (d) => _applyDockBrightness(d.localPosition.dy),
+      onVerticalDragUpdate: (d) => _applyDockBrightness(d.localPosition.dy),
+      child: SizedBox(
+        width: w,
+        height: _brightnessTrackH,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // 轨道底
+            Container(
+              width: 5,
+              height: _brightnessTrackH,
+              decoration: BoxDecoration(
+                color: fg.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(2.5),
+              ),
+            ),
+            // 已填充部分（自底向上渐变 = 亮度隐喻）
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Container(
+                width: 5,
+                height: (_brightnessTrackH * t).clamp(0.0, _brightnessTrackH),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: [
+                      fg.withValues(alpha: 0.35),
+                      fg.withValues(alpha: 0.9),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(2.5),
+                ),
+              ),
+            ),
+            // 拇指
+            Positioned(
+              top: (_brightnessTrackH - _brightnessThumb) * (1 - t),
+              child: Container(
+                width: _brightnessThumb,
+                height: _brightnessThumb,
+                decoration: BoxDecoration(
+                  color: fg,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.18),
+                      blurRadius: 4,
+                      offset: const Offset(0, 1),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -3258,6 +3569,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   /// 右侧竖向悬浮栏：朗读 / 亮度 / 白夜 / 编辑。
   /// 与漫画阅读器的右侧竖条同款 —— 这 4 个原来挤在顶栏里（用户要求挪出来）。
+  ///
+  /// ⚠️ 2026-10-21 用户要求：竖栏**不要背景**（去掉原来的白色胶囊卡片与投影），
+  ///   只留图标本身悬浮在正文上 ✓。
   Widget _sideDock(Color fg) {
     final ink = _bgIndex == 5 && _customBgColor == null;
     return Positioned(
@@ -3265,21 +3579,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       top: 0,
       bottom: 0,
       child: Center(
-        child: Container(
+        child: SizedBox(
           width: 46,
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            color: _bgTop.withValues(alpha: 0.97),
-            borderRadius: BorderRadius.circular(23),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.16),
-                blurRadius: 20,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          child: Column(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               _dockButton(
@@ -3290,6 +3594,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               ),
               const SizedBox(height: 10),
               // 亮度：**直接给滑杆**（不再是"按钮点开→弹层里再拖"，见 _dockBrightness）
+              // 上方补一个小太阳图标（参考用户截图的线性图标风格 ✓）
+              Icon(
+                Icons.brightness_5_outlined,
+                size: 18,
+                color: fg.withValues(alpha: 0.75),
+              ),
+              const SizedBox(height: 4),
               _dockBrightness(fg),
               const SizedBox(height: 10),
               _dockButton(
@@ -3301,7 +3612,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               const SizedBox(height: 10),
               // 对齐 Cmbok：书源书籍的阅读器「编辑」= 编辑该书源
               // （划线与笔记入口在底部宫格「笔记」里，不冲突）
-              _dockButton(Icons.edit_outlined, '书源编辑', () {
+              // 图标用齿轮（用户 2026-10-21 指定）✓
+              _dockButton(Icons.settings_outlined, '书源编辑', () {
                 Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => BookSourceEditorPage(source: widget.source),
@@ -3311,6 +3623,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               // ⚠️ 番茄钟**不在这里**了：它已经回到底部宫格第一格
               //    （用户 2026-10-14：宫格那格本来就是番茄钟，右侧竖条不再重复放）。
             ],
+            ),
           ),
         ),
       ),
@@ -3742,7 +4055,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               _navItem(
                 Icons.settings_outlined,
                 '设置',
-                () => setState(() => _showSettingsPanel = true),
+                () => setState(() {
+                  _settingsSnapshot = _rs;
+                  _showSettingsPanel = true;
+                }),
                 fg,
               ),
               _navItem(Icons.menu_book_rounded, '目录', _showToc, fg),
@@ -4258,19 +4574,28 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 // 最高半屏（用户 2026-10-12）
                 BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.5),
             decoration: BoxDecoration(
-              color: _bgTop,
+              color: _sheetBg,
               borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(22),
               ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.22),
+                  blurRadius: 32,
+                  offset: const Offset(0, -10),
+                ),
+              ],
             ),
+            clipBehavior: Clip.antiAlias,
             child: SafeArea(
               top: false,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  _sheetHandle(),
                   // ── 标题行：排版 + 独立排版开关 ────────────────
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
                     child: Row(
                       children: [
                         Text(
@@ -4294,27 +4619,100 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                         //   的本书记录（`enable/disable(_indepKey, _layoutSnapshot())` ✓），
                         //   下次进这本书时 `_restorePrefs` 会把覆盖项读回来 ✓。
                         //   ℹ️ 排版行、朗读面板、阅读设置面板三处共用同一个 `_independent` ✓。
-                        Switch(
-                          value: _independent,
-                          onChanged: (v) async {
-                            setState(() => _independent = v);
-                            if (v) {
-                              await BsrIndependentLayout.instance.enable(
-                                _indepKey,
-                                _layoutSnapshot(),
-                              );
-                            } else {
-                              await BsrIndependentLayout.instance.disable(
-                                _indepKey,
-                              );
-                            }
-                            _scheduleSavePrefs();
-                            if (mounted) setState(() {});
-                          },
+                        SizedBox(
+                          width: 46,
+                          height: 30,
+                          child: FittedBox(
+                            child: Switch(
+                              value: _independent,
+                              activeThumbColor: _bgTop,
+                              activeTrackColor: _fg.withValues(alpha: 0.85),
+                              inactiveThumbColor: _bgTop,
+                              inactiveTrackColor: _fg.withValues(alpha: 0.16),
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                              onChanged: (v) async {
+                                setState(() => _independent = v);
+                                if (v) {
+                                  await BsrIndependentLayout.instance.enable(
+                                    _indepKey,
+                                    _layoutSnapshot(),
+                                  );
+                                } else {
+                                  await BsrIndependentLayout.instance.disable(
+                                    _indepKey,
+                                  );
+                                }
+                                _scheduleSavePrefs();
+                                if (mounted) setState(() {});
+                              },
+                            ),
+                          ),
                         ),
                       ],
                     ),
                   ),
+                  // ── 默认排版 / 自研排版（对齐参考图的分段控件）──────
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: _fg.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: _fg.withValues(alpha: 0.08),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          for (final e in const [
+                            ('默认排版', false),
+                            ('自研排版', true),
+                          ])
+                            Expanded(
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () async {
+                                  await _setIndependent(e.$2);
+                                  setSheet(() {});
+                                },
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 150),
+                                  curve: Curves.easeOut,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 8,
+                                  ),
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                    color: _independent == e.$2
+                                        ? _fg.withValues(alpha: 0.88)
+                                        : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(9),
+                                  ),
+                                  child: Text(
+                                    e.$1,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: _independent == e.$2
+                                          ? _bgTop
+                                          : _fg.withValues(alpha: 0.6),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Divider(
+                    height: 1,
+                    thickness: 0.5,
+                    color: _fg.withValues(alpha: 0.08),
+                  ),
+                  const SizedBox(height: 8),
                   // ── 5 个 tab ──────────────────────────────────
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -4324,7 +4722,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                           Expanded(
                             child: GestureDetector(
                               onTap: () => setSheet(() => tab = i),
-                              child: Container(
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 150),
+                                curve: Curves.easeOut,
                                 margin: const EdgeInsets.symmetric(
                                   horizontal: 3,
                                 ),
@@ -4334,18 +4734,25 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
                                   color: tab == i
-                                      ? _fg.withValues(alpha: 0.85)
-                                      : _fg.withValues(alpha: 0.06),
-                                  borderRadius: BorderRadius.circular(10),
+                                      ? _fg.withValues(alpha: 0.88)
+                                      : _fg.withValues(alpha: 0.05),
+                                  borderRadius: BorderRadius.circular(11),
+                                  border: Border.all(
+                                    color: tab == i
+                                        ? Colors.transparent
+                                        : _fg.withValues(alpha: 0.10),
+                                  ),
                                 ),
                                 child: Text(
                                   _layoutTabs[i],
                                   style: TextStyle(
-                                    fontSize: AppTheme.fontBody,
+                                    fontSize: 13,
                                     fontWeight: tab == i
                                         ? FontWeight.w600
-                                        : FontWeight.normal,
-                                    color: tab == i ? _bgTop : _fg,
+                                        : FontWeight.w500,
+                                    color: tab == i
+                                        ? _bgTop
+                                        : _fg.withValues(alpha: 0.78),
                                   ),
                                 ),
                               ),
@@ -5935,23 +6342,35 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                         const SizedBox(width: 4),
                         // ✅ 与排版行的「独立排版」同源（同一个 `_independent` ✓），已接线：
                         //   拨动即写 / 删 `BsrIndependentLayout` 的本书记录 ✓。
-                        Switch(
-                          value: _independent,
-                          onChanged: (v) async {
-                            setState(() => _independent = v);
-                            if (v) {
-                              await BsrIndependentLayout.instance.enable(
-                                _indepKey,
-                                _layoutSnapshot(),
-                              );
-                            } else {
-                              await BsrIndependentLayout.instance.disable(
-                                _indepKey,
-                              );
-                            }
-                            _scheduleSavePrefs();
-                            if (mounted) setState(() {});
-                          },
+                        SizedBox(
+                          width: 46,
+                          height: 30,
+                          child: FittedBox(
+                            child: Switch(
+                              value: _independent,
+                              activeThumbColor: _bgTop,
+                              activeTrackColor: _fg.withValues(alpha: 0.85),
+                              inactiveThumbColor: _bgTop,
+                              inactiveTrackColor: _fg.withValues(alpha: 0.16),
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                              onChanged: (v) async {
+                                setState(() => _independent = v);
+                                if (v) {
+                                  await BsrIndependentLayout.instance.enable(
+                                    _indepKey,
+                                    _layoutSnapshot(),
+                                  );
+                                } else {
+                                  await BsrIndependentLayout.instance.disable(
+                                    _indepKey,
+                                  );
+                                }
+                                _scheduleSavePrefs();
+                                if (mounted) setState(() {});
+                              },
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -7722,65 +8141,95 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             // 最高半屏（用户 2026-10-12）
             BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.5),
         decoration: BoxDecoration(
-          color: _bgTop,
+          color: _sheetBg,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.22),
+              blurRadius: 32,
+              offset: const Offset(0, -10),
+            ),
+          ],
         ),
+        clipBehavior: Clip.antiAlias,
         child: SafeArea(
           top: false,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              _sheetHandle(),
               // 标题：阅读设置 + 独立设置
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 14, 16, 4),
+                padding: const EdgeInsets.fromLTRB(20, 2, 16, 10),
                 child: Row(
                   children: [
-                    Text(
-                      '阅读设置',
-                      style: TextStyle(
-                        fontSize: AppTheme.fontHeadline,
-                        fontWeight: FontWeight.w700,
-                        color: _fg,
-                      ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '阅读设置',
+                          style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.2,
+                            color: _fg,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '翻页 · 信息栏 · 文本',
+                          style: TextStyle(
+                            fontSize: 11,
+                            letterSpacing: 0.2,
+                            color: _fg.withValues(alpha: 0.45),
+                          ),
+                        ),
+                      ],
                     ),
                     const Spacer(),
                     Text(
                       '独立设置',
                       style: TextStyle(
-                        fontSize: AppTheme.fontSubhead,
+                        fontSize: 12,
                         color: _fgMuted,
                       ),
                     ),
                     const SizedBox(width: 4),
                     // ✅ 三处「独立设置 / 独立排版」共用同一个 `_independent` ✓，均已接线：
                     //   拨动即写 / 删 `BsrIndependentLayout` 的本书记录，`_restorePrefs` 读回 ✓。
-                    Switch(
-                      value: _independent,
-                      onChanged: (v) async {
-                        setState(() => _independent = v);
-                        if (v) {
-                          await BsrIndependentLayout.instance.enable(
-                            _indepKey,
-                            _layoutSnapshot(),
-                          );
-                        } else {
-                          await BsrIndependentLayout.instance.disable(
-                            _indepKey,
-                          );
-                        }
-                        _scheduleSavePrefs();
-                        if (mounted) setState(() {});
-                      },
+                    SizedBox(
+                      width: 46,
+                      height: 30,
+                      child: FittedBox(
+                        child: Switch(
+                          value: _independent,
+                          activeThumbColor: _bgTop,
+                          activeTrackColor: _fg.withValues(alpha: 0.85),
+                          inactiveThumbColor: _bgTop,
+                          inactiveTrackColor: _fg.withValues(alpha: 0.16),
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          onChanged: (v) => _setIndependent(v),
+                        ),
+                      ),
                     ),
                   ],
                 ),
               ),
+              // 标题与内容之间的分隔线（滚动时不会和标题糊在一起）
+              Divider(
+                height: 1,
+                thickness: 0.5,
+                color: _fg.withValues(alpha: 0.08),
+              ),
               Flexible(
                 child: ListView(
                   shrinkWrap: true,
-                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
                   children: [
                     // ── 阅读模式（5 种）────────────────────────
+                    _sectionLabel('翻页'),
                     // 阅读模式：标签在左、5 个模式块在右（同一行，截图如此）。
                     // 用户 2026-10-15：纯文字 chip 辨识度差 ⇒ 换成
                     // 「图标 + 名称」的等宽小块（JellyModePicker）。
@@ -7788,6 +8237,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                       '阅读模式',
                       JellyModePicker(
                         fg: _fg,
+                        // 用户 2026-10-21：模式按钮上不要那个符号/图标，只留文字
+                        showSymbol: false,
                         items: [
                           for (final m in PageMode.values)
                             JellyModeItem(
@@ -7804,14 +8255,26 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                         ],
                       ),
                     ),
-                    _setSwitch('翻页反转', '左点下一页、右点上一页', _rs.flipReverse, (v) {
-                      setState(() => _rs = _rs.copyWith(flipReverse: v));
-                      _scheduleSavePrefs();
-                    }),
-                    _setSwitch('单手模式', '屏幕左右点击都是下一页', _rs.oneHand, (v) {
-                      setState(() => _rs = _rs.copyWith(oneHand: v));
-                      _scheduleSavePrefs();
-                    }),
+                    // ── 正文替换（对齐参考图：已启用 N 条规则 + 管理）──
+                    _setRowRight(
+                      '正文替换',
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '已启用 '
+                            '${_rs.purifyRules.where((r) => r.enabled).length}'
+                            ' 条规则',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              color: _fg.withValues(alpha: 0.55),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          _chip('管理', false, _showPurifySheet, compact: true),
+                        ],
+                      ),
+                    ),
                     // 点击区域：进入 3×3 编辑页（截图 IMG_8117）
                     InkWell(
                       onTap: _showTapZoneEditor,
@@ -7822,7 +8285,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                             Text(
                               '点击区域',
                               style: TextStyle(
-                                fontSize: AppTheme.fontHeadline,
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w600,
                                 color: _fg,
                               ),
                             ),
@@ -7831,8 +8295,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                               child: Text(
                                 '自定义各区域触发上一页/菜单/下一页',
                                 style: TextStyle(
-                                  fontSize: AppTheme.fontSubhead,
-                                  color: _fgMuted,
+                                  fontSize: 11.5,
+                                  color: _fg.withValues(alpha: 0.5),
                                 ),
                               ),
                             ),
@@ -7845,11 +8309,70 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                         ),
                       ),
                     ),
+                    // ── 简繁转换（位置对齐参考图：紧跟在点击区域之后）──
+                    _setRowRight(
+                      '简繁转换',
+                      Wrap(
+                        spacing: 6,
+                        children: [
+                          for (final cm in ChineseConvertMode.values)
+                            _chip(_convertLabel(cm), _rs.convertMode == cm, () {
+                              setState(
+                                () => _rs = _rs.copyWith(convertMode: cm),
+                              );
+                              _scheduleSavePrefs();
+                              _invalidateTtsSegs();
+                              // 从**原文缓存**重转（不改缓存），保留锚点重排 ✓
+                              if (_cache.containsKey(_index)) {
+                                _paragraphs = _applyConvert(_cache[_index]!);
+                              }
+                              _repaginateLayout();
+                            }, compact: true),
+                        ],
+                      ),
+                    ),
+                    // ── 屏幕休眠（对齐参考图：简繁转换之后）────────
+                    _setRowRight(
+                      '屏幕休眠',
+                      Wrap(
+                        spacing: 6,
+                        children: [
+                          for (final s in SleepMode.values)
+                            _chip(s.label, _rs.sleepMode == s, () {
+                              setState(() => _rs = _rs.copyWith(sleepMode: s));
+                              _scheduleSavePrefs();
+                              _applySleepMode();
+                            }, compact: true),
+                        ],
+                      ),
+                    ),
+                    _setSwitch('翻页反转', '左点下一页、右点上一页', _rs.flipReverse, (v) {
+                      setState(() => _rs = _rs.copyWith(flipReverse: v));
+                      _scheduleSavePrefs();
+                    }),
+                    _setSwitch('单手模式', '屏幕左右点击都是下一页', _rs.oneHand, (v) {
+                      setState(() => _rs = _rs.copyWith(oneHand: v));
+                      _scheduleSavePrefs();
+                    }),
+                    // 查看插图（对齐参考图）：正文末展示本章插图，点开可放大
+                    _setSwitch(
+                      '查看插图',
+                      '在正文末尾展示本章插图，点击放大查看',
+                      _rs.showIllustrations,
+                      (v) {
+                        setState(
+                          () => _rs = _rs.copyWith(showIllustrations: v),
+                        );
+                        _scheduleSavePrefs();
+                        _repaginateLayout();
+                      },
+                    ),
                     _setSwitch('双页模式', '横屏左右并排（上下模式除外）', _rs.dualPage, (v) {
                       setState(() => _rs = _rs.copyWith(dualPage: v));
                       _scheduleSavePrefs();
                     }),
                     // ── 信息栏（6 项逐项开关）──────────────────
+                    _sectionLabel('信息栏'),
                     Padding(
                       padding: const EdgeInsets.only(top: 8, bottom: 6),
                       child: Row(
@@ -7871,6 +8394,21 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                               ),
                             ),
                           ),
+                          // 总开关：一键显示/隐藏整条信息栏（全不选 = 隐藏）
+                          Switch(
+                            value: _rs.statusItems.isNotEmpty,
+                            onChanged: (v) {
+                              setState(
+                                () => _rs = _rs.copyWith(
+                                  statusItems: v
+                                      ? const {'章节', '页码', '进度'}
+                                      : <String>{},
+                                ),
+                              );
+                              _scheduleSavePrefs();
+                              _repaginateLayout();
+                            },
+                          ),
                         ],
                       ),
                     ),
@@ -7890,49 +8428,55 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                       ],
                     ),
                     const SizedBox(height: 8),
+                    // 信息栏字号/图标缩放（用户 2026-10-21）
+                    _setRowRight(
+                      '信息栏字号',
+                      Wrap(
+                        spacing: 6,
+                        children: [
+                          for (final e in const [
+                            ('小', 0.85),
+                            ('标准', 1.0),
+                            ('大', 1.15),
+                            ('超大', 1.3),
+                          ])
+                            _chip(
+                              e.$1,
+                              (_rs.statusTextScale - e.$2).abs() < 0.01,
+                              () {
+                                setState(
+                                  () => _rs = _rs.copyWith(
+                                    statusTextScale: e.$2,
+                                  ),
+                                );
+                                _scheduleSavePrefs();
+                                // 页脚高了/矮了 ⇒ 正文可用高度变了，要重排
+                                _repaginateLayout();
+                              },
+                              compact: true,
+                            ),
+                        ],
+                      ),
+                    ),
+                    // 隐藏系统状态栏（沉浸全屏，用户 2026-10-21）
+                    _setSwitch(
+                      '隐藏状态栏',
+                      '阅读时全屏，不显示手机顶部状态栏',
+                      _rs.hideStatusBar,
+                      (v) {
+                        setState(() => _rs = _rs.copyWith(hideStatusBar: v));
+                        _scheduleSavePrefs();
+                        _applyReaderSystemUi();
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    _sectionLabel('其他'),
                     _setSwitch('音量键翻页', '按音量上/下键翻页（会接管音量键）', _rs.volumeKeys, (
                       v,
                     ) {
                       setState(() => _rs = _rs.copyWith(volumeKeys: v));
                       _scheduleSavePrefs();
                     }),
-                    // ── A2 繁简转换（Cmbok 差距文档）────────────
-                    _setRowRight(
-                      '繁简转换',
-                      Wrap(
-                        spacing: 6,
-                        children: [
-                          for (final cm in ChineseConvertMode.values)
-                            _chip(_convertLabel(cm), _rs.convertMode == cm, () {
-                              setState(
-                                () => _rs = _rs.copyWith(convertMode: cm),
-                              );
-                              _scheduleSavePrefs();
-                              _invalidateTtsSegs();
-                              // 从**原文缓存**重转（不改缓存），保留锚点重排 ✓
-                              if (_cache.containsKey(_index)) {
-                                _paragraphs = _applyConvert(_cache[_index]!);
-                              }
-                              _repaginateLayout();
-                            }, compact: true),
-                        ],
-                      ),
-                    ),
-                    // ── C9 正文净化（Cmbok 差距文档）────────────
-                    _setRowRight(
-                      '正文净化',
-                      Wrap(
-                        spacing: 6,
-                        children: [
-                          _chip(
-                            '规则 ${_rs.purifyRules.where((r) => r.enabled).length} 条',
-                            true,
-                            _showPurifySheet,
-                            compact: true,
-                          ),
-                        ],
-                      ),
-                    ),
                     // ── A1 对话气泡（Cmbok 差距文档）────────────
                     _setRowRight(
                       '对话气泡',
@@ -7997,21 +8541,6 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                           ],
                         ),
                       ),
-                    // ── 屏幕休眠（标签左 + 3 个按钮同一行）────────
-                    _setRowRight(
-                      '屏幕休眠',
-                      Wrap(
-                        spacing: 6,
-                        children: [
-                          for (final s in SleepMode.values)
-                            _chip(s.label, _rs.sleepMode == s, () {
-                              setState(() => _rs = _rs.copyWith(sleepMode: s));
-                              _scheduleSavePrefs();
-                              _applySleepMode();
-                            }, compact: true),
-                        ],
-                      ),
-                    ),
                     // ── A3 背景壁纸（点开 14 张内置壁纸 + 无壁纸）──
                     InkWell(
                       onTap: _showBgImageSheet,
@@ -8091,15 +8620,22 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 ),
               ),
               // 底部：取消 · 确认
+              Divider(
+                height: 1,
+                thickness: 0.5,
+                color: _fg.withValues(alpha: 0.08),
+              ),
               //（原来这里还有个「排版」按钮 ✗ —— 与底部功能栏里的「排版」重复了，
               //  用户实测："功能面板里面的设置里面还有一个排版？" ⇒ 去掉 ✓）
-              Padding(
+              // 底部动作区单独压一层淡底：和上面的设置列表区分开（层次感）
+              Container(
+                color: _fg.withValues(alpha: 0.03),
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
                 child: Row(
                   children: [
                     TextButton(
-                      onPressed: () =>
-                          setState(() => _showSettingsPanel = false),
+                      // 取消 = 回滚到打开面板时的设置（真的取消）
+                      onPressed: () => _closeSettingsPanel(apply: false),
                       child: Text(
                         '取消',
                         style: TextStyle(
@@ -8109,9 +8645,23 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                       ),
                     ),
                     const Spacer(),
+                    // 中间「排版」：直接切到排版面板（对齐参考图 ✓）
+                    TextButton(
+                      onPressed: () {
+                        _closeSettingsPanel(apply: true);
+                        _showLayoutSheet();
+                      },
+                      child: Text(
+                        '排版',
+                        style: TextStyle(
+                          fontSize: AppTheme.fontBody,
+                          color: _fg,
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
                     FilledButton(
-                      onPressed: () =>
-                          setState(() => _showSettingsPanel = false),
+                      onPressed: () => _closeSettingsPanel(apply: true),
                       style: FilledButton.styleFrom(
                         backgroundColor: _fg.withValues(alpha: 0.9),
                         foregroundColor: _bgTop,
@@ -8134,14 +8684,18 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 截图里标签和按钮是**同一行**的。
   Widget _setRowRight(String label, Widget child) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 7),
       child: Row(
         children: [
           SizedBox(
-            width: 76,
+            width: 82,
             child: Text(
               label,
-              style: TextStyle(fontSize: AppTheme.fontHeadline, color: _fg),
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+                color: _fg,
+              ),
             ),
           ),
           Expanded(
@@ -8159,7 +8713,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     ValueChanged<bool> onChanged,
   ) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 7),
       child: Row(
         children: [
           Expanded(
@@ -8168,20 +8722,41 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               children: [
                 Text(
                   label,
-                  style: TextStyle(fontSize: AppTheme.fontHeadline, color: _fg),
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: _fg,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   sub,
                   style: TextStyle(
-                    fontSize: AppTheme.fontSubhead,
-                    color: _fgMuted,
+                    fontSize: 11.5,
+                    height: 1.3,
+                    color: _fg.withValues(alpha: 0.5),
                   ),
                 ),
               ],
             ),
           ),
-          Switch(value: value, onChanged: onChanged),
+          const SizedBox(width: 8),
+          // 统一开关的配色与紧凑度（原来默认蓝色 + 48dp 触控区，视觉太抢）
+          SizedBox(
+            width: 46,
+            height: 30,
+            child: FittedBox(
+              child: Switch(
+                value: value,
+                activeThumbColor: _bgTop,
+                activeTrackColor: _fg.withValues(alpha: 0.85),
+                inactiveThumbColor: _bgTop,
+                inactiveTrackColor: _fg.withValues(alpha: 0.16),
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                onChanged: onChanged,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -8238,22 +8813,44 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   }) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
         padding: EdgeInsets.symmetric(
-          horizontal: compact ? 11 : 16,
-          vertical: compact ? 7 : 9,
+          horizontal: compact ? 12 : 16,
+          vertical: compact ? 8 : 9,
         ),
         decoration: BoxDecoration(
-          color: on ? _fg.withValues(alpha: 0.85) : _fg.withValues(alpha: 0.06),
-          borderRadius: BorderRadius.circular(10),
+          // 选中：实底；未选中：淡底 + 细描边（原来只有淡底，跟背景糊在一起 ✗）
+          color: on ? _fg.withValues(alpha: 0.88) : _fg.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(11),
+          border: Border.all(
+            color: on ? Colors.transparent : _fg.withValues(alpha: 0.10),
+          ),
         ),
         child: Text(
           label,
           style: TextStyle(
             fontSize: compact ? 13 : 13.5,
-            fontWeight: on ? FontWeight.w600 : FontWeight.normal,
-            color: on ? _bgTop : _fg,
+            fontWeight: on ? FontWeight.w600 : FontWeight.w500,
+            color: on ? _bgTop : _fg.withValues(alpha: 0.78),
           ),
+        ),
+      ),
+    );
+  }
+
+  /// 设置面板里的小节标题（把一长串行分组，便于扫读）
+  Widget _sectionLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 14, bottom: 6),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.4,
+          color: _fg.withValues(alpha: 0.45),
         ),
       ),
     );
@@ -8675,15 +9272,15 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                             ),
                           ),
                           const SizedBox(width: 6),
+                          // 排序：改成上下双箭头（参考 Cmbok 的 t↓ 样式），
+                          // 不再用单向上/下箭头 —— 单箭头看着像"跳到顶/底" ✗
                           IconButton(
-                            tooltip: asc ? '正序' : '倒序',
+                            tooltip: asc ? '正序（点击切倒序）' : '倒序（点击切正序）',
                             onPressed: () => setSheet(() => asc = !asc),
                             icon: Icon(
-                              asc
-                                  ? Icons.arrow_upward_rounded
-                                  : Icons.arrow_downward_rounded,
+                              Icons.swap_vert_rounded,
                               size: 20,
-                              color: _fg,
+                              color: _fg.withValues(alpha: asc ? 0.9 : 0.55),
                             ),
                           ),
                         ],
@@ -8692,7 +9289,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     Flexible(
                       child: Stack(
                         children: [
-                          ScrollablePositionedList.builder(
+                          ScrollConfiguration(
+                            // 关掉系统滚动条：目录动辄上千章，原生 thumb 会拉成
+                            // 一条很长的灰条压在云朵图标上（用户反馈"太长"）✗
+                            behavior: ScrollConfiguration.of(
+                              context,
+                            ).copyWith(scrollbars: false),
+                            child: ScrollablePositionedList.builder(
                             itemScrollController: itemScrollController,
                             itemPositionsListener: itemPositionsListener,
                             itemCount: chapters.length,
@@ -8745,11 +9348,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                               );
                             },
                           ),
+                          ),
                           // 右缘快速拖动定位条（Cmbok 同款）：按住上下拖动 →
                           // 列表按比例滚动，浮现章节标题提示；搜索状态隐藏 ✓
                           if (kwToc.isEmpty)
                             Positioned(
-                              right: 6,
+                              right: 2,
                               top: 40,
                               bottom: 40,
                               child: LayoutBuilder(
@@ -8778,70 +9382,62 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                         },
                                       );
                                     },
-                                    child: Stack(
-                                      children: [
-                                        Container(
-                                          width: 26,
-                                          decoration: BoxDecoration(
-                                            color: _fg.withValues(alpha: 0.07),
-                                            borderRadius: BorderRadius.circular(
-                                              12,
+                                    // 只留一个细短指示块，**不再画整条灰底 + ⌃⌄ 图标** ——
+                                    // 用户反馈"这么长的滑动样式"太碍眼 ✗。
+                                    // 热区仍是整条（24 宽，透明），拖动功能不受影响 ✓。
+                                    child: SizedBox(
+                                      width: 24,
+                                      child: Stack(
+                                        children: [
+                                          // 拖动指示块（按当前可见章下标比例定位；
+                                          // 监听 ItemPositions，滚动时自动刷新 ✓）
+                                          Positioned(
+                                            top: 0,
+                                            left: 10,
+                                            child: ValueListenableBuilder<
+                                                Iterable<ItemPosition>>(
+                                              valueListenable:
+                                                  itemPositionsListener
+                                                      .itemPositions,
+                                              builder: (c, positions, _) {
+                                                final ratio =
+                                                    positions.isEmpty ||
+                                                            chapters.length <= 1
+                                                        ? 0.0
+                                                        : (positions
+                                                              .reduce((a, b) =>
+                                                                  a.index <
+                                                                          b.index
+                                                                      ? a
+                                                                      : b)
+                                                              .index /
+                                                          (chapters.length -
+                                                              1));
+                                                return Transform.translate(
+                                                  offset: Offset(
+                                                    0,
+                                                    (ratio.clamp(0.0, 1.0) *
+                                                            (h - 44))
+                                                        .clamp(0.0, h - 44),
+                                                  ),
+                                                  child: Container(
+                                                    width: 4,
+                                                    height: 44,
+                                                    decoration: BoxDecoration(
+                                                      color: _fg.withValues(
+                                                        alpha: 0.22,
+                                                      ),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              2),
+                                                    ),
+                                                  ),
+                                                );
+                                              },
                                             ),
                                           ),
-                                          alignment: Alignment.center,
-                                          child: Icon(
-                                            Icons.unfold_more_rounded,
-                                            size: 18,
-                                            color: _fgMuted,
-                                          ),
-                                        ),
-                                        // 拖动指示块（按当前可见章下标比例定位；
-                                        // 监听 ItemPositions，滚动时自动刷新 ✓）
-                                        Positioned(
-                                          top: 0,
-                                          left: 3,
-                                          child: ValueListenableBuilder<
-                                              Iterable<ItemPosition>>(
-                                            valueListenable:
-                                                itemPositionsListener
-                                                    .itemPositions,
-                                            builder: (c, positions, _) {
-                                              final ratio =
-                                                  positions.isEmpty ||
-                                                          chapters.length <= 1
-                                                      ? 0.0
-                                                      : (positions
-                                                            .reduce((a, b) =>
-                                                                a.index <
-                                                                        b.index
-                                                                    ? a
-                                                                    : b)
-                                                            .index /
-                                                        (chapters.length - 1));
-                                              return Transform.translate(
-                                                offset: Offset(
-                                                  0,
-                                                  (ratio.clamp(0.0, 1.0) *
-                                                          (h - 34))
-                                                      .clamp(0.0, h - 34),
-                                                ),
-                                                child: Container(
-                                                  width: 20,
-                                                  height: 34,
-                                                  decoration: BoxDecoration(
-                                                    color: _fg.withValues(
-                                                      alpha: 0.35,
-                                                    ),
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                            8),
-                                                  ),
-                                                ),
-                                              );
-                                            },
-                                          ),
-                                        ),
-                                      ],
+                                        ],
+                                      ),
                                     ),
                                   );
                                 },
@@ -8931,14 +9527,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                             ),
                           ),
                           IconButton(
-                            tooltip: asc ? '正序' : '倒序',
+                            tooltip: asc ? '正序（点击切倒序）' : '倒序（点击切正序）',
                             onPressed: () => setSheet(() => asc = !asc),
                             icon: Icon(
-                              asc
-                                  ? Icons.arrow_upward_rounded
-                                  : Icons.arrow_downward_rounded,
+                              Icons.swap_vert_rounded,
                               size: 20,
-                              color: _fg,
+                              color: _fg.withValues(alpha: asc ? 0.9 : 0.55),
                             ),
                           ),
                         ],
@@ -9369,4 +9963,88 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     }
     return null;
   }
+}
+
+/// 手机状态栏样式的**电量图形**（空心电池 + 右侧电极 + 按比例填充）。
+///
+/// 尺寸随「信息栏字号」缩放（[height]），颜色沿用信息栏的淡前景色 ✓。
+class _BatteryGlyph extends StatelessWidget {
+  const _BatteryGlyph({
+    required this.level,
+    required this.color,
+    this.height = 10,
+  });
+
+  /// 0.0 ~ 1.0
+  final double level;
+  final Color color;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      size: Size(height * 2.0, height),
+      painter: _BatteryGlyphPainter(level: level, color: color),
+    );
+  }
+}
+
+class _BatteryGlyphPainter extends CustomPainter {
+  _BatteryGlyphPainter({required this.level, required this.color});
+
+  final double level;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final h = size.height;
+    final stroke = (h * 0.09).clamp(0.8, 2.0);
+    final capW = h * 0.13;
+    final bodyW = size.width - capW - h * 0.06;
+    final radius = Radius.circular(h * 0.28);
+
+    final paint = Paint()
+      ..isAntiAlias = true
+      ..color = color;
+
+    // 外壳（描边）
+    final border = Paint()
+      ..isAntiAlias = true
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..color = color;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(stroke / 2, stroke / 2, bodyW - stroke, h - stroke),
+        radius,
+      ),
+      border,
+    );
+
+    // 右侧电极
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(bodyW + h * 0.06, h * 0.3, capW, h * 0.4),
+        Radius.circular(capW * 0.5),
+      ),
+      paint,
+    );
+
+    // 电量填充
+    final inset = h * 0.22;
+    final innerW = (bodyW - inset * 2) * level.clamp(0.0, 1.0);
+    if (innerW > 0.5) {
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(inset, inset, innerW, h - inset * 2),
+          Radius.circular(h * 0.14),
+        ),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_BatteryGlyphPainter old) =>
+      old.level != level || old.color != color;
 }

@@ -942,6 +942,11 @@ class _RssManagePageState extends State<RssManagePage> {
   }
 
   /// 卡片视图：一行一张的大卡片
+  ///
+  /// 布局（用户 2026-10-21 要求）：
+  ///   左上 = 选择框   右上 = ⋮
+  ///   中间 = 只显示名称文字（**不显示链接**），水平居中
+  ///   右下 = 开关；标签留在左下
   Widget _cardTile(RssSource s) {
     final cur = s.id == store.selectedId;
     return GestureDetector(
@@ -949,64 +954,35 @@ class _RssManagePageState extends State<RssManagePage> {
       onTap: () => _togglePick(s.id),
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.fromLTRB(12, 10, 8, 12),
+        padding: const EdgeInsets.fromLTRB(6, 6, 6, 8),
         decoration: _cardDecoration(s),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
               children: [
                 _pickIcon(s),
-                const SizedBox(width: 8),
-                _avatar(s),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            s.enabled ? Icons.check_circle : Icons.block,
-                            size: 14,
-                            color:
-                                s.enabled ? Colors.green : AppTheme.textTertiary,
-                          ),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              s.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: AppTheme.fontHeadline,
-                                fontWeight: FontWeight.w600,
-                                color: s.enabled
-                                    ? AppTheme.textPrimary
-                                    : AppTheme.textTertiary,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        s.url,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: AppTheme.fontCaption,
-                          color: AppTheme.textTertiary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                const SizedBox(width: 6),
+                _avatar(s, size: 26),
+                const Spacer(),
                 _menuBtn(s),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
+            Text(
+              s.name,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: AppTheme.fontHeadline,
+                fontWeight: FontWeight.w600,
+                color: s.enabled ? AppTheme.textPrimary : AppTheme.textTertiary,
+              ),
+            ),
+            const SizedBox(height: 10),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Expanded(
                   child: Wrap(
@@ -1019,10 +995,18 @@ class _RssManagePageState extends State<RssManagePage> {
                     ],
                   ),
                 ),
-                Switch(
-                  value: s.enabled,
-                  activeThumbColor: AppTheme.accentColor,
-                  onChanged: (v) => store.setEnabled(s.id, v),
+                // 开关挪到**右下角**
+                SizedBox(
+                  width: 44,
+                  height: 28,
+                  child: FittedBox(
+                    child: Switch(
+                      value: s.enabled,
+                      activeThumbColor: AppTheme.accentColor,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      onChanged: (v) => store.setEnabled(s.id, v),
+                    ),
+                  ),
                 ),
               ],
             ),

@@ -15,6 +15,7 @@ import '../models/bookshelf.dart';
 import '../models/comic.dart';
 import '../services/book_download_service.dart';
 import '../services/book_source_service.dart';
+import '../services/chapter_alignment.dart';
 import '../services/sync_service.dart';
 import '../services/book_favorites_service.dart';
 import '../services/book_reading_progress_service.dart';
@@ -35,6 +36,7 @@ import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_search_bar.dart';
 import '../widgets/jelly_segmented_toggle.dart';
 import 'book_source_detail_page.dart';
+import 'book_source_reader_page.dart';
 import '../widgets/jelly_select_badge.dart';
 import '../widgets/staggered_entrance.dart';
 import '../../services/file_export_service.dart';
@@ -4419,23 +4421,10 @@ class _BookShelfTab extends StatelessWidget {
   }
 
   static Future<void> _onTap(BuildContext context, Book book) async {
-    // 书源书籍：优先打开书源详情页（与详情页入口保持一致）
+    // 书源书籍：**直接进阅读器**（用户 2026-10-21：书架点书不该再走一遍详情页）
     final src = _matchBookSource(book);
     if (src != null) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => BookSourceDetailPage(
-            result: BookSourceResult(
-              source: src,
-              name: book.title,
-              author: book.author ?? '',
-              bookUrl: book.bookUrl!,
-              coverUrl: book.cover ?? '',
-            ),
-          ),
-        ),
-      );
+      await _openSourceBookDirectly(context, book, src);
       return;
     }
     final task = BookDownloadService().task(book.id);
@@ -4472,6 +4461,100 @@ class _BookShelfTab extends StatelessWidget {
       MaterialPageRoute(
         builder: (_) =>
             BookDetailPage(book: book, heroTag: 'bookshelf_book_${book.id}'),
+      ),
+    );
+  }
+
+  /// 书架点「书源书籍」→ 直接进阅读器（不再经过详情页）。
+  ///
+  /// 目录必须联网取一次（与详情页同一接口 `bookInfo` + `toc`）；
+  /// 取失败 / 空目录时**回退到详情页** —— 那里有错误提示和「换源」入口，
+  /// 不至于把用户卡在一个空白阅读器里 ✓。
+  static bool _openingSourceBook = false;
+
+  static Future<void> _openSourceBookDirectly(
+    BuildContext context,
+    Book book,
+    BookSource src,
+  ) async {
+    final bookUrl = book.bookUrl;
+    if (bookUrl == null || bookUrl.isEmpty) return;
+    if (_openingSourceBook) return; // 防连点弹出两个加载框
+    _openingSourceBook = true;
+
+    final rootNav = Navigator.of(context, rootNavigator: true);
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: SizedBox(
+          width: 36,
+          height: 36,
+          child: CircularProgressIndicator(strokeWidth: 2.5),
+        ),
+      ),
+    );
+
+    List<BookSourceChapter> chapters = const [];
+    try {
+      final info = await BookSourceService.instance.bookInfo(src, bookUrl);
+      final tocUrl = (info?['tocUrl'] ?? '').toString().trim();
+      final t = await BookSourceService.instance.toc(
+        src,
+        tocUrl.isEmpty ? bookUrl : tocUrl,
+      );
+      if (t.ok) chapters = t.list;
+    } catch (_) {
+      chapters = const [];
+    } finally {
+      _openingSourceBook = false;
+    }
+
+    if (!context.mounted) return;
+    rootNav.pop(); // 关加载框
+
+    if (chapters.isEmpty) {
+      // 回退：详情页（可重试 / 换源 / 看错误原因）
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => BookSourceDetailPage(
+            result: BookSourceResult(
+              source: src,
+              name: book.title,
+              author: book.author ?? '',
+              bookUrl: bookUrl,
+              coverUrl: book.cover ?? '',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+
+    // 恢复上次读到哪一章（阅读器自己的进度键）
+    var initial = 0;
+    try {
+      final p = await SharedPreferences.getInstance();
+      final saved = p.getInt(ChapterAlignment.progressKey(src.id, book.title));
+      if (saved != null && saved >= 0 && saved < chapters.length) {
+        initial = saved;
+      }
+    } catch (_) {
+      /* 读不到就从第一章开始 */
+    }
+    if (!context.mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BookSourceReaderPage(
+          source: src,
+          bookName: book.title,
+          author: book.author ?? '',
+          chapters: chapters,
+          initialIndex: initial,
+          coverUrl: book.cover,
+        ),
       ),
     );
   }

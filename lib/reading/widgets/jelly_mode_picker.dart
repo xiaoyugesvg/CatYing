@@ -69,6 +69,7 @@ class JellyModePicker extends StatelessWidget {
     required this.items,
     required this.fg,
     this.gap = 6,
+    this.showSymbol = true,
   });
 
   final List<JellyModeItem> items;
@@ -79,6 +80,10 @@ class JellyModePicker extends StatelessWidget {
 
   /// 块间距
   final double gap;
+
+  /// 是否在名称前显示文字符号（`↔ 左右`）。
+  /// 书源阅读器用户 2026-10-21 要求只留名称 ⇒ 传 false。
+  final bool showSymbol;
 
   @override
   Widget build(BuildContext context) {
@@ -109,7 +114,7 @@ class JellyModePicker extends StatelessWidget {
         child: FittedBox(
           fit: BoxFit.scaleDown,
           child: Text(
-            '${item.symbol} ${item.label}',
+            showSymbol ? '${item.symbol} ${item.label}' : item.label,
             maxLines: 1,
             style: TextStyle(
               fontSize: AppTheme.fontCaption,

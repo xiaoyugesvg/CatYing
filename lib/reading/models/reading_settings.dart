@@ -24,6 +24,9 @@ class ReadingSettings {
     this.tapZones = const {},
     this.dualPage = false,
     this.statusItems = const {'章节', '页码', '进度'},
+    this.statusTextScale = 1.0,
+    this.hideStatusBar = false,
+    this.showIllustrations = false,
     this.volumeKeys = false,
     this.sleepMode = SleepMode.defaultMode,
     this.bubbleMode = BubbleMode.none,
@@ -55,6 +58,20 @@ class ReadingSettings {
 
   /// 页眉页脚显示的信息项（可多选）
   final Set<String> statusItems;
+
+  /// 信息栏（页眉/页脚）的字体与电量图标缩放。
+  ///
+  /// 用户 2026-10-21：「信息栏的字体或者图标尺寸加个可调整功能」。
+  /// 取值 0.85 / 1.0 / 1.15 / 1.3（小 / 标准 / 大 / 超大）。
+  final double statusTextScale;
+
+  /// 阅读时隐藏手机状态栏（沉浸全屏）。
+  /// 用户 2026-10-21：「阅读的时候能不能全屏，不显示手机状态栏」。
+  final bool hideStatusBar;
+
+  /// 查看插图：在上下一篇末尾显示本章插图（点开可放大）。
+  /// 用户 2026-10-21：对齐参考图的「查看插图」项。
+  final bool showIllustrations;
 
   /// 按音量上/下键翻页（会接管音量键）
   final bool volumeKeys;
@@ -91,6 +108,9 @@ class ReadingSettings {
     Map<int, TapAction>? tapZones,
     bool? dualPage,
     Set<String>? statusItems,
+    double? statusTextScale,
+    bool? hideStatusBar,
+    bool? showIllustrations,
     bool? volumeKeys,
     SleepMode? sleepMode,
     BubbleMode? bubbleMode,
@@ -109,6 +129,9 @@ class ReadingSettings {
       tapZones: tapZones ?? this.tapZones,
       dualPage: dualPage ?? this.dualPage,
       statusItems: statusItems ?? this.statusItems,
+      statusTextScale: statusTextScale ?? this.statusTextScale,
+      hideStatusBar: hideStatusBar ?? this.hideStatusBar,
+      showIllustrations: showIllustrations ?? this.showIllustrations,
       volumeKeys: volumeKeys ?? this.volumeKeys,
       sleepMode: sleepMode ?? this.sleepMode,
       bubbleMode: bubbleMode ?? this.bubbleMode,
@@ -142,6 +165,9 @@ class ReadingSettings {
         'tapZones': tapZones.map((k, v) => MapEntry('$k', v.name)),
         'dualPage': dualPage,
         'statusItems': statusItems.toList(),
+        'statusTextScale': statusTextScale,
+        'hideStatusBar': hideStatusBar,
+        'showIllustrations': showIllustrations,
         'volumeKeys': volumeKeys,
         'sleepMode': sleepMode.name,
         'bubbleMode': bubbleMode.name,
@@ -204,6 +230,11 @@ class ReadingSettings {
       statusItems: (j['statusItems'] is List)
           ? (j['statusItems'] as List).map((e) => '$e').toSet()
           : {'章节', '页码', '进度'},
+      statusTextScale: ((j['statusTextScale'] as num?)?.toDouble() ?? 1.0)
+          .clamp(0.8, 1.4)
+          .toDouble(),
+      hideStatusBar: j['hideStatusBar'] == true,
+      showIllustrations: j['showIllustrations'] == true,
       volumeKeys: j['volumeKeys'] == true,
       sleepMode: sm,
       bubbleMode: bm,
