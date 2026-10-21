@@ -980,11 +980,23 @@ class _RssManagePageState extends State<RssManagePage> {
                     s.enabled ? AppTheme.textPrimary : AppTheme.textTertiary,
               ),
             ),
+            const SizedBox(height: 2),
+            // 链接放名称下面（用户 2026-10-21），居中小字
+            Text(
+              s.url,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 10.5,
+                color: AppTheme.textTertiary,
+              ),
+            ),
             const Spacer(),
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Flexible(
+                Expanded(
                   child: Wrap(
                     spacing: 3,
                     runSpacing: 3,
@@ -994,7 +1006,7 @@ class _RssManagePageState extends State<RssManagePage> {
                     ],
                   ),
                 ),
-                // 开关放右下角
+                // 开关固定在**右下角**（Expanded 把标签撑开，开关才会贴右）
                 SizedBox(
                   width: 40,
                   height: 26,

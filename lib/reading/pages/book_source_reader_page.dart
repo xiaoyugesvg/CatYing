@@ -182,25 +182,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 现在只有功能栏里的「设置」项才打开它 ✓。
   bool _showSettingsPanel = false;
 
-  /// 打开「阅读设置」面板时的设置快照。
+  /// 关闭阅读设置面板。
   ///
-  /// 用户 2026-10-21：「取消」应该真的取消 —— 原来取消/确认都是直接关面板，
-  /// 已经改掉的设置收不回来 ✗。这里在打开时存一份，取消时整体回滚 ✓。
-  ReadingSettings? _settingsSnapshot;
-
-  /// 关闭阅读设置面板。[apply] = true 表示保留改动（确认），false 回滚（取消）。
-  void _closeSettingsPanel({required bool apply}) {
-    final snap = _settingsSnapshot;
-    _settingsSnapshot = null;
-    setState(() {
-      if (!apply && snap != null) _rs = snap;
-      _showSettingsPanel = false;
-    });
-    if (!apply && snap != null) {
-      // 回滚后要把副作用的设置也还原：全屏 / 分页方式
-      _applyReaderSystemUi();
-      _paginate();
-    }
+  /// 用户 2026-10-21：面板里的选项**点了就生效**，不再需要「确认」——
+  /// 所以底栏整个去掉了，这里只负责关闭（改动早已写入 `_rs` 并落盘）。
+  void _closeSettingsPanel() {
+    setState(() => _showSettingsPanel = false);
     _scheduleSavePrefs();
   }
 
@@ -1683,24 +1670,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                       ),
                     ),
                   ),
-                // 阅读设置面板拆成**独立开关**（只有功能栏里的「设置」打开它 ✓）——
-                // 否则点中间会连面板一起弹出、把刚出现的功能栏整个盖住 ✗。
-                //
-                // ✅ 用户 2026-10-15：「子面板打开时，点外面空白不能收起吗？」
-                //   ⇒ 面板**下面垫一层全屏透明屏障**（不改变观感）：
-                //     点空白 = 收起面板；点面板本身不受影响（屏障在它下面 ✓）。
-                if (_showSettingsPanel)
-                  Positioned.fill(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () => _closeSettingsPanel(apply: false),
-                      // 背后压一层遮罩：面板才「浮」在正文之上，而不是和正文连成一片
-                      child: Container(
-                        color: Colors.black.withValues(alpha: 0.32),
-                      ),
-                    ),
-                  ),
-                if (_showSettingsPanel) _settingsPanel(bg[1]),
+                // 阅读设置面板见 build 末尾：它被放在 SafeArea **外面**，
+                // 才能一直铺到屏幕最底部（含 Home 指示条那一截）✓
                 // 番茄钟浮层：bottom 动态计算，避免悬浮功能栏改后错位
                 if (_showPomodoro)
                   Obx(
@@ -1790,6 +1761,20 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               ],
             ),
           ),
+          // 阅读设置面板：放在外层 Stack（SafeArea 之外）↓
+          //   放里面时 `bottom: 0` 是"安全区上沿"，Home 指示条那截会露出正文
+          if (_showSettingsPanel)
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _closeSettingsPanel,
+                // 背后压一层遮罩：面板才「浮」在正文之上，而不是和正文连成一片
+                child: Container(
+                  color: Colors.black.withValues(alpha: 0.32),
+                ),
+              ),
+            ),
+          if (_showSettingsPanel) _settingsPanel(bg[1]),
         ],
       ),
     );
@@ -3277,8 +3262,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     // 面板 / 顶栏打开时：点击正文空白任意位置先收起（不翻页、不误切换）
     if (_showBar || _showSettingsPanel) {
       if (_showSettingsPanel) {
-        // 点空白 = 取消（回滚本次面板里的改动）
-        _closeSettingsPanel(apply: false);
+        // 点空白 = 收起面板（改动已即时生效）
+        _closeSettingsPanel();
         return;
       }
       setState(() => _showBar = false);
@@ -4044,10 +4029,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               _navItem(
                 Icons.settings_outlined,
                 '设置',
-                () => setState(() {
-                  _settingsSnapshot = _rs;
-                  _showSettingsPanel = true;
-                }),
+                () => setState(() => _showSettingsPanel = true),
                 fg,
               ),
               _navItem(Icons.menu_book_rounded, '目录', _showToc, fg),
@@ -4802,15 +4784,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                             ),
                           ),
                         ),
-                        const Spacer(),
-                        FilledButton(
-                          onPressed: () => Navigator.pop(ctx),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: _fg.withValues(alpha: 0.9),
-                            foregroundColor: _bgTop,
-                          ),
-                          child: const Text('确认'),
-                        ),
+                        // ⚠️ 「确认」按钮已去掉：排版改动本来就是即时生效 ✓
+                        //   （用户 2026-10-21：选了就直接生效，不用再点确认）
                       ],
                     ),
                   ),
@@ -8122,10 +8097,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 上下 = 不分页改滚动；其余 4 种 = 分页。
   Widget _settingsPanel(Color fg) {
     return Positioned(
-      // ⚠️ 面板挂在 SafeArea 里的 Stack 上：`bottom: 0` = 底部安全区上沿，
-      //   于是 Home 指示条那一截会露出正文（用户 2026-10-21：「没延伸到底」✗）。
-      //   往下多铺一个安全区高度，面板内部再靠 SafeArea 把按钮顶上来 ✓
-      bottom: -MediaQuery.of(context).padding.bottom,
+      // 面板已在 SafeArea 之外（见 build 末尾）⇒ 这里 bottom:0 就是屏幕最底部 ✓
+      bottom: 0,
       left: 0,
       right: 0,
       child: Container(
@@ -8620,58 +8593,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   ],
                 ),
               ),
-              // 底部：取消 · 确认
-              Divider(
-                height: 1,
-                thickness: 0.5,
-                color: _fg.withValues(alpha: 0.08),
-              ),
-              //（原来这里还有个「排版」按钮 ✗ —— 与底部功能栏里的「排版」重复了，
-              //  用户实测："功能面板里面的设置里面还有一个排版？" ⇒ 去掉 ✓）
-              // 底部动作区单独压一层淡底：和上面的设置列表区分开（层次感）
-              Container(
-                color: _fg.withValues(alpha: 0.03),
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-                child: Row(
-                  children: [
-                    TextButton(
-                      // 取消 = 回滚到打开面板时的设置（真的取消）
-                      onPressed: () => _closeSettingsPanel(apply: false),
-                      child: Text(
-                        '取消',
-                        style: TextStyle(
-                          fontSize: AppTheme.fontBody,
-                          color: _fg,
-                        ),
-                      ),
-                    ),
-                    const Spacer(),
-                    // 中间「排版」：直接切到排版面板（对齐参考图 ✓）
-                    TextButton(
-                      onPressed: () {
-                        _closeSettingsPanel(apply: true);
-                        _showLayoutSheet();
-                      },
-                      child: Text(
-                        '排版',
-                        style: TextStyle(
-                          fontSize: AppTheme.fontBody,
-                          color: _fg,
-                        ),
-                      ),
-                    ),
-                    const Spacer(),
-                    FilledButton(
-                      onPressed: () => _closeSettingsPanel(apply: true),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: _fg.withValues(alpha: 0.9),
-                        foregroundColor: _bgTop,
-                      ),
-                      child: const Text('确认'),
-                    ),
-                  ],
-                ),
-              ),
+              // ⚠️ 底栏（取消 / 排版 / 确认）已按用户要求**整条去掉** ——
+              //   面板里的选项点了就即时生效，不需要再确认 ✓
             ],
           ),
         ),

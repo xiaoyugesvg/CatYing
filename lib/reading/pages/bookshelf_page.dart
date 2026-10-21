@@ -133,6 +133,8 @@ class _BookshelfPageState extends State<BookshelfPage>
   @override
   void initState() {
     super.initState();
+    // 预热 prefs（书架构建是同步的，用来同步读「读到第几章」）
+    _BookShelfTab.warmPrefs();
     final tabs = SettingsService().effectiveContentTabs();
     final initialIdx = min(
       SettingsService().defaultContentTabIndex(),
@@ -4218,6 +4220,14 @@ class _ComicShelfTab extends StatelessWidget {
 // 图书书架 Tab
 // ============================================================
 class _BookShelfTab extends StatelessWidget {
+  /// 书架构建是同步的，但「读到第几章」存在 SharedPreferences 里。
+  /// 这里缓存一份实例，构建时就能**同步**读出来（首次为 null，下一帧补上）。
+  static SharedPreferences? prefsCache;
+
+  static void warmPrefs() {
+    SharedPreferences.getInstance().then((p) => prefsCache = p);
+  }
+
   final String shelfId;
   final ScrollController scrollController;
   final bool showBackToTop;
@@ -4317,6 +4327,15 @@ class _BookShelfTab extends StatelessWidget {
             final progress = (rp != null && rp.pageTotal > 0)
                 ? ((rp.pageIndex + 1) / rp.pageTotal).clamp(0.0, 1.0)
                 : null;
+            // 书源书籍：从阅读器写的进度键里取「第几章」
+            String? chapterLabel;
+            final sid = b.sourceId;
+            if (sid != null && sid.isNotEmpty) {
+              final idx = prefsCache?.getInt(
+                ChapterAlignment.progressKey(sid, b.title),
+              );
+              if (idx != null && idx >= 0) chapterLabel = '第${idx + 1}章';
+            }
             entries.add(
               _ShelfEntry(
                 id: b.id,
@@ -4328,6 +4347,7 @@ class _BookShelfTab extends StatelessWidget {
                 index: i,
                 meta: item.meta,
                 progress: progress,
+                chapterLabel: chapterLabel,
                 formatLabel: b.extension?.trim().toUpperCase(),
               ),
             );
@@ -4534,6 +4554,7 @@ class _ShelfEntry {
   final String? sourceLabel; // 漫画下载源名角标（如「拷贝漫画」），图书/未下载为 null
   final String? sourceId; // 漫画所属源 id（封面防盗链头用），图书为 null
   final int? updateCount; // 更新角标（新话数），仅漫画条目有值
+  final String? chapterLabel; // 「阅读第几章」角标（书源书籍用）
 
   _ShelfEntry({
     required this.id,
@@ -4550,6 +4571,7 @@ class _ShelfEntry {
     this.sourceLabel,
     this.sourceId,
     this.updateCount,
+    this.chapterLabel,
   });
 }
 
@@ -4589,13 +4611,41 @@ class _BookshelfRow extends StatelessWidget {
         ),
         const SizedBox(height: 4), // 书与架板间距，阴影投在架上
         _ShelfBoard(isDark: isDark),
-        // 🔴 2026-10-14：架板下的「书名 / 作者」**整行去掉** ✓ —— 用户要求
-        //    书架里不再显示漫画名 / 书籍名 ✓（名称在**长按条目菜单**顶部仍有 ✓，
-        //    不会因为这里不显示就查不到是哪本书 ✓）
+        // 书名：架板下方居中一行（用户 2026-10-21 要求）
+        const SizedBox(height: 6),
+        _titleRow(isDark),
         // 行间距随「显示设置 → 列表密度」缩放（用户 2026-10-15）
-        SizedBox(height: 20 * SettingsService().densityScale),
+        SizedBox(height: 12 * SettingsService().densityScale),
       ],
     );
+  }
+
+  /// 架板下的书名行（与封面列同宽、居中对齐）
+  Widget _titleRow(bool isDark) {
+    final list = <Widget>[];
+    for (var i = 0; i < entries.length; i++) {
+      final e = entries[i];
+      if (i > 0) list.add(SizedBox(width: spacing));
+      list.add(
+        SizedBox(
+          width: cellWidth,
+          child: Text(
+            e.title,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: AppTheme.fontFootnote,
+              fontWeight: FontWeight.w600,
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.85)
+                  : JellyTheme.textPrimaryLight,
+            ),
+          ),
+        ),
+      );
+    }
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: list);
   }
 
   List<Widget> _coverSlots() {
@@ -4627,6 +4677,7 @@ class _BookshelfRow extends StatelessWidget {
               sourceLabel: e.sourceLabel,
               sourceId: e.sourceId,
               updateCount: e.updateCount,
+              chapterLabel: e.chapterLabel,
               isSelecting: isSelecting,
               selected: selectedIds.contains(e.itemId),
             ),
@@ -4698,6 +4749,8 @@ class _ShelfCover extends StatefulWidget {
   final String? sourceLabel;
   final String? sourceId; // 封面防盗链头用
   final int? updateCount; // 更新角标（新话数），仅漫画条目有值
+  /// 「阅读第几章」角标（用户 2026-10-21）；null = 不显示
+  final String? chapterLabel;
   final bool isSelecting;
   final bool selected;
 
@@ -4712,6 +4765,7 @@ class _ShelfCover extends StatefulWidget {
     this.sourceLabel,
     this.sourceId,
     this.updateCount,
+    this.chapterLabel,
     this.isSelecting = false,
     this.selected = false,
   });
@@ -4807,6 +4861,31 @@ class _ShelfCoverState extends State<_ShelfCover> {
                     ),
                     child: Text(
                       widget.formatLabel ?? widget.sourceLabel!,
+                      style: const TextStyle(
+                        fontSize: AppTheme.fontCaption,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              // 右上角：「阅读第几章」角标（用户 2026-10-21）
+              if (widget.chapterLabel != null && !widget.isSelecting)
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: (isDark ? Colors.black : JellyTheme.primary)
+                          .withValues(alpha: 0.75),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      widget.chapterLabel!,
                       style: const TextStyle(
                         fontSize: AppTheme.fontCaption,
                         color: Colors.white,
