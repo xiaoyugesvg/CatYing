@@ -297,10 +297,16 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
         ),
       ),
       actions: [
+        // 用户 2026-10-22：右上角「更多」改成两个直接按钮 —— 刷新 + 换源
         IconButton(
-          tooltip: '更多',
-          icon: Icon(Icons.chevron_right_rounded, color: titleColor),
-          onPressed: _showMoreSheet,
+          tooltip: '刷新',
+          icon: Icon(Icons.refresh_rounded, color: titleColor),
+          onPressed: _isLoading ? null : _loadData,
+        ),
+        IconButton(
+          tooltip: '换源',
+          icon: Icon(Icons.swap_horiz_rounded, color: titleColor),
+          onPressed: _changeSource,
         ),
         const SizedBox(width: 4),
       ],
@@ -811,62 +817,14 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     );
   }
 
-  /// 右上角「更多」弹层：换源 / 刷新章节
-  void _showMoreSheet() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final titleColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (sheetCtx) => kbSheet(
-        Container(
-          decoration: BoxDecoration(
-            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _sheetHandle(),
-              const SizedBox(height: 4),
-              ListTile(
-                leading: Icon(Icons.swap_horiz_rounded, color: titleColor),
-                title: Text(
-                  '换源',
-                  style: TextStyle(
-                    fontSize: AppTheme.fontBody,
-                    color: titleColor,
-                  ),
-                ),
-                onTap: () {
-                  Navigator.of(sheetCtx).pop();
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const ComicAggregateSearchPage(),
-                    ),
-                  );
-                },
-              ),
-              ListTile(
-                leading: Icon(Icons.refresh_rounded, color: titleColor),
-                title: Text(
-                  '刷新章节',
-                  style: TextStyle(
-                    fontSize: AppTheme.fontBody,
-                    color: titleColor,
-                  ),
-                ),
-                onTap: () {
-                  Navigator.of(sheetCtx).pop();
-                  _loadData();
-                },
-              ),
-            ],
-          ),
-        ),
+  /// 换源：带着当前漫画名进聚搜页，自动填好关键词并立刻跨源搜索
+  /// （用户 2026-10-22：「换源是点击后自动输入并搜索其他源」）
+  void _changeSource() {
+    final title = _comic.title.trim();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ComicAggregateSearchPage(initialKeyword: title),
       ),
     );
   }

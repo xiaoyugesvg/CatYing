@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:flutter/services.dart';
@@ -39,6 +40,21 @@ import '../../common/theme.dart';
 import '../../common/system_ui.dart';
 import '../theme/jelly_theme.dart';
 import '../../widgets/app_image_cache.dart';
+
+/// 分页模式的 PageView 专用 physics：滑动必须位移满 touch slop 才启动 drag。
+///
+/// 默认 `PageScrollPhysics` 在 iOS 上走 `DragStartBehavior.down` —— 手指刚按下
+/// 就抢占手势竞技场，单指轻点常被它抢赢 ⇒ 「点中间呼不出面板」✗（5d65950 /
+/// 65273fa 两次来回的根因）。设了 `dragStartDistanceMotionThreshold` 后，
+/// Scrollable 自动改用 `DragStartBehavior.start`：位移 < kTouchSlop 的轻点
+/// 必然被外层 GestureDetector 的 tap 抢到 ✓；真正滑动（位移 ≥ slop）时
+/// drag 照常赢得竞技场、翻页不受影响 ✓。与漫画阅读器手势行为对齐。
+class _TapFriendlyPagePhysics extends PageScrollPhysics {
+  const _TapFriendlyPagePhysics({super.parent});
+
+  @override
+  double? get dragStartDistanceMotionThreshold => kTouchSlop;
+}
 
 /// ✅ **页号夹取**（blocker 修复的纯函数核心 ✓ —— 独立出来是为了**可单测** ✓）。
 ///
@@ -1968,6 +1984,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           }
           return PageView.builder(
             controller: _pageCtrl,
+            physics: const _TapFriendlyPagePhysics(),
             itemCount: spreads.length,
             onPageChanged: (i) {
               setState(() => _pageIndex = spreads[i].first);
@@ -2026,7 +2043,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 physics: _rs.pageMode == PageMode.none
                     // 无动画：**不滑动**，点点击区/翻页按钮瞬切（Duration.zero）
                     ? const NeverScrollableScrollPhysics()
-                    : const PageScrollPhysics(),
+                    : const _TapFriendlyPagePhysics(),
                 itemCount: _pages.length,
                 onPageChanged: (i) {
                   setState(() => _pageIndex = i);

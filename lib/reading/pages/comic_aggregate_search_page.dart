@@ -19,7 +19,10 @@ import 'comic_detail_page.dart';
 /// 交互：顶部搜索框 + 「聚搜 / 复搜」模式切换；
 /// 复搜模式结果顶部出现源标签 chips 多选，点选即过滤。
 class ComicAggregateSearchPage extends StatefulWidget {
-  const ComicAggregateSearchPage({super.key});
+  const ComicAggregateSearchPage({super.key, this.initialKeyword = ''});
+
+  /// 预填关键词（换源时传当前漫画名）—— 进页自动填好并立刻搜索
+  final String initialKeyword;
 
   @override
   State<ComicAggregateSearchPage> createState() =>
@@ -66,6 +69,18 @@ class _ComicAggregateSearchPageState extends State<ComicAggregateSearchPage> {
   final Map<String, String> _sourceErrors = {};
 
   static const _titleCleaner = _TitleCleaner();
+
+  @override
+  void initState() {
+    super.initState();
+    // 换源进页：自动填入书名并立刻跨源搜索
+    final kw = widget.initialKeyword.trim();
+    if (kw.isEmpty) return;
+    _controller.text = kw;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _search(kw);
+    });
+  }
 
   @override
   void dispose() {

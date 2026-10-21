@@ -213,6 +213,12 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                 ),
               ),
         actions: [
+          // 用户 2026-10-22：右上角两个按钮 —— 刷新（强制越过缓存）+ 换源
+          IconButton(
+            tooltip: '刷新',
+            icon: Icon(Icons.refresh_rounded, color: _titleColor),
+            onPressed: _loadingToc ? null : () => _load(force: true),
+          ),
           IconButton(
             tooltip: '换源',
             icon: Icon(Icons.swap_horiz_rounded, color: _titleColor),
