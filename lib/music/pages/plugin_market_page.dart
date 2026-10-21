@@ -242,8 +242,8 @@ class _PluginMarketPageState extends State<PluginMarketPage> {
             ),
           );
         }
-        return ListView(
-          padding: const EdgeInsets.only(bottom: 40),
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(18, 2, 18, 8),
@@ -256,19 +256,33 @@ class _PluginMarketPageState extends State<PluginMarketPage> {
                 ),
               ),
             ),
-            for (final e in list) _entryCard(e),
-            if (list.isEmpty)
-              Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text(
-                  '没有找到「$_query」',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: MusicTheme.secondary,
-                    fontSize: AppTheme.fontSubhead,
-                  ),
-                ),
-              ),
+            Expanded(
+              child: list.isEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        '没有找到「$_query」',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: MusicTheme.secondary,
+                          fontSize: AppTheme.fontSubhead,
+                        ),
+                      ),
+                    )
+                  // 一行两列的卡片式布局
+                  : GridView.builder(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 40),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        mainAxisSpacing: 10,
+                        crossAxisSpacing: 10,
+                        mainAxisExtent: 132,
+                      ),
+                      itemCount: list.length,
+                      itemBuilder: (_, i) => _entryCard(list[i]),
+                    ),
+            ),
           ],
         );
       },
@@ -284,108 +298,131 @@ class _PluginMarketPageState extends State<PluginMarketPage> {
     if (!installed) {
       status = '未安装';
     } else if (updatable) {
-      final have = _market.installedVersion(e);
-      status = '已安装${have.isEmpty ? '' : ' $have'} → ${e.version}';
+      status = '可更新 ${e.version}';
     } else {
       status = '已安装${e.version.isEmpty ? '' : ' ${e.version}'}';
     }
 
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-      padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
       decoration: BoxDecoration(
         color: MusicTheme.card,
         borderRadius: BorderRadius.circular(14),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 36,
-            height: 36,
+            width: 32,
+            height: 32,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: MusicTheme.tint.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(9),
             ),
             child: Icon(Icons.extension_rounded,
-                size: 18, color: MusicTheme.tint),
+                size: 17, color: MusicTheme.tint),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  e.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: MusicTheme.label,
-                    fontSize: AppTheme.fontHeadline,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  status,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: updatable ? MusicTheme.tint : MusicTheme.secondary,
-                    fontSize: AppTheme.fontFootnote,
-                  ),
-                ),
-              ],
+          const SizedBox(height: 8),
+          Text(
+            e.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: MusicTheme.label,
+              fontSize: AppTheme.fontHeadline,
+              fontWeight: FontWeight.w600,
             ),
           ),
+          const SizedBox(height: 2),
+          Text(
+            status,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: updatable ? MusicTheme.tint : MusicTheme.secondary,
+              fontSize: AppTheme.fontFootnote,
+            ),
+          ),
+          const Spacer(),
           if (busy)
             const SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
+              height: 28,
+              child: Center(
+                child: SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
             )
-          else ...[
-            if (!installed)
-              FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: MusicTheme.tint,
-                  visualDensity: VisualDensity.compact,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
-                ),
-                onPressed: () => _install(e),
-                child: const Text('安装', style: TextStyle(fontSize: 12)),
-              )
-            else ...[
-              if (updatable)
-                FilledButton(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: MusicTheme.tint,
-                    visualDensity: VisualDensity.compact,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
-                  ),
-                  onPressed: () => _install(e),
-                  child: const Text('更新', style: TextStyle(fontSize: 12)),
-                ),
-              IconButton(
-                tooltip: '登录变量',
-                visualDensity: VisualDensity.compact,
-                icon: Icon(Icons.tune_rounded,
-                    size: 19, color: MusicTheme.secondary),
-                onPressed: () => _openVariables(e),
+          else
+            SizedBox(
+              height: 28,
+              child: Row(
+                children: [
+                  if (!installed || updatable)
+                    Expanded(
+                      child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: MusicTheme.tint,
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          minimumSize: const Size(0, 28),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        onPressed: () => _install(e),
+                        child: Text(
+                          installed ? '更新' : '安装',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    )
+                  else
+                    Expanded(
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '已安装',
+                          style: TextStyle(
+                            color: MusicTheme.secondary,
+                            fontSize: AppTheme.fontFootnote,
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (installed) ...[
+                    _cardIcon(
+                      tooltip: '登录变量',
+                      icon: Icons.tune_rounded,
+                      onTap: () => _openVariables(e),
+                    ),
+                    _cardIcon(
+                      tooltip: '卸载',
+                      icon: Icons.delete_outline_rounded,
+                      onTap: () => _uninstall(e),
+                    ),
+                  ],
+                ],
               ),
-              IconButton(
-                tooltip: '卸载',
-                visualDensity: VisualDensity.compact,
-                icon: Icon(Icons.delete_outline_rounded,
-                    size: 19, color: MusicTheme.secondary),
-                onPressed: () => _uninstall(e),
-              ),
-            ],
-          ],
+            ),
         ],
       ),
+    );
+  }
+
+  Widget _cardIcon({
+    required String tooltip,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onTap,
+      padding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
+      constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+      icon: Icon(icon, size: 17, color: MusicTheme.secondary),
     );
   }
 }
