@@ -12,7 +12,6 @@ import '../theme/discover_preset.dart';
 import '../widgets/music_components.dart';
 import '../widgets/discover_sections.dart';
 import 'playlist_detail_page.dart';
-import 'plugin_explore_page.dart';
 import 'plugin_market_page.dart';
 import '../widgets/plugin_explore_view.dart';
 import '../widgets/plugin_source_sheet.dart';
@@ -503,8 +502,6 @@ class _DiscoverPageState extends State<DiscoverPage>
                 //   · 每日推荐 → 直接播当天「新歌速递」
                 //   · 私人漫游 → 从「我的收藏」随机漫游（没收藏就明确提示）
                 SliverToBoxAdapter(child: _bigCards(style)),
-                // 插件推荐（2026-10-21 第二阶段）：第三方 MusicFree 插件的榜单/歌单
-                SliverToBoxAdapter(child: _pluginSection()),
                 if (_error.isNotEmpty)
                   SliverToBoxAdapter(child: _errorBox()),
                 ..._buildSections(style),
@@ -651,83 +648,6 @@ class _DiscoverPageState extends State<DiscoverPage>
   // ============================================================
   // 顶栏 / 平台切换
   // ============================================================
-
-  /// 「插件推荐」：已启用的 MusicFree 插件（点进去看它的榜单 / 推荐歌单）。
-  ///
-  /// 没有启用的插件时**整段不渲染**（不占位、不留空标题）。
-  /// 监听 `ThirdPartySourceStore.revision` —— 在设置里启用/停用插件后
-  /// 回到发现页会立刻反映，不用重启。
-  Widget _pluginSection() {
-    return ValueListenableBuilder<int>(
-      valueListenable: ThirdPartySourceStore.instance.revision,
-      builder: (c, _, __) {
-        final plugins = ThirdPartySourceStore.instance.enabled
-            .where((s) => s.isMusicFree)
-            .toList();
-        if (plugins.isEmpty) return const SizedBox.shrink();
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SectionTitle(title: '插件推荐（${plugins.length}）'),
-            SizedBox(
-              height: 118,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: plugins.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 10),
-                itemBuilder: (c, i) {
-                  final p = plugins[i];
-                  return GestureDetector(
-                    onTap: () => Navigator.of(context).push<void>(
-                      MaterialPageRoute<void>(
-                        settings: const RouteSettings(name: 'music:page'),
-                        builder: (_) => PluginExplorePage(source: p),
-                      ),
-                    ),
-                    child: Container(
-                      width: 120,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: MusicTheme.fill,
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Icon(Icons.extension_rounded,
-                              size: 20, color: MusicTheme.tint),
-                          const Spacer(),
-                          Text(
-                            p.name,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: MusicTheme.label,
-                              fontSize: AppTheme.fontBody,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '榜单 · 歌单',
-                            style: TextStyle(
-                              color: MusicTheme.secondary,
-                              fontSize: AppTheme.fontCaption,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
 
   // ============================================================
   // 顶部两张并排大卡（对齐 Beans 主页排版）
@@ -1009,7 +929,8 @@ class _DiscoverPageState extends State<DiscoverPage>
     ];
     final isPaper = style.preset == DiscoverPreset.paper;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+      // 7 个分类（推荐 + 6 个平台）→ 左右留白收一点，保证每个胶囊都放得下
+      padding: const EdgeInsets.fromLTRB(14, 4, 14, 12),
       child: Container(
         padding: const EdgeInsets.all(4),
         decoration: BoxDecoration(
@@ -1059,16 +980,27 @@ class _DiscoverPageState extends State<DiscoverPage>
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeOut,
           alignment: Alignment.center,
-          padding: const EdgeInsets.symmetric(vertical: 9),
+          padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
             // 选中 = 实心主题色胶囊；未选 = 透明
             color: selected ? style.accent : Colors.transparent,
             borderRadius: BorderRadius.circular(999),
+            // 选中胶囊给一点柔和投影，层级更清楚（不引入新色值）
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                      color: style.accent.withValues(alpha: 0.28),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
           ),
           child: Text(
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
             style: TextStyle(
               color: selected ? Colors.white : style.secondary,
               fontSize: AppTheme.fontSubhead,
@@ -1616,55 +1548,8 @@ class _DiscoverPageState extends State<DiscoverPage>
       ));
     }
 
-    // ── 🔴 关键提示：**能看 ≠ 能播**（这是用户最容易误解的一点）──
-    //
-    // 上面的热搜/歌手/排行榜/歌单广场**全部免登录可用**，
-    // 但点歌播放**必须 QQ 登录**（vkey 要登录 Cookie）——
-    // 5 首实测全部拿不到地址。
-    //
-    // 不写清楚的话，用户看到榜单点进去点播放 → 失败 → 以为 App 坏了。
-    out.add(SliverToBoxAdapter(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 22, 16, 0),
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: MusicTheme.fill,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(Icons.info_outline, size: 17, color: MusicTheme.tint),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('QQ 可以搜、可以看，但不能直接播',
-                        style: TextStyle(
-                            color: MusicTheme.label,
-                            fontSize: AppTheme.fontFootnote,
-                            fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 4),
-                    Text(
-                      '搜索 / 每日推荐 / 热搜 / 歌手 / 排行榜 / 歌单广场\n'
-                      '都是免登录的；但 QQ 的播放地址必须登录（会员校验）。\n'
-                      '想听 QQ 的歌，请把声音源导进来 —— 点歌失败时会自动'
-                      '尝试你导入的源，并让你挑用哪个。',
-                      style: TextStyle(
-                          color: MusicTheme.secondary,
-                          fontSize: AppTheme.fontCaption,
-                          height: 1.55),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    ));
+    // 2026-10-21 用户要求：去掉页尾那段「QQ 可以搜、可以看，但不能直接播」
+    // 的长说明（播不了时播放器自己会弹源选择，不需要在发现页常驻大段文字）。
 
     return out;
   }

@@ -623,7 +623,9 @@ class SectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 10),
+      // 2026-10-21 排版统一：区块之间的节奏收紧一点（20/10 → 18/8），
+      // 发现页 / 插件页 / 各平台页共用同一个标题组件，视觉更一致。
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 8),
       child: Row(
         children: [
           Container(
