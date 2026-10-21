@@ -1599,9 +1599,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             )
           else
             Container(color: bg[0]),
-          // ✅ 点击判定已全部由正文区 Listener 手动负责（_onPointerUp），
-          //   不再用 GestureDetector onTapUp —— iOS 上单指 tap 会被
-          //   PageView/ListView 的 drag 竞技场抢走 ⇒ "两指才呼出" ✗。
+          // ✅ 点击判定与**漫画阅读器**一致：正文区 GestureDetector.onTapUp
+          //   （用户 2026-10-21：「书源阅读器功能面板的打开方式参照漫画的来」）
           //   仿真/覆盖模式由组件内部 onTapCenter 自行处理 ✓。
           SafeArea(
             child: Padding(
@@ -1612,11 +1611,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 // 呼出/收起菜单时正文不重排、不跳动（用户 2026-10-21 要求：
                 // 「面板是悬浮在正文上面，不是挤压正文」）。
                 Positioned.fill(
-                  child: Listener(
+                  // 点击判定与**漫画阅读器**保持一致：GestureDetector.onTapUp
+                  child: GestureDetector(
                     behavior: HitTestBehavior.translucent,
-                    onPointerDown: _onPointerDown,
-                    onPointerUp: _onPointerUp,
-                    onPointerCancel: _onPointerCancel,
+                    onTapUp: _onTapUp,
                     child: _contentArea(bg[1]),
                   ),
                 ),
@@ -2111,8 +2109,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// （横向分页/双页/仿真那套留给**文字**阅读，见 _contentArea。）
   Widget _mangaView(Color fg) {
     final headers = _mangaHeaders;
-    // 点击判定统一由正文区 Listener（_onPointerUp）负责：
-    // 左/右 1/3 翻章、中间 1/3 呼出、面板开时点空白收起（逻辑已迁移到 _onPointerUp）。
+    // 点击判定统一由正文区 GestureDetector（_onTapUp）负责：
+    // 左/右 1/3 翻章、中间 1/3 呼出、面板开时点空白收起。
     return ListView.builder(
       padding: EdgeInsets.only(top: _padTop, bottom: _padBottom + 40),
       // 图片数量 + 1（末尾放"下一章"）
@@ -3040,7 +3038,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 由 [_pageContent] 包上底色（+ 页缘投影）后使用 ✓。
   Widget _pageBody(Color fg, BookPage page) {
     final items = _rs.statusItems;
-    // 点击判定统一由正文区 Listener（_onPointerUp）负责，不再注册 onTapUp
+    // 点击判定统一由正文区 GestureDetector（_onTapUp）负责，这里不再注册
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -3279,49 +3277,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     );
   }
 
-  // ── 手动点击判定（Listener，不参与手势竞技场）────────────────
-  // 之前用 GestureDetector 的 onTapUp 触发翻页/呼出，在 iOS 上单指 tap 会被
-  // PageView/ListView 的 drag recognizer 抢赢（手指轻微位移即判为滚动），
-  // 导致"必须两指点击顶栏/功能面板才出现" ✗。改用 Listener 原始事件流
-  // 手动判定"点击"（位移小 + 时长短），单指一定响应 ✓。
-  Offset? _tapDownPos;
-  DateTime? _tapDownTime;
-  // 只认「第一根手指」的 down/up（按 pointer id 配对，不用计数器）。
-  // 计数器在指针被 cancel 时会漏减 → 之后单指点击永远被当成"还有手指按着"
-  // 直接丢弃（用户 2026-10-21：单指死活呼不出面板，双指反而能出来）。
-  int? _tapPointer;
-
-  void _onPointerDown(PointerDownEvent e) {
-    // 已有手指按着（双指缩放 / 两指同时点）→ 第二根手指不参与点击判定
-    if (_tapPointer != null) return;
-    _tapPointer = e.pointer;
-    _tapDownPos = e.position;
-    _tapDownTime = DateTime.now();
-  }
-
-  /// 指针被取消（滚动/翻页抢走手势、来电、切后台等）。
-  void _onPointerCancel(PointerCancelEvent e) {
-    if (e.pointer != _tapPointer) return;
-    _tapPointer = null;
-    _tapDownPos = null;
-    _tapDownTime = null;
-  }
-
-  void _onPointerUp(PointerUpEvent e) {
-    // 抬起的不是基准手指（两指先后抬起）→ 忽略
-    if (e.pointer != _tapPointer) return;
-    _tapPointer = null;
-    final down = _tapDownPos;
-    final t0 = _tapDownTime;
-    _tapDownPos = null;
-    _tapDownTime = null;
-    if (down == null || t0 == null) return;
-    final dt = DateTime.now().difference(t0).inMilliseconds;
-    // 450ms：iOS 上正常单指点击很容易超过 350ms（尤其正文里有 SelectableText
-    // 参与手势竞技场时）→ 之前 350ms 会把它当长按直接丢弃，表现为"单指点了没反应"。
-    if (dt > 450) return; // 长按选字/长按书签，不是点击
-    final dist = (e.position - down).distance;
-    if (dist > 24) return; // 滑动翻页中，不是点击
+  // ── 点击判定（与漫画阅读器同一套：GestureDetector.onTapUp）──────
+  // 用户 2026-10-21：「书源阅读器的功能面板打开方式参照漫画的来」。
+  void _onTapUp(TapUpDetails d) {
+    final pos = d.globalPosition;
     final size = MediaQuery.of(context).size;
     if (size.width <= 0 || size.height <= 0) return;
     // 面板 / 顶栏打开时：点击正文空白任意位置先收起（不翻页、不误切换）
@@ -3340,7 +3299,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     //   漫画页也会沿用文字阅读的 pageMode；如果用户之前设成仿真/覆盖，
     //   下面那句 `return` 会把图片模式的点击全吞掉 ⇒ 「全屏漫画点不出功能面板」。
     if (_images.isNotEmpty) {
-      final x = e.position.dx;
+      final x = pos.dx;
       final w = size.width;
       final flip = _rs.flipReverse;
       if (x < w / 3) {
@@ -3366,8 +3325,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       return;
     }
     // 文字模式：3×3 分区 + 「点击区域」配置
-    final col = (e.position.dx / (size.width / 3)).floor().clamp(0, 2);
-    final row = (e.position.dy / (size.height / 3)).floor().clamp(0, 2);
+    final col = (pos.dx / (size.width / 3)).floor().clamp(0, 2);
+    final row = (pos.dy / (size.height / 3)).floor().clamp(0, 2);
     final zone = row * 3 + col;
     final zones = _rs.tapZones.isEmpty
         ? ReadingSettings.defaultZones()
