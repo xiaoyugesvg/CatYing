@@ -2335,10 +2335,62 @@ class _ReaderPageState extends State<ReaderPage> {
     );
   }
 
-  void _handleTap(TapUpDetails details) {
+  /// 点击判定层：用 [Listener] 直接吃原始指针事件，**不参与手势竞技场**。
+  ///
+  /// 原来四个画廊（单页 PhotoView / 双页 PageView / 消散 / 拼页滚动）都是
+  /// `GestureDetector(onTapUp:)`。iOS 上 PhotoView、PageView、Scrollable 内部
+  /// 各自的 tap/scale/drag recognizer 会抢赢 ⇒ 点中间呼不出功能面板
+  /// （用户 2026-10-21：「漫画里面怎么点击出功能面板」）。
+  ///
+  /// 与书源阅读器同一套判定：只认第一根手指（pointer id 配对，无计数泄漏），
+  /// 位移 ≤24px、时长 ≤450ms 才算点击。
+  Offset? _tapDownPos;
+  DateTime? _tapDownTime;
+  int? _tapPointer;
+
+  Widget _tapLayer({required Widget child}) {
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: _onPointerDown,
+      onPointerUp: _onPointerUp,
+      onPointerCancel: _onPointerCancel,
+      child: child,
+    );
+  }
+
+  void _onPointerDown(PointerDownEvent e) {
+    // 已有手指按着（双指缩放）→ 第二根手指不参与点击判定
+    if (_tapPointer != null) return;
+    _tapPointer = e.pointer;
+    _tapDownPos = e.position;
+    _tapDownTime = DateTime.now();
+  }
+
+  void _onPointerCancel(PointerCancelEvent e) {
+    if (e.pointer != _tapPointer) return;
+    _tapPointer = null;
+    _tapDownPos = null;
+    _tapDownTime = null;
+  }
+
+  void _onPointerUp(PointerUpEvent e) {
+    if (e.pointer != _tapPointer) return;
+    _tapPointer = null;
+    final pos = _tapDownPos;
+    final t0 = _tapDownTime;
+    _tapDownPos = null;
+    _tapDownTime = null;
+    if (pos == null || t0 == null) return;
+    // 450ms：iOS 上正常单指点击很容易超过 350ms，太紧会被当成长按丢掉
+    if (DateTime.now().difference(t0).inMilliseconds > 450) return;
+    if ((e.position - pos).distance > 24) return; // 拖动/缩放，不是点击
+    _handleTapAt(e.position);
+  }
+
+  void _handleTapAt(Offset globalPos) {
     final size = MediaQuery.sizeOf(context);
-    final dx = details.globalPosition.dx;
-    final dy = details.globalPosition.dy;
+    final dx = globalPos.dx;
+    final dy = globalPos.dy;
     // 单手模式：屏幕左右点击都是下一页
     if (SettingsService().singleHand) {
       final tapEdge = dx < size.width / 3 || dx > size.width * 2 / 3;
@@ -2694,8 +2746,7 @@ class _ReaderPageState extends State<ReaderPage> {
     // 的 pinchZoom / rememberZoom 在整个 pages/ + widgets/ 里没有任何消费点，
     // 表现为「开关关掉了照样能放大」。
     final allowZoom = SettingsService().pinchZoom;
-    return GestureDetector(
-      onTapUp: _handleTap,
+    return _tapLayer(
       child: PhotoViewGallery.builder(
         scrollDirection: scrollDirection,
         reverse: _isReverseDirection,
@@ -2779,8 +2830,7 @@ class _ReaderPageState extends State<ReaderPage> {
 
   /// 双页模式：PageView 逐 spread 翻页，每 spread 左右并排两图（首页单独）
   Widget _buildDoublePageGallery() {
-    return GestureDetector(
-      onTapUp: _handleTap,
+    return _tapLayer(
       child: PageView.builder(
         controller: _pageController,
         reverse: _isReverseDirection,
@@ -3005,8 +3055,7 @@ class _ReaderPageState extends State<ReaderPage> {
 
   /// 消散模式：逐页显示，换页时旧页淡出、新页淡入（交叉淡入淡出）
   Widget _buildDissolveGallery() {
-    return GestureDetector(
-      onTapUp: _handleTap,
+    return _tapLayer(
       child: ColoredBox(
         color: _innerGalleryBg,
         child: AnimatedSwitcher(
@@ -3114,8 +3163,7 @@ class _ReaderPageState extends State<ReaderPage> {
 
   /// 拼页模式：所有图片纵向连续滚动，按索引定位/翻页
   Widget _buildContinuousGallery() {
-    return GestureDetector(
-      onTapUp: _handleTap,
+    return _tapLayer(
       child: ScrollablePositionedList.builder(
         itemScrollController: _itemScrollController,
         itemPositionsListener: _itemPositionsListener,
