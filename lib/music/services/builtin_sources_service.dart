@@ -242,8 +242,10 @@ class BuiltinSourcesService {
   // ────────────────────────────────────────────────────────────
 
   static const _mfIndexAsset = 'assets/music/musicfree/.index.json';
+  /// 远端索引走 jsDelivr(gcore) 镜像：`plugins-gcore.json` 里的下载地址也是
+  /// jsDelivr，设备上比 github.io 稳定（2026-10-21 用户提供）。
   static const _mfIndexRemote =
-      'https://hebijunge.github.io/musicfree-plugins/plugins.json';
+      'https://gcore.jsdelivr.net/gh/hebijunge/musicfree-plugins@master/plugins-gcore.json';
   static const _mfPluginDir = 'assets/music/musicfree/';
 
   /// 单个插件脚本的**大小上限**（超过就跳过，防被塞垃圾）

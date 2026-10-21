@@ -150,8 +150,8 @@ class PluginMarketService {
 
     for (final sub in subs) {
       try {
-        final resp = await _dio.get(sub.url);
-        final list = _parseIndex(resp.data?.toString() ?? '', sub.id);
+        final raw = await _fetchIndexText(sub.url);
+        final list = _parseIndex(raw, sub.id);
         if (list.isEmpty) continue;
         fetched.addAll(list);
         ok++;
@@ -190,6 +190,30 @@ class PluginMarketService {
 
     await _persist();
     return ok;
+  }
+
+  /// 拉清单文本。github.io 上的清单在部分网络下拉不到（用户 2026-10-21 反馈），
+  /// 同一个文件用 jsDelivr(gcore) 镜像兜底再试一次。
+  Future<String> _fetchIndexText(String url) async {
+    try {
+      final resp = await _dio.get(url);
+      return resp.data?.toString() ?? '';
+    } catch (e) {
+      final alt = _cdnFallback(url);
+      if (alt == null) rethrow;
+      final resp = await _dio.get(alt);
+      return resp.data?.toString() ?? '';
+    }
+  }
+
+  static const _ghPagesBase = 'https://hebijunge.github.io/musicfree-plugins/';
+  static const _jsdelivrBase =
+      'https://gcore.jsdelivr.net/gh/hebijunge/musicfree-plugins@master/';
+
+  static String? _cdnFallback(String url) {
+    final u = url.trim();
+    if (!u.startsWith(_ghPagesBase)) return null;
+    return _jsdelivrBase + u.substring(_ghPagesBase.length);
   }
 
   List<PluginMarketEntry> _parseIndex(String raw, String subId) {

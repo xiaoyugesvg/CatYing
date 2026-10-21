@@ -2,8 +2,9 @@
 //
 // MusicFree 插件**订阅源**（registry.json）—— 2026-10-21 第三期。
 //
-// 支持多条订阅，全部由用户自己添加：
-//   · 内置默认源已移除（hebijunge 那个地址经常拉不到清单）
+// 支持多条订阅：
+//   · 内置一条（plugins-gcore.json，首次启动种入一次，用户可删）
+//   · 用户添加的任意 registry.json / plugins.json 地址
 //
 // 订阅本身只负责"提供插件清单"；安装/更新/卸载在 `PluginMarketService`，
 // 装好的插件仍然是普通的 `ThirdPartySource`（kind: musicfree），
@@ -59,6 +60,15 @@ class PluginSubscriptionStore {
   static const String defaultId = 'default'; // 旧版内置订阅的 id，仅用于清理
   static const _key = 'music.pluginSubscriptions.v1';
 
+  // ── 内置订阅（2026-10-21）──────────────────────────────────
+  // 原来的内置地址是 github.io，设备上经常拉不到清单；换成 jsDelivr(gcore)
+  // 镜像后同一份 plugins.json 能稳定访问 ⇒ 重新内置一条。
+  // 只在**首次启动**写入一次：用户删掉后不会再被补回来。
+  static const String builtinId = 'builtin_gcore';
+  static const String builtinUrl =
+      'https://hebijunge.github.io/musicfree-plugins/plugins-gcore.json';
+  static const String _seededKey = 'music.pluginSubscriptions.seeded.v1';
+
   final List<PluginSubscription> _items = [];
   final revision = ValueNotifier<int>(0);
 
@@ -69,8 +79,9 @@ class PluginSubscriptionStore {
   bool get isEmpty => _items.isEmpty;
 
   Future<void> init() async {
+    SharedPreferences? prefs;
     try {
-      final prefs = await SharedPreferences.getInstance();
+      prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_key);
       if (raw != null && raw.isNotEmpty) {
         final decoded = jsonDecode(raw);
@@ -90,11 +101,28 @@ class PluginSubscriptionStore {
     } catch (e) {
       debugPrint('[MusicSub] 读取订阅失败: $e');
     }
-    // 内置订阅已下线：老用户 prefs 里那条 id=default 的记录顺手清掉
+    // 旧版内置订阅（id=default，github.io 地址）顺手清掉
     final before = _items.length;
     _items.removeWhere((s) => s.id == defaultId);
+    var dirty = _items.length != before;
+
+    // 首次启动种入新的内置订阅（gcore 镜像）
+    if (prefs != null && !(prefs.getBool(_seededKey) ?? false)) {
+      if (!_items.any((s) => s.url.trim() == builtinUrl)) {
+        _items.insert(
+          0,
+          const PluginSubscription(
+            id: builtinId,
+            name: 'MusicFree 插件源',
+            url: builtinUrl,
+          ),
+        );
+      }
+      await prefs.setBool(_seededKey, true);
+      dirty = true;
+    }
     revision.value++;
-    if (_items.length != before) await _persist();
+    if (dirty) await _persist();
   }
 
   Future<void> _persist() async {

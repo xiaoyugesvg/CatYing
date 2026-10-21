@@ -3,7 +3,7 @@
 // 「插件订阅」页 —— 2026-10-21 第三期。
 //
 // 一个订阅就是一个 registry/plugins.json 地址（MusicFree 生态的插件清单）。
-//   · 不内置任何订阅，全部由用户自己添加
+//   · 内置一条 plugins-gcore.json（首次启动种入，可删除）
 //   · 刷新后清单条目会出现在「插件市场」里
 
 import 'package:flutter/material.dart';
