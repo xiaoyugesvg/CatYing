@@ -28,6 +28,12 @@ class _PluginMarketPageState extends State<PluginMarketPage> {
   final _market = PluginMarketService.instance;
   final _searchCtrl = TextEditingController();
 
+  /// 市场列表滚动控制器（「定位到已安装」用）
+  final _scrollCtrl = ScrollController();
+
+  /// 「已安装」区块标题的 key —— 定位时滚到这里
+  final _installedKey = GlobalKey();
+
   bool _loading = true;
   String _query = '';
 
@@ -46,7 +52,30 @@ class _PluginMarketPageState extends State<PluginMarketPage> {
   @override
   void dispose() {
     _searchCtrl.dispose();
+    _scrollCtrl.dispose();
     super.dispose();
+  }
+
+  /// 定位到「已安装」区块：先清掉搜索词，再滚到区块标题。
+  /// 没有已安装插件时给明确提示（不然点了没反应）。
+  void _locateInstalled() {
+    setState(() {
+      _query = '';
+      _searchCtrl.clear();
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _installedKey.currentContext;
+      if (ctx == null) {
+        AppToast.show('还没有已安装的插件', '在下面挑一个装上，就能在这里快速定位');
+        return;
+      }
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.02,
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
   Future<void> _load() async {
@@ -137,6 +166,11 @@ class _PluginMarketPageState extends State<PluginMarketPage> {
           ),
           actions: [
             IconButton(
+              tooltip: '定位到已安装',
+              icon: Icon(Icons.my_location_rounded, color: MusicTheme.tint),
+              onPressed: _locateInstalled,
+            ),
+            IconButton(
               tooltip: '订阅管理',
               icon: Icon(Icons.rss_feed_rounded, color: MusicTheme.tint),
               onPressed: _openSubscriptions,
@@ -172,9 +206,14 @@ class _PluginMarketPageState extends State<PluginMarketPage> {
                           fontSize: AppTheme.fontHeadline,
                         ),
                         cursorColor: MusicTheme.tint,
+                        textInputAction: TextInputAction.search,
+                        onSubmitted: (_) => FocusScope.of(context).unfocus(),
                         decoration: InputDecoration(
                           isDense: true,
+                          filled: false,
                           border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
                           hintText: '搜索插件',
                           hintStyle: TextStyle(
                             color: MusicTheme.secondary,
@@ -275,8 +314,11 @@ class _PluginMarketPageState extends State<PluginMarketPage> {
             Padding(
               padding: const EdgeInsets.fromLTRB(18, 2, 18, 8),
               child: Text(
-                '共 ${all.length} 个插件 · 已安装 $installed'
-                '${updatable > 0 ? ' · $updatable 个可更新' : ''}',
+                _query.isEmpty
+                    ? '共 ${all.length} 个插件 · 已安装 $installed'
+                        '${updatable > 0 ? ' · $updatable 个可更新' : ''}'
+                    : '「$_query」· 找到 ${list.length} 个'
+                        '${installedList.isEmpty ? '' : ' · 已安装 ${installedList.length}'}',
                 style: TextStyle(
                   color: MusicTheme.secondary,
                   fontSize: AppTheme.fontFootnote,
@@ -285,10 +327,11 @@ class _PluginMarketPageState extends State<PluginMarketPage> {
             ),
             Expanded(
               child: CustomScrollView(
+                controller: _scrollCtrl,
                 slivers: [
                   if (installedList.isNotEmpty) ...[
-                    const SliverToBoxAdapter(
-                      child: SectionTitle(title: '已安装'),
+                    SliverToBoxAdapter(
+                      child: SectionTitle(key: _installedKey, title: '已安装'),
                     ),
                     SliverPadding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 2),
