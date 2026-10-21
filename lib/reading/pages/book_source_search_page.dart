@@ -1649,29 +1649,35 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
           }
           return false;
         },
-        child: ListView.builder(
-          padding: const EdgeInsets.only(bottom: 24),
-          physics: const AlwaysScrollableScrollPhysics(),
-          itemCount: _exploreVisibleSections + 1,
-          itemBuilder: (c, i) {
-            if (i == _exploreVisibleSections) {
-              // 底部：正在加载更多板块 / 已全部加载
-              if (_exploreVisibleSections >= _cats.length) {
-                return const SizedBox(height: 8);
-              }
-              return const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                child: Center(
-                  child: SizedBox(
-                    width: 22,
-                    height: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2.5),
+        // 下拉刷新（用户 2026-10-21）：重新拉分类 + 前两个板块，
+        // 源站更新了榜单/接口变了时不用退出去再进
+        child: RefreshIndicator(
+          color: JellyTheme.primary,
+          onRefresh: _loadExploreIfNeeded,
+          child: ListView.builder(
+            padding: const EdgeInsets.only(bottom: 24),
+            physics: const AlwaysScrollableScrollPhysics(),
+            itemCount: _exploreVisibleSections + 1,
+            itemBuilder: (c, i) {
+              if (i == _exploreVisibleSections) {
+                // 底部：正在加载更多板块 / 已全部加载
+                if (_exploreVisibleSections >= _cats.length) {
+                  return const SizedBox(height: 8);
+                }
+                return const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  child: Center(
+                    child: SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2.5),
+                    ),
                   ),
-                ),
-              );
-            }
-            return _sectionBlock(src, _cats[i]);
-          },
+                );
+              }
+              return _sectionBlock(src, _cats[i]);
+            },
+          ),
         ),
       );
     }
@@ -1692,7 +1698,9 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
       }
       return _hint(_exploreError ?? '该分类暂时没有内容', Icons.auto_stories_outlined);
     }
-    return GridView.builder(
+    final exploreSrc = _lastExploreSource;
+    final exploreCat = _activeCat;
+    final gridView = GridView.builder(
       // ✅ 2026-10-10 内容布局统一：横向 16->12、底部 24 固定 -> 底栏避让
       //    （与漫画/图书/收藏页的 12 + JellyNavBar.contentBottomAvoid 对齐）
       padding: EdgeInsets.only(
@@ -1711,6 +1719,16 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
       ),
       itemCount: _exploreList.length,
       itemBuilder: (context, i) => _exploreTile(_exploreList[i]),
+    );
+    if (exploreSrc == null || exploreCat == null) return gridView;
+    // 单分类视图也支持下拉刷新（清掉该分类缓存再重拉）
+    return RefreshIndicator(
+      color: JellyTheme.primary,
+      onRefresh: () async {
+        _catBooksCache.remove(exploreCat.url);
+        await _loadCatBooks(exploreSrc, exploreCat);
+      },
+      child: gridView,
     );
   }
 
