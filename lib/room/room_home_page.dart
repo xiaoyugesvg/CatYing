@@ -29,6 +29,13 @@ class _RoomHomePageState extends State<RoomHomePage> {
   final _nickCtrl = TextEditingController();
   final _joinCtrl = TextEditingController();
 
+  // 局域网模式
+  final _lanRoomCtrl = TextEditingController(text: '一起看');
+  final _lanPwdCtrl = TextEditingController();
+  final _lanPortCtrl = TextEditingController(text: '9527');
+  final _lanJoinCtrl = TextEditingController();
+  final _lanJoinPwdCtrl = TextEditingController();
+
   bool _busy = false;
   bool _showServer = false;
 
@@ -43,9 +50,11 @@ class _RoomHomePageState extends State<RoomHomePage> {
         _authCtrl.text = _session.authKey;
         _nickCtrl.text = _session.nickname;
         _joinCtrl.text = _session.lastRoomId;
+        _lanPortCtrl.text = '${_session.lanPort}';
+        _lanRoomCtrl.text = '${_session.nickname}的房间';
         _showServer = !_session.configured;
       });
-      if (_session.configured) {
+      if (_session.mode == RoomMode.server && _session.configured) {
         final ok = await _session.connect();
         if (ok && mounted) _session.refreshRooms();
       }
@@ -59,6 +68,11 @@ class _RoomHomePageState extends State<RoomHomePage> {
     _authCtrl.dispose();
     _nickCtrl.dispose();
     _joinCtrl.dispose();
+    _lanRoomCtrl.dispose();
+    _lanPwdCtrl.dispose();
+    _lanPortCtrl.dispose();
+    _lanJoinCtrl.dispose();
+    _lanJoinPwdCtrl.dispose();
     super.dispose();
   }
 
@@ -85,32 +99,48 @@ class _RoomHomePageState extends State<RoomHomePage> {
                 fontWeight: FontWeight.w600,
                 color: _fg)),
         actions: [
-          IconButton(
-            tooltip: _session.connected ? '刷新房间列表' : '连接服务器',
-            icon: Icon(
-                _session.connected ? Icons.refresh_rounded : Icons.link_rounded,
-                color: _fg),
-            onPressed: _session.connected ? _session.refreshRooms : _connect,
-          ),
-          IconButton(
-            tooltip: '服务器设置',
-            icon: Icon(Icons.dns_outlined, color: _fg),
-            onPressed: () => setState(() => _showServer = !_showServer),
-          ),
+          if (_session.mode == RoomMode.server)
+            IconButton(
+              tooltip: _session.connected ? '刷新房间列表' : '连接服务器',
+              icon: Icon(
+                  _session.connected
+                      ? Icons.refresh_rounded
+                      : Icons.link_rounded,
+                  color: _fg),
+              onPressed: _session.connected ? _session.refreshRooms : _connect,
+            ),
+          if (_session.mode == RoomMode.server)
+            IconButton(
+              tooltip: '服务器设置',
+              icon: Icon(Icons.dns_outlined, color: _fg),
+              onPressed: () => setState(() => _showServer = !_showServer),
+            ),
           const SizedBox(width: 4),
         ],
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 120),
         children: [
-          if (_session.inRoom) _activeCard() else ...[
-            if (_showServer || !_session.configured) _serverCard(),
-            if (_session.configured && !_showServer) _statusRow(),
-            if (_session.inRoom == false && _session.configured) ...[
+          if (_session.inRoom)
+            _activeCard()
+          else ...[
+            _modeRow(),
+            const SizedBox(height: 12),
+            if (_session.mode == RoomMode.server) ...[
+              if (_showServer || !_session.configured) _serverCard(),
+              if (_session.configured && !_showServer) _statusRow(),
+              if (_session.configured) ...[
+                const SizedBox(height: 12),
+                _joinCard(),
+                const SizedBox(height: 14),
+                _roomsSection(),
+              ],
+            ] else ...[
+              _lanIntro(),
               const SizedBox(height: 12),
-              _joinCard(),
-              const SizedBox(height: 14),
-              _roomsSection(),
+              _lanHostCard(),
+              const SizedBox(height: 12),
+              _lanJoinCard(),
             ],
           ],
           if (_session.error != null) ...[
@@ -125,6 +155,226 @@ class _RoomHomePageState extends State<RoomHomePage> {
       ),
     );
   }
+
+  /// 顶部模式切换：服务器房间 / 局域网
+  Widget _modeRow() {
+    final modes = [RoomMode.server, RoomMode.lan];
+    return Container(
+      height: 40,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: _isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+      ),
+      child: Row(
+        children: [
+          for (final m in modes)
+            Expanded(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _busy || _session.connecting
+                    ? null
+                    : () async {
+                        await _session.switchMode(m);
+                        if (mounted) setState(() {});
+                      },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: _session.mode == m
+                        ? AppTheme.accentColor.withValues(alpha: 0.18)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                          m == RoomMode.server
+                              ? Icons.cloud_outlined
+                              : Icons.wifi_rounded,
+                          size: 15,
+                          color: _session.mode == m
+                              ? AppTheme.accentColor
+                              : _sub),
+                      const SizedBox(width: 5),
+                      Text(
+                        m == RoomMode.server ? '服务器' : '局域网',
+                        style: TextStyle(
+                            color: _session.mode == m
+                                ? AppTheme.accentColor
+                                : _sub,
+                            fontSize: AppTheme.fontSubhead,
+                            fontWeight: _session.mode == m
+                                ? FontWeight.w600
+                                : FontWeight.w400),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _lanIntro() => _card(children: [
+        Row(
+          children: [
+            Icon(Icons.wifi_rounded, size: 18, color: AppTheme.accentColor),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('同一个 WiFi，房主手机就是服务器',
+                  style: TextStyle(
+                      color: _fg,
+                      fontSize: AppTheme.fontSubhead,
+                      fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '不用部署任何服务端。房主开房后，把页面显示的地址（如 '
+          '192.168.1.5:9527）发给朋友，他们切到「局域网」填进来即可。\n'
+          '播放同步、聊天、暂停/拖进度都和服务器模式一致。',
+          style:
+              TextStyle(color: _sub, fontSize: AppTheme.fontFootnote, height: 1.6),
+        ),
+        const SizedBox(height: 12),
+        _fieldLabel('我的昵称'),
+        TextField(
+          controller: _nickCtrl,
+          style: TextStyle(color: _fg, fontSize: AppTheme.fontSubhead),
+          decoration: _dec('房间里显示的名字'),
+          onTapOutside: (_) => _session.saveNickname(_nickCtrl.text),
+        ),
+      ]);
+
+  Widget _lanHostCard() => _card(children: [
+        Text('开房（本机当服务器）',
+            style: TextStyle(
+                color: _fg,
+                fontSize: AppTheme.fontSubhead,
+                fontWeight: FontWeight.w600)),
+        const SizedBox(height: 12),
+        _fieldLabel('房间名'),
+        TextField(
+          controller: _lanRoomCtrl,
+          style: TextStyle(color: _fg, fontSize: AppTheme.fontSubhead),
+          decoration: _dec('给房间起个名字'),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _fieldLabel('密码（可选）'),
+                  TextField(
+                    controller: _lanPwdCtrl,
+                    style:
+                        TextStyle(color: _fg, fontSize: AppTheme.fontSubhead),
+                    decoration: _dec('留空 = 不设密码'),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            SizedBox(
+              width: 96,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _fieldLabel('端口'),
+                  TextField(
+                    controller: _lanPortCtrl,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    style:
+                        TextStyle(color: _fg, fontSize: AppTheme.fontSubhead),
+                    decoration: _dec('9527'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.accentColor,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(0, 44),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppTheme.radiusMD)),
+            ),
+            onPressed: (_busy || _session.connecting) ? null : _hostLan,
+            icon: (_busy || _session.connecting)
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.play_circle_outline_rounded, size: 19),
+            label: Text((_busy || _session.connecting) ? '正在开房…' : '开房并进入'),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text('iOS 首次会弹「本地网络」权限，必须允许，否则朋友连不上。',
+            style: TextStyle(
+                color: _sub, fontSize: AppTheme.fontCaption, height: 1.5)),
+      ]);
+
+  Widget _lanJoinCard() => _card(children: [
+        Text('加入局域网房间',
+            style: TextStyle(
+                color: _fg,
+                fontSize: AppTheme.fontSubhead,
+                fontWeight: FontWeight.w600)),
+        const SizedBox(height: 12),
+        _fieldLabel('房间地址（房主显示给你的 IP:端口）'),
+        TextField(
+          controller: _lanJoinCtrl,
+          keyboardType: TextInputType.url,
+          autocorrect: false,
+          style: TextStyle(color: _fg, fontSize: AppTheme.fontSubhead),
+          decoration: _dec('例如 192.168.1.5:9527'),
+        ),
+        const SizedBox(height: 10),
+        _fieldLabel('密码（房主设了才填）'),
+        TextField(
+          controller: _lanJoinPwdCtrl,
+          style: TextStyle(color: _fg, fontSize: AppTheme.fontSubhead),
+          decoration: _dec('没有密码就留空'),
+        ),
+        const SizedBox(height: 14),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.accentColor,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(0, 44),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppTheme.radiusMD)),
+            ),
+            onPressed: (_busy || _session.connecting) ? null : _joinLan,
+            icon: (_busy || _session.connecting)
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.login_rounded, size: 19),
+            label: Text((_busy || _session.connecting) ? '正在连接…' : '加入房间'),
+          ),
+        ),
+      ]);
 
   Widget _card({required List<Widget> children}) => Container(
         padding: const EdgeInsets.all(14),
@@ -452,10 +702,20 @@ class _RoomHomePageState extends State<RoomHomePage> {
       ),
       const SizedBox(height: 6),
       Text(
-        '房间号 ${r.id} · ${s.members.length} 人'
-        '${s.connected ? '' : ' · 连接已断开'}',
+        _session.mode == RoomMode.lan
+            ? '局域网 ${_session.lanAddress} · ${s.members.length} 人'
+                '${s.connected ? '' : ' · 连接已断开'}'
+            : '房间号 ${r.id} · ${s.members.length} 人'
+                '${s.connected ? '' : ' · 连接已断开'}',
         style: TextStyle(color: _sub, fontSize: AppTheme.fontFootnote),
       ),
+      if (_session.mode == RoomMode.lan && s.isHost && s.lanIps.isNotEmpty) ...[
+        const SizedBox(height: 10),
+        Text('把这个地址发给朋友（同一 WiFi）：',
+            style: TextStyle(color: _sub, fontSize: AppTheme.fontCaption)),
+        const SizedBox(height: 4),
+        for (final ip in s.lanIps) _lanAddressRow('$ip:${s.lanPort}'),
+      ],
       if (s.playState != null) ...[
         const SizedBox(height: 4),
         Text('正在播放：${s.playState!.title}',
@@ -486,17 +746,51 @@ class _RoomHomePageState extends State<RoomHomePage> {
               foregroundColor: Colors.redAccent,
               minimumSize: const Size(0, 42),
             ),
-            child: Text(s.isHost ? '离开（房间保留 5 分钟）' : '离开房间'),
+            child: Text(
+              s.isHost
+                  ? (_session.mode == RoomMode.lan
+                      ? '关闭房间'
+                      : '离开（房间保留 5 分钟）')
+                  : '离开房间',
+            ),
           ),
         ],
       ),
       if (s.isHost) ...[
         const SizedBox(height: 6),
-        Text('房间号 ${r.id} 分享给朋友，他们在「输入房间号加入」里填即可',
-            style: TextStyle(color: _sub, fontSize: AppTheme.fontCaption)),
+        Text(
+          _session.mode == RoomMode.lan
+              ? '朋友切到「局域网」，填上面的地址就能进来'
+              : '房间号 ${r.id} 分享给朋友，他们在「输入房间号加入」里填即可',
+          style: TextStyle(color: _sub, fontSize: AppTheme.fontCaption),
+        ),
       ],
     ]);
   }
+
+  Widget _lanAddressRow(String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: SelectableText(text,
+                  style: TextStyle(
+                      color: AppTheme.accentColor,
+                      fontSize: AppTheme.fontSubhead,
+                      fontWeight: FontWeight.w600)),
+            ),
+            TextButton.icon(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: text));
+                AppToast.show('地址已复制', '');
+              },
+              icon: const Icon(Icons.copy_rounded, size: 15),
+              label: Text('复制',
+                  style: TextStyle(fontSize: AppTheme.fontFootnote)),
+            ),
+          ],
+        ),
+      );
 
   Widget _fieldLabel(String text) => Padding(
         padding: const EdgeInsets.only(bottom: 6),
@@ -546,6 +840,51 @@ class _RoomHomePageState extends State<RoomHomePage> {
     } else {
       AppToast.show(_session.error ?? '连接失败', '');
     }
+  }
+
+  Future<void> _hostLan() async {
+    FocusScope.of(context).unfocus();
+    await _session.saveNickname(_nickCtrl.text);
+    final port = int.tryParse(_lanPortCtrl.text.trim()) ?? 9527;
+    if (port < 1024 || port > 65535) {
+      AppToast.show('端口要在 1024–65535 之间', '');
+      return;
+    }
+    setState(() => _busy = true);
+    final ok = await _session.lanHostRoom(
+      roomName: _lanRoomCtrl.text,
+      password: _lanPwdCtrl.text.trim(),
+      port: port,
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (!ok) {
+      AppToast.show(_session.error ?? '开房失败', '');
+      return;
+    }
+    _openRoom();
+  }
+
+  Future<void> _joinLan() async {
+    FocusScope.of(context).unfocus();
+    final addr = _lanJoinCtrl.text.trim();
+    if (addr.isEmpty) {
+      AppToast.show('先填房主给你的地址，如 192.168.1.5:9527', '');
+      return;
+    }
+    await _session.saveNickname(_nickCtrl.text);
+    setState(() => _busy = true);
+    final ok = await _session.lanJoinRoom(
+      address: addr,
+      password: _lanJoinPwdCtrl.text.trim(),
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (!ok) {
+      AppToast.show(_session.error ?? '加入失败', '');
+      return;
+    }
+    _openRoom();
   }
 
   Future<void> _createDraft() async {
@@ -693,12 +1032,18 @@ class _RoomHomePageState extends State<RoomHomePage> {
   }
 
   Future<void> _leave() async {
+    final lan = _session.mode == RoomMode.lan;
+    final hosting = _session.isHost;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('离开房间？'),
-        content: const Text('房主离开后房间保留 5 分钟，期间可以用房间号回来；'
-            '超过 5 分钟或成员全部离开后，服务器会删除房间。'),
+        title: Text(lan && hosting ? '关闭房间？' : '离开房间？'),
+        content: Text(lan
+            ? (hosting
+                ? '关闭后本机房间服务立即停止，所有人都会断开。'
+                : '离开后可以重新输入房主地址进来。')
+            : '房主离开后房间保留 5 分钟，期间可以用房间号回来；'
+                '超过 5 分钟或成员全部离开后，服务器会删除房间。'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -706,7 +1051,7 @@ class _RoomHomePageState extends State<RoomHomePage> {
           TextButton(
               onPressed: () => Navigator.pop(ctx, true),
               style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
-              child: const Text('离开')),
+              child: Text(lan && hosting ? '关闭' : '离开')),
         ],
       ),
     );

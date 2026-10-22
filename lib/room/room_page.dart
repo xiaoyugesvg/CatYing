@@ -361,8 +361,11 @@ class _RoomPageState extends State<RoomPage> {
                     fontWeight: FontWeight.w600,
                     color: _fg)),
             Text(
-              '房间号 ${room.id} · ${_session.members.length} 人'
-              '${_session.connected ? '' : ' · 连接已断开'}',
+              _session.mode == RoomMode.lan
+                  ? '局域网 ${_session.lanAddress} · ${_session.members.length} 人'
+                      '${_session.connected ? '' : ' · 连接已断开'}'
+                  : '房间号 ${room.id} · ${_session.members.length} 人'
+                      '${_session.connected ? '' : ' · 连接已断开'}',
               style: TextStyle(fontSize: AppTheme.fontCaption, color: _sub),
             ),
           ],

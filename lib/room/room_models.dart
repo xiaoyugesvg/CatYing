@@ -198,6 +198,16 @@ class RoomChatMessage {
   /// 本地系统提示（"xx 加入房间"）—— 服务端不下发这类消息，由客户端自己补
   final bool system;
 
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'userId': userId,
+        'userName': userName,
+        'content': content,
+        'type': type,
+        'timestamp': timestamp,
+        if (system) 'system': true,
+      };
+
   factory RoomChatMessage.fromJson(Map<String, dynamic> j) => RoomChatMessage(
         id: '${j['id'] ?? ''}',
         userId: '${j['userId'] ?? ''}',
@@ -205,5 +215,6 @@ class RoomChatMessage {
         content: '${j['content'] ?? ''}',
         type: '${j['type'] ?? 'text'}',
         timestamp: (j['timestamp'] as num?)?.toInt() ?? 0,
+        system: j['system'] == true,
       );
 }

@@ -4,7 +4,20 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
+import 'room_lan_client.dart';
+import 'room_lan_server.dart';
 import 'room_models.dart';
+
+/// 房间的两种连法
+enum RoomMode {
+  /// 连自建的 watch-room-server（可跨公网、有公开房间列表）
+  server,
+
+  /// 局域网：房主手机自己起服务，同一 WiFi 直接连
+  lan;
+
+  String get label => this == RoomMode.server ? '服务器' : '局域网';
+}
 
 /// 播放同步事件（来自服务端，页面据此驱动播放器）
 sealed class RoomPlayEvent {
@@ -55,9 +68,24 @@ class RoomSession extends ChangeNotifier {
   static const _kAuth = 'room.authKey';
   static const _kNickname = 'room.nickname';
   static const _kLastRoom = 'room.lastRoomId';
+  static const _kMode = 'room.mode';
+  static const _kLanPort = 'room.lanPort';
 
   IO.Socket? _socket;
   Timer? _heartbeatTimer;
+
+  /// 局域网模式：本机服务 + 本机 WebSocket 客户端
+  LanRoomServer? _lanServer;
+  LanRoomClient? _lanClient;
+  StreamSubscription<Map<String, dynamic>>? _lanSub;
+  Completer<bool>? _lanWelcome;
+
+  RoomMode mode = RoomMode.server;
+
+  /// 局域网房间地址（房主显示 IP:端口；加入者显示填的地址）
+  String lanAddress = '';
+  List<String> lanIps = const [];
+  int lanPort = LanRoomClient.defaultPort;
 
   String serverUrl = '';
   String authKey = '';
@@ -96,6 +124,9 @@ class RoomSession extends ChangeNotifier {
 
   bool get configured => serverUrl.trim().isNotEmpty;
 
+  /// 本机是不是正在当"局域网房间服务器"
+  bool get lanHosting => _lanServer != null;
+
   Future<void> loadPrefs() async {
     if (_prefsLoaded) return;
     _prefsLoaded = true;
@@ -105,8 +136,26 @@ class RoomSession extends ChangeNotifier {
       authKey = p.getString(_kAuth) ?? '';
       nickname = p.getString(_kNickname) ?? '我';
       lastRoomId = p.getString(_kLastRoom) ?? '';
+      mode = (p.getString(_kMode) ?? '') == 'lan'
+          ? RoomMode.lan
+          : RoomMode.server;
+      lanPort = p.getInt(_kLanPort) ?? LanRoomClient.defaultPort;
     } catch (_) {}
     notifyListeners();
+  }
+
+  /// 切换模式：先把当前房间/连接收干净，再切
+  Future<void> switchMode(RoomMode m) async {
+    if (m == mode) return;
+    await leaveRoom();
+    await _teardownServerSocket();
+    mode = m;
+    error = null;
+    notifyListeners();
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setString(_kMode, m == RoomMode.lan ? 'lan' : 'server');
+    } catch (_) {}
   }
 
   Future<void> saveConfig({required String url, required String key}) async {
@@ -135,6 +184,7 @@ class RoomSession extends ChangeNotifier {
 
   /// 连接（已连上则直接返回 true）
   Future<bool> connect() async {
+    if (mode == RoomMode.lan) return false; // 局域网模式不需要连服务器
     if (_socket?.connected == true) return true;
     final url = serverUrl.trim();
     if (url.isEmpty) {
@@ -241,74 +291,323 @@ class RoomSession extends ChangeNotifier {
   }
 
   void _bindRoomEvents(IO.Socket socket) {
-    socket.on('room:member-joined', (data) {
-      if (data is Map) {
-        final m = RoomMemberInfo.fromJson(data.cast<String, dynamic>());
-        members = [...members.where((e) => e.id != m.id), m];
-        _appendSystem('${m.name} 加入了房间');
+    socket.on('room:member-joined', (data) => _dispatch('room:member-joined', data));
+    socket.on('room:member-left', (data) => _dispatch('room:member-left', data));
+    socket.on('room:deleted', (data) => _dispatch('room:deleted', data));
+    socket.on('play:update', (data) => _dispatch('play:update', data));
+    socket.on('play:change', (data) => _dispatch('play:change', data));
+    socket.on('play:seek', (data) => _dispatch('play:seek', data));
+    socket.on('play:play', (data) => _dispatch('play:play', data));
+    socket.on('play:pause', (data) => _dispatch('play:pause', data));
+    socket.on('state:cleared', (data) => _dispatch('state:cleared', data));
+    socket.on('chat:message', (data) => _dispatch('chat:message', data));
+  }
+
+  /// 两种传输（Socket.IO / 局域网 WS）共用的事件分发
+  void _dispatch(String event, dynamic data) {
+    switch (event) {
+      case 'room:member-joined':
+        if (data is Map) {
+          final m = RoomMemberInfo.fromJson(data.cast<String, dynamic>());
+          members = [...members.where((e) => e.id != m.id), m];
+          _appendSystem('${m.name} 加入了房间');
+          notifyListeners();
+        }
+        break;
+      case 'room:member-left':
+        final id = '$data';
+        final left = members.where((e) => e.id == id).toList();
+        members = members.where((e) => e.id != id).toList();
+        if (left.isNotEmpty) _appendSystem('${left.first.name} 离开了房间');
         notifyListeners();
-      }
-    });
+        break;
+      case 'room:deleted':
+        room = null;
+        members = const [];
+        playState = null;
+        isHost = false;
+        error = '房间已被解散';
+        _emit(const RoomPlayCleared());
+        notifyListeners();
+        break;
+      case 'play:update':
+        if (data is! Map) return;
+        final s = PlayState.fromJson(data.cast<String, dynamic>());
+        playState = s;
+        _emit(RoomPlayUpdated(s));
+        notifyListeners();
+        break;
+      case 'play:change':
+        if (data is! Map) return;
+        final s = PlayState.fromJson(data.cast<String, dynamic>());
+        playState = s;
+        _emit(RoomPlayChanged(s));
+        notifyListeners();
+        break;
+      case 'play:seek':
+        final sec = double.tryParse('$data') ?? 0;
+        _emit(RoomPlaySought(sec));
+        break;
+      case 'play:play':
+        _emit(const RoomPlayToggled(true));
+        break;
+      case 'play:pause':
+        _emit(const RoomPlayToggled(false));
+        break;
+      case 'state:cleared':
+        playState = null;
+        _emit(const RoomPlayCleared());
+        notifyListeners();
+        break;
+      case 'chat:message':
+        if (data is! Map) return;
+        messages = [
+          ...messages,
+          RoomChatMessage.fromJson(data.cast<String, dynamic>()),
+        ];
+        if (messages.length > 300) {
+          messages = messages.sublist(messages.length - 300);
+        }
+        notifyListeners();
+        break;
+    }
+  }
 
-    socket.on('room:member-left', (data) {
-      final id = '$data';
-      final left = members.where((e) => e.id == id).toList();
-      members = members.where((e) => e.id != id).toList();
-      if (left.isNotEmpty) _appendSystem('${left.first.name} 离开了房间');
+  // ── 局域网模式 ───────────────────────────────────────────────
+
+  /// 房主开一个局域网房间（本机起服务）
+  Future<bool> lanHostRoom({
+    required String roomName,
+    String password = '',
+    int port = LanRoomClient.defaultPort,
+  }) async {
+    await _teardownAll();
+    mode = RoomMode.lan;
+    connecting = true;
+    error = null;
+    notifyListeners();
+
+    final server = LanRoomServer(
+      roomName: roomName.trim().isEmpty ? '一起看' : roomName.trim(),
+      hostName: nickname,
+      password: password.trim(),
+      port: port,
+    );
+    try {
+      await server.start();
+    } catch (e) {
+      connecting = false;
+      error = '开房失败：$e（端口 $port 可能被占用）';
       notifyListeners();
-    });
+      return false;
+    }
+    _lanServer = server;
+    lanPort = port;
+    isHost = true;
+    _joinPassword = password.trim();
+    lanIps = await LanRoomServer.localIPv4();
+    lanAddress = '${lanIps.isNotEmpty ? lanIps.first : '127.0.0.1'}:$port';
 
-    socket.on('room:deleted', (_) {
-      room = null;
-      members = const [];
-      playState = null;
-      isHost = false;
-      error = '房间已被解散';
-      _emit(const RoomPlayCleared());
+    // 房主自己的客户端连回环地址：某些路由器不支持 NAT 回环，
+    // 连自己的局域网 IP 会失败，而 127.0.0.1 一定通
+    final ok = await _lanConnect(
+      address: '127.0.0.1:$port',
+      password: password.trim(),
+      hostToken: server.hostToken,
+    );
+    if (!ok) {
+      await server.stop();
+      _lanServer = null;
+      lanIps = const [];
+      lanAddress = '';
+    } else {
+      try {
+        final p = await SharedPreferences.getInstance();
+        await p.setInt(_kLanPort, port);
+      } catch (_) {}
+    }
+    return ok;
+  }
+
+  /// 加入局域网房间
+  Future<bool> lanJoinRoom({
+    required String address,
+    String password = '',
+  }) async {
+    await _teardownAll();
+    mode = RoomMode.lan;
+    connecting = true;
+    isHost = false;
+    error = null;
+    lanAddress = _normalizeAddress(address);
+    notifyListeners();
+    return _lanConnect(address: address, password: password);
+  }
+
+  Future<bool> _lanConnect({
+    required String address,
+    String password = '',
+    String hostToken = '',
+  }) async {
+    final client = LanRoomClient(
+      address: address,
+      name: nickname,
+      password: password,
+      hostToken: hostToken,
+    );
+    _lanClient = client;
+    _lanWelcome = Completer<bool>();
+    _lanSub = client.events.listen(_onLanEvent);
+    try {
+      await client.connect();
+    } catch (e) {
+      connecting = false;
+      error = '连接失败：$e';
+      await _closeLanClient();
       notifyListeners();
-    });
-
-    socket.on('play:update', (data) {
-      if (data is! Map) return;
-      final s = PlayState.fromJson(data.cast<String, dynamic>());
-      playState = s;
-      _emit(RoomPlayUpdated(s));
+      return false;
+    }
+    final ok = await _lanWelcome!.future.timeout(
+      const Duration(seconds: 10),
+      onTimeout: () => false,
+    );
+    if (!ok) {
+      connecting = false;
+      error ??= '连接房间超时：确认双方在同一 WiFi、地址和端口填对';
+      await _closeLanClient();
       notifyListeners();
-    });
+    }
+    return ok;
+  }
 
-    socket.on('play:change', (data) {
-      if (data is! Map) return;
-      final s = PlayState.fromJson(data.cast<String, dynamic>());
-      playState = s;
-      _emit(RoomPlayChanged(s));
-      notifyListeners();
-    });
+  void _onLanEvent(Map<String, dynamic> m) {
+    switch (m['t']) {
+      case 'welcome':
+        _applyLanWelcome(m);
+        _lanWelcome?.complete(true);
+        break;
+      case 'members':
+        final list = m['members'];
+        if (list is List) members = _parseMembers(list);
+        notifyListeners();
+        break;
+      case 'system':
+        _appendSystem('${m['text'] ?? ''}');
+        notifyListeners();
+        break;
+      case 'chat':
+        _dispatch('chat:message', m['message']);
+        break;
+      case 'state':
+        _dispatch('play:update', m['state']);
+        break;
+      case 'change':
+        _dispatch('play:change', m['state']);
+        break;
+      case 'seek':
+        _dispatch('play:seek', m['seconds']);
+        break;
+      case 'play':
+        _dispatch('play:play', null);
+        break;
+      case 'pause':
+        _dispatch('play:pause', null);
+        break;
+      case 'cleared':
+        _dispatch('state:cleared', null);
+        break;
+      case 'error':
+        error = '${m['message'] ?? '房间返回错误'}';
+        connecting = false;
+        _lanWelcome?.complete(false);
+        notifyListeners();
+        break;
+      case 'closed':
+        connected = false;
+        connecting = false;
+        if (room != null) error ??= '与房间的连接已断开';
+        _lanWelcome?.complete(false);
+        notifyListeners();
+        break;
+    }
+  }
 
-    socket.on('play:seek', (data) {
-      final sec = double.tryParse('$data') ?? 0;
-      _emit(RoomPlaySought(sec));
-    });
+  void _applyLanWelcome(Map<String, dynamic> m) {
+    final raw = m['room'];
+    if (raw is! Map) return;
+    final info = RoomInfo.fromJson(raw.cast<String, dynamic>());
+    isHost = m['host'] == true;
+    room = info;
+    members = m['members'] is List ? _parseMembers(m['members'] as List) : const [];
+    final st = m['state'];
+    playState = st is Map
+        ? PlayState.fromJson(st.cast<String, dynamic>())
+        : info.currentState;
+    final hist = m['history'];
+    messages = hist is List
+        ? [
+            for (final e in hist)
+              if (e is Map) RoomChatMessage.fromJson(e.cast<String, dynamic>()),
+          ]
+        : const [];
+    connected = true;
+    connecting = false;
+    error = null;
+    _appendSystem('你进入了房间「${info.name}」');
+    notifyListeners();
+  }
 
-    socket.on('play:play', (_) => _emit(const RoomPlayToggled(true)));
-    socket.on('play:pause', (_) => _emit(const RoomPlayToggled(false)));
-
-    socket.on('state:cleared', (_) {
-      playState = null;
-      _emit(const RoomPlayCleared());
-      notifyListeners();
-    });
-
-    socket.on('chat:message', (data) {
-      if (data is! Map) return;
-      messages = [
-        ...messages,
-        RoomChatMessage.fromJson(data.cast<String, dynamic>()),
+  List<RoomMemberInfo> _parseMembers(List raw) => [
+        for (final e in raw)
+          if (e is Map) RoomMemberInfo.fromJson(e.cast<String, dynamic>()),
       ];
-      if (messages.length > 300) {
-        messages = messages.sublist(messages.length - 300);
+
+  String _normalizeAddress(String input) {
+    var s = input.trim();
+    if (s.contains('://')) {
+      final u = Uri.tryParse(s);
+      if (u != null) {
+        s = u.hasPort ? '${u.host}:${u.port}' : u.host;
       }
-      notifyListeners();
-    });
+    }
+    if (!s.contains(':')) s = '$s:${LanRoomClient.defaultPort}';
+    return s;
+  }
+
+  Future<void> _closeLanClient() async {
+    await _lanSub?.cancel();
+    _lanSub = null;
+    final c = _lanClient;
+    _lanClient = null;
+    await c?.close();
+  }
+
+  /// 断掉当前所有连接（切模式 / 重开房间前调用）
+  Future<void> _teardownAll() async {
+    await _closeLanClient();
+    final server = _lanServer;
+    _lanServer = null;
+    await server?.stop();
+    await _teardownServerSocket();
+    lanIps = const [];
+    lanAddress = '';
+    room = null;
+    members = const [];
+    messages = const [];
+    playState = null;
+    isHost = false;
+    error = null;
+  }
+
+  Future<void> _teardownServerSocket() async {
+    _stopHeartbeat();
+    try {
+      _socket?.dispose();
+    } catch (_) {}
+    _socket = null;
+    _eventsBound = false;
+    connected = false;
+    connecting = false;
   }
 
   void _startHeartbeat() {
@@ -326,6 +625,7 @@ class RoomSession extends ChangeNotifier {
   // ── 大厅 ─────────────────────────────────────────────────────
 
   Future<void> refreshRooms() async {
+    if (mode == RoomMode.lan) return;
     if (await connect() != true) return;
     loadingRooms = true;
     notifyListeners();
@@ -357,6 +657,9 @@ class RoomSession extends ChangeNotifier {
     String password = '',
     bool isPublic = true,
   }) async {
+    if (mode == RoomMode.lan) {
+      return lanHostRoom(roomName: name, password: password, port: lanPort);
+    }
     if (await connect() != true) return false;
     final completer = Completer<bool>();
     _socket?.emitWithAck('room:create', {
@@ -392,6 +695,9 @@ class RoomSession extends ChangeNotifier {
     String password = '',
     bool asOwner = false,
   }) async {
+    if (mode == RoomMode.lan) {
+      return lanJoinRoom(address: roomId, password: password);
+    }
     if (await connect() != true) return false;
     final id = roomId.trim().toUpperCase();
     if (id.isEmpty) {
@@ -464,8 +770,19 @@ class RoomSession extends ChangeNotifier {
   }
 
   Future<void> leaveRoom() async {
-    if (room == null) return;
-    _socket?.emit('room:leave');
+    if (mode == RoomMode.lan) {
+      if (room == null && !lanHosting) return;
+      await _closeLanClient();
+      final server = _lanServer;
+      _lanServer = null;
+      await server?.stop();
+      lanIps = const [];
+      lanAddress = '';
+      connected = false;
+    } else {
+      if (room == null) return;
+      _socket?.emit('room:leave');
+    }
     room = null;
     members = const [];
     messages = const [];
@@ -478,6 +795,7 @@ class RoomSession extends ChangeNotifier {
 
   /// 断线重连后自动回到原房间（房主凭 token 恢复身份）
   Future<void> rejoin() async {
+    if (mode == RoomMode.lan) return;
     final id = lastRoomId;
     if (id.isEmpty || room != null) return;
     await joinRoom(
@@ -492,37 +810,61 @@ class RoomSession extends ChangeNotifier {
   void sendChat(String text) {
     final t = text.trim();
     if (t.isEmpty || room == null) return;
-    _socket?.emit('chat:message', {'content': t, 'type': 'text'});
+    if (mode == RoomMode.lan) {
+      _lanClient?.send({'t': 'chat', 'text': t});
+    } else {
+      _socket?.emit('chat:message', {'content': t, 'type': 'text'});
+    }
   }
 
   /// 房主：定时广播完整状态
   void broadcastPlay(PlayState state) {
     if (!isHost || room == null) return;
     playState = state;
-    _socket?.emit('play:update', state.toJson());
+    if (mode == RoomMode.lan) {
+      _lanClient?.send({'t': 'state', 'state': state.toJson()});
+    } else {
+      _socket?.emit('play:update', state.toJson());
+    }
   }
 
   /// 房主：换片 / 切集
   void changePlay(PlayState state) {
     if (!isHost || room == null) return;
     playState = state;
-    _socket?.emit('play:change', state.toJson());
+    if (mode == RoomMode.lan) {
+      _lanClient?.send({'t': 'change', 'state': state.toJson()});
+    } else {
+      _socket?.emit('play:change', state.toJson());
+    }
     notifyListeners();
   }
 
   void sendSeek(double seconds) {
     if (room == null) return;
-    _socket?.emit('play:seek', seconds);
+    if (mode == RoomMode.lan) {
+      _lanClient?.send({'t': 'seek', 'seconds': seconds});
+    } else {
+      _socket?.emit('play:seek', seconds);
+    }
   }
 
   void sendPlay() {
     if (room == null) return;
-    _socket?.emit('play:play');
+    if (mode == RoomMode.lan) {
+      _lanClient?.send({'t': 'play'});
+    } else {
+      _socket?.emit('play:play');
+    }
   }
 
   void sendPause() {
     if (room == null) return;
-    _socket?.emit('play:pause');
+    if (mode == RoomMode.lan) {
+      _lanClient?.send({'t': 'pause'});
+    } else {
+      _socket?.emit('play:pause');
+    }
   }
 
   /// 房主：清空片源
@@ -530,7 +872,11 @@ class RoomSession extends ChangeNotifier {
     if (!isHost || room == null) return;
     playState = null;
     notifyListeners();
-    _socket?.emitWithAck('state:clear', null, ack: (_) {});
+    if (mode == RoomMode.lan) {
+      _lanClient?.send({'t': 'clear'});
+    } else {
+      _socket?.emitWithAck('state:clear', null, ack: (_) {});
+    }
   }
 
   // ── 工具 ─────────────────────────────────────────────────────
@@ -556,6 +902,8 @@ class RoomSession extends ChangeNotifier {
   @override
   void dispose() {
     _stopHeartbeat();
+    unawaited(_closeLanClient());
+    unawaited(_lanServer?.stop() ?? Future<void>.value());
     try {
       _socket?.dispose();
     } catch (_) {}
