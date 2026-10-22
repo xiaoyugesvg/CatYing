@@ -70,7 +70,8 @@ class RexService {
     for (final m in list) {
       final i = modules.indexWhere((e) => e.url == m.url);
       if (i >= 0) {
-        modules[i] = m;
+        // 重新导入同一地址：保留用户的启用状态
+        modules[i] = m.copyWith(enabled: modules[i].enabled);
       } else {
         modules.add(m);
       }
@@ -81,6 +82,53 @@ class RexService {
   Future<void> remove(String url) async {
     modules.removeWhere((e) => e.url == url);
     await _persist();
+  }
+
+  /// REX 首页只显示启用中的模块
+  List<RexModule> get enabledModules =>
+      modules.where((e) => e.enabled).toList();
+
+  Future<void> setEnabled(String url, bool enabled) async {
+    final i = modules.indexWhere((e) => e.url == url);
+    if (i < 0) return;
+    modules[i] = modules[i].copyWith(enabled: enabled);
+    await _persist();
+  }
+
+  /// 上移 / 下移（delta = -1 / +1），越界忽略
+  Future<void> move(String url, int delta) async {
+    final i = modules.indexWhere((e) => e.url == url);
+    final j = i + delta;
+    if (i < 0 || j < 0 || j >= modules.length) return;
+    final t = modules[i];
+    modules[i] = modules[j];
+    modules[j] = t;
+    await _persist();
+  }
+
+  /// 改模块地址：重新拉元数据后替换（保留启用状态与顺序）
+  Future<void> updateUrl(String oldUrl, String newUrl) async {
+    final i = modules.indexWhere((e) => e.url == oldUrl);
+    if (i < 0) return;
+    final fresh = await loadModule(newUrl.trim());
+    modules[i] = fresh.copyWith(enabled: modules[i].enabled);
+    await _persist();
+  }
+
+  /// 刷新全部模块的元数据；返回失败明细
+  Future<List<String>> refreshAll() async {
+    final errors = <String>[];
+    for (var i = 0; i < modules.length; i++) {
+      final m = modules[i];
+      try {
+        final fresh = await loadModule(m.url);
+        modules[i] = fresh.copyWith(enabled: m.enabled);
+      } catch (e) {
+        errors.add('${m.title}：$e');
+      }
+    }
+    await _persist();
+    return errors;
   }
 
   Future<void> clearCache(RexModule m) async {

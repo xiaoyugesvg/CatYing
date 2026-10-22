@@ -97,6 +97,7 @@ class RexModule {
     this.site = '',
     this.functions = const [],
     this.functionNames = const [],
+    this.enabled = true,
   });
 
   /// 模块 raw 地址（.js 内容）
@@ -113,6 +114,31 @@ class RexModule {
 
   /// 模块实际导出的可调用函数名
   final List<String> functionNames;
+
+  /// 是否显示在「REX」首页（订阅管理里可开关）
+  final bool enabled;
+
+  RexModule copyWith({
+    String? url,
+    String? title,
+    String? description,
+    String? version,
+    bool? enabled,
+    List<RexFunction>? functions,
+    List<String>? functionNames,
+  }) =>
+      RexModule(
+        url: url ?? this.url,
+        id: id,
+        title: title ?? this.title,
+        description: description ?? this.description,
+        author: author,
+        version: version ?? this.version,
+        site: site,
+        functions: functions ?? this.functions,
+        functionNames: functionNames ?? this.functionNames,
+        enabled: enabled ?? this.enabled,
+      );
 
   List<RexFunction> get listFunctions =>
       functions.where((f) => !f.isStream && f.functionName.isNotEmpty).toList();
@@ -133,6 +159,7 @@ class RexModule {
         'site': site,
         'functions': functions.map((e) => e.toJson()).toList(),
         'functionNames': functionNames,
+        'enabled': enabled,
       };
 
   factory RexModule.fromJson(Map<String, dynamic> j) => RexModule(
@@ -152,6 +179,7 @@ class RexModule {
           if (j['functionNames'] is List)
             for (final e in j['functionNames'] as List) '$e',
         ],
+        enabled: j['enabled'] != false,
       );
 }
 
