@@ -8,6 +8,7 @@ import '../../models/movie_sort.dart';
 import '../../models/source_bean.dart';
 import '../../services/api_config.dart';
 import '../../services/source_service.dart';
+import 'drama_banner.dart';
 import 'drama_settings.dart';
 import 'generic_source_page.dart';
 
@@ -209,6 +210,10 @@ class _DramaPageState extends State<DramaPage> {
     );
   }
 
+  /// 顶部幻灯片：只取有封面的条目，最多 8 张
+  List<Video> get _bannerVideos =>
+      _videos.where((v) => v.pic.trim().isNotEmpty).take(8).toList();
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -362,6 +367,10 @@ class _DramaPageState extends State<DramaPage> {
                   },
                 ),
               ),
+            ),
+          if (_bannerVideos.isNotEmpty)
+            SliverToBoxAdapter(
+              child: DramaBanner(videos: _bannerVideos, isDark: isDark),
             ),
           if (_error != null)
             SliverToBoxAdapter(
