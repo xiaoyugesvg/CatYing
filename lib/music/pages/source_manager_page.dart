@@ -9,6 +9,7 @@ import '../models/third_party_source.dart';
 import '../models/models.dart';
 import '../services/music_api.dart';
 import '../services/settings_store.dart';
+import '../services/source_health_service.dart';
 import '../services/source_import_parser.dart';
 import '../services/unblock_service.dart';
 import '../theme/music_theme.dart';
@@ -87,7 +88,19 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
   bool _busy = false;
 
   /// 列表类型筛选：'' = 全部 / 'lx' = 洛雪音乐源 / 'musicfree' = MusicFree 源
+  /// / 'failed' = 仅看体检失效
   String _kindFilter = '';
+
+  /// 体检进度：_checking 为 true 时画进度条
+  int _checkDone = 0;
+  int _checkTotal = 0;
+  bool _checking = false;
+
+  @override
+  void initState() {
+    super.initState();
+    SourceHealthService.instance.ensureLoaded();
+  }
 
   @override
   void dispose() {
@@ -103,6 +116,7 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
   @override
   Widget build(BuildContext context) {
     final store = ThirdPartySourceStore.instance;
+    final health = SourceHealthService.instance;
     return Theme(
       data: MusicTheme.themeData(),
       child: Scaffold(
@@ -114,7 +128,29 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
           title: Text('音乐源',
               style:
                   TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
+          bottom: _checking
+              ? PreferredSize(
+                  preferredSize: const Size.fromHeight(2),
+                  child: LinearProgressIndicator(
+                    minHeight: 2,
+                    value: _checkTotal == 0 ? null : _checkDone / _checkTotal,
+                    backgroundColor: Colors.transparent,
+                    color: MusicTheme.tint,
+                  ),
+                )
+              : null,
           actions: [
+            IconButton(
+              tooltip: _checking
+                  ? '体检中 $_checkDone/$_checkTotal'
+                  : '音源体检（批量测活）',
+              icon: Icon(
+                  _checking
+                      ? Icons.hourglass_top_rounded
+                      : Icons.monitor_heart_outlined,
+                  color: MusicTheme.tint),
+              onPressed: _checking ? null : _runHealth,
+            ),
             IconButton(
               tooltip: 'LX 引擎自检',
               icon: Icon(Icons.verified_outlined, color: MusicTheme.tint),
@@ -130,14 +166,17 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
             ),
           ],
         ),
-        body: ValueListenableBuilder<int>(
-          valueListenable: store.revision,
-          builder: (context, _, __) {
+        body: AnimatedBuilder(
+          animation: Listenable.merge([store.revision, health.revision]),
+          builder: (context, _) {
             final all = store.all;
+            final failed = all.where((s) => health.isFailed(s.id)).toList();
             // 类型筛选：'' = 全部 / 'lx' = 洛雪 / 'musicfree' = MusicFree
+            // / 'failed' = 仅看体检失效
             final list = _kindFilter.isEmpty
                 ? all
                 : all.where((s) {
+                    if (_kindFilter == 'failed') return health.isFailed(s.id);
                     if (_kindFilter == 'musicfree') return s.isMusicFree;
                     // 洛雪一侧包含 LX 脚本 + 模板法（都是洛雪生态）
                     return !s.isMusicFree;
@@ -151,7 +190,10 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                 // ── 两个**独立**的导入入口（洛雪 / MusicFree）────────
                 _sourceCard(context, _CardKind.lx),
                 _sourceCard(context, _CardKind.musicFree),
-                _filterRow(all.length, lxCount, mfCount),
+                _filterRow(all.length, lxCount, mfCount, failed.length),
+                if (_checking) _checkBanner(),
+                if (!_checking && failed.isNotEmpty)
+                  _failedBanner(failed.where((s) => s.enabled).length),
                 _listHeader(list.length),
                 if (list.isEmpty)
                   _emptyHint(all.isEmpty)
@@ -164,6 +206,96 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
       ),
     );
   }
+
+  /// 跑一轮体检：只测**已启用**的源（禁用的本来就不参与播放）
+  Future<void> _runHealth() async {
+    final health = SourceHealthService.instance;
+    if (health.checking) {
+      AppToast.show('正在体检中…', '');
+      return;
+    }
+    final targets =
+        ThirdPartySourceStore.instance.all.where((s) => s.enabled).toList();
+    if (targets.isEmpty) {
+      AppToast.show('没有已启用的音源', '');
+      return;
+    }
+    setState(() {
+      _checking = true;
+      _checkDone = 0;
+      _checkTotal = targets.length;
+    });
+    final ok = await health.checkAll(targets, onProgress: (d, t) {
+      if (mounted) setState(() => _checkDone = d);
+    });
+    if (!mounted) return;
+    setState(() => _checking = false);
+    AppToast.show('体检完成：$ok/${targets.length} 可用', '');
+  }
+
+  Widget _checkBanner() => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 13,
+              height: 13,
+              child: CircularProgressIndicator(
+                  strokeWidth: 1.6, color: MusicTheme.tint),
+            ),
+            const SizedBox(width: 8),
+            Text('正在测活 $_checkDone/$_checkTotal（每源最多 15 秒）',
+                style: TextStyle(
+                    color: MusicTheme.secondary,
+                    fontSize: AppTheme.fontCaption)),
+          ],
+        ),
+      );
+
+  /// 有失效源时给一条「一键禁用」的操作条
+  Widget _failedBanner(int enabledFailed) => Container(
+        margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+        decoration: BoxDecoration(
+          color: Colors.redAccent.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: Colors.redAccent.withValues(alpha: 0.35), width: 0.8),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.error_outline,
+                size: 16, color: Colors.redAccent),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                enabledFailed > 0
+                    ? '$enabledFailed 个已启用音源体检失效'
+                    : '失效音源都已被禁用',
+                style: TextStyle(
+                    color: MusicTheme.label,
+                    fontSize: AppTheme.fontFootnote),
+              ),
+            ),
+            if (enabledFailed > 0)
+              TextButton(
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.redAccent,
+                  minimumSize: const Size(0, 32),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  visualDensity: VisualDensity.compact,
+                ),
+                onPressed: () async {
+                  final n = await SourceHealthService.instance.disableFailed();
+                  if (!context.mounted) return;
+                  AppToast.show('已禁用 $n 个失效音源', '');
+                },
+                child: const Text('一键禁用',
+                    style: TextStyle(fontSize: AppTheme.fontFootnote)),
+              ),
+          ],
+        ),
+      );
 
   // ── 顶部说明：一句话讲清"有两个入口、为什么分两张卡" ──────────
   Widget _intro() => Padding(
@@ -340,16 +472,21 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
         ),
       );
 
-  /// 列表类型筛选（全部 / 洛雪 / MusicFree）
-  Widget _filterRow(int all, int lx, int mf) => Padding(
+  /// 列表筛选（全部 / 洛雪 / MusicFree / 仅看失效）
+  ///
+  /// 用 Wrap 而不是 Row：四个 chip 带数字，窄屏会溢出
+  Widget _filterRow(int all, int lx, int mf, int failed) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-        child: Row(
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
           children: [
             _filterChip('全部', '', all, MusicTheme.tint),
-            const SizedBox(width: 8),
             _filterChip('洛雪音乐源', 'lx', lx, _CardKind.lx.accent),
-            const SizedBox(width: 8),
             _filterChip('MusicFree', 'musicfree', mf, _CardKind.musicFree.accent),
+            // 只有体检过才出现 —— 没数据时这个筛选没有意义
+            if (SourceHealthService.instance.hasResults)
+              _filterChip('失效', 'failed', failed, Colors.redAccent),
           ],
         ),
       );
@@ -609,7 +746,9 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
             Text(
               storeEmpty
                   ? '还没有音乐源。\n用上面两张卡片导入后，播放时内置接口拿不到地址会自动尝试这里。'
-                  : '这个分类下还没有音乐源。\n点上面的「全部」看所有源。',
+                  : (_kindFilter == 'failed'
+                      ? '没有体检失效的音源。\n点上面的「全部」看所有源。'
+                      : '这个分类下还没有音乐源。\n点上面的「全部」看所有源。'),
               textAlign: TextAlign.center,
               style: TextStyle(
                   color: MusicTheme.secondary,
@@ -646,6 +785,9 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
             ? 'LX 脚本 · ${(s.script ?? '').length} 字符'
             : (s.template.isEmpty ? '（无模板）' : s.template));
     final descExtra = s.headers.isEmpty ? '' : ' · ${s.headers.length} 个请求头';
+    // 体检结果：失效 → 整卡描红 + 红标签；可用 → 绿标签带耗时
+    final h = SourceHealthService.instance.of(s.id);
+    final failed = h != null && !h.ok;
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
       padding: const EdgeInsets.fromLTRB(14, 12, 10, 4),
@@ -653,7 +795,10 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
         color: MusicTheme.card,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-            color: MusicTheme.label.withValues(alpha: 0.06), width: 0.5),
+            color: failed
+                ? Colors.redAccent.withValues(alpha: 0.55)
+                : MusicTheme.label.withValues(alpha: 0.06),
+            width: failed ? 1.0 : 0.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -669,11 +814,19 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                            color: MusicTheme.label,
+                            color: failed ? Colors.redAccent : MusicTheme.label,
                             fontSize: AppTheme.fontHeadline,
                             fontWeight: FontWeight.w600)),
                     const SizedBox(height: 4),
-                    _tag(tagText),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        _tag(tagText),
+                        if (h != null) _healthTag(h),
+                      ],
+                    ),
                     const SizedBox(height: 4),
                     Text('$desc$descExtra',
                         maxLines: 1,
@@ -681,6 +834,16 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                         style: TextStyle(
                             color: MusicTheme.secondary,
                             fontSize: AppTheme.fontFootnote)),
+                    if (failed && h.message.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(h.message,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              color: Colors.redAccent.withValues(alpha: 0.85),
+                              fontSize: AppTheme.fontCaption,
+                              height: 1.35)),
+                    ],
                   ],
                 ),
               ),
@@ -730,6 +893,31 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                 fontSize: AppTheme.fontCaption,
                 fontWeight: FontWeight.w600)),
       );
+
+  /// 体检状态标签：可用（绿·耗时）/ 失效（红）
+  Widget _healthTag(SourceHealth h) {
+    final color = h.ok ? MusicTheme.sage : Colors.redAccent;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.13),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(h.ok ? Icons.check_circle_outline : Icons.error_outline,
+              size: 11, color: color),
+          const SizedBox(width: 3),
+          Text(h.ok ? '可用 ${h.ms}ms' : '体检失效',
+              style: TextStyle(
+                  color: color,
+                  fontSize: AppTheme.fontCaption,
+                  fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
 
   Widget _action(IconData icon, String label, VoidCallback onTap) =>
       TextButton.icon(
@@ -1081,7 +1269,16 @@ Future<void> testSource(BuildContext context, ThirdPartySource s) async {
     duration: const Duration(seconds: 1),
   ));
 
+  final sw = Stopwatch()..start();
   final r = await UnblockService.instance.testOne(s, probe);
+  sw.stop();
+  // 顺手记进体检结果：列表卡片立刻能看出这个源现在是红是绿
+  SourceHealthService.instance.record(
+    s.id,
+    ok: r.ok,
+    ms: sw.elapsedMilliseconds,
+    message: r.ok ? '' : (r.error.isEmpty ? '未返回播放地址' : r.error),
+  );
   if (!context.mounted) return;
 
   await showDialog<void>(
