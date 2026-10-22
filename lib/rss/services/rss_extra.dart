@@ -161,20 +161,9 @@ class RssExtra {
 
   /// 源配了 `searchUrl` 就返回替换好的地址，否则返回空串。
   ///
-  /// 支持 Legado 常见占位符：`{{key}}` / `{{keyword}}` / `{{searchKey}}`；
-  /// 也支持地址后面跟 `,{...}` 的请求描述（交给 fetchArticles 的
-  /// `splitRequestSpec` 处理，这里只做关键字替换）。
-  static String searchUrlFor(RssSource s, String keyword) {
-    final tpl = s.searchUrl.trim();
-    if (tpl.isEmpty) return '';
-    final kw = Uri.encodeComponent(keyword.trim());
-    return tpl
-        .replaceAll('{{key}}', kw)
-        .replaceAll('{{keyword}}', kw)
-        .replaceAll('{{searchKey}}', kw)
-        .replaceAll('{{searchPage}}', '1')
-        .replaceAll('{{page}}', '1');
-  }
+  /// 真正的求值在 [RssReader.searchUrlFor]（支持模板占位符 + `<js>` / `@js:`）。
+  static String searchUrlFor(RssSource s, String keyword) =>
+      RssReader.searchUrlFor(s, keyword);
 
   /// 源内搜索：有 `searchUrl` 走远端，没有返回 null（调用方退回标题过滤）。
   static Future<List<RssArticle>?> search(

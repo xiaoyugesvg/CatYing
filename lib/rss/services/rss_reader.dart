@@ -411,6 +411,43 @@ class RssReader {
   /// 纯内存（随进程消失），清掉只影响"下次要重新抓一次"，不动任何订阅数据。
   static void clearBodyCache() => _bodyCache.clear();
 
+  /// 本进程内已做过 `loginUrl` 预访问的源（Legado 的登录态检查）
+  static final Set<String> _loginPreflighted = {};
+
+  /// `searchUrl` 求值（2026-10-22，Legado 兼容）
+  ///
+  /// 支持两类写法：
+  ///   · 模板：`https://site/search?q={{key}}`（`{{key}}`/`{{keyword}}`/
+  ///     `{{searchKey}}`/`{{searchPage}}` 都会被替换，关键字自动 URL 编码）
+  ///   · 脚本：`<js>…</js>` 或 `@js:`，由源自己的 jsLib 生成最终地址
+  ///     （返回字符串可以直接带 `,{"method":"POST","body":"…"}` 描述）
+  static String searchUrlFor(RssSource source, String keyword) {
+    final tpl = source.searchUrl.trim();
+    if (tpl.isEmpty) return '';
+    final kw = Uri.encodeComponent(keyword.trim());
+    var s = tpl
+        .replaceAll('{{key}}', kw)
+        .replaceAll('{{keyword}}', kw)
+        .replaceAll('{{searchKey}}', kw)
+        .replaceAll('{{searchPage}}', '1')
+        .replaceAll('{{page}}', '1');
+    var script = '';
+    if (s.startsWith('@js:')) {
+      script = s;
+    } else if (s.startsWith('<js>') && s.endsWith('</js>')) {
+      script = '@js:${s.substring(4, s.length - 5)}';
+    }
+    if (script.isNotEmpty) {
+      try {
+        final r = _ruleFor(source, '', source.url).getString(script).trim();
+        if (r.isNotEmpty) s = r;
+      } catch (_) {
+        // JS 出错就退回原串（大概率请求失败，但至少把错误暴露出来）
+      }
+    }
+    return s;
+  }
+
   /// 取响应体：命中缓存就直接用（仅当 `cacheFirst` 且未强制刷新），否则抓取并回填。
   static Future<String> _body(
     RssSource source,
@@ -786,8 +823,27 @@ class RssReader {
           );
         }
       }
+      // 正文多页（Legado 兼容，2026-10-22）：页面里有明确的「下一页」链接时
+      // 继续抓并拼接，最多再抓 3 页（防死循环 / 误把列表页翻到底）。
+      var text = extractArticleText(body);
+      var pages = 0;
+      var next = _nextContentUrl(body, article.link);
+      while (next != null && pages < 3) {
+        pages++;
+        try {
+          final nb = await _body(source, next);
+          final more = extractArticleText(nb);
+          if (more.trim().isEmpty) break;
+          text = '$text\n\n$more';
+          final nn = _nextContentUrl(nb, next);
+          if (nn == null || nn == next) break;
+          next = nn;
+        } catch (_) {
+          break;
+        }
+      }
       return (
-        text: extractArticleText(body),
+        text: text,
         image: _firstImage(body, article.link),
         isHtml: false,
         imageCount: imageCount,
@@ -800,6 +856,42 @@ class RssReader {
         imageCount: 0,
       );
     }
+  }
+
+  /// 正文页的「下一页」地址（正文分页用）。
+  ///
+  /// 只认**明确的翻页语义**：`rel=next`，或文本恰好是「下一页 / 下页 / next」
+  /// （允许带 » › … 之类装饰）；且必须与原页同域，避免把"相关推荐"当成下一页。
+  static String? _nextContentUrl(String html, String pageUrl) {
+    try {
+      final doc = html_parser.parse(html);
+      final host = Uri.tryParse(pageUrl)?.host ?? '';
+      for (final a in doc.querySelectorAll('a[href]')) {
+        final href = (a.attributes['href'] ?? '').trim();
+        if (href.isEmpty ||
+            href.startsWith('#') ||
+            href.toLowerCase().startsWith('javascript')) {
+          continue;
+        }
+        final rel = (a.attributes['rel'] ?? '').toLowerCase();
+        final t = a.text
+            .trim()
+            .toLowerCase()
+            .replaceAll(RegExp(r'[\s»›…\.\-—>]+'), '');
+        final isNext = rel.split(RegExp(r'\s+')).contains('next') ||
+            t == '下一页' ||
+            t == '下页' ||
+            t == '下一頁' ||
+            t == 'next';
+        if (!isNext) continue;
+        final abs = _absUrl(href, pageUrl);
+        if (abs.isEmpty || abs == pageUrl) continue;
+        final h = Uri.tryParse(abs)?.host ?? '';
+        if (host.isNotEmpty && h.isNotEmpty && h != host) continue;
+        return abs;
+      }
+    } catch (_) {}
+    return null;
   }
 
   /// 正文页里的图片数量（图集判定用）。
@@ -1004,6 +1096,21 @@ class RssReader {
     }
     final m = method.trim().isEmpty ? 'GET' : method.trim().toUpperCase();
     final bodyText = postBody ?? '';
+    // ── `loginUrl` 登录态预访问（Legado 兼容，2026-10-22）─────────────
+    // 不少订阅源必须**先访问一次登录/校验地址**才会下发会话 Cookie
+    // （legado 的 loginUrl 就是干这个的）。这里每个源每进程只做一次，
+    // 失败不阻塞主请求（有的源登录页本身就会 4xx）。
+    final loginUrl = source.loginUrl.trim();
+    if (loginUrl.isNotEmpty) {
+      final lk = '${source.id}|$loginUrl';
+      if (_loginPreflighted.add(lk)) {
+        try {
+          await _get(loginUrl, source);
+        } catch (_) {
+          // 忽略：预访问失败时仍尝试正常抓取
+        }
+      }
+    }
     // 站点常见的防盗链判断：没有 Referer 直接 403（用户 2026-10-20 截图里的
     // DioException 403 就是这一类）。补一个同源 Referer。
     headers.putIfAbsent('Referer', () => _originOf(url));
