@@ -171,18 +171,26 @@ class _RoomPageState extends State<RoomPage> {
       _open(s);
       return;
     }
+    var applied = false;
     if (p.state.playing != s.isPlaying) {
       if (s.isPlaying) {
         p.play();
       } else {
         p.pause();
       }
+      applied = true;
     }
     final local = p.state.position.inMilliseconds / 1000;
     if ((local - s.currentTime).abs() > 2.5) {
       p.seek(Duration(milliseconds: (s.currentTime * 1000).round()));
+      applied = true;
     }
-    // 对齐后刷新基准，避免下一轮轮询把"刚跟随的动作"当成本地操作再发回去
+    // 对齐后刷新基准，避免下一轮轮询把"刚跟随的动作"当成本地操作再发回去。
+    // ⚠️ 还需要短暂静音：慢内核/慢网络下 position/playing 的本地回调会比
+    //    seek/play 晚几百毫秒，只刷新基准仍可能把**旧进度**当成"用户拖了进度"
+    //    再广播回去，形成 1~2 轮来回拉锯（画面抖动）。900ms < 2s 心跳，
+    //    不会挡住用户自己的操作。
+    if (applied) _suppress(900);
     _lastPlaying = s.isPlaying;
     _lastPos = s.currentTime;
     _lastPosAt = DateTime.now();
@@ -193,6 +201,8 @@ class _RoomPageState extends State<RoomPage> {
     if (p == null) return;
     if ((p.state.position.inMilliseconds / 1000 - seconds).abs() < 0.8) return;
     p.seek(Duration(milliseconds: (seconds * 1000).round()));
+    // 同 _applyState：等本地 position 追上后再恢复变化检测，避免回环
+    _suppress(900);
     _lastPos = seconds;
     _lastPosAt = DateTime.now();
   }
@@ -205,6 +215,7 @@ class _RoomPageState extends State<RoomPage> {
     } else {
       p.pause();
     }
+    _suppress(600);
     _lastPlaying = playing;
     _lastPos = p.state.position.inMilliseconds / 1000;
     _lastPosAt = DateTime.now();

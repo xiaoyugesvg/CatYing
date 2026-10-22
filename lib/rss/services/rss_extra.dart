@@ -165,20 +165,29 @@ class RssExtra {
   static String searchUrlFor(RssSource s, String keyword) =>
       RssReader.searchUrlFor(s, keyword);
 
-  /// 源内搜索：有 `searchUrl` 走远端，没有返回 null（调用方退回标题过滤）。
+  /// 源内搜索：有 `searchUrl` 走远端；**远端不可用/无结果时返回 null**，
+  /// 调用方据此退回"当前列表标题过滤"。
   static Future<List<RssArticle>?> search(
     RssSource s,
     String keyword,
   ) async {
     final url = searchUrlFor(s, keyword);
     if (url.isEmpty) return null;
-    final res = await RssReader.fetchArticles(
-      s,
-      channel: RssChannel('搜索', url),
-      page: 1,
-      ignoreCache: true,
-    );
-    return res.articles;
+    try {
+      final res = await RssReader.fetchArticles(
+        s,
+        channel: RssChannel('搜索', url),
+        page: 1,
+        ignoreCache: true,
+      );
+      // 站点型（返回 HTML 外壳）/ 被拦 / 真的没结果 → 交给调用方本地过滤，
+      // 而不是让页面直接显示"没搜到"（契约见方法头注释）
+      if (res.siteLike || res.articles.isEmpty) return null;
+      return res.articles;
+    } catch (_) {
+      // 403 / 超时 / 解析失败同理：退回本地标题过滤
+      return null;
+    }
   }
 
   // ── 批量刷新 ─────────────────────────────────────────────

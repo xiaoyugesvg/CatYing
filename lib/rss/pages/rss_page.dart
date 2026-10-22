@@ -585,10 +585,26 @@ class _RssPageState extends State<RssPage> {
     try {
       final list = await RssExtra.search(src, key);
       if (!mounted) return;
+      if (list == null) {
+        // 源内搜索不可用（站点型 / 403 / 无结果）→ 退回当前列表标题过滤，
+        // 与"源没配 searchUrl"那条分支保持一致
+        final old = _preSearch ??= List<RssArticle>.from(_articles);
+        final hit = old
+            .where((a) =>
+                a.title.contains(key) || a.description.contains(key))
+            .toList();
+        setState(() {
+          _searchKw = key;
+          _articles = hit;
+          _loading = false;
+          _error = hit.isEmpty ? '当前列表里没有匹配「$key」的文章' : '';
+        });
+        return;
+      }
       setState(() {
-        _articles = list ?? const [];
+        _articles = list;
         _loading = false;
-        _error = (_articles.isEmpty) ? '没搜到「$key」' : '';
+        _error = list.isEmpty ? '没搜到「$key」' : '';
       });
     } catch (e) {
       if (!mounted) return;

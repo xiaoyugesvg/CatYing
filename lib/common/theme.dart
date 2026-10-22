@@ -43,7 +43,12 @@ class AppTheme {
   /// 避免其它老代码突然找不到 `PlayerPrefs.instance.fontScale`。
   static final ValueNotifier<double> fontScale = ValueNotifier(1.0);
 
-  static double fs(double base) => (base * fontScale.value).clamp(9.0, 40.0);
+  /// 全局字号缩放。
+  ///
+  /// 上限必须 ≥ 最大字号 × 最大缩放：`fontDisplay(48) × 1.30 = 62.4`，
+  /// 原来 clamp 到 40 会把大标题砍回去（放大模式下"大标题不再放大"）。
+  /// 72 足够覆盖当前所有字号档位，下限 9 保证小字不糊。
+  static double fs(double base) => (base * fontScale.value).clamp(9.0, 72.0);
 
   /// 启动时从持久化读字号缩放（原 PlayerPrefs.load 里那行搬过来）
   static Future<void> loadFontScale() async {
@@ -660,6 +665,13 @@ class AppTheme {
             fontSize: fontBody,
             fontWeight: FontWeight.w600,
           ),
+          // 与浅色主题保持一致：同一档阴影 + **中性**按压反馈。
+          // 不配 overlayColor 时深色下会走 Material 默认的主题色叠加，
+          // 导致深浅两套的按压手感/观感不同。
+          elevation: 1,
+          shadowColor: Colors.black.withValues(alpha: _light ? 0.12 : 0.22),
+          overlayColor:
+              (_light ? Colors.black : Colors.white).withValues(alpha: 0.08),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
@@ -672,6 +684,8 @@ class AppTheme {
             fontSize: fontBody,
             fontWeight: FontWeight.w600,
           ),
+          overlayColor:
+              accentColor.withValues(alpha: _light ? 0.08 : 0.12),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
@@ -682,6 +696,8 @@ class AppTheme {
           // 保持紧凑：TextButton 大量用在对话框/设置行里
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           textStyle: const TextStyle(fontSize: fontBody),
+          overlayColor:
+              accentColor.withValues(alpha: _light ? 0.08 : 0.12),
         ),
       ),
       // SnackBar 统一外观（与顶部气泡 AppToast 同一种视觉）——

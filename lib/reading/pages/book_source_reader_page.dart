@@ -3382,10 +3382,16 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   // ── 呼出面板：双击 或 双指单击（2026-10-22 用户拍板）──────────────
   // 全部走 Listener 的**原始指针流**，不进手势竞技场：
   //   正文里的 long-press / 滚动 / PageView 识别器抢不到，单指双指都稳定
-  // · 双击：两次"单击候选"间隔 ≤300ms、位移 ≤60 ⇒ 开合面板，并取消第一击的翻页
+  // · 双击：两次"单击候选"间隔 ≤[_tapWindowMs]、位移 ≤60 ⇒ 开合面板，并取消第一击的翻页
   // · 双指：两指同时按着且各自都是轻点（≤400ms、位移 ≤22）⇒ 开合面板（只触发一次）
-  // · 单击：延迟 320ms（> 双击窗口 300ms，不会"先翻页又弹面板"）后翻页 / 收面板
-  // · 单击不再呼出面板 —— 双击/双指专属，避免互相打架
+  // · 单击：延迟 [_tapWindowMs] 后翻页 / 收面板；单击不再呼出面板
+  //
+  // ⚠️ 双击窗口与单击延迟**必须是同一个值**：
+  //   · 延迟 < 窗口 → 第一击先翻页、第二击又弹面板（"翻页 + 呼出"）
+  //   · 延迟 > 窗口 → 中间那段（窗口~延迟）的"慢双击"被拆成两次单击（盲区）
+  //   相等时：窗口内的第二击一定会走双击分支并 cancel 第一击的 timer，
+  //   所以不会出现"一次双击翻两页"；超过窗口的两次点击本来就是两次单击。
+  static const int _tapWindowMs = 320;
   final Map<int, ({Offset pos, DateTime at})> _ptrs = {};
   bool _twoFingerSeq = false;
   bool _firedTwoFinger = false;
@@ -3442,7 +3448,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     final lastPos = _lastTapPos;
     if (lastAt != null &&
         lastPos != null &&
-        now.difference(lastAt).inMilliseconds <= 300 &&
+        now.difference(lastAt).inMilliseconds <= _tapWindowMs &&
         (e.position - lastPos).distance <= 60) {
       _lastTapAt = null;
       _lastTapPos = null;
@@ -3453,7 +3459,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     _lastTapAt = now;
     _lastTapPos = e.position;
     _tapTimer?.cancel();
-    _tapTimer = Timer(const Duration(milliseconds: 320), () {
+    _tapTimer = Timer(const Duration(milliseconds: _tapWindowMs), () {
       _lastTapAt = null;
       _lastTapPos = null;
       _handleSingleTap(e.position);
@@ -3478,7 +3484,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     setState(() => _showBar = !_showBar);
   }
 
-  /// 单击动作（延迟 320ms 后执行）：面板开着 → 收起；否则按区域翻页/翻章。
+  /// 单击动作（延迟 [_tapWindowMs] 后执行）：面板开着 → 收起；否则按区域翻页/翻章。
   void _handleSingleTap(Offset pos) {
     if (!mounted) return;
     final size = MediaQuery.of(context).size;
