@@ -20,6 +20,7 @@ import '../miniapp/pages/mini_app_list_page.dart';
 import '../hiker/pages/hiker_home_page.dart';
 import '../emby/emby_home_page.dart';
 import '../rss/pages/rss_page.dart';
+import 'drama/view.dart';
 import 'settings/view.dart';
 import 'search/view.dart';
 import 'search/controller.dart';
@@ -317,6 +318,9 @@ class _ContentViewState extends State<ContentView>
         // Emby（索引 10）—— 自建媒体库（电影 / 剧集）。
         // 默认不进底栏，用户在「设置 → 菜单设置」里自行开启。
         const EmbyHomePage(),
+        // 短剧（索引 11）—— 按当前源的短剧类目聚合（2026-10-22）。
+        // 同样默认不进底栏。
+        const DramaPage(),
       ];
     }
     return _tabPagesCache!;

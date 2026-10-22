@@ -30,6 +30,10 @@ enum NavFeature {
   // 「Emby」媒体库分类（自建 Emby 服务器：电影 / 剧集）。
   // 默认不进底栏，用户在「设置 → 菜单设置」里自行开启。
   emby('emby', 'Emby', false, tabIndex: 10),
+  // 「短剧」分类（2026-10-22）：跨源短剧/微短剧聚合页。
+  // ⚠️ 默认**不进底栏**（用户要求「悬浮菜单栏默认关闭」），
+  //    在「设置 → 主页页面」打开后才会出现在底栏。
+  drama('drama', '短剧', false, tabIndex: 11),
   shelf('shelf', '史藏', false, tabIndex: 1),
   settings('settings', '设置', true, tabIndex: 3),
   search('search', '搜索', false, tabIndex: 0);
@@ -59,6 +63,7 @@ enum NavFeature {
         NavFeature.rss => Icons.rss_feed_outlined,
         NavFeature.hiker => Icons.rocket_launch_outlined,
         NavFeature.emby => Icons.video_settings_outlined,
+        NavFeature.drama => Icons.movie_filter_outlined,
         NavFeature.shelf => Icons.schedule_outlined,
         NavFeature.settings => Icons.settings_outlined,
         NavFeature.search => Icons.search,
@@ -95,6 +100,7 @@ enum NavFeature {
         NavFeature.rss => Icons.rss_feed,
         NavFeature.hiker => Icons.rocket_launch,
         NavFeature.emby => Icons.video_settings,
+        NavFeature.drama => Icons.movie_filter,
         NavFeature.shelf => Icons.schedule,
         NavFeature.settings => Icons.settings,
         NavFeature.search => Icons.search,
@@ -128,6 +134,7 @@ class NavFeatureService extends GetxService {
     NavFeature.rss,
     NavFeature.hiker,
     NavFeature.emby,
+    NavFeature.drama,
   ];
 
   /// 启用中的功能（**顺序即底栏顺序**，不含 search —— 搜索是按钮不是 tab）
