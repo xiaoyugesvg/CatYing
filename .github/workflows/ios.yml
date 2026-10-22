@@ -42,11 +42,11 @@ concurrency:
 jobs:
   build-ios-trollstore:
     name: Build Runner.app + NodeMobile + ldid → IPA
-    # ⚠️ macos-14 已进入弃用期（2026-11-02 彻底下线）：
-    #   https://github.com/actions/runner-images/issues/13518
-    #   弃用期容量极少 ⇒ 经常出现"Job is waiting for a hosted runner"卡几十分钟。
-    # 用 macos-15-intel（受支持的 x64 标准镜像），保持原有 x86_64 构建假设。
-    runs-on: macos-15-intel
+    # macos-14 已弃用（2026-11-02 下线）；macos-15-intel（x64）能跑但 Xcode 编译
+    # 明显更慢（实测 16 分钟还没编完）。这里用 **macos-15（arm64）**：
+    #   · 受支持的标准镜像，容量充足
+    #   · 之前成功的 macos-14 其实也是 arm64，Xcode 编译只要 4~5 分钟
+    runs-on: macos-15
     # 正常一次构建 ≈7 分钟（实测：SPM 解析 2.6 + iOS 构建 2.1，其余步骤全在秒级）。
     # 原来写 90 ⇒ 一旦某步卡死（网络下载 / 编译挂住）最坏烧掉 90×10 = 900 额度分钟。
     # 收到 45 仍留 6 倍余量（冷缓存首次 pod install 最慢也就是 9 分钟量级）。
@@ -80,6 +80,8 @@ jobs:
         with:
           channel: stable
           cache: true
+          # macos-15 是 Apple Silicon；显式要 arm64 的 Flutter SDK，
+          # 避免默认下 x64 版走 Rosetta（编译会明显变慢）
           # ⚠️ 不要传 `flutter-version-file: pubspec.yaml`：
           #   pubspec 里的 `environment.sdk: '>=3.12.0'` 是 Dart SDK 范围约束，
           #   flutter-action 解析后会找 Flutter SDK `3.12.0`，但 stable channel 没有这个具体版本号
@@ -87,10 +89,9 @@ jobs:
           # 正确做法：在 pubspec.yaml 加 `flutter: '>=3.22.0'`（用 stable 匹配的版本）
           # 然后改用 `flutter-version-file: pubspec.yaml` + `channel: stable`
           #
-          # 注意：macos-15-intel runner 是 Intel x86_64 Mac
-          # 不能传 architecture: ARM64（需要 arm64 runner）
-          # 不传 architecture = 默认 x64
-          # 如果以后切到 Apple Silicon runner，把这里改成 'ARM64' 即可
+          # 注意：macos-15 runner 是 Apple Silicon (arm64)
+          # 显式传 architecture: arm64，下载原生 SDK（不传默认 x64，会走 Rosetta）
+          architecture: arm64
 
       - name: Show Flutter / Xcode versions
         run: |
