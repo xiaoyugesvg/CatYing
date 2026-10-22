@@ -135,10 +135,6 @@ class NavFeatureService extends GetxService {
   /// 一次性迁移标记：见 [load] 里「把这三个请出底栏」那一段
   static const String _kDefaultOffOnce = 'nav_default_off_once_v1';
 
-  /// 一次性迁移标记（2026-10-22）：REX 是用户点名要**直接进底栏**的分类，
-  /// 但老用户的持久化 enabled 列表里没有它 ⇒ 不强制一次就永远不显示。
-  static const String _kRexOnOnce = 'nav_rex_on_once_v1';
-
   /// **默认不进悬浮底栏**的新增模块（用户 2026-10-15 明确要求）：
   /// 「RSS」「海阔」。
   ///
@@ -150,6 +146,7 @@ class NavFeatureService extends GetxService {
     NavFeature.emby,
     NavFeature.drama,
     NavFeature.room,
+    NavFeature.rex,
   ];
 
   /// 启用中的功能（**顺序即底栏顺序**，不含 search —— 搜索是按钮不是 tab）
@@ -207,7 +204,6 @@ class NavFeatureService extends GetxService {
     // 这里在首次跑到这段代码时，把这三个**挪回未启用段一次**；
     // 之后就完全尊重用户在「菜单设置」里的选择（想开随时能开，不会再被重置）。
     final defaultOffMigrated = prefs.getBool(_kDefaultOffOnce) ?? false;
-    final rexMigrated = prefs.getBool(_kRexOnOnce) ?? false;
     final on = <NavFeature>[];
     final off = <NavFeature>[];
     for (final f in order) {
@@ -219,9 +215,6 @@ class NavFeatureService extends GetxService {
           : enabledSet.contains(f);
       // 迁移没跑过 ⇒ 这三个一律先按关闭算，并在下面写回磁盘
       if (!defaultOffMigrated && kDefaultOffFeatures.contains(f)) isOn = false;
-      // REX：用户要求直接进底栏。老配置里没有它 ⇒ 首次强制打开一次，
-      // 之后完全尊重用户在「主页页面」里的开关。
-      if (!rexMigrated && f == NavFeature.rex) isOn = true;
       // 必需页面强制启用
       if (f.required) {
         on.add(f);
@@ -249,11 +242,6 @@ class NavFeatureService extends GetxService {
       // 迁移标记必须**本次就落下**：否则全新安装（enabledRaw == null、不回写）
       // 之后用户自己把 RSS 打开 → 下次启动又被"迁移"关掉一次。
       await prefs.setBool(_kDefaultOffOnce, true);
-    }
-    if (!rexMigrated) {
-      // 只强开这一次：用户之后手动关掉 REX，下次启动必须尊重他的选择
-      await prefs.setBool(_kRexOnOnce, true);
-      PrefsMirror.snapshotSoon();
     }
     if (enabledRaw != null) {
       await _persist();

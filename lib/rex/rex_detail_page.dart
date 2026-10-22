@@ -7,9 +7,10 @@ import 'rex_models.dart';
 import 'rex_player_page.dart';
 import 'rex_service.dart';
 
-/// REX 模块的详情页：展示 `loadDetail` 结果，播放时调 `loadResource`。
+/// REX 详情页 —— 布局对齐影视详情：
+///   大幅头图 + 悬浮返回键 → 海报 + 标题/元数据 + 播放按钮 → 简介。
 ///
-/// 播放地址通常是**带时效签名**的（如 helvid 的 m3u8），所以这里不在进页面时
+/// 播放地址通常是**带时效签名**的（如 helvid 的 m3u8），所以不在进页面时
 /// 预解析，而是用户点「播放」那一刻才去取，保证签名新鲜。
 class RexDetailPage extends StatefulWidget {
   const RexDetailPage({
@@ -31,6 +32,7 @@ class _RexDetailPageState extends State<RexDetailPage> {
   late RexItem _item = widget.item;
   bool _loading = true;
   bool _resolving = false;
+  bool _expanded = false;
   String? _error;
 
   @override
@@ -62,129 +64,283 @@ class _RexDetailPageState extends State<RexDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final backdrop = _item.backdrop.isNotEmpty ? _item.backdrop : _item.cover;
+    final top = MediaQuery.of(context).padding.top;
     return Scaffold(
       backgroundColor: Colors.transparent,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        title: Text(_item.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-                fontSize: AppTheme.fontHeadline,
-                fontWeight: FontWeight.w600,
-                color: _fg)),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
+      body: Stack(
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          ListView(
+            padding: EdgeInsets.zero,
             children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: SizedBox(
-                  width: 108,
-                  height: 158,
-                  child: _item.cover.isEmpty
-                      ? Container(
+              // ── 头图（对齐影视详情的大图）──────────────────────
+              SizedBox(
+                height: 224 + top,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (backdrop.isEmpty)
+                      Container(
+                        color: _isDark
+                            ? Colors.white10
+                            : Colors.black.withValues(alpha: 0.06),
+                      )
+                    else
+                      CachedNetworkImage(
+                        imageUrl: backdrop,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
                           color: _isDark
                               ? Colors.white10
                               : Colors.black.withValues(alpha: 0.06),
-                          child: Icon(Icons.movie_outlined,
-                              size: 24, color: _sub),
-                        )
-                      : CachedNetworkImage(
-                          imageUrl: _item.cover,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
-                            color: _isDark
-                                ? Colors.white10
-                                : Colors.black.withValues(alpha: 0.06),
-                            child: Icon(Icons.movie_outlined,
-                                size: 24, color: _sub),
-                          ),
                         ),
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_item.title,
-                        style: TextStyle(
-                            color: _fg,
-                            fontSize: AppTheme.fontHeadline,
-                            fontWeight: FontWeight.w600,
-                            height: 1.3)),
-                    if (_item.description.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(_item.description,
-                          maxLines: 5,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              color: _sub,
-                              fontSize: AppTheme.fontFootnote,
-                              height: 1.5)),
-                    ],
-                    const SizedBox(height: 14),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppTheme.accentColor,
-                          foregroundColor: Colors.white,
-                          minimumSize: const Size(0, 42),
-                          shape: RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius.circular(AppTheme.radiusMD)),
+                      ),
+                    // 顶部压暗：保证返回键在任何图上都清晰
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.black.withValues(alpha: 0.45),
+                            Colors.transparent,
+                          ],
+                          stops: const [0, 0.45],
                         ),
-                        onPressed: _resolving ? null : _play,
-                        icon: _resolving
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Colors.white))
-                            : const Icon(Icons.play_arrow_rounded, size: 20),
-                        label: Text(_resolving ? '解析线路中…' : '播放'),
                       ),
                     ),
                   ],
                 ),
               ),
+              // ── 海报 + 信息（上移一点，和头图衔接）──────────────
+              Transform.translate(
+                offset: const Offset(0, -34),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // 海报（影视详情同款：左海报、右信息）
+                          Container(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(10),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.25),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 5),
+                                ),
+                              ],
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: SizedBox(
+                                width: 104,
+                                height: 156,
+                                child: _item.cover.isEmpty
+                                    ? _posterPlaceholder()
+                                    : CachedNetworkImage(
+                                        imageUrl: _item.cover,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) =>
+                                            _posterPlaceholder(),
+                                      ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const SizedBox(height: 38),
+                                Text(
+                                  _item.title,
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      color: _fg,
+                                      fontSize: AppTheme.fontTitle3,
+                                      fontWeight: FontWeight.w700,
+                                      height: 1.25),
+                                ),
+                                const SizedBox(height: 8),
+                                _metaRow(),
+                                const SizedBox(height: 14),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: FilledButton.icon(
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: AppTheme.accentColor,
+                                      foregroundColor: Colors.white,
+                                      minimumSize: const Size(0, 42),
+                                      shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                              AppTheme.radiusMD)),
+                                    ),
+                                    onPressed: _resolving ? null : _play,
+                                    icon: _resolving
+                                        ? const SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Colors.white))
+                                        : const Icon(Icons.play_arrow_rounded,
+                                            size: 22),
+                                    label: Text(
+                                        _resolving ? '解析线路中…' : '立即播放'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
+                      if (_loading)
+                        const Center(
+                          child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      if (_error != null)
+                        Text(_error!,
+                            style: TextStyle(
+                                color: Colors.redAccent,
+                                fontSize: AppTheme.fontFootnote,
+                                height: 1.5)),
+                      if (_item.description.isNotEmpty) ...[
+                        _sectionTitle('简介'),
+                        const SizedBox(height: 6),
+                        Text(
+                          _item.description,
+                          maxLines: _expanded ? 30 : 4,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              color: _fg,
+                              fontSize: AppTheme.fontFootnote,
+                              height: 1.65),
+                        ),
+                        if (_item.description.length > 80)
+                          GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () =>
+                                setState(() => _expanded = !_expanded),
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(_expanded ? '收起' : '展开',
+                                      style: TextStyle(
+                                          color: AppTheme.accentColor,
+                                          fontSize: AppTheme.fontCaption)),
+                                  Icon(
+                                      _expanded
+                                          ? Icons.keyboard_arrow_up
+                                          : Icons.keyboard_arrow_down,
+                                      size: 14,
+                                      color: AppTheme.accentColor),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
+                      const SizedBox(height: 18),
+                      _sectionTitle('来源'),
+                      const SizedBox(height: 6),
+                      Text(
+                        '${widget.module.title}'
+                        '${_item.playerType.isNotEmpty ? ' · ${_item.playerType}' : ''}\n'
+                        '播放地址由模块实时解析，可能带时效签名，失效请重新点播放。',
+                        style: TextStyle(
+                            color: _sub,
+                            fontSize: AppTheme.fontCaption,
+                            height: 1.6),
+                      ),
+                      const SizedBox(height: 40),
+                    ],
+                  ),
+                ),
+              ),
             ],
           ),
-          if (_loading) ...[
-            const SizedBox(height: 18),
-            const Center(
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
+          // 悬浮返回键（头图上的白字按钮）
+          Positioned(
+            left: 6,
+            top: top + 4,
+            child: Material(
+              color: Colors.black.withValues(alpha: 0.3),
+              shape: const CircleBorder(),
+              child: IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                    size: 18, color: Colors.white),
+                onPressed: () => Navigator.of(context).pop(),
               ),
             ),
-          ],
-          if (_error != null) ...[
-            const SizedBox(height: 16),
-            Text(_error!,
-                style: TextStyle(
-                    color: Colors.redAccent,
-                    fontSize: AppTheme.fontFootnote,
-                    height: 1.5)),
-          ],
-          const SizedBox(height: 16),
-          Text(
-            '模块：${widget.module.title}'
-            '${_item.playerType.isNotEmpty ? ' · ${_item.playerType}' : ''}',
-            style: TextStyle(color: _sub, fontSize: AppTheme.fontCaption),
           ),
         ],
       ),
     );
   }
+
+  Widget _metaRow() {
+    final chips = <String>[
+      if (widget.module.title.isNotEmpty) widget.module.title,
+      if (_item.mediaType.isNotEmpty) _item.mediaType,
+      if (_item.playerType.isNotEmpty) _item.playerType,
+    ];
+    if (chips.isEmpty) return const SizedBox.shrink();
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        for (final c in chips)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: AppTheme.accentColor.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(c,
+                style: TextStyle(
+                    color: AppTheme.accentColor,
+                    fontSize: AppTheme.fontCaption)),
+          ),
+      ],
+    );
+  }
+
+  Widget _sectionTitle(String text) => Row(
+        children: [
+          Container(
+            width: 3,
+            height: 13,
+            decoration: BoxDecoration(
+              color: AppTheme.accentColor,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 7),
+          Text(text,
+              style: TextStyle(
+                  color: _fg,
+                  fontSize: AppTheme.fontSubhead,
+                  fontWeight: FontWeight.w600)),
+        ],
+      );
+
+  Widget _posterPlaceholder() => Container(
+        color: _isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.06),
+        alignment: Alignment.center,
+        child: Icon(Icons.movie_outlined, size: 24, color: _sub),
+      );
 
   Future<void> _play() async {
     // 少数模块的 detail 直接给直链（没有 loadResource）
