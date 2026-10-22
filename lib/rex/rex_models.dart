@@ -143,6 +143,16 @@ class RexModule {
   List<RexFunction> get listFunctions =>
       functions.where((f) => !f.isStream && f.functionName.isNotEmpty).toList();
 
+  /// 能当「浏览源」用：有分类列表或能搜索。
+  ///
+  /// 有些模块只导出了 `loadResource`（纯播放源，挂在影视详情上用），
+  /// 它们没有可浏览的内容 —— 首页的源 chips 不显示，订阅管理里保留。
+  bool get browsable =>
+      listFunctions.isNotEmpty || canSearch || functionNames.contains('loadHome');
+
+  /// 纯播放源（只有取流能力，没有列表）
+  bool get streamOnly => !browsable && canPlay;
+
   bool get canSearch => functionNames.contains('search') ||
       functionNames.contains('searchByCode') ||
       functionNames.contains('loadSearch');
@@ -252,4 +262,65 @@ class RexException implements Exception {
   final String message;
   @override
   String toString() => message;
+}
+
+/// 一个 `.rex` 集合（订阅）里的**候选模块**。
+///
+/// 只是从集合 JSON 里读出来的元信息，还没有真正加载过 JS ——
+/// 「市场」页先展示这份清单让用户勾选，勾完再逐个加载。
+class RexCollectionItem {
+  const RexCollectionItem({
+    required this.url,
+    required this.title,
+    this.id = '',
+    this.author = '',
+    this.version = '',
+    this.description = '',
+  });
+
+  final String url;
+  final String title;
+  final String id;
+  final String author;
+  final String version;
+  final String description;
+
+  factory RexCollectionItem.fromJson(Map<String, dynamic> j) => RexCollectionItem(
+        url: '${j['url'] ?? ''}',
+        title: '${j['title'] ?? ''}'.trim(),
+        id: '${j['id'] ?? ''}',
+        author: '${j['author'] ?? ''}',
+        version: '${j['version'] ?? ''}',
+        description: '${j['description'] ?? ''}',
+      );
+}
+
+/// `.rex` 集合：`{ title, description, icon, widgets: [...] }`
+class RexCollection {
+  const RexCollection({
+    required this.url,
+    required this.title,
+    this.description = '',
+    this.icon = '',
+    this.items = const [],
+  });
+
+  /// 集合自身的地址（用于去重 / 展示来源）
+  final String url;
+  final String title;
+  final String description;
+  final String icon;
+  final List<RexCollectionItem> items;
+
+  bool get isEmpty => items.isEmpty;
+}
+
+/// 批量导入结果
+class RexImportResult {
+  const RexImportResult({this.imported = const [], this.errors = const []});
+
+  final List<RexModule> imported;
+
+  /// 每个失败项一行：「模块名：原因」
+  final List<String> errors;
 }

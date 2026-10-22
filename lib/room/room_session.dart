@@ -53,7 +53,7 @@ class RoomPlayCleared extends RoomPlayEvent {
   const RoomPlayCleared();
 }
 
-/// 「一起看」全局会话：一条 Socket.IO 连接 + 一个当前房间。
+/// 「房间」全局会话：一条 Socket.IO 连接 + 一个当前房间。
 ///
 /// 服务端就是用户自己部署的 watch-room-server：
 ///   · 连接时把 AUTH_KEY 放在 handshake.auth.token 里（服务端强校验）
@@ -388,7 +388,7 @@ class RoomSession extends ChangeNotifier {
     notifyListeners();
 
     final server = LanRoomServer(
-      roomName: roomName.trim().isEmpty ? '一起看' : roomName.trim(),
+      roomName: roomName.trim().isEmpty ? '房间' : roomName.trim(),
       hostName: nickname,
       password: password.trim(),
       port: port,
@@ -666,7 +666,7 @@ class RoomSession extends ChangeNotifier {
     if (await connect() != true) return false;
     final completer = Completer<bool>();
     _socket?.emitWithAck('room:create', {
-      'name': name.trim().isEmpty ? '一起看' : name.trim(),
+      'name': name.trim().isEmpty ? '房间' : name.trim(),
       'description': description.trim(),
       'password': password.trim().isEmpty ? null : password.trim(),
       'isPublic': isPublic,

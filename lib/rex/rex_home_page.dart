@@ -6,8 +6,8 @@ import '../services/player_prefs.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/vod_card.dart';
 import 'rex_detail_page.dart';
-import 'rex_import.dart';
 import 'rex_manage_page.dart';
+import 'rex_market_page.dart';
 import 'rex_models.dart';
 import 'rex_service.dart';
 
@@ -64,7 +64,7 @@ class _RexHomePageState extends State<RexHomePage> {
   Color get _fg => _isDark ? Colors.white : AppTheme.textPrimary;
   Color get _sub => _isDark ? Colors.white60 : Colors.black54;
 
-  List<RexModule> get _modules => _service.enabledModules;
+  List<RexModule> get _modules => _service.browsableModules;
 
   RexModule? get _module {
     final list = _modules;
@@ -215,15 +215,9 @@ class _RexHomePageState extends State<RexHomePage> {
             onPressed: _openManage,
           ),
           IconButton(
-            tooltip: '导入模块',
-            icon: Icon(Icons.add_link_rounded, color: _fg),
-            onPressed: () async {
-              final ok = await showRexImportDialog(context);
-              if (ok && mounted) {
-                _ensureSelection();
-                _reload();
-              }
-            },
+            tooltip: 'REX 市场',
+            icon: Icon(Icons.storefront_rounded, color: _fg),
+            onPressed: _openMarket,
           ),
           const SizedBox(width: 4),
         ],
@@ -462,7 +456,7 @@ class _RexHomePageState extends State<RexHomePage> {
                   size: 38, color: _sub.withValues(alpha: 0.6)),
               const SizedBox(height: 12),
               Text(
-                  _service.modules.isEmpty ? '还没有 REX 模块' : '模块都被停用了',
+                  _service.modules.isEmpty ? '还没有 REX 模块' : '没有可浏览的模块',
                   style: TextStyle(
                       color: _fg,
                       fontSize: AppTheme.fontHeadline,
@@ -470,10 +464,10 @@ class _RexHomePageState extends State<RexHomePage> {
               const SizedBox(height: 8),
               Text(
                 _service.modules.isEmpty
-                    ? '右上角「导入模块」可以粘贴：\n'
-                        '· 单个模块地址（返回 JS）\n'
-                        '· .rex 集合地址（会自动展开里面的模块）'
-                    : '去「REX 订阅管理」把要用的模块打开。',
+                    ? '去「REX 市场」挑一个合集：\n'
+                        '· 先列出里面的模块，勾选后再加载\n'
+                        '· 也可以只加单个模块地址'
+                    : '去「REX 订阅」把要用的模块打开。',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                     color: _sub, fontSize: AppTheme.fontFootnote, height: 1.7),
@@ -485,16 +479,15 @@ class _RexHomePageState extends State<RexHomePage> {
                   foregroundColor: Colors.white,
                   minimumSize: const Size(0, 42),
                 ),
-                onPressed: _service.modules.isEmpty
-                    ? () => showRexImportDialog(context)
-                    : _openManage,
+                onPressed:
+                    _service.modules.isEmpty ? _openMarket : _openManage,
                 icon: Icon(
                     _service.modules.isEmpty
-                        ? Icons.add_link_rounded
+                        ? Icons.storefront_rounded
                         : Icons.tune_rounded,
                     size: 18),
                 label: Text(
-                    _service.modules.isEmpty ? '导入模块' : '打开订阅管理'),
+                    _service.modules.isEmpty ? '打开 REX 市场' : '打开订阅管理'),
               ),
             ],
           ),
@@ -529,6 +522,17 @@ class _RexHomePageState extends State<RexHomePage> {
           ),
         ),
       );
+
+  Future<void> _openMarket() async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      settings: const RouteSettings(name: 'rex:market'),
+      builder: (_) => const RexMarketPage(),
+    ));
+    if (!mounted) return;
+    _ensureSelection();
+    setState(() {});
+    _reload();
+  }
 
   Future<void> _openManage() async {
     await Navigator.of(context).push(MaterialPageRoute(

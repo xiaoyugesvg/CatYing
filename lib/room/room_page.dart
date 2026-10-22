@@ -15,7 +15,7 @@ import 'room_models.dart';
 import 'room_session.dart';
 import 'room_source_picker.dart';
 
-/// 「一起看」房间页：播放器 + 成员 + 聊天。
+/// 「房间」播放页：播放器 + 成员 + 聊天。
 ///
 /// ── 同步协议（watch-room-server）──────────────────────────────
 ///   · 房主 `play:update`：每 2 秒广播「地址 + 进度 + 播放态」，
@@ -126,15 +126,15 @@ class _RoomPageState extends State<RoomPage> {
   AppPlayer _newPlayer() {
     final engine = PlayerPrefs.instance.vodEngine.value;
     if (engine == PlayerEngine.mpv) {
-      return MpvAppPlayer(config: const AppConfig(title: '一起看'));
+      return MpvAppPlayer(config: const AppConfig(title: '房间'));
     }
     if (engine == PlayerEngine.ksplayer && Platform.isIOS) {
-      return KSPlayer(config: const AppConfig(title: '一起看'));
+      return KSPlayer(config: const AppConfig(title: '房间'));
     }
     if (Platform.isIOS) {
-      return IosAvPlayer(config: const AppConfig(title: '一起看'));
+      return IosAvPlayer(config: const AppConfig(title: '房间'));
     }
-    return AppPlayer(config: const AppConfig(title: '一起看'));
+    return AppPlayer(config: const AppConfig(title: '房间'));
   }
 
   void _suppress([int ms = 1500]) {

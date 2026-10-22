@@ -88,6 +88,15 @@ class RexService {
   List<RexModule> get enabledModules =>
       modules.where((e) => e.enabled).toList();
 
+  /// 首页真正能出内容的模块（启用的 + 有列表/搜索能力）。
+  ///
+  /// 纯播放源（只有 loadResource）进了这个列表也只会显示空页面，
+  /// 所以首页不展示它们，但在订阅管理里保留并标「仅播放」。
+  List<RexModule> get browsableModules =>
+      modules.where((e) => e.enabled && e.browsable).toList();
+
+  bool hasUrl(String url) => modules.any((e) => e.url == url);
+
   Future<void> setEnabled(String url, bool enabled) async {
     final i = modules.indexWhere((e) => e.url == url);
     if (i < 0) return;
@@ -139,22 +148,31 @@ class RexService {
 
   // ── 导入 ─────────────────────────────────────────────────────
 
-  /// 支持两种输入：
-  ///   · 单个模块 raw 地址（返回 JS）
-  ///   · `.rex` 集合（返回 `{ widgets: [{title,url}] }`）
-  Future<List<RexModule>> importFrom(String input) async {
-    final url = input.trim();
-    if (url.isEmpty) throw const RexException('先粘贴模块地址');
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      throw const RexException('地址要以 http:// 或 https:// 开头');
+  /// 把用户粘贴的地址规范化。
+  ///
+  /// 🔴 中文路径（如 `…/collections/花花.rex`）必须百分号编码：
+  /// dart:io 的 HttpClient 只接受 ASCII 请求行，Dio 直接抛
+  /// `Invalid character in path` —— 用户看到的就是「导入没反应」。
+  static String normalizeUrl(String input) {
+    final u = input.trim();
+    if (u.isEmpty) return u;
+    if (u.codeUnits.any((c) => c > 127)) {
+      try {
+        return Uri.encodeFull(u);
+      } catch (_) {
+        return u;
+      }
     }
+    return u;
+  }
 
-    String text = '';
+  Future<String> _get(String url) async {
     try {
       final res = await _dio.get<String>(
         url,
         options: Options(
           responseType: ResponseType.plain,
+          followRedirects: true,
           headers: const {
             // 部分模块/集合放在会拦默认 UA 的站点上
             'User-Agent':
@@ -164,62 +182,145 @@ class RexService {
           },
         ),
       );
-      text = res.data ?? '';
+      return res.data ?? '';
     } catch (e) {
       throw RexException('拉取失败：${_short(e)}');
     }
+  }
+
+  /// 拉取一个集合地址，**只解析 JSON、不加载模块**（秒回）。
+  ///
+  /// 这是「市场」页的核心：先拿到候选清单让用户勾选，
+  /// 避免像以前那样一次串行加载几十个模块、界面上毫无反馈。
+  Future<RexCollection> fetchCollection(String input) async {
+    var url = input.trim();
+    if (url.isEmpty) throw const RexException('先粘贴集合地址');
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      throw const RexException('地址要以 http:// 或 https:// 开头');
+    }
+    url = normalizeUrl(url);
+
+    final text = await _get(url);
     if (text.trim().isEmpty) throw const RexException('地址内容为空');
 
     final trimmed = text.trimLeft();
     if (trimmed.startsWith('{')) {
-      final collection = _parseCollection(url, text);
-      if (collection != null) {
-        if (collection.isEmpty) {
-          throw const RexException('集合里没有可用的模块地址');
-        }
-        final loaded = <RexModule>[];
-        final errors = <String>[];
-        for (final item in collection) {
-          try {
-            loaded.add(await loadModule(item.url, fallbackTitle: item.title));
-          } catch (e) {
-            errors.add('${item.title.isEmpty ? item.url : item.title}：$e');
-          }
-        }
-        if (loaded.isEmpty) {
-          throw RexException('集合里的模块都加载失败：${errors.take(2).join('；')}');
-        }
-        return loaded;
+      Map<String, dynamic>? map;
+      try {
+        final d = jsonDecode(text);
+        if (d is Map) map = d.cast<String, dynamic>();
+      } catch (_) {
+        map = null;
+      }
+      if (map != null && map['widgets'] is List) {
+        return _parseCollection(url, map);
       }
     }
 
-    return [await loadModule(url)];
+    // 不是集合 ⇒ 当成单个模块。标题尽量从 WidgetMetadata 里抠出来
+    final m = RegExp(r'''title\s*:\s*['"]([^'"]{1,40})['"]''').firstMatch(text);
+    final host = Uri.tryParse(url)?.host ?? url;
+    return RexCollection(
+      url: url,
+      title: m != null ? m.group(1)! : host,
+      items: [
+        RexCollectionItem(
+          url: url,
+          title: m != null ? m.group(1)! : host,
+        ),
+      ],
+    );
   }
 
-  List<_CollectionItem>? _parseCollection(String baseUrl, String text) {
-    try {
-      final decoded = jsonDecode(text);
-      if (decoded is! Map) return null;
-      final widgets = decoded['widgets'];
-      if (widgets is! List || widgets.isEmpty) return null;
-      final out = <_CollectionItem>[];
-      final base = Uri.tryParse(baseUrl);
-      for (final w in widgets) {
-        if (w is! Map) continue;
-        var u = '${w['url'] ?? ''}'.trim();
-        if (u.isEmpty) continue;
-        if (!u.startsWith('http') && base != null) {
-          u = base.resolve(u).toString();
-        }
-        out.add(_CollectionItem(
-          title: '${w['title'] ?? ''}',
-          url: u,
-        ));
-      }
-      return out;
-    } catch (_) {
-      return null;
+  RexCollection _parseCollection(String url, Map<String, dynamic> map) {
+    final widgets = map['widgets'];
+    if (widgets is! List || widgets.isEmpty) {
+      throw const RexException('这个 .rex 集合里没有模块');
     }
+    final base = Uri.tryParse(url);
+    final items = <RexCollectionItem>[];
+    for (final w in widgets) {
+      if (w is! Map) continue;
+      var u = '${w['url'] ?? ''}'.trim();
+      if (u.isEmpty) continue;
+      if (!u.startsWith('http') && base != null) {
+        u = base.resolve(u).toString();
+      }
+      final it = RexCollectionItem.fromJson(w.cast<String, dynamic>());
+      items.add(RexCollectionItem(
+        url: normalizeUrl(u),
+        title: it.title,
+        id: it.id,
+        author: it.author,
+        version: it.version,
+        description: it.description,
+      ));
+    }
+    if (items.isEmpty) throw const RexException('这个 .rex 集合里没有可用的模块地址');
+    return RexCollection(
+      url: url,
+      title: '${map['title'] ?? ''}'.trim(),
+      description: '${map['description'] ?? ''}',
+      icon: '${map['icon'] ?? ''}',
+      items: items,
+    );
+  }
+
+  /// 批量加载并保存勾选的模块。
+  ///
+  /// · 并发 [concurrency] 路（默认 4）：88 个模块串行要几分钟，界面像卡死；
+  /// · 每一项单独 25 秒超时，坏的模块不会拖住整批；
+  /// · [onProgress] 每完成一项回调一次，页面用它画进度条。
+  Future<RexImportResult> importSelected(
+    List<RexCollectionItem> items, {
+    void Function(int done, int total, String current)? onProgress,
+    int concurrency = 4,
+  }) async {
+    if (items.isEmpty) return const RexImportResult();
+    final total = items.length;
+    final width = concurrency.clamp(1, 6);
+    final loaded = <RexModule>[];
+    final errors = <String>[];
+    var next = 0;
+    var done = 0;
+
+    Future<void> worker() async {
+      while (true) {
+        final i = next++;
+        if (i >= total) return;
+        final it = items[i];
+        try {
+          final m = await loadModule(it.url, fallbackTitle: it.title)
+              .timeout(const Duration(seconds: 25));
+          loaded.add(m);
+        } catch (e) {
+          errors.add('${it.title.isEmpty ? it.url : it.title}：${_short(e)}');
+        }
+        done++;
+        onProgress?.call(done, total, it.title);
+      }
+    }
+
+    await Future.wait(
+      List.generate(width > total ? total : width, (_) => worker()),
+    );
+    if (loaded.isNotEmpty) await addAll(loaded);
+    return RexImportResult(imported: loaded, errors: errors);
+  }
+
+  /// 一步到位导入（单个模块地址 / 集合都会展开）。
+  ///
+  /// 保持旧入口：内部改成「先取清单 → 全量导入」，
+  /// 但页面已改用 [fetchCollection] + [importSelected] 让用户挑选。
+  Future<List<RexModule>> importFrom(String input) async {
+    final col = await fetchCollection(input);
+    final res = await importSelected(col.items);
+    if (res.imported.isEmpty) {
+      throw RexException(
+        res.errors.isEmpty ? '没有导入任何模块' : '全部加载失败：${res.errors.take(2).join('；')}',
+      );
+    }
+    return res.imported;
   }
 
   /// 让 Node 加载模块并取 WidgetMetadata
@@ -403,10 +504,4 @@ class RexService {
     final s = '$e';
     return s.length > 160 ? '${s.substring(0, 160)}…' : s;
   }
-}
-
-class _CollectionItem {
-  const _CollectionItem({required this.title, required this.url});
-  final String title;
-  final String url;
 }

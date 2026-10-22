@@ -2,14 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../common/theme.dart';
 import '../widgets/app_toast.dart';
-import 'rex_import.dart';
+import 'rex_market_page.dart';
 import 'rex_models.dart';
 import 'rex_service.dart';
 
-/// REX 订阅管理：导入、启用/停用、刷新元数据、改地址、排序、删除。
+/// REX 订阅管理：市场入口 + 启用/停用 + 刷新 + 排序 + 改地址 + 删除。
 ///
-/// 和「音乐源管理」「书源管理」是同一套心智：首页只展示启用中的模块，
-/// 所有维护动作集中在这一页。
+/// 布局按「已启用 / 已停用」两段分组 —— 原来的单列表里开关一关，
+/// 卡片只是变灰、位置不变，用户很难看清「现在到底有几个源在首页」。
 class RexManagePage extends StatefulWidget {
   const RexManagePage({super.key});
 
@@ -24,6 +24,21 @@ class _RexManagePageState extends State<RexManagePage> {
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
   Color get _fg => _isDark ? Colors.white : AppTheme.textPrimary;
   Color get _sub => _isDark ? Colors.white60 : Colors.black54;
+  Color get _line => _isDark
+      ? Colors.white.withValues(alpha: 0.08)
+      : Colors.black.withValues(alpha: 0.06);
+  Color get _tile => _isDark
+      ? Colors.white.withValues(alpha: 0.05)
+      : Colors.black.withValues(alpha: 0.025);
+
+  /// 文字 / 图标用的强调色（暗色下 accentColor 是墨灰，看不见）
+  Color get _accent => AppTheme.accentOnSurface;
+
+  @override
+  void initState() {
+    super.initState();
+    _service.load();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -33,21 +48,16 @@ class _RexManagePageState extends State<RexManagePage> {
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        title: Text('REX 订阅管理',
+        title: Text('REX 订阅',
             style: TextStyle(
                 fontSize: AppTheme.fontHeadline,
                 fontWeight: FontWeight.w600,
                 color: _fg)),
         actions: [
           IconButton(
-            tooltip: '导入模块',
-            icon: Icon(Icons.add_link_rounded, color: _fg),
-            onPressed: _busy
-                ? null
-                : () async {
-                    final ok = await showRexImportDialog(context);
-                    if (ok && mounted) setState(() {});
-                  },
+            tooltip: '打开市场',
+            icon: Icon(Icons.storefront_rounded, color: _fg),
+            onPressed: _busy ? null : _openMarket,
           ),
           IconButton(
             tooltip: '全部刷新元数据',
@@ -56,7 +66,7 @@ class _RexManagePageState extends State<RexManagePage> {
                     width: 16,
                     height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2))
-                : Icon(Icons.refresh_rounded, color: _fg),
+                : Icon(Icons.sync_rounded, color: _fg),
             onPressed: _busy ? null : _refreshAll,
           ),
           const SizedBox(width: 4),
@@ -65,88 +75,157 @@ class _RexManagePageState extends State<RexManagePage> {
       body: ValueListenableBuilder<int>(
         valueListenable: _service.revision,
         builder: (context, _, __) {
-          final list = _service.modules;
-          if (list.isEmpty) return _empty();
-          return ListView.builder(
+          final all = _service.modules;
+          final on = all.where((e) => e.enabled).toList();
+          final off = all.where((e) => !e.enabled).toList();
+          return ListView(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
-            itemCount: list.length + 1,
-            itemBuilder: (context, i) {
-              if (i == list.length) {
-                return Padding(
-                  padding: const EdgeInsets.only(top: 14),
-                  child: Text(
-                    '首页只显示「已启用」的模块。长按首页卡片也可以快速移除。',
-                    style: TextStyle(
-                        color: _sub,
-                        fontSize: AppTheme.fontCaption,
-                        height: 1.5),
-                  ),
-                );
-              }
-              return _tile(list[i], i, list.length);
-            },
+            children: [
+              _summaryCard(all.length, on.length),
+              if (all.isEmpty) ...[
+                const SizedBox(height: 30),
+                _empty(),
+              ],
+              if (on.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                _sectionTitle('已启用', on.length),
+                for (var i = 0; i < on.length; i++)
+                  _card(on[i], onIndex: i, onTotal: on.length),
+              ],
+              if (off.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                _sectionTitle('已停用', off.length),
+                for (var i = 0; i < off.length; i++)
+                  _card(off[i], onIndex: -1, onTotal: off.length),
+              ],
+              if (all.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Text(
+                  '首页只显示「已启用 + 有列表/搜索能力」的模块；'
+                  '标着「仅播放」的模块没有可浏览内容，只作为取流源保留。',
+                  style: TextStyle(
+                      color: _sub,
+                      fontSize: AppTheme.fontCaption,
+                      height: 1.6),
+                ),
+              ],
+            ],
           );
         },
       ),
     );
   }
 
-  Widget _empty() => Center(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(36, 0, 36, 80),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.extension_outlined,
-                  size: 36, color: _sub.withValues(alpha: 0.6)),
-              const SizedBox(height: 12),
-              Text('还没有导入 REX 模块',
-                  style: TextStyle(
-                      color: _fg,
-                      fontSize: AppTheme.fontHeadline,
-                      fontWeight: FontWeight.w600)),
-              const SizedBox(height: 8),
-              Text('右上角可以粘贴模块地址或 .rex 集合地址。',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      color: _sub,
-                      fontSize: AppTheme.fontFootnote,
-                      height: 1.6)),
-              const SizedBox(height: 16),
-              FilledButton.icon(
+  Widget _summaryCard(int total, int enabled) => Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              _accent.withValues(alpha: _isDark ? 0.20 : 0.11),
+              _accent.withValues(alpha: _isDark ? 0.05 : 0.02),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
+          border: Border.all(
+              color: _accent.withValues(alpha: 0.20), width: 0.8),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.extension_rounded,
+                    size: 18, color: _accent),
+                const SizedBox(width: 8),
+                Text('我的模块',
+                    style: TextStyle(
+                        color: _fg,
+                        fontSize: AppTheme.fontHeadline,
+                        fontWeight: FontWeight.w700)),
+                const Spacer(),
+                Text('$enabled / $total',
+                    style: TextStyle(
+                        color: _accent,
+                        fontSize: AppTheme.fontSubhead,
+                        fontWeight: FontWeight.w600)),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text('启用 $enabled 个，停用 ${total - enabled} 个',
+                style: TextStyle(color: _sub, fontSize: AppTheme.fontCaption)),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
                 style: FilledButton.styleFrom(
                   backgroundColor: AppTheme.accentColor,
                   foregroundColor: Colors.white,
+                  minimumSize: const Size(0, 42),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(AppTheme.radiusMD)),
                 ),
-                onPressed: _busy
-                    ? null
-                    : () async {
-                        final ok = await showRexImportDialog(context);
-                        if (ok && mounted) setState(() {});
-                      },
-                icon: const Icon(Icons.add_link_rounded, size: 18),
-                label: const Text('导入模块'),
+                onPressed: _busy ? null : _openMarket,
+                icon: const Icon(Icons.add_rounded, size: 19),
+                label: const Text('从市场添加模块'),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       );
 
-  Widget _tile(RexModule m, int index, int total) {
+  Widget _sectionTitle(String text, int count) => Padding(
+        padding: const EdgeInsets.only(bottom: 2, left: 2),
+        child: Row(
+          children: [
+            Text(text,
+                style: TextStyle(
+                    color: _fg,
+                    fontSize: AppTheme.fontSubhead,
+                    fontWeight: FontWeight.w600)),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: _tile,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text('$count',
+                  style:
+                      TextStyle(color: _sub, fontSize: AppTheme.fontCaption)),
+            ),
+          ],
+        ),
+      );
+
+  Widget _empty() => Column(
+        children: [
+          Icon(Icons.extension_outlined,
+              size: 36, color: _sub.withValues(alpha: 0.6)),
+          const SizedBox(height: 10),
+          Text('还没有模块',
+              style: TextStyle(
+                  color: _fg,
+                  fontSize: AppTheme.fontHeadline,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          Text('去市场挑一个合集，勾选后一键导入。',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: _sub, fontSize: AppTheme.fontFootnote, height: 1.6)),
+        ],
+      );
+
+  Widget _card(RexModule m, {required int onIndex, required int onTotal}) {
     final host = Uri.tryParse(m.url)?.host ?? m.url;
     return Container(
-      margin: const EdgeInsets.only(top: 10),
-      padding: const EdgeInsets.fromLTRB(13, 12, 10, 4),
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.fromLTRB(12, 11, 6, 6),
       decoration: BoxDecoration(
-        color: _isDark
-            ? Colors.white.withValues(alpha: 0.06)
-            : Colors.black.withValues(alpha: 0.03),
+        color: _tile,
         borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
-        border: Border.all(
-            color: _isDark
-                ? Colors.white.withValues(alpha: 0.08)
-                : Colors.black.withValues(alpha: 0.06),
-            width: 0.8),
+        border: Border.all(color: _line, width: 0.8),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -155,18 +234,18 @@ class _RexManagePageState extends State<RexManagePage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 36,
-                height: 36,
+                width: 38,
+                height: 38,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: AppTheme.accentColor
-                      .withValues(alpha: m.enabled ? 0.14 : 0.06),
-                  borderRadius: BorderRadius.circular(10),
+                  color: _accent
+                      .withValues(alpha: m.enabled ? 0.15 : 0.06),
+                  borderRadius: BorderRadius.circular(11),
                 ),
                 child: Icon(Icons.extension_rounded,
-                    size: 18,
+                    size: 19,
                     color: m.enabled
-                        ? AppTheme.accentColor
+                        ? _accent
                         : _sub.withValues(alpha: 0.7)),
               ),
               const SizedBox(width: 10),
@@ -174,81 +253,55 @@ class _RexManagePageState extends State<RexManagePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
+                    Text(m.title.isEmpty ? 'REX 模块' : m.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            color: m.enabled ? _fg : _sub,
+                            fontSize: AppTheme.fontHeadline,
+                            fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 3),
+                    Wrap(
+                      spacing: 5,
+                      runSpacing: 4,
                       children: [
-                        Flexible(
-                          child: Text(m.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  color: m.enabled ? _fg : _sub,
-                                  fontSize: AppTheme.fontHeadline,
-                                  fontWeight: FontWeight.w600)),
-                        ),
-                        if (m.version.isNotEmpty) ...[
-                          const SizedBox(width: 6),
-                          Text('v${m.version}',
-                              style: TextStyle(
-                                  color: _sub,
-                                  fontSize: AppTheme.fontCaption)),
-                        ],
+                        if (m.version.isNotEmpty) _chip('v${m.version}'),
+                        _chip('${m.listFunctions.length} 个分类'),
+                        if (m.canSearch) _chip('可搜索'),
+                        if (m.canPlay) _chip('可播放'),
+                        if (m.streamOnly) _chip('仅播放', accent: true),
                       ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '$host · ${m.listFunctions.length} 个分类'
-                      '${m.canSearch ? ' · 可搜索' : ''}'
-                      '${m.canPlay ? ' · 可播放' : ''}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          color: _sub, fontSize: AppTheme.fontCaption),
                     ),
                   ],
                 ),
               ),
               Switch(
                 value: m.enabled,
-                activeThumbColor: AppTheme.accentColor,
+                activeThumbColor: _accent,
                 onChanged: _busy
                     ? null
                     : (v) => _service.setEnabled(m.url, v),
               ),
             ],
           ),
-          if (m.description.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 4, right: 6),
-              child: Text(m.description,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      color: _sub,
-                      fontSize: AppTheme.fontFootnote,
-                      height: 1.35)),
-            ),
-          const SizedBox(height: 4),
-          Text(m.url,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  color: _sub.withValues(alpha: 0.75),
-                  fontSize: 10)),
+          const SizedBox(height: 6),
           Row(
-            mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              _action(Icons.sync_rounded, '刷新',
-                  _busy ? null : () => _refreshOne(m)),
-              _action(Icons.link_rounded, '改地址',
-                  _busy ? null : () => _editUrl(m)),
-              _action(Icons.arrow_upward_rounded, '上移',
-                  _busy || index == 0 ? null : () => _service.move(m.url, -1)),
-              _action(Icons.arrow_downward_rounded, '下移',
-                  _busy || index >= total - 1
-                      ? null
-                      : () => _service.move(m.url, 1)),
-              _action(Icons.delete_outline, '删除',
-                  _busy ? null : () => _confirmRemove(m)),
+              Expanded(
+                child: Text('$host',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: _sub.withValues(alpha: 0.8),
+                        fontSize: 10)),
+              ),
+              if (onIndex >= 0) ...[
+                _mini(Icons.keyboard_arrow_up_rounded,
+                    onIndex == 0 ? null : () => _service.move(m.url, -1)),
+                _mini(Icons.keyboard_arrow_down_rounded,
+                    onIndex >= onTotal - 1 ? null : () => _service.move(m.url, 1)),
+              ],
+              _more(m),
             ],
           ),
         ],
@@ -256,19 +309,70 @@ class _RexManagePageState extends State<RexManagePage> {
     );
   }
 
-  Widget _action(IconData icon, String label, VoidCallback? onTap) =>
-      TextButton.icon(
-        style: TextButton.styleFrom(
-          foregroundColor: _sub,
-          minimumSize: const Size(0, 34),
-          padding: const EdgeInsets.symmetric(horizontal: 7),
-          visualDensity: VisualDensity.compact,
+  Widget _chip(String text, {bool accent = false}) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+        decoration: BoxDecoration(
+          color: accent
+              ? _accent.withValues(alpha: 0.15)
+              : (_isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.04)),
+          borderRadius: BorderRadius.circular(999),
         ),
-        onPressed: onTap,
-        icon: Icon(icon, size: 15),
-        label: Text(label,
-            style: TextStyle(color: _sub, fontSize: AppTheme.fontCaption)),
+        child: Text(text,
+            style: TextStyle(
+              color: accent ? _accent : _sub,
+              fontSize: 9.5,
+              fontWeight: accent ? FontWeight.w600 : FontWeight.w400,
+            )),
       );
+
+  Widget _mini(IconData icon, VoidCallback? onTap) => IconButton(
+        visualDensity: VisualDensity.compact,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+        icon: Icon(icon,
+            size: 19,
+            color: onTap == null ? _sub.withValues(alpha: 0.3) : _sub),
+        onPressed: onTap,
+      );
+
+  Widget _more(RexModule m) => PopupMenuButton<String>(
+        tooltip: '更多',
+        padding: EdgeInsets.zero,
+        icon: Icon(Icons.more_horiz_rounded, size: 19, color: _sub),
+        onSelected: (v) {
+          switch (v) {
+            case 'refresh':
+              _refreshOne(m);
+              break;
+            case 'url':
+              _editUrl(m);
+              break;
+            case 'cache':
+              _clearCache(m);
+              break;
+            case 'remove':
+              _confirmRemove(m);
+              break;
+          }
+        },
+        itemBuilder: (_) => const [
+          PopupMenuItem(value: 'refresh', child: Text('刷新元数据')),
+          PopupMenuItem(value: 'url', child: Text('修改地址')),
+          PopupMenuItem(value: 'cache', child: Text('清空编译缓存')),
+          PopupMenuItem(
+            value: 'remove',
+            child: Text('移除模块', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      );
+
+  Future<void> _openMarket() async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      settings: const RouteSettings(name: 'rex:market'),
+      builder: (_) => const RexMarketPage(),
+    ));
+    if (mounted) setState(() {});
+  }
 
   Future<void> _refreshOne(RexModule m) async {
     setState(() => _busy = true);
@@ -283,6 +387,7 @@ class _RexManagePageState extends State<RexManagePage> {
   }
 
   Future<void> _refreshAll() async {
+    if (_service.modules.isEmpty) return;
     setState(() => _busy = true);
     try {
       final errors = await _service.refreshAll();
@@ -297,6 +402,11 @@ class _RexManagePageState extends State<RexManagePage> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _clearCache(RexModule m) async {
+    await _service.clearCache(m);
+    if (mounted) AppToast.show('已清空「${m.title}」的编译缓存', '');
   }
 
   Future<void> _editUrl(RexModule m) async {

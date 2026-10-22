@@ -183,22 +183,33 @@ function extractModule(url, ctx) {
       }))
     : [];
 
+  // 收集所有 load*/search* 函数。
+  // 🔴 不要只认固定的 7 个名字：社区模块里存在 loadPage / loadCategory /
+  //    loadPlaylist / searchVideo 之类的变体，写死名单会把整批模块判成
+  //    「模块没有 loadList / search，无法使用」（花花集合里 88 个模块中
+  //    光这一类被误杀的就有十几个）。
   const fns = {};
-  const names = [
-    'loadList',
-    'loadDetail',
-    'loadResource',
-    'search',
-    'searchByCode',
-    'loadSearch',
-    'loadHome',
-  ];
-  for (const name of names) {
-    const fn = ctx[name] ?? (ex ? ex[name] : undefined);
-    if (typeof fn === 'function') fns[name] = fn;
+  for (const k of Object.keys(ctx)) {
+    if (!/^(load|search)/.test(k)) continue;
+    let v;
+    try {
+      v = ctx[k];
+    } catch (_) {
+      continue;
+    }
+    if (typeof v === 'function') fns[k] = v;
   }
-  if (!fns.loadList && !fns.search) {
-    throw new Error('模块没有 loadList / search，无法使用');
+  if (ex) {
+    for (const k of Object.keys(ex)) {
+      if (!/^(load|search)/.test(k)) continue;
+      if (typeof ex[k] === 'function' && !fns[k]) fns[k] = ex[k];
+    }
+  }
+  // 一个 load*/search* 都没有 ⇒ 确实不是可用模块。
+  // 注意：只导出 loadResource 的「纯播放源」是合法的（挂在影视详情上用），
+  // 所以这里不区分类型，一律放行。
+  if (Object.keys(fns).length === 0) {
+    throw new Error('模块没有可调用的 load* / search* 函数');
   }
 
   return {
@@ -310,7 +321,21 @@ export async function handleRexApi(body) {
   const mod = await getModule(url);
 
   if (action === 'list') {
-    const fn = String(data.functionName || 'loadList');
+    let fn = String(data.functionName || '');
+    if (!fn || !mod.fns[fn]) {
+      // 模块声明的 functionName 和实际导出名对不上时兜底：
+      // 优先 loadList，其次任何「列表类」的 load*（排除 detail/resource/home/search）
+      fn = mod.fns.loadList
+        ? 'loadList'
+        : Object.keys(mod.fns).find(
+            (k) =>
+              k.startsWith('load') &&
+              k !== 'loadDetail' &&
+              k !== 'loadResource' &&
+              k !== 'loadHome' &&
+              k !== 'loadSearch',
+          ) || 'loadList';
+    }
     const raw = await callFn(mod, fn, [data.params || {}]);
     return { ok: true, items: normalizeItems(raw) };
   }

@@ -1,4 +1,4 @@
-/// 「一起看」房间的数据模型 —— 与 watch-room-server 的 Socket.IO 载荷一一对应。
+/// 「房间」的数据模型 —— 与 watch-room-server 的 Socket.IO 载荷一一对应。
 ///
 /// 服务端类型定义见：
 /// https://github.com/tgs9915/watch-room-server/blob/master/src/types.ts

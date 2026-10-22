@@ -7,13 +7,14 @@ import 'room_models.dart';
 import 'room_page.dart';
 import 'room_session.dart';
 
-/// 「一起看」大厅：连房间服务器 → 看房间列表 / 建房 / 加入。
+/// 「房间」大厅：连房间服务器 → 看房间列表 / 建房 / 加入。
 ///
-/// 底栏里的「一起看」tab（默认不启用，用户在「设置 → 主页页面」打开）。
+/// 底栏里的「房间」tab（默认不启用，用户在「设置 → 主页页面」打开）。
 ///
-/// 服务端就是 watch-room-server（Node + Socket.IO）：
-///   填服务器地址 + 与服务端一致的 AUTH_KEY 即可，
-///   房间的创建/加入/播放同步/聊天全部由服务端转发。
+/// 两种模式：
+///   · 服务器 —— 用户自己部署的 watch-room-server（Node + Socket.IO），
+///     填地址 + AUTH_KEY 即可，房间的创建/加入/同步/聊天全由服务端转发。
+///   · 局域网 —— 房主手机直接当服务器，同一 WiFi 下填 IP:端口 就能进。
 class RoomHomePage extends StatefulWidget {
   const RoomHomePage({super.key});
 
@@ -30,7 +31,7 @@ class _RoomHomePageState extends State<RoomHomePage> {
   final _joinCtrl = TextEditingController();
 
   // 局域网模式
-  final _lanRoomCtrl = TextEditingController(text: '一起看');
+  final _lanRoomCtrl = TextEditingController(text: '房间');
   final _lanPwdCtrl = TextEditingController();
   final _lanPortCtrl = TextEditingController(text: '9527');
   final _lanJoinCtrl = TextEditingController();
@@ -93,7 +94,7 @@ class _RoomHomePageState extends State<RoomHomePage> {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
-        title: Text('一起看',
+        title: Text('房间',
             style: TextStyle(
                 fontSize: AppTheme.fontHeadline,
                 fontWeight: FontWeight.w600,
@@ -156,15 +157,20 @@ class _RoomHomePageState extends State<RoomHomePage> {
     );
   }
 
-  /// 顶部模式切换：服务器房间 / 局域网
+  /// 顶部模式切换：房间服务器 / 局域网
   Widget _modeRow() {
     final modes = [RoomMode.server, RoomMode.lan];
     return Container(
-      height: 40,
-      padding: const EdgeInsets.all(3),
+      height: 46,
+      padding: const EdgeInsets.all(3.5),
       decoration: BoxDecoration(
-        color: _isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+        color: _isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.045),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+            color: _isDark
+                ? Colors.white.withValues(alpha: 0.06)
+                : Colors.black.withValues(alpha: 0.04),
+            width: 0.8),
       ),
       child: Row(
         children: [
@@ -179,13 +185,24 @@ class _RoomHomePageState extends State<RoomHomePage> {
                         if (mounted) setState(() {});
                       },
                 child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 160),
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutCubic,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: _session.mode == m
-                        ? AppTheme.accentColor.withValues(alpha: 0.18)
+                        ? (_isDark ? Colors.white : Colors.white)
                         : Colors.transparent,
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(999),
+                    boxShadow: _session.mode == m
+                        ? [
+                            BoxShadow(
+                              color: Colors.black
+                                  .withValues(alpha: _isDark ? 0.35 : 0.08),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ]
+                        : null,
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -196,18 +213,18 @@ class _RoomHomePageState extends State<RoomHomePage> {
                               : Icons.wifi_rounded,
                           size: 15,
                           color: _session.mode == m
-                              ? AppTheme.accentColor
+                              ? (_isDark ? Colors.black87 : AppTheme.accentColor)
                               : _sub),
                       const SizedBox(width: 5),
                       Text(
                         m == RoomMode.server ? '服务器' : '局域网',
                         style: TextStyle(
                             color: _session.mode == m
-                                ? AppTheme.accentColor
+                                ? (_isDark ? Colors.black87 : AppTheme.accentColor)
                                 : _sub,
                             fontSize: AppTheme.fontSubhead,
                             fontWeight: _session.mode == m
-                                ? FontWeight.w600
+                                ? FontWeight.w700
                                 : FontWeight.w400),
                       ),
                     ],
@@ -598,31 +615,43 @@ class _RoomHomePageState extends State<RoomHomePage> {
         onTap: _busy ? null : () => _joinWith(r.id, room: r),
         child: Container(
           margin: const EdgeInsets.only(top: 8),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.fromLTRB(11, 10, 10, 10),
           decoration: BoxDecoration(
             color: _isDark
                 ? Colors.white.withValues(alpha: 0.05)
                 : Colors.black.withValues(alpha: 0.025),
-            borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+            borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
+            border: Border.all(
+                color: _isDark
+                    ? Colors.white.withValues(alpha: 0.06)
+                    : Colors.black.withValues(alpha: 0.04),
+                width: 0.8),
           ),
           child: Row(
             children: [
               Container(
-                width: 34,
-                height: 34,
+                width: 40,
+                height: 40,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: AppTheme.accentColor.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(9),
+                  gradient: LinearGradient(
+                    colors: [
+                      AppTheme.accentColor.withValues(alpha: 0.30),
+                      AppTheme.accentColor.withValues(alpha: 0.12),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
                     r.roomType == 'music'
                         ? Icons.music_note_rounded
-                        : Icons.movie_outlined,
-                    size: 18,
+                        : Icons.movie_rounded,
+                    size: 20,
                     color: AppTheme.accentColor),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 11),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -640,13 +669,26 @@ class _RoomHomePageState extends State<RoomHomePage> {
                         ),
                         if (r.hasPassword) ...[
                           const SizedBox(width: 4),
-                          Icon(Icons.lock_outline, size: 12, color: _sub),
+                          Icon(Icons.lock_outline_rounded,
+                              size: 12, color: _sub),
                         ],
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: AppTheme.accentColor.withValues(alpha: 0.13),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text('${r.memberCount}人',
+                              style: TextStyle(
+                                  color: AppTheme.accentColor, fontSize: 9.5)),
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 3),
                     Text(
-                      '${r.ownerName} · ${r.memberCount} 人 · 房间号 ${r.id}',
+                      '${r.ownerName} · 房间号 ${r.id}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style:
@@ -655,7 +697,18 @@ class _RoomHomePageState extends State<RoomHomePage> {
                   ],
                 ),
               ),
-              Icon(Icons.chevron_right, size: 18, color: _sub),
+              const SizedBox(width: 6),
+              Container(
+                width: 28,
+                height: 28,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppTheme.accentColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Icon(Icons.arrow_forward_rounded,
+                    size: 15, color: AppTheme.accentColor),
+              ),
             ],
           ),
         ),
