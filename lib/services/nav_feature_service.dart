@@ -37,6 +37,9 @@ enum NavFeature {
   // 「一起看」分类（2026-10-22）：局域网观影房间（房主手机当服务器）。
   // ⚠️ 同样默认**不进底栏**，在「设置 → 主页页面」打开。
   room('room', '一起看', false, tabIndex: 12),
+  // 「REX」分类（2026-10-22）：ForwardWidget / REX 模块宿主。
+  // 默认不进底栏，在「设置 → 主页页面」打开。
+  rex('rex', 'REX', false, tabIndex: 13),
   shelf('shelf', '史藏', false, tabIndex: 1),
   settings('settings', '设置', true, tabIndex: 3),
   search('search', '搜索', false, tabIndex: 0);
@@ -68,6 +71,7 @@ enum NavFeature {
         NavFeature.emby => Icons.video_settings_outlined,
         NavFeature.drama => Icons.movie_filter_outlined,
         NavFeature.room => Icons.groups_outlined,
+        NavFeature.rex => Icons.extension_outlined,
         NavFeature.shelf => Icons.schedule_outlined,
         NavFeature.settings => Icons.settings_outlined,
         NavFeature.search => Icons.search,
@@ -106,6 +110,7 @@ enum NavFeature {
         NavFeature.emby => Icons.video_settings,
         NavFeature.drama => Icons.movie_filter,
         NavFeature.room => Icons.groups_rounded,
+        NavFeature.rex => Icons.extension_rounded,
         NavFeature.shelf => Icons.schedule,
         NavFeature.settings => Icons.settings,
         NavFeature.search => Icons.search,
@@ -141,6 +146,7 @@ class NavFeatureService extends GetxService {
     NavFeature.emby,
     NavFeature.drama,
     NavFeature.room,
+    NavFeature.rex,
   ];
 
   /// 启用中的功能（**顺序即底栏顺序**，不含 search —— 搜索是按钮不是 tab）

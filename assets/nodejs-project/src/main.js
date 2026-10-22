@@ -71,6 +71,16 @@ async function getDrpyHost() {
     return drpyHostCache;
 }
 
+// ── REX / ForwardWidget 模块宿主 ─────────────────────────────
+// 同样惰性加载：只有用户真正打开 REX 模块时才求值。
+let rexEngineCache = null;
+
+async function getRexEngine() {
+    if (rexEngineCache) return rexEngineCache;
+    rexEngineCache = await import('./rex_engine.js');
+    return rexEngineCache;
+}
+
 // ── 小说书源引擎（Legado 格式）────────────────────────────────
 //
 // 为什么要惰性加载而不是顶层 import：
@@ -711,6 +721,31 @@ const mgmtServer = createServer((req, res) => {
                         error: '音乐接口异常：' + ((e && e.message) || String(e)),
                     }));
                 } catch (_) { /* 响应已开始写出，忽略二次写入错误 */ }
+            }
+        });
+        return;
+    }
+
+    // ── REX / ForwardWidget 模块宿主 ─────────────────────────────
+    //   body: { action: 'load'|'list'|'detail'|'resource'|'search'|'clearCache',
+    //           url, functionName?, params?, link?, keyword?, page? }
+    if (req.method === 'POST' && url.pathname === '/rex/api') {
+        miniAppReadBody(req, 1024 * 1024).then(async (body) => {
+            try {
+                const data = JSON.parse(body || '{}');
+                const engine = await getRexEngine();
+                const r = await engine.handleRexApi(data);
+                res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+                res.end(JSON.stringify(r));
+            } catch (e) {
+                console.error('ERROR in /rex/api:', (e && e.stack) || e);
+                try {
+                    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+                    res.end(JSON.stringify({
+                        ok: false,
+                        error: String((e && e.message) || e),
+                    }));
+                } catch (_) { /* 响应已开始写出 */ }
             }
         });
         return;

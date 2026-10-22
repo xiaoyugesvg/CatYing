@@ -22,6 +22,7 @@ import '../emby/emby_home_page.dart';
 import '../rss/pages/rss_page.dart';
 import 'drama/view.dart';
 import '../room/room_home_page.dart';
+import '../rex/rex_home_page.dart';
 import 'settings/view.dart';
 import 'search/view.dart';
 import 'search/controller.dart';
@@ -326,6 +327,9 @@ class _ContentViewState extends State<ContentView>
         // 同一 WiFi 下多人同步播放 + 聊天（2026-10-22）。
         // 同样默认不进底栏。
         const RoomHomePage(),
+        // REX（索引 13）—— ForwardWidget / REX 模块宿主（2026-10-22）。
+        // 默认不进底栏，用户自行开启。
+        const RexHomePage(),
       ];
     }
     return _tabPagesCache!;

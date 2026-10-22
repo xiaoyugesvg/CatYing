@@ -27,6 +27,7 @@ class HomePagesSettingsPage extends StatelessWidget {
     NavFeature.emby: Icons.video_settings_outlined,
     NavFeature.drama: Icons.movie_filter_outlined,
     NavFeature.room: Icons.groups_outlined,
+    NavFeature.rex: Icons.extension_outlined,
     NavFeature.shelf: Icons.video_library_outlined,
     NavFeature.settings: Icons.settings_outlined,
     NavFeature.search: Icons.search,
