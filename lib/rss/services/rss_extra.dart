@@ -183,38 +183,49 @@ class RssExtra {
 
   // ── 批量刷新 ─────────────────────────────────────────────
 
-  /// 逐个刷新已启用订阅源的第一页，顺便写缓存。
+  /// 按批（3 路并发）刷新已启用订阅源的第一页，顺便写缓存。
   /// 返回成功条数；[onProgress] 用于进度提示。
   static Future<int> refreshAll({
     void Function(int done, int total)? onProgress,
   }) async {
     final all = RssStore.instance.enabledSources;
+    if (all.isEmpty) return 0;
     var ok = 0;
     var done = 0;
-    for (final s in all) {
-      done++;
-      onProgress?.call(done, all.length);
-      try {
-        if (s.isSiteOnly) {
-          ok++;
-          continue;
-        }
-        final ch = s.channels.isNotEmpty ? s.channels.first : null;
-        if (ch == null) continue;
-        final res = await RssReader.fetchArticles(
-          s,
-          channel: ch,
-          page: 1,
-          ignoreCache: true,
-        );
-        if (res.articles.isNotEmpty) {
-          await writeCache(s, ch.url, res.articles);
-          ok++;
-        }
-      } catch (_) {
-        // 单个源失败不影响其它源
-      }
+    // 并发 3：串行时几十个源要排队等很久；全并发又会同时打几十个站点。
+    // 单个源失败只影响自己（_refreshOne 内部 catch）。
+    const concurrency = 3;
+    for (var i = 0; i < all.length; i += concurrency) {
+      final end = i + concurrency < all.length ? i + concurrency : all.length;
+      final batch = all.sublist(i, end);
+      final results = await Future.wait(batch.map((s) async {
+        final r = await _refreshOne(s);
+        done++;
+        onProgress?.call(done, all.length);
+        return r;
+      }));
+      ok += results.where((e) => e).length;
     }
     return ok;
+  }
+
+  /// 刷新单个源；站点型（SiteOnly）没有频道可刷，直接算成功
+  static Future<bool> _refreshOne(RssSource s) async {
+    try {
+      if (s.isSiteOnly) return true;
+      final ch = s.channels.isNotEmpty ? s.channels.first : null;
+      if (ch == null) return false;
+      final res = await RssReader.fetchArticles(
+        s,
+        channel: ch,
+        page: 1,
+        ignoreCache: true,
+      );
+      if (res.articles.isEmpty) return false;
+      await writeCache(s, ch.url, res.articles);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 }

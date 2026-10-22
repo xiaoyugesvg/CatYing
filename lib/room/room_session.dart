@@ -550,6 +550,9 @@ class RoomSession extends ChangeNotifier {
               if (e is Map) RoomChatMessage.fromJson(e.cast<String, dynamic>()),
           ]
         : const [];
+    if (messages.length > 300) {
+      messages = messages.sublist(messages.length - 300);
+    }
     connected = true;
     connecting = false;
     error = null;
@@ -893,6 +896,10 @@ class RoomSession extends ChangeNotifier {
         system: true,
       ),
     ];
+    // 系统消息也要受同一个上限约束，否则长房间里只涨不减
+    if (messages.length > 300) {
+      messages = messages.sublist(messages.length - 300);
+    }
   }
 
   void _emit(RoomPlayEvent e) {

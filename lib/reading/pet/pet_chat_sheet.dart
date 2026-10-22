@@ -24,6 +24,18 @@ class _PetChatSheetState extends State<PetChatSheet> {
 
   /// (是否用户, 文本)
   final List<({bool me, String text})> _messages = [];
+
+  /// 会话内存上限：只保留最近 N 条（上下文本身只拼最近 6 条，
+  /// 这里防的是"聊很久之后列表无限涨"）
+  static const int _maxMessages = 100;
+
+  void _append(({bool me, String text}) m) {
+    _messages.add(m);
+    if (_messages.length > _maxMessages) {
+      _messages.removeRange(0, _messages.length - _maxMessages);
+    }
+  }
+
   bool _busy = false;
   bool _showConfig = false;
 
@@ -69,7 +81,7 @@ class _PetChatSheetState extends State<PetChatSheet> {
     final text = _input.text.trim();
     if (text.isEmpty || _busy) return;
     setState(() {
-      _messages.add((me: true, text: text));
+      _append((me: true, text: text));
       _busy = true;
     });
     _input.clear();
@@ -85,10 +97,10 @@ class _PetChatSheetState extends State<PetChatSheet> {
       final user = ctx.isEmpty ? text : '$ctx\n主人：$text\n我：';
       final reply = await _ai.chat(system: _systemPrompt, user: user);
       if (!mounted) return;
-      setState(() => _messages.add((me: false, text: reply)));
+      setState(() => _append((me: false, text: reply)));
     } catch (e) {
       if (!mounted) return;
-      setState(() => _messages.add((me: false, text: '（说不出话）$e')));
+      setState(() => _append((me: false, text: '（说不出话）$e')));
     } finally {
       if (mounted) setState(() => _busy = false);
       _jumpBottom();

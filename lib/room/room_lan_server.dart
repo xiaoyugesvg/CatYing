@@ -121,7 +121,8 @@ class LanRoomServer {
         'id': roomId,
         'name': roomName,
         'description': '局域网房间',
-        'password': password,
+        // 不回传明文密码：客户端只需要知道"有没有密码"
+        'hasPassword': password.isNotEmpty,
         'isPublic': false,
         'roomType': 'sync',
         'ownerName': hostName,
@@ -166,6 +167,25 @@ class LanRoomServer {
     }
 
     final fromHost = cid == _hostCid;
+    try {
+      _handleMessage(cid, peer, m, fromHost: fromHost);
+    } catch (e) {
+      // 非本 App 客户端可能发来任意 JSON：单条消息处理失败不能让异常
+      // 冒到 WebSocket 回调的 zone（未捕获异常会污染整个房间服务）
+      try {
+        peer.ws.add(jsonEncode({'t': 'error', 'message': '消息处理失败'}));
+      } catch (_) {}
+      // ignore: avoid_print
+      print('[LanRoom] 消息处理失败: $e');
+    }
+  }
+
+  void _handleMessage(
+    String cid,
+    _LanPeer peer,
+    Map<String, dynamic> m, {
+    required bool fromHost,
+  }) {
     switch (m['t']) {
       case 'chat':
         final text = (m['text'] ?? '').toString().trim();
