@@ -486,7 +486,7 @@ class _RoomHomePageState extends State<RoomHomePage> {
               foregroundColor: Colors.redAccent,
               minimumSize: const Size(0, 42),
             ),
-            child: Text(s.isHost ? '解散房间' : '离开房间'),
+            child: Text(s.isHost ? '离开（房间保留 5 分钟）' : '离开房间'),
           ),
         ],
       ),
@@ -693,15 +693,12 @@ class _RoomHomePageState extends State<RoomHomePage> {
   }
 
   Future<void> _leave() async {
-    final hosting = _session.isHost;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(hosting ? '解散房间？' : '离开房间？'),
-        content: Text(hosting
-            ? '离开后房主身份保留 5 分钟，期间可以用房间号回来；'
-                '超过 5 分钟房间会被服务器删除。'
-            : '离开后可以随时用房间号再进来。'),
+        title: const Text('离开房间？'),
+        content: const Text('房主离开后房间保留 5 分钟，期间可以用房间号回来；'
+            '超过 5 分钟或成员全部离开后，服务器会删除房间。'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -709,7 +706,7 @@ class _RoomHomePageState extends State<RoomHomePage> {
           TextButton(
               onPressed: () => Navigator.pop(ctx, true),
               style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
-              child: Text(hosting ? '离开' : '离开')),
+              child: const Text('离开')),
         ],
       ),
     );

@@ -471,8 +471,8 @@ class RoomSession extends ChangeNotifier {
     messages = const [];
     playState = null;
     isHost = false;
-    _ownerToken = '';
-    _joinPassword = '';
+    // 刻意**保留** _ownerToken / _joinPassword：服务端会给房主留 5 分钟，
+    // 期间用同一房间号回来还能恢复房主身份（清了就只能当普通成员）。
     notifyListeners();
   }
 
