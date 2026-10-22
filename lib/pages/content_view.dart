@@ -21,6 +21,7 @@ import '../hiker/pages/hiker_home_page.dart';
 import '../emby/emby_home_page.dart';
 import '../rss/pages/rss_page.dart';
 import 'drama/view.dart';
+import '../room/room_home_page.dart';
 import 'settings/view.dart';
 import 'search/view.dart';
 import 'search/controller.dart';
@@ -321,6 +322,10 @@ class _ContentViewState extends State<ContentView>
         // 短剧（索引 11）—— 按当前源的短剧类目聚合（2026-10-22）。
         // 同样默认不进底栏。
         const DramaPage(),
+        // 一起看（索引 12）—— 局域网观影房间：房主手机当服务器，
+        // 同一 WiFi 下多人同步播放 + 聊天（2026-10-22）。
+        // 同样默认不进底栏。
+        const RoomHomePage(),
       ];
     }
     return _tabPagesCache!;
