@@ -8,6 +8,8 @@
 // 一个源可能有多个分类（`sortUrl` 里 `名称::url`）⇒ 分类多的时候顶栏下面
 // 出一条分类胶囊。
 
+import 'dart:async';
+
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -24,6 +26,7 @@ import '../../widgets/card_action_sheet.dart';
 import '../../widgets/common_widgets.dart';
 import '../models/rss_article.dart';
 import '../models/rss_source.dart';
+import '../services/rss_extra.dart';
 import '../services/rss_reader.dart';
 import '../services/rss_store.dart';
 import '../widgets/rss_login_sheet.dart';
@@ -223,6 +226,7 @@ class _RssPageState extends State<RssPage> {
   void initState() {
     super.initState();
     _restoreView();
+    _loadReadIds();
     store.tick.addListener(_onStoreChanged);
     if (_tabEnabled) {
       _start();
@@ -235,14 +239,27 @@ class _RssPageState extends State<RssPage> {
     }
   }
 
+  // 定时静默刷新（Legado 的"定时更新"）：每 30 分钟检查一次当前源
+  Timer? _silentTimer;
+
   void _start() {
     if (_started) return;
     _started = true;
     _boot();
+    _silentTimer?.cancel();
+    _silentTimer = Timer.periodic(const Duration(minutes: 30), (_) async {
+      if (!mounted || !_started || _loading) return;
+      final s = store.current;
+      if (s == null || s.isSiteOnly) return;
+      if (await RssExtra.isStale(s)) {
+        await _load(append: false, fresh: true);
+      }
+    });
   }
 
   @override
   void dispose() {
+    _silentTimer?.cancel();
     store.tick.removeListener(_onStoreChanged);
     _navWorker?.dispose();
     super.dispose();
@@ -368,12 +385,25 @@ class _RssPageState extends State<RssPage> {
     }
     final my = ++_seq;
     _loadingId = src.id;
+    final chs0 = _channels.isNotEmpty ? _channels : src.channels;
+    final ch0 = chs0[_channel.clamp(0, chs0.length - 1)];
+    // 离线缓存优先：首屏立刻有内容，再静默刷新（Legado 的"缓存优先"）
+    if (!append && !fresh) {
+      final cached = await RssExtra.readCache(src, ch0.url);
+      if (cached != null && mounted && my == _seq) {
+        setState(() {
+          _articles = cached;
+          _loadedId = src.id;
+          _loading = false;
+          _error = '';
+        });
+      }
+    }
     setState(() {
       _loading = true;
       if (!append) {
         _error = '';
-        _articles = [];
-        _siteLike = false;
+        if (_articles.isEmpty) _siteLike = false;
       }
     });
     try {
@@ -389,6 +419,10 @@ class _RssPageState extends State<RssPage> {
       );
       if (!mounted || my != _seq) return;
       final list = res.articles;
+      // 抓成功就更新离线缓存（失败时保留旧缓存，断网也能看）
+      if (list.isNotEmpty) {
+        unawaited(RssExtra.writeCache(src, ch.url, list));
+      }
       setState(() {
         _articles = append ? [..._articles, ...list] : list;
         _nextUrl = res.nextUrl;
@@ -398,9 +432,15 @@ class _RssPageState extends State<RssPage> {
       });
     } catch (e) {
       if (!mounted || my != _seq) return;
+      // 有缓存时不拿错误盖掉列表：提示一句，内容照常可读
       setState(() {
-        _error = '抓取失败：${e.toString().split('\n').first}';
+        _error = _articles.isEmpty
+            ? '抓取失败：${e.toString().split('\n').first}'
+            : '';
       });
+      if (_articles.isNotEmpty) {
+        AppToast.message('刷新失败，正在显示离线缓存');
+      }
     } finally {
       if (mounted && my == _seq) {
         _loadingId = '';
@@ -461,6 +501,113 @@ class _RssPageState extends State<RssPage> {
           ),
         ),
       );
+
+  /// 已读集合（Legado 语义：点开即已读）+ 源内搜索状态
+  Set<String> _read = {};
+  String _searchKw = '';
+  List<RssArticle>? _preSearch;
+
+  /// 当前列表的未读数
+  int get _unreadCount =>
+      _articles.where((a) => !_read.contains(RssExtra.articleKey(a))).length;
+
+  Future<void> _loadReadIds() async {
+    final s = await RssExtra.readIds();
+    if (mounted) setState(() => _read = s);
+  }
+
+  /// 打开文章：先落"已读"，再进正文页。
+  Future<void> _openArticle(RssArticle a, RssSource src) async {
+    final k = RssExtra.articleKey(a);
+    if (!_read.contains(k)) {
+      unawaited(RssExtra.markRead(k));
+      setState(() => _read.add(k));
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => RssArticlePage(source: src, article: a),
+      ),
+    );
+  }
+
+  /// 源内搜索：源配了 `searchUrl` 走远端，否则退回当前列表的标题过滤。
+  Future<void> _openSearch() async {
+    final src = store.current;
+    if (src == null) return;
+    final c = TextEditingController();
+    final kw = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('搜索订阅内容'),
+        content: TextField(
+          controller: c,
+          autofocus: true,
+          textInputAction: TextInputAction.search,
+          decoration: const InputDecoration(
+            hintText: '输入关键词',
+            isDense: true,
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, c.text),
+            child: const Text('搜索'),
+          ),
+        ],
+      ),
+    );
+    final key = (kw ?? '').trim();
+    if (key.isEmpty || !mounted) return;
+    if (src.searchUrl.trim().isEmpty) {
+      // 没有 searchUrl：只在已抓到的列表里过滤，不清空原列表
+      final old = _preSearch ??= List<RssArticle>.from(_articles);
+      final hit = old
+          .where((a) =>
+              a.title.contains(key) || a.description.contains(key))
+          .toList();
+      setState(() {
+        _searchKw = key;
+        _articles = hit;
+        _error = hit.isEmpty ? '当前列表里没有匹配「$key」的文章' : '';
+      });
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _searchKw = key;
+      _preSearch = List<RssArticle>.from(_articles);
+    });
+    try {
+      final list = await RssExtra.search(src, key);
+      if (!mounted) return;
+      setState(() {
+        _articles = list ?? const [];
+        _loading = false;
+        _error = (_articles.isEmpty) ? '没搜到「$key」' : '';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = '搜索失败：${e.toString().split('\n').first}';
+      });
+    }
+  }
+
+  void _clearSearch() {
+    setState(() {
+      _searchKw = '';
+      _articles = _preSearch ?? _articles;
+      _preSearch = null;
+      _error = '';
+    });
+    _reload();
+  }
 
   Future<void> _restoreView() async {
     try {
@@ -585,6 +732,26 @@ class _RssPageState extends State<RssPage> {
                         else
                           Icon(Icons.expand_more_rounded,
                               size: 16, color: AppTheme.textTertiary),
+                        // 未读数：当前列表里还没点开过的条数
+                        if (_unreadCount > 0) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE5484D),
+                              borderRadius: BorderRadius.circular(9),
+                            ),
+                            child: Text(
+                              '$_unreadCount',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -595,6 +762,8 @@ class _RssPageState extends State<RssPage> {
                     _topIcon(Icons.key_rounded, '登录 / 源站设置', _openLogin),
                     const SizedBox(width: 8),
                   ],
+                  _topIcon(Icons.search_rounded, '搜索', _openSearch),
+                  const SizedBox(width: 8),
                   _topIcon(Icons.refresh_rounded, '刷新', _loading ? null : _reload),
                   const SizedBox(width: 8),
                   _topIcon(
@@ -656,6 +825,39 @@ class _RssPageState extends State<RssPage> {
               ),
             ),
           const SizedBox(height: 8),
+          // 搜索中：给一条可清除的提示（否则用户不知道列表为什么变短了）
+          if (_searchKw.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+              child: Row(
+                children: [
+                  Icon(Icons.search_rounded,
+                      size: 14, color: AppTheme.textTertiary),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '搜索「$_searchKw」',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: AppTheme.fontCaption,
+                        color: AppTheme.textTertiary,
+                      ),
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: _clearSearch,
+                    child: Text(
+                      '退出搜索',
+                      style: TextStyle(
+                        fontSize: AppTheme.fontCaption,
+                        color: AppTheme.accentColor,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Expanded(child: _body(src)),
         ],
       ),
@@ -794,11 +996,7 @@ class _RssPageState extends State<RssPage> {
         border: Border.all(color: AppTheme.borderLight, width: 0.5),
       ),
       child: InkWell(
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => RssArticlePage(source: src, article: a),
-          ),
-        ),
+        onTap: () => _openArticle(a, src),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -820,16 +1018,35 @@ class _RssPageState extends State<RssPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      a.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                        height: 1.3,
-                      ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (!_read.contains(RssExtra.articleKey(a)))
+                          Padding(
+                            padding: const EdgeInsets.only(top: 5, right: 5),
+                            child: Container(
+                              width: 6,
+                              height: 6,
+                              decoration: const BoxDecoration(
+                                color: Color(0xFFE5484D),
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ),
+                        Expanded(
+                          child: Text(
+                            a.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              height: 1.3,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const Spacer(),
                     Text(
@@ -959,11 +1176,7 @@ class _RssPageState extends State<RssPage> {
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => RssArticlePage(source: src, article: a),
-          ),
-        ),
+        onTap: () => _openArticle(a, src),
         child: Padding(
           padding: const EdgeInsets.all(10),
           child: Row(
@@ -992,9 +1205,14 @@ class _RssPageState extends State<RssPage> {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        // 已读：颜色压灰；未读：正常主色 + 加粗
+                        color: _read.contains(RssExtra.articleKey(a))
+                            ? AppTheme.textTertiary
+                            : AppTheme.textPrimary,
                         fontSize: AppTheme.fontSubhead,
-                        fontWeight: FontWeight.w600,
+                        fontWeight: _read.contains(RssExtra.articleKey(a))
+                            ? FontWeight.w400
+                            : FontWeight.w600,
                         height: 1.35,
                       ),
                     ),

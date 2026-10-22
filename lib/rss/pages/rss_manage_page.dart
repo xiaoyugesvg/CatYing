@@ -32,6 +32,7 @@ import '../../widgets/card_action_sheet.dart';
 import '../../widgets/common_widgets.dart';
 import '../models/rss_source.dart';
 import '../services/rss_reader.dart';
+import '../services/rss_extra.dart';
 import '../services/rss_store.dart';
 import 'rss_source_edit_page.dart';
 
@@ -278,6 +279,7 @@ class _RssManagePageState extends State<RssManagePage> {
     ('net', Icons.cloud_download_outlined, '网络导入'),
     ('qr', Icons.qr_code_scanner_rounded, '二维码导入'),
     ('default', Icons.restore_rounded, '导入默认'),
+    ('refresh', Icons.sync_rounded, '全部刷新'),
     ('share', Icons.ios_share_rounded, '分享'),
   ];
 
@@ -343,6 +345,16 @@ class _RssManagePageState extends State<RssManagePage> {
       case 'default':
         final n = await store.restoreBuiltins();
         AppToast.message(n == 0 ? '内置订阅源都在' : '已导入 $n 个内置订阅源');
+      case 'refresh':
+        // 批量刷新：逐个抓第一页并写离线缓存（Legado 的"全部更新"）
+        final total = store.enabledSources.length;
+        if (total == 0) {
+          AppToast.message('还没有启用的订阅源');
+          return;
+        }
+        AppToast.message('正在刷新 $total 个订阅源…');
+        final ok = await RssExtra.refreshAll();
+        AppToast.message('已刷新 $ok/$total 个订阅源');
       case 'share':
         if (store.sources.isEmpty) {
           AppToast.message('还没有订阅源');

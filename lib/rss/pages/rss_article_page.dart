@@ -5,6 +5,7 @@
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../common/theme.dart';
@@ -16,6 +17,7 @@ import '../../widgets/ad_block_bubble.dart';
 import '../models/rss_article.dart';
 import '../models/rss_source.dart';
 import '../services/rss_reader.dart';
+import '../../reading/services/tts_service.dart';
 
 class RssArticlePage extends StatefulWidget {
   const RssArticlePage({super.key, required this.source, required this.article});
@@ -53,6 +55,18 @@ class _RssArticlePageState extends State<RssArticlePage> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  /// 朗读正文（2026-10-22，Legado 订阅源同款能力）
+  Future<void> _toggleTts() async {
+    final t = TtsService.instance;
+    if (t.isSpeaking.value) {
+      await t.stop();
+      return;
+    }
+    final plain = _text.trim();
+    if (plain.isEmpty) return;
+    await t.speak(plain);
   }
 
   Future<void> _load() async {
@@ -352,6 +366,22 @@ class _RssArticlePageState extends State<RssArticlePage> {
               TextStyle(color: AppTheme.textPrimary, fontSize: AppTheme.fontSubhead),
         ),
         actions: [
+          // 朗读正文（纯文本模式；HTML/网页模式没有可朗读正文）
+          Obx(() {
+            final speaking = TtsService.instance.isSpeaking.value;
+            return IconButton(
+              tooltip: speaking ? '停止朗读' : '朗读正文',
+              icon: Icon(
+                speaking ? Icons.stop_circle_outlined : Icons.volume_up_rounded,
+                size: 20,
+                color: AppTheme.textSecondary,
+              ),
+              onPressed:
+                  (_loading || _webMode || _isHtml || _text.trim().isEmpty)
+                      ? null
+                      : _toggleTts,
+            );
+          }),
           // 正文 / 网页切换：图集型文章默认网页；其它文章也能手动切过去看原文
           IconButton(
             tooltip: _webMode
