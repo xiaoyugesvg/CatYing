@@ -1267,22 +1267,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     }
   }
 
-  /// C9：正文净化（正则替换）。坏正则跳过，不打断阅读。
-  String _applyPurify(String raw) {
-    var text = raw;
-    for (final rule in _rs.purifyRules) {
-      if (!rule.enabled || rule.pattern.trim().isEmpty) continue;
-      try {
-        text = text.replaceAll(
-          RegExp(rule.pattern, multiLine: true),
-          rule.replacement,
-        );
-      } catch (_) {
-        // 用户自定义正则不合法 → 跳过该条
-      }
-    }
-    return text;
-  }
+  /// C9：正文净化（正则/纯文本替换）。坏正则跳过，不打断阅读。
+  String _applyPurify(String raw) => applyPurifyRules(raw, _rs.purifyRules);
 
   /// C9：正文净化设置弹窗。规则列表 + 启停开关 + 删除自定义规则 +
   /// 新增规则（正则替换），改完即时重排当前章（从净化后原文缓存重转）。
@@ -1327,6 +1313,99 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                         ),
                       ),
                       const Spacer(),
+                      // 2026-10-22：导入 legado 替换净化规则（JSON 或 legado:// 链接）
+                      IconButton(
+                        tooltip: '导入 legado 规则',
+                        icon: Icon(
+                          Icons.file_download_outlined,
+                          color: _fgMuted,
+                          size: 20,
+                        ),
+                        onPressed: () async {
+                          final c = TextEditingController();
+                          final ok = await showDialog<bool>(
+                            context: ctx,
+                            builder: (dctx) => AlertDialog(
+                              backgroundColor: _bgTop,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              title: Text(
+                                '导入替换净化',
+                                style: TextStyle(
+                                  fontSize: AppTheme.fontTitle3,
+                                  color: _fg,
+                                ),
+                              ),
+                              content: TextField(
+                                controller: c,
+                                maxLines: 8,
+                                minLines: 4,
+                                style: TextStyle(color: _fg, fontSize: 13),
+                                decoration: InputDecoration(
+                                  hintText:
+                                      '粘贴 legado 的 replaceRule JSON（数组），\n'
+                                      '或 legado://import/replaceRule?src=...',
+                                  hintStyle: TextStyle(
+                                    color: _fgMuted,
+                                    fontSize: 12,
+                                  ),
+                                  filled: true,
+                                  fillColor: _fg.withValues(alpha: 0.05),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.pop(dctx, false),
+                                  child: const Text('取消'),
+                                ),
+                                FilledButton(
+                                  onPressed: () => Navigator.pop(dctx, true),
+                                  child: const Text('导入'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (ok != true) return;
+                          var raw = c.text.trim();
+                          if (raw.isEmpty) return;
+                          // legado://import/replaceRule?src=<urlencoded JSON/URL>
+                          if (raw.startsWith('legado://')) {
+                            final q = Uri.tryParse(raw)?.queryParameters;
+                            raw = (q?['src'] ?? '').trim();
+                            if (raw.isEmpty) {
+                              _toast('链接里没有 src 参数');
+                              return;
+                            }
+                            raw = Uri.decodeComponent(raw);
+                          }
+                          try {
+                            final parsed = parseLegadoReplaceRules(
+                              jsonDecode(raw),
+                            );
+                            if (parsed.isEmpty) {
+                              _toast('没有解析到规则');
+                              return;
+                            }
+                            var added = 0;
+                            final exist = list.map((e) => e.pattern).toSet();
+                            for (final r in parsed) {
+                              if (exist.add(r.pattern)) {
+                                list.add(r);
+                                added++;
+                              }
+                            }
+                            commit();
+                            _toast('已导入 $added 条（重复 ${parsed.length - added} 条已跳过）');
+                          } catch (e) {
+                            _toast('导入失败：$e（若是远程链接，请先打开它把内容复制过来）');
+                          }
+                        },
+                      ),
                       IconButton(
                         icon: Icon(
                           Icons.close_rounded,
@@ -1970,7 +2049,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 _go(-1);
               }
             },
-            onTapCenter: () => setState(() => _showBar = !_showBar),
+            onTapCenter: _toggleBar,
           );
         }
 
@@ -2034,7 +2113,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   _go(-1);
                 }
               },
-              onTapCenter: () => setState(() => _showBar = !_showBar),
+              onTapCenter: _toggleBar,
             ),
           );
         }

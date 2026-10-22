@@ -409,7 +409,7 @@ class SettingsService extends ChangeNotifier {
   // 图书正文字体：null = 跟随阅读模式；其他含义见 _kBookFontFamilyKey 注释。
   String? _bookFontFamily;
   List<NavTab> _visibleNavTabs = NavTab.values.toList(); // 导航栏可见 tab，默认全显示
-  bool _navFloating = true; // 导航栏是否悬浮（胶囊型毛玻璃样式），默认开启
+  bool _navFloating = false; // 导航栏是否悬浮（胶囊型毛玻璃样式），默认关闭（2026-10-22 用户要求）
   bool _navIconOnly = false; // 导航栏只显示图标（隐藏文字标签），默认关
   String _navStyle = 'ink'; // 悬浮栏风格：ink / liquid / aurora / neon
   final Map<String, String> _navCustomIcons = {}; // tab 标签 → 自定义图标文件路径
@@ -896,7 +896,7 @@ class SettingsService extends ChangeNotifier {
           ? null
           : savedFont;
       // 导航栏悬浮开关
-      _navFloating = prefs.getBool(_kNavFloatingKey) ?? true;
+      _navFloating = prefs.getBool(_kNavFloatingKey) ?? false;
       _navIconOnly = prefs.getBool(_kNavIconOnlyKey) ?? false;
       // 悬浮底栏风格 + 自定义图标
       _navStyle = prefs.getString(_kNavStyleKey) ?? 'ink';

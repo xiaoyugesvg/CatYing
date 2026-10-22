@@ -295,9 +295,22 @@ class _HomePageState extends State<HomePage> {
               return ListView.builder(
                 scrollDirection: Axis.horizontal,
                 padding: EdgeInsets.zero,
-                itemCount: sorts.length,
+                // 2026-10-22：首位固定「短剧」入口（当前源有短剧类目就直接切过去）
+                itemCount: sorts.length + 1,
                 itemBuilder: (context, index) {
-                  final sort = sorts[index];
+                  if (index == 0) {
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: GestureDetector(
+                        onTap: _openShortDramaCategory,
+                        child: const _CategoryChip(
+                          label: '短剧',
+                          selected: false,
+                        ),
+                      ),
+                    );
+                  }
+                  final sort = sorts[index - 1];
                   final isSelected =
                       _controller.selectedSort.value?.id == sort.id;
                   return Padding(
@@ -329,12 +342,32 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  /// 短剧入口（2026-10-22）：在**当前源**的分类里找短剧类目并切过去；
+  /// 没有就提示换源。类目来自源接口，不写死任何站源。
+  void _openShortDramaCategory() {
+    bool isShortDrama(String name) {
+      const keys = ['短剧', '微短剧', '竖屏', '爽剧', '短剧场'];
+      return keys.any(name.contains);
+    }
+
+    for (final s in _controller.sorts) {
+      if (isShortDrama(s.name)) {
+        _controller.selectSort(s);
+        return;
+      }
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('当前源没有短剧分类，可在「切换源」里换个源再试'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
   /// 筛选入口按钮（放在分类栏右端）
   ///
   /// 没有筛选条件时置灰不可点；已有选中项时高亮成实心圆点，
   /// 让用户一眼看出"当前列表是被筛选过的"。
-  /// 筛选按钮（分类栏右端）。
-  ///
   /// 点击弹出**三项菜单**（参考图样式）：
   ///   分类屏蔽 / 隐藏筛选 / 切换布局
   /// 其中「隐藏筛选」展开下方的分组筛选行；按钮在有筛选条件时高亮。

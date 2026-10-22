@@ -14,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/book.dart';
 import '../models/book_content.dart';
+import '../models/reading_settings.dart';
 import '../models/bookshelf.dart';
 import '../services/book_download_service.dart';
 import '../services/book_font_service.dart';
@@ -538,6 +539,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
         _imageNaturalWidths.addAll(r.naturalWidths);
       }
       if (!mounted) return;
+      // C9 正文净化：本地 TXT/EPUB 与书源阅读器共用同一套规则
+      content = _purifyContent(content, await _loadPurifyRules());
       setState(() {
         _content = content;
         // ✅ **填充划线缓存（正常加载路径）**（本轮 ✓）—— 与预取路径**同一段逻辑** ✓
@@ -559,6 +562,48 @@ class _BookReaderPageState extends State<BookReaderPage> {
         });
       }
     }
+  }
+
+  /// C9：从阅读设置里取正文净化规则（与书源阅读器同一个 key）
+  Future<List<PurifyRule>> _loadPurifyRules() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString('reading.settings');
+      if (raw == null || raw.isEmpty) return const [];
+      final j = jsonDecode(raw);
+      if (j is! Map) return const [];
+      return ReadingSettings.fromJson(
+        Map<String, dynamic>.from(j),
+      ).purifyRules;
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// C9：对本地书的段落/标题套用净化规则（图片、分隔块原样保留）
+  BookContent _purifyContent(BookContent c, List<PurifyRule> rules) {
+    if (rules.isEmpty) return c;
+    return BookContent(
+      title: c.title,
+      author: c.author,
+      images: c.images,
+      imageLoader: c.imageLoader,
+      chapters: [
+        for (final ch in c.chapters)
+          BookChapter(
+            title: ch.title,
+            blocks: [
+              for (final b in ch.blocks)
+                if (b is ParagraphBlock)
+                  ParagraphBlock(applyPurifyRules(b.text, rules), kind: b.kind)
+                else if (b is HeadingBlock)
+                  HeadingBlock(applyPurifyRules(b.text, rules), b.level)
+                else
+                  b,
+            ],
+          ),
+      ],
+    );
   }
 
   void _restoreProgress() {

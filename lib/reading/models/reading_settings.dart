@@ -336,39 +336,105 @@ enum SleepMode {
 
 /// 正文净化规则（C9）：正则替换，enabled=false 时跳过。
 /// pattern 用 RegExp 语义（默认 multiLine），坏正则会被阅读器 try/catch 跳过。
+/// 2026-10-22：兼容 legado 的 replaceRule（name/group/isRegex/isEnabled），
+/// 旧的三字段 JSON 仍可读；isRegex=false 时按纯文本替换。
 class PurifyRule {
+  final String name;
+  final String group;
   final String pattern;
   final String replacement;
   final bool enabled;
+  final bool isRegex;
 
   const PurifyRule({
+    this.name = '',
+    this.group = '',
     required this.pattern,
     this.replacement = '',
     this.enabled = true,
+    this.isRegex = true,
   });
 
   factory PurifyRule.fromJson(Map<String, dynamic> j) => PurifyRule(
-        pattern: j['pattern'] as String? ?? '',
+        name: j['name'] as String? ?? '',
+        group: j['group'] as String? ?? '',
+        pattern: j['pattern'] as String? ?? j['rule'] as String? ?? '',
         replacement: j['replacement'] as String? ?? '',
-        enabled: j['enabled'] as bool? ?? true,
+        enabled: j['enabled'] as bool? ?? j['isEnabled'] as bool? ?? true,
+        isRegex: j['isRegex'] as bool? ?? true,
       );
 
   Map<String, dynamic> toJson() => {
+        'name': name,
+        'group': group,
         'pattern': pattern,
         'replacement': replacement,
         'enabled': enabled,
+        'isRegex': isRegex,
       };
 
   PurifyRule copyWith({
+    String? name,
+    String? group,
     String? pattern,
     String? replacement,
     bool? enabled,
+    bool? isRegex,
   }) =>
       PurifyRule(
+        name: name ?? this.name,
+        group: group ?? this.group,
         pattern: pattern ?? this.pattern,
         replacement: replacement ?? this.replacement,
         enabled: enabled ?? this.enabled,
+        isRegex: isRegex ?? this.isRegex,
       );
+}
+
+/// 应用一组净化规则（书源阅读器 / 本地阅读器共用）。
+/// 坏正则跳过，不打断阅读。
+String applyPurifyRules(String raw, List<PurifyRule> rules) {
+  var text = raw;
+  for (final rule in rules) {
+    if (!rule.enabled || rule.pattern.trim().isEmpty) continue;
+    if (!rule.isRegex) {
+      text = text.replaceAll(rule.pattern, rule.replacement);
+      continue;
+    }
+    try {
+      text = text.replaceAll(
+        RegExp(rule.pattern, multiLine: true),
+        rule.replacement,
+      );
+    } catch (_) {
+      // 用户自定义正则不合法 → 跳过该条
+    }
+  }
+  return text;
+}
+
+/// 解析 legado 的「替换净化」JSON：单条对象或数组都接受。
+/// 字段：name / group / pattern / replacement / isRegex / isEnabled
+/// 也兼容 `legado://import/replaceRule?src=...` 里的 rule 字段写法。
+List<PurifyRule> parseLegadoReplaceRules(dynamic json) {
+  final list = json is List ? json : (json is Map ? [json] : const []);
+  final out = <PurifyRule>[];
+  for (final e in list) {
+    if (e is! Map) continue;
+    final pattern = (e['pattern'] ?? e['rule'] ?? '').toString();
+    if (pattern.trim().isEmpty) continue;
+    out.add(
+      PurifyRule(
+        name: (e['name'] ?? '').toString(),
+        group: (e['group'] ?? '').toString(),
+        pattern: pattern,
+        replacement: (e['replacement'] ?? '').toString(),
+        enabled: e['isEnabled'] as bool? ?? true,
+        isRegex: e['isRegex'] as bool? ?? true,
+      ),
+    );
+  }
+  return out;
 }
 
 /// C9 默认净化规则集（站点残留文案，可按需关闭/删除）

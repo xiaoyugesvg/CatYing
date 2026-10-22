@@ -116,13 +116,16 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
     } else if (_s.type == 'mimo' || _s.type == 'openai') {
       if (_endpoint.text.trim().isEmpty) problems.add('接口地址没填');
       if (_modelId.text.trim().isEmpty) problems.add('模型 ID 没填');
+    } else if (_s.type == 'http') {
+      if (_endpoint.text.trim().isEmpty) problems.add('接口模板没填');
     } else if (_s.type == 'easyvoice') {
       if (_endpoint.text.trim().isEmpty) problems.add('接口地址没填');
       // AI 推荐配音模式下音色可留空（由大模型推荐）
       if (_voice.text.trim().isEmpty && !_s.useAiVoice) problems.add('音色没填');
     }
     if (_apiKey.text.trim().isEmpty &&
-        _s.type != 'easyvoice') {
+        _s.type != 'easyvoice' &&
+        _s.type != 'http') {
       problems.add('API Key 没填');
     }
     if (problems.isNotEmpty) {
@@ -242,6 +245,14 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
               _row('区域', _region, hint: 'eastasia', chevron: true),
               _row('自定义主机', _customHost,
                   hint: '留空按区域自动拼；主权云填完整地址'),
+            ] else if (_s.type == 'http') ...[
+              _row('接口模板', _endpoint,
+                  hint: 'https://host/tts?text={{speakText}}&speed={{speakSpeed}}'),
+              _row('请求头（JSON）', _extraParams,
+                  hint: '{"Authorization":"Bearer xxx"}，可留空'),
+              _note('URL 模板支持占位符：{{speakText}} / {{text}}（自动 URL 编码）、'
+                  '{{speakSpeed}} / {{speed}}（当前语速）。'
+                  '服务返回音频字节即可（mp3/wav），对齐 legado 的 httpTTS。'),
             ] else if (_s.type == 'easyvoice') ...[
               _row('接口地址', _endpoint,
                   hint: 'http://ip:3000（自部署）或公共实例地址'),
@@ -258,6 +269,9 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
               _note('EasyVoice 是免费的 Edge-TTS 服务，无需 API Key。'
                   '自部署：docker run -d -p 3000:3000 cosincox/easyvoice:latest。'
                   '保存后自动设为「当前使用」，朗读面板点播放即走本源。')
+            else if (_s.type == 'http')
+              _note('HTTP 模板源不需要 API Key；需要鉴权的服务把请求头写在上面。'
+                  '保存后自动设为「当前使用」。')
             else ...[
               _row('API Key', _apiKey, hint: '必填', obscure: true),
               _note('API Key 存在系统密钥库里，不写进配置、也不进备份。'

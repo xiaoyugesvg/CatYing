@@ -70,7 +70,14 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                     ],
                   ),
                 ),
-                for (final t in ['network', 'azure', 'mimo', 'openai', 'easyvoice'])
+                for (final t in [
+                  'network',
+                  'azure',
+                  'mimo',
+                  'openai',
+                  'easyvoice',
+                  'http',
+                ])
                   ListTile(
                     title: Text(
                       TtsSource.blank(t).typeLabel,

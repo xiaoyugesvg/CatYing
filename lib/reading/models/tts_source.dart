@@ -184,6 +184,15 @@ class TtsSource {
           useAiVoice: true, // 默认打开 AI 智能推荐配音（多角色有声书）
           maxRetries: 2,
         );
+      case 'http':
+        return TtsSource(
+          id: ts,
+          type: type,
+          name: '自定义 HTTP',
+          endpoint: 'https://host/tts?text={{speakText}}&speed={{speakSpeed}}',
+          audioFormat: 'mp3',
+          timeoutSec: 20,
+        );
       default: // network
         return TtsSource(id: ts, type: 'network', name: '网络导入');
     }
@@ -199,6 +208,8 @@ class TtsSource {
         return 'OpenAI 兼容（/audio/speech 接口）';
       case 'easyvoice':
         return 'EasyVoice（免费 Edge-TTS 服务）';
+      case 'http':
+        return '自定义 HTTP（URL 模板）';
       default:
         return '网络导入';
     }

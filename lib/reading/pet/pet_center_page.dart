@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../common/theme.dart';
 import '../source/global_proxy.dart';
 import '../theme/jelly_theme.dart';
+import 'pet_chat_sheet.dart';
 import 'pet_models.dart';
 import 'pet_service.dart';
 import 'pet_view.dart';
@@ -61,6 +62,20 @@ class _PetCenterPageState extends State<PetCenterPage>
             fontSize: AppTheme.fontTitle3,
           ),
         ),
+        actions: [
+          // 2026-10-22：AI 闲聊（参考 QQ 宠物复刻），走用户自己的 OpenAI 兼容接口
+          IconButton(
+            tooltip: '和宠物聊聊',
+            icon: const Icon(Icons.chat_bubble_outline_rounded),
+            onPressed: () => showModalBottomSheet<void>(
+              context: context,
+              isScrollControlled: true,
+              backgroundColor: Colors.transparent,
+              builder: (_) => const PetChatSheet(),
+            ),
+          ),
+          const SizedBox(width: 4),
+        ],
       ),
       body: ListenableBuilder(
         listenable: _pet,

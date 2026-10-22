@@ -226,7 +226,10 @@ class TtsService extends GetxService {
     // 刷新当前朗读源：朗读引擎页里选中的 easyvoice 源生效，否则原生
     await TtsSourceStore.instance.init();
     final active = TtsSourceStore.instance.active;
-    _netSource = (active != null && active.type == 'easyvoice') ? active : null;
+    _netSource = (active != null &&
+            (active.type == 'easyvoice' || active.type == 'http'))
+        ? active
+        : null;
     var segs = splitSegments(text);
     // EasyVoice「AI 推荐配音」：一次 AI 分析给一段才有意义，
     // 把小段合并成 ~1500 字大段再发（服务端内部会再按角色切）
@@ -439,8 +442,9 @@ class TtsService extends GetxService {
           (_segmentVoices != null && i < _segmentVoices!.length)
               ? _segmentVoices![i]
               : null;
-      final bytes = await _synthesizeEasyVoice(src, seg,
-          voiceOverride: segVoice);
+      final bytes = src.type == 'http'
+          ? await _synthesizeHttp(src, seg, rate.value)
+          : await _synthesizeEasyVoice(src, seg, voiceOverride: segVoice);
       _netSynthesizing = false;
       if (_stopRequested) return;
       if (bytes == null || bytes.isEmpty) throw '服务返回空音频';
@@ -459,6 +463,56 @@ class TtsService extends GetxService {
         lastError.value = '合成失败：$e';
         isSpeaking.value = false;
       }
+    }
+  }
+
+  /// 通用 HTTP 朗读源（2026-10-22，对齐 legado 的 httpTTS）：
+  /// [TtsSource.endpoint] 直接写 URL 模板，支持占位符
+  /// `{{speakText}}` / `{{text}}`（自动 URL 编码）与
+  /// `{{speakSpeed}}` / `{{speed}}`（当前语速，如 1.00）。
+  /// [TtsSource.extraParams] 可填 JSON 对象作为请求头。
+  /// 返回音频字节（mp3/wav 均可，交给 media_kit 播放）。
+  Future<List<int>?> _synthesizeHttp(
+    TtsSource src,
+    String text,
+    double speed,
+  ) async {
+    final tpl = src.endpoint.trim();
+    if (tpl.isEmpty) throw '未配置接口模板';
+    final enc = Uri.encodeComponent(text);
+    final sp = speed.toStringAsFixed(2);
+    final url = tpl
+        .replaceAll('{{speakText}}', enc)
+        .replaceAll('{{text}}', enc)
+        .replaceAll('{{speakSpeed}}', sp)
+        .replaceAll('{{speed}}', sp);
+    Map<String, dynamic> headers = const {};
+    final hp = src.extraParams.trim();
+    if (hp.isNotEmpty) {
+      try {
+        final m = jsonDecode(hp);
+        if (m is Map) headers = Map<String, dynamic>.from(m);
+      } catch (_) {
+        // 头配置不是合法 JSON → 忽略，不阻塞朗读
+      }
+    }
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: Duration(seconds: src.timeoutSec),
+        receiveTimeout: Duration(seconds: src.timeoutSec),
+        responseType: ResponseType.bytes,
+        headers: headers,
+        validateStatus: (c) => c != null && c < 400,
+      ),
+    );
+    applyGlobalProxy(dio);
+    try {
+      final r = await dio.get<List<int>>(url);
+      return r.data;
+    } on DioException catch (e) {
+      throw 'HTTP ${e.response?.statusCode ?? ''} ${e.message ?? e}';
+    } finally {
+      dio.close(force: true);
     }
   }
 
