@@ -164,10 +164,7 @@ class _DramaPlayerPageState extends State<DramaPlayerPage> {
     if (saved != null) start = saved.episodeIndex;
     if (start > 0) {
       setState(() => _index = start);
-      // PageView 首帧后再定位，否则还没 attach 会抛
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _pageCtrl.hasClients) _pageCtrl.jumpToPage(start);
-      });
+      _syncPageTo(start);
     }
     if (saved != null) {
       _lastSavedSec = saved.progressSeconds.toInt();
@@ -175,6 +172,36 @@ class _DramaPlayerPageState extends State<DramaPlayerPage> {
     } else {
       _c.selectEpisode(start);
     }
+  }
+
+  /// 把 PageView 定位到第 [i] 页（续播跳集必须成功，否则会盖住画面）。
+  ///
+  /// 为什么不能只跳一次：续播时 `itemCount` 可能还停在 1（剧集刚解析出来），
+  /// `jumpToPage(i)` 会被夹到 0；老代码只 post-frame 跳一次，没成功就再没人
+  /// 纠正 ⇒ PageView 停在第 1 页、`_index` 却是第 4 集，
+  /// 当前页判定成"不是当前集"→ 一直铺着「第 1 集」封面，
+  /// 表现就是**有声音没画面**（用户 2026-10-23 反馈）。
+  void _syncPageTo(int i) {
+    var tries = 0;
+    void attempt() {
+      if (!mounted) return;
+      if (!_pageCtrl.hasClients) {
+        if (tries++ < 10) {
+          WidgetsBinding.instance.addPostFrameCallback((_) => attempt());
+        }
+        return;
+      }
+      _pageCtrl.jumpToPage(i);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (_pageCtrl.hasClients && _pageCtrl.page?.round() == i) return;
+        if (tries++ < 10) {
+          Future<void>.delayed(const Duration(milliseconds: 80), attempt);
+        }
+      });
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) => attempt());
   }
 
   /// 写观看历史（每 10 秒一次，切集/退出时强制写）。
@@ -355,7 +382,12 @@ class _DramaPlayerPageState extends State<DramaPlayerPage> {
                 ),
 
               // ── 翻页层（只画封面与滑动）──────────────────────
+              // ⚠️ 必须有 key：视频层/控件层是按需插入删除的，
+              //    没 key 时 PageView 在 children 里的下标一变就会被当成
+              //    "新组件"重建 → 滚动位置回到第 1 页（续播集数对不上，
+              //    画面被第 1 集的封面盖住 = 有声音没画面）。
               PageView.builder(
+                key: const ValueKey('drama-pages'),
                 controller: _pageCtrl,
                 scrollDirection: Axis.vertical,
                 itemCount: count,

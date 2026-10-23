@@ -382,6 +382,10 @@ class _RexManagePageState extends State<RexManagePage> {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(color: sub, fontSize: AppTheme.fontCaption)),
                 const SizedBox(height: 10),
+                _action(ctx, Icons.drive_file_rename_outline,
+                    '重命名', fg, () {
+                  _rename(m);
+                }),
                 _action(ctx, Icons.ios_share_rounded, '分享（复制地址）', fg, () {
                   Clipboard.setData(ClipboardData(text: m.url));
                   AppToast.show('地址已复制', m.url);
@@ -453,6 +457,9 @@ class _RexManagePageState extends State<RexManagePage> {
         icon: Icon(Icons.more_horiz_rounded, size: 20, color: _sub),
         onSelected: (v) {
           switch (v) {
+            case 'rename':
+              _rename(m);
+              break;
             case 'refresh':
               _refreshOne(m);
               break;
@@ -468,6 +475,7 @@ class _RexManagePageState extends State<RexManagePage> {
           }
         },
         itemBuilder: (_) => const [
+          PopupMenuItem(value: 'rename', child: Text('重命名')),
           PopupMenuItem(value: 'refresh', child: Text('刷新元数据')),
           PopupMenuItem(value: 'url', child: Text('修改地址')),
           PopupMenuItem(value: 'cache', child: Text('清空编译缓存')),
@@ -522,6 +530,44 @@ class _RexManagePageState extends State<RexManagePage> {
   Future<void> _clearCache(RexModule m) async {
     await _service.clearCache(m);
     if (mounted) AppToast.show('已清空「${m.title}」的编译缓存', '');
+  }
+
+  /// 重命名模块：只改显示名（首页源切换、管理页都用这个名字），
+  /// 地址和脚本不动，重新导入也不会被脚本里的 title 覆盖
+  Future<void> _rename(RexModule m) async {
+    final ctrl = TextEditingController(text: m.title);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('重命名模块'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLength: 30,
+          decoration: const InputDecoration(labelText: '显示名称'),
+          onSubmitted: (_) => Navigator.pop(ctx, true),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('保存')),
+        ],
+      ),
+    );
+    final name = ctrl.text.trim();
+    ctrl.dispose();
+    if (ok != true || name.isEmpty || !mounted) return;
+    try {
+      await _service.rename(m.url, name);
+      if (!mounted) return;
+      setState(() {});
+      AppToast.show('已重命名', name);
+    } catch (e) {
+      if (mounted) AppToast.show('重命名失败：$e', '');
+    }
   }
 
   Future<void> _editUrl(RexModule m) async {

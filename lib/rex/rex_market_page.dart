@@ -683,8 +683,8 @@ class _RexMarketPageState extends State<RexMarketPage> {
       ];
     }
     if (_grid) {
-      // 列数跟着首页的 gridColumns 走（2/3，市场卡片信息多，最多三列）
-      final cols = PlayerPrefs.instance.gridColumns.value.clamp(2, 3);
+      // 列数跟着 REX 自己的偏好走（默认 2 列；市场卡片信息多，最多三列）
+      final cols = PlayerPrefs.instance.rexGridColumns.value.clamp(2, 3);
       // 3 列时卡片更窄 → 纵向拉高，避免标题/标签被挤掉
       final ratio = cols == 2 ? 1.22 : 0.86;
       return [
@@ -713,6 +713,8 @@ class _RexMarketPageState extends State<RexMarketPage> {
       context,
       listMode: !_grid,
       maxColumns: 3,
+      current: PlayerPrefs.instance.rexGridColumns.value,
+      onPick: (n) => PlayerPrefs.instance.setRexGridColumns(n),
     );
     if (picked == null || !mounted) return;
     setState(() => _grid = picked > 0);

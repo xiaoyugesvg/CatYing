@@ -1,15 +1,15 @@
 ﻿import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:get/get.dart';
 
 import '../../common/theme.dart';
-import '../../models/cache_store.dart';
 import '../../models/movie.dart';
 import '../../models/movie_sort.dart';
 import '../../models/source_bean.dart';
+import '../../services/api_config.dart';
 import '../../services/source_service.dart';
 import 'drama_banner.dart';
 import 'drama_entry.dart';
+import 'drama_history_page.dart';
 import 'drama_manage_page.dart';
 import 'drama_search_page.dart';
 import 'drama_settings.dart';
@@ -85,7 +85,41 @@ class _DramaPageState extends State<DramaPage> {
   /// （实现与搜索页共用 [DramaSettings.targets]）
   Future<List<SourceBean>> _targets() => DramaSettings.targets();
 
-  Future<void> _load() async {
+  /// 按 key 找源（订阅线路 + 本地源两套都查，缓存还原分组时要用）
+  SourceBean? _findSource(String key) {
+    final api = ApiConfig.instance;
+    final hit = api.getSource(key);
+    if (hit != null) return hit;
+    for (final s in api.localVideoSources) {
+      if (s.key == key) return s;
+    }
+    return null;
+  }
+
+  /// 用上次落盘的扫描结果还原分组（进页面默认走这里，不再每次重扫）
+  Future<List<_DramaGroup>?> _groupsFromCache() async {
+    final rows = await DramaSettings.cachedGroups();
+    if (rows.isEmpty) return null;
+    final out = <_DramaGroup>[];
+    for (final r in rows) {
+      final sourceKey = r['source'] ?? '';
+      final source = _findSource(sourceKey);
+      // 源被删/停用 → 这条缓存作废
+      if (source == null) continue;
+      out.add(_DramaGroup(
+        source,
+        SortData(
+          id: r['id'] ?? '',
+          name: r['name'] ?? '',
+          flag: r['flag'] ?? '',
+        ),
+      ));
+    }
+    return out.isEmpty ? null : out;
+  }
+
+  /// [rescan] = true 才重新扫描各源的分类；否则优先用缓存。
+  Future<void> _load({bool rescan = false}) async {
     setState(() {
       _loading = true;
       _error = null;
@@ -96,6 +130,28 @@ class _DramaPageState extends State<DramaPage> {
       _scanHint = '';
     });
     _keywords = await DramaSettings.keywords();
+
+    // ── 缓存优先：上次扫到的分组直接用 ──────────────────────────
+    if (!rescan) {
+      final cached = await _groupsFromCache();
+      if (!mounted) return;
+      if (cached != null) {
+        final picked = await DramaSettings.sourceKeys();
+        if (!mounted) return;
+        setState(() {
+          _groups = cached;
+          _dramaSourceKeys
+            ..clear()
+            ..addAll(picked)
+            ..addAll(cached.map((g) => g.source.key));
+          _groupIdx = 0;
+          _loading = false;
+        });
+        await _loadPage(1);
+        return;
+      }
+    }
+
     final targets = await _targets();
     if (targets.isEmpty) {
       setState(() {
@@ -128,15 +184,34 @@ class _DramaPageState extends State<DramaPage> {
       });
       return;
     }
-    // 设置里勾选的源 + 本次扫描到的源，都算「短剧源」
+    // 扫描结果与旧缓存**合并**：站点抖动漏扫几个源时，不把之前的分组弄丢；
+    // 但已经不在「参与聚合的源」里的分组要丢掉（用户主动取消勾选）。
+    final targetKeys = targets.map((s) => s.key).toSet();
+    final oldRows = await DramaSettings.cachedGroups();
+    final merged = <String, Map<String, String>>{};
+    for (final r in oldRows) {
+      if (!targetKeys.contains(r['source'])) continue;
+      merged['${r['source']}|${r['id']}'] = r;
+    }
+    for (final g in found) {
+      merged['${g.source.key}|${g.sort.id}'] = {
+        'source': g.source.key,
+        'id': g.sort.id,
+        'name': g.sort.name,
+        'flag': g.sort.flag,
+      };
+    }
+    await DramaSettings.saveGroups(merged.values.toList());
+    final groups = await _groupsFromCache() ?? found;
+    // 设置里勾选的源 + 全部短剧源，都算「短剧源」
     final picked = await DramaSettings.sourceKeys();
     if (!mounted) return;
     setState(() {
-      _groups = found;
+      _groups = groups;
       _dramaSourceKeys
         ..clear()
         ..addAll(picked)
-        ..addAll(found.map((g) => g.source.key));
+        ..addAll(groups.map((g) => g.source.key));
       _groupIdx = 0;
       _scanHint = '';
     });
@@ -203,8 +278,8 @@ class _DramaPageState extends State<DramaPage> {
       builder: (_) => const DramaManagePage(),
     ));
     if (!mounted) return;
-    // 管理页里也可能没改就退出 —— 无论如何重扫一次最省心（只读本地设置）
-    _load();
+    // 管理页可能改了关键词/参与源 —— 必须重扫，不能用缓存
+    _load(rescan: true);
   }
 
   /// 顶部幻灯片：只取有封面的条目，最多 8 张
@@ -240,14 +315,20 @@ class _DramaPageState extends State<DramaPage> {
             )),
           ),
           IconButton(
+            tooltip: '观看记录',
+            icon: Icon(Icons.history_rounded, color: fg),
+            onPressed: _openHistory,
+          ),
+          IconButton(
             tooltip: '短剧设置',
             icon: Icon(Icons.tune_rounded, color: fg),
             onPressed: _openSettings,
           ),
           IconButton(
-            tooltip: '刷新',
+            tooltip: '重新扫描分类',
             icon: Icon(Icons.refresh_rounded, color: fg),
-            onPressed: _loading ? null : _load,
+            // 只有手动点刷新才重扫；平时进页面走缓存
+            onPressed: _loading ? null : () => _load(rescan: true),
           ),
           const SizedBox(width: 4),
         ],
@@ -319,8 +400,6 @@ class _DramaPageState extends State<DramaPage> {
         controller: _scroll,
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
-          // 「继续观看」：短剧源里看过、且存了进度的记录，点一下直接续播
-          _resumeSliver(isDark),
           // 分组 chips：多个「源 · 分类」时用来切换
           if (_groups.length > 1)
             SliverToBoxAdapter(
@@ -438,160 +517,13 @@ class _DramaPageState extends State<DramaPage> {
     );
   }
 
-  /// 「继续观看」记录：短剧源下、存过播放进度的，按最近观看排序
-  List<VodRecord> _resumeRecords() {
-    final keys = _dramaSourceKeys;
-    if (keys.isEmpty) return const [];
-    final out = <VodRecord>[];
-    for (final r in CacheStore.instance.records) {
-      if (!keys.contains(r.sourceKey)) continue;
-      final st = CacheStore.instance.getPlaybackState(r.vodId, r.sourceKey);
-      if (st == null || st.progressSeconds <= 0) continue;
-      out.add(r);
-    }
-    out.sort((a, b) => b.updateTime.compareTo(a.updateTime));
-    return out.take(12).toList();
-  }
-
-  Widget _resumeSliver(bool isDark) {
-    return Obx(() {
-      final items = _resumeRecords();
-      if (items.isEmpty) {
-        return const SliverToBoxAdapter(child: SizedBox.shrink());
-      }
-      return SliverToBoxAdapter(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-              child: Row(
-                children: [
-                  Icon(Icons.play_circle_fill_rounded,
-                      size: 16, color: AppTheme.accentColor),
-                  const SizedBox(width: 6),
-                  Text(
-                    '继续观看',
-                    style: TextStyle(
-                      fontSize: AppTheme.fontSubhead,
-                      fontWeight: FontWeight.w700,
-                      color: isDark ? Colors.white : Colors.black87,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            SizedBox(
-              height: 188,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 14),
-                itemCount: items.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 10),
-                itemBuilder: (_, i) => _resumeCard(items[i], isDark),
-              ),
-            ),
-          ],
-        ),
-      );
-    });
-  }
-
-  Widget _resumeCard(VodRecord r, bool isDark) {
-    final st = CacheStore.instance.getPlaybackState(r.vodId, r.sourceKey);
-    final ep = (st?.episodeIndex ?? 0) + 1;
-    final sec = st?.progressSeconds.toInt() ?? 0;
-    final time = sec <= 0
-        ? ''
-        : '${(sec ~/ 60).toString().padLeft(2, '0')}:'
-            '${(sec % 60).toString().padLeft(2, '0')}';
-    final label = time.isEmpty ? '第 $ep 集' : '第 $ep 集 · $time';
-    return GestureDetector(
-      onTap: () => _openResume(r),
-      child: SizedBox(
-        width: 112,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: AspectRatio(
-                aspectRatio: 3 / 4,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    if (r.vodPic.isEmpty)
-                      _ph(isDark)
-                    else
-                      CachedNetworkImage(
-                        imageUrl: r.vodPic,
-                        fit: BoxFit.cover,
-                        errorWidget: (_, __, ___) => _ph(isDark),
-                      ),
-                    // 压暗 + 播放小标：一眼看出「点了就接着放」
-                    const DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [Color(0x00000000), Color(0x8C000000)],
-                        ),
-                      ),
-                    ),
-                    Center(
-                      child: Container(
-                        width: 30,
-                        height: 30,
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.42),
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.7),
-                            width: 1,
-                          ),
-                        ),
-                        child: const Icon(Icons.play_arrow_rounded,
-                            size: 20, color: Colors.white),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 5),
-            Text(
-              r.vodName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: AppTheme.fontFootnote,
-                height: 1.2,
-                color: isDark ? Colors.white : Colors.black87,
-              ),
-            ),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 11,
-                color: AppTheme.accentColor,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 点「继续观看」：直接进短剧播放页，由它按历史续到上次的集/进度
-  Future<void> _openResume(VodRecord r) async {
-    await DramaEntry.open(Video(
-      id: r.vodId,
-      name: r.vodName,
-      pic: r.vodPic,
-      sourceKey: r.sourceKey,
+  /// 右上角「观看记录」：单独一页列出短剧源下看过、存了进度的记录
+  Future<void> _openHistory() async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      settings: const RouteSettings(name: 'drama:history'),
+      builder: (_) => DramaHistoryPage(sourceKeys: _dramaSourceKeys.toSet()),
     ));
+    // 回来可能删了记录/看了别的剧，刷新一下当前列表
     if (mounted) setState(() {});
   }
 

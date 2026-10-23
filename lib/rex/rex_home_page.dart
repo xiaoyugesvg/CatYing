@@ -230,114 +230,86 @@ class _RexHomePageState extends State<RexHomePage> {
     _reload();
   }
 
-  /// 幻灯片是否显示：搜索中不显示，内容不足两条也没有
-  bool get _bannerVisible => _keyword.isEmpty && _bannerCount >= 2;
-
-  /// 幻灯片是否「从屏幕顶部开始」：此时内容延伸到状态栏/顶栏下面，
-  /// 顶栏只做浮层 —— 必须保证源切换按钮还是能看清（见 _buildAppBar）
-  bool get _bannerBleed => _modules.isNotEmpty && _bannerVisible;
-
   @override
   Widget build(BuildContext context) {
-    final bleed = _bannerBleed;
-    // 幻灯片压到顶栏下面时，顶栏文字一律用白色（图片上可读），
-    // 没有幻灯片时沿用主题前景色。
-    final headerFg = bleed ? Colors.white : _fg;
     return Scaffold(
       backgroundColor: Colors.transparent,
-      // 幻灯片从屏幕最顶部开始（含状态栏区域），顶栏浮在它上面
-      extendBodyBehindAppBar: bleed,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        centerTitle: false,
-        titleSpacing: 8,
-        // 顶栏底色：一条从上到下的黑→透明渐变，保证文字压在图片上仍可读，
-        // 也避免滚动时内容从文字背后穿过去看不清
-        flexibleSpace: bleed
-            ? const IgnorePointer(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Color(0x8C000000), Color(0x00000000)],
+      // 顶栏不悬浮：和影视首页一样，顶栏 + 内容在同一个纵向布局里，
+      // 幻灯片从顶栏下面开始（不会压到按钮上）
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            _headerBar(),
+            Expanded(child: _modules.isEmpty ? _empty() : _content()),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 顶栏：左「源（模块）切换」，右功能按钮 —— 与影视首页同一套布局
+  Widget _headerBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 8, 2),
+      child: Row(
+        children: [
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _openModuleSheet,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.extension_rounded,
+                      size: 17, color: AppTheme.accentColor),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      _module?.title ?? '选择模块',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: AppTheme.fontHeadline,
+                          fontWeight: FontWeight.w600,
+                          color: _fg),
                     ),
                   ),
-                ),
-              )
-            : null,
-        // 左上角：源（模块）切换 —— 与影视首页同一个交互：点名称弹面板
-        title: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: _openModuleSheet,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.extension_rounded,
-                  size: 17,
-                  color: bleed ? Colors.white : AppTheme.accentColor),
-              const SizedBox(width: 6),
-              // Flexible：模块名过长 / 窄屏 + 多个 action 时自动省略，
-              // 不把 AppBar 顶成黄黑溢出条
-              Flexible(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 150),
-                  child: Text(
-                    _module?.title ?? '选择模块',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: AppTheme.fontHeadline,
-                        fontWeight: FontWeight.w600,
-                        color: headerFg,
-                        shadows: bleed
-                            ? const [
-                                Shadow(blurRadius: 6, color: Colors.black54)
-                              ]
-                            : null),
-                  ),
-                ),
+                  Icon(Icons.arrow_drop_down_rounded, size: 20, color: _sub),
+                ],
               ),
-              Icon(Icons.arrow_drop_down_rounded,
-                  size: 20, color: bleed ? Colors.white70 : _sub),
-            ],
+            ),
           ),
-        ),
-        actions: [
           IconButton(
             tooltip: '切换布局',
-            icon: Icon(Icons.grid_view_rounded, color: headerFg),
+            icon: Icon(Icons.grid_view_rounded, size: 21, color: _fg),
             onPressed: _openLayout,
           ),
           if (_module?.canSearch == true)
             IconButton(
               tooltip: '搜索',
-              icon: Icon(Icons.search, color: headerFg),
+              icon: Icon(Icons.search, size: 21, color: _fg),
               onPressed: _showSearch,
             ),
           IconButton(
             tooltip: 'REX 订阅管理',
-            icon: Icon(Icons.tune_rounded, color: headerFg),
+            icon: Icon(Icons.tune_rounded, size: 21, color: _fg),
             onPressed: _openManage,
           ),
           IconButton(
             tooltip: 'REX 市场',
-            icon: Icon(Icons.storefront_rounded, color: headerFg),
+            icon: Icon(Icons.storefront_rounded, size: 21, color: _fg),
             onPressed: _openMarket,
           ),
-          const SizedBox(width: 4),
         ],
       ),
-      body: _modules.isEmpty ? _empty() : _content(),
     );
   }
 
   Widget _content() {
     final m = _module!;
     final fns = m.listFunctions;
-    final cols = PlayerPrefs.instance.gridColumns.value.clamp(2, 4);
+    final cols = PlayerPrefs.instance.rexGridColumns.value.clamp(2, 4);
     return LayoutBuilder(
       builder: (context, constraints) {
         final cardWidth = (constraints.maxWidth -
@@ -402,22 +374,15 @@ class _RexHomePageState extends State<RexHomePage> {
       return const SliverToBoxAdapter(child: SizedBox.shrink());
     }
     final slides = _items.take(count).toList();
-    // 「从顶部开始」：图片铺到屏幕最上沿（含状态栏 + 顶栏那一截），
-    // 顶栏浮在图片上面，所以这里的高度要把它们算进来 ——
-    // 否则图片只是从顶栏下面才开始，看起来仍然"没到顶"。
-    final bleed = _bannerBleed;
-    final topInset =
-        bleed ? MediaQuery.of(context).padding.top + kToolbarHeight : 0.0;
-    final cardRadius = bleed
-        ? const BorderRadius.vertical(bottom: Radius.circular(18))
-        : BorderRadius.circular(AppTheme.glassRadiusCard);
+    // 与影视首页同一规格：16:9 大图卡片 + 左右露边（viewportFraction 0.9），
+    // 顶栏保持普通布局（不悬浮、不压到图片上）
     return SliverToBoxAdapter(
       child: Padding(
-        padding: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.only(top: 4, bottom: 10),
         child: Column(
           children: [
             SizedBox(
-              height: 172 + topInset,
+              height: 196,
               child: PageView.builder(
                 controller: _bannerCtrl,
                 itemCount: slides.length,
@@ -427,7 +392,8 @@ class _RexHomePageState extends State<RexHomePage> {
                   child: GestureDetector(
                     onTap: () => _openItem(slides[i]),
                     child: ClipRRect(
-                      borderRadius: cardRadius,
+                      borderRadius:
+                          BorderRadius.circular(AppTheme.glassRadiusCard),
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
@@ -562,47 +528,69 @@ class _RexHomePageState extends State<RexHomePage> {
                   ],
                 ),
               ),
+              // 与影视首页的「源切换」一致：卡片视图，一行两个
               Flexible(
-                child: ListView.builder(
+                child: GridView.builder(
                   shrinkWrap: true,
-                  padding: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.fromLTRB(16, 2, 16, 14),
+                  gridDelegate:
+                      const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 10,
+                    childAspectRatio: 3.4,
+                  ),
                   itemCount: list.length,
                   itemBuilder: (_, i) {
                     final m = list[i];
                     final on = m.url == _module?.url;
-                    return ListTile(
-                      dense: true,
-                      leading: Icon(
-                        on
-                            ? Icons.check_circle_rounded
-                            : Icons.radio_button_unchecked,
-                        size: 18,
-                        color: on ? AppTheme.accentColor : _sub,
-                      ),
-                      title: Text(
-                        m.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            color: on ? AppTheme.accentColor : _fg,
-                            fontSize: AppTheme.fontSubhead,
-                            fontWeight:
-                                on ? FontWeight.w600 : FontWeight.w400),
-                      ),
-                      subtitle: m.description.isEmpty
-                          ? null
-                          : Text(
-                              m.description,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  color: _sub,
-                                  fontSize: AppTheme.fontCaption),
-                            ),
+                    return GestureDetector(
+                      behavior: HitTestBehavior.opaque,
                       onTap: () {
                         Navigator.pop(ctx);
                         _selectModule(m);
                       },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        decoration: BoxDecoration(
+                          color: on
+                              ? AppTheme.accentColor.withValues(alpha: 0.12)
+                              : AppTheme.backgroundTertiary,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: on
+                                ? AppTheme.accentColor.withValues(alpha: 0.4)
+                                : AppTheme.glassBorderSoft,
+                            width: on ? 1 : 0.5,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              on
+                                  ? Icons.check_circle
+                                  : Icons.radio_button_unchecked,
+                              size: 16,
+                              color:
+                                  on ? AppTheme.accentColor : _sub,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                m.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: on ? _fg : _sub,
+                                  fontSize: AppTheme.fontSubhead,
+                                  fontWeight:
+                                      on ? FontWeight.w600 : FontWeight.w400,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     );
                   },
                 ),
@@ -614,10 +602,15 @@ class _RexHomePageState extends State<RexHomePage> {
     );
   }
 
-  /// 切换布局：2 / 3 / 4 列
+  /// 切换布局：2 / 3 / 4 列（REX 自己的偏好，默认 2 列）
   Future<void> _openLayout() async {
-    final picked =
-        await showRexLayoutSheet(context, listMode: false, allowList: false);
+    final picked = await showRexLayoutSheet(
+      context,
+      listMode: false,
+      allowList: false,
+      current: PlayerPrefs.instance.rexGridColumns.value,
+      onPick: (n) => PlayerPrefs.instance.setRexGridColumns(n),
+    );
     if (picked == null || !mounted) return;
     setState(() {});
   }

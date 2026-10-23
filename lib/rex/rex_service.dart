@@ -83,11 +83,26 @@ class RexService {
       final i = modules.indexWhere((e) => e.url == m.url);
       if (i >= 0) {
         // 重新导入同一地址：保留用户的启用状态
-        modules[i] = m.copyWith(enabled: modules[i].enabled);
+        // 以及**用户改过的名字**（重命名后不被脚本里的 title 覆盖）
+        final old = modules[i];
+        modules[i] = m.copyWith(
+          enabled: old.enabled,
+          title: old.title == m.title ? m.title : old.title,
+        );
       } else {
         modules.add(m);
       }
     }
+    await _persist();
+  }
+
+  /// 重命名模块（只改显示名，地址和脚本都不动）
+  Future<void> rename(String url, String title) async {
+    final i = modules.indexWhere((e) => e.url == url);
+    final t = title.trim();
+    if (i < 0 || t.isEmpty) return;
+    if (modules[i].title == t) return;
+    modules[i] = modules[i].copyWith(title: t);
     await _persist();
   }
 

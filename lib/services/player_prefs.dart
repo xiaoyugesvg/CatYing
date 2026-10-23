@@ -165,6 +165,9 @@ class PlayerPrefs {
   /// 布局列数：2 / 3 / 4（首页网格每行卡片数）
   final gridColumns = 3.obs;
 
+  /// REX 页面的列数（默认 2 —— 用户 2026-10-23：「REX 页面默认卡片一行 2 列」）
+  final rexGridColumns = 2.obs;
+
   /// 收藏页 / 历史页各自的列数（与首页独立，便于分别设置）
   final favGridColumns = 4.obs;
   final historyGridColumns = 4.obs;
@@ -259,6 +262,8 @@ class PlayerPrefs {
     hideFilters.value = prefs.getBool('home_hide_filters') ?? false;
     final cols = prefs.getInt('home_grid_columns') ?? 3;
     gridColumns.value = (cols >= 2 && cols <= 4) ? cols : 3;
+    final rc = prefs.getInt('rex_grid_columns') ?? 2;
+    rexGridColumns.value = (rc >= 2 && rc <= 4) ? rc : 2;
     final fc = prefs.getInt('fav_grid_columns') ?? 4;
     favGridColumns.value = (fc >= 2 && fc <= 6) ? fc : 4;
     final hc = prefs.getInt('history_grid_columns') ?? 4;
@@ -398,6 +403,12 @@ class PlayerPrefs {
     gridColumns.value = n.clamp(2, 4);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('home_grid_columns', gridColumns.value);
+  }
+
+  Future<void> setRexGridColumns(int n) async {
+    rexGridColumns.value = n.clamp(2, 4);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('rex_grid_columns', rexGridColumns.value);
   }
 
   Future<void> setEngine(PlayerEngine e) async {

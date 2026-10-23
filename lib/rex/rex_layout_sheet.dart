@@ -1,23 +1,22 @@
 import 'package:flutter/material.dart';
-import 'package:get/get.dart';
 
 import '../common/theme.dart';
-import '../services/player_prefs.dart';
 import '../widgets/common_widgets.dart';
 
 /// REX 页面的「视图」面板（与影视首页「切换布局」同一套视觉）。
 ///
 /// 返回值：`null` = 没改；`0` = 列表；`2/3/4` = 一行几列。
 ///
-/// 列数跟首页共用 `PlayerPrefs.gridColumns`，用户在影视首页选过的列数
-/// 直接沿用，不用在每个页面各记一套。
+/// 列数由调用方决定（REX 有自己的一套偏好，默认 2 列，不跟影视首页混），
+/// 选中后先落盘再回调，调用方 setState 即可。
 Future<int?> showRexLayoutSheet(
   BuildContext context, {
   required bool listMode,
+  required int current,
+  required Future<void> Function(int columns) onPick,
   bool allowList = true,
   int maxColumns = 4,
 }) {
-  final prefs = PlayerPrefs.instance;
   return showModalBottomSheet<int>(
     context: context,
     backgroundColor: AppTheme.backgroundSecondary,
@@ -54,39 +53,41 @@ Future<int?> showRexLayoutSheet(
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-              child: Obx(() {
-                // 读一下这个 Rx：外部改了列数，面板里的选中态跟着变
-                final cols = prefs.gridColumns.value.clamp(2, 4);
-                final width = (MediaQuery.of(ctx).size.width - 50) / 2;
-                return Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    if (allowList)
-                      SizedBox(
-                        width: width,
-                        child: _cell(
-                          ctx,
-                          label: '列表',
-                          selected: listMode,
-                          columns: 0,
-                          value: 0,
+              child: Builder(
+                builder: (ctx) {
+                  final width = (MediaQuery.of(ctx).size.width - 50) / 2;
+                  return Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      if (allowList)
+                        SizedBox(
+                          width: width,
+                          child: _cell(
+                            ctx,
+                            label: '列表',
+                            selected: listMode,
+                            columns: 0,
+                            value: 0,
+                            onPick: onPick,
+                          ),
                         ),
-                      ),
-                    for (var n = 2; n <= maxColumns; n++)
-                      SizedBox(
-                        width: width,
-                        child: _cell(
-                          ctx,
-                          label: '$n 列',
-                          selected: !listMode && cols == n,
-                          columns: n,
-                          value: n,
+                      for (var n = 2; n <= maxColumns; n++)
+                        SizedBox(
+                          width: width,
+                          child: _cell(
+                            ctx,
+                            label: '$n 列',
+                            selected: !listMode && current == n,
+                            columns: n,
+                            value: n,
+                            onPick: onPick,
+                          ),
                         ),
-                      ),
-                  ],
-                );
-              }),
+                    ],
+                  );
+                },
+              ),
             ),
           ],
         ),
@@ -102,12 +103,13 @@ Widget _cell(
   required bool selected,
   required int columns,
   required int value,
+  required Future<void> Function(int columns) onPick,
 }) {
   return GestureDetector(
     behavior: HitTestBehavior.opaque,
     onTap: () async {
       // 0 = 列表，不动列数偏好；>0 时才落盘
-      if (value > 0) await PlayerPrefs.instance.setGridColumns(value);
+      if (value > 0) await onPick(value);
       if (ctx.mounted) Navigator.pop(ctx, value);
     },
     child: Container(

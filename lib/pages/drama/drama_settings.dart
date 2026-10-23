@@ -6,6 +6,8 @@
 //
 // 存在 SharedPreferences，和订阅/线路解耦，换订阅不会丢。
 
+import 'dart:convert';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../models/source_bean.dart';
@@ -16,6 +18,7 @@ class DramaSettings {
 
   static const _kKeywords = 'drama_keywords_v1';
   static const _kSources = 'drama_source_keys_v1';
+  static const _kGroups = 'drama_groups_v1';
 
   static const List<String> defaultKeywords = [
     '短剧',
@@ -84,5 +87,39 @@ class DramaSettings {
       return cur == null ? const [] : [cur];
     }
     return all.where((s) => keys.contains(s.key)).toList();
+  }
+
+  /// 上次扫描到的「源 · 分类」缓存。
+  ///
+  /// 用户 2026-10-23：「之前有的现在刷新不出来了，为啥每次都要刷新重搜？
+  /// 既然获取了不能固定吗？」——扫描要打十几个源的分类接口，站点抖动时
+  /// 就会漏掉几组；所以把结果落盘，进页面先用缓存，只有手动刷新才重扫。
+  static Future<List<Map<String, String>>> cachedGroups() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final raw = sp.getString(_kGroups);
+      if (raw == null || raw.isEmpty) return const [];
+      final list = jsonDecode(raw);
+      if (list is! List) return const [];
+      return [
+        for (final e in list)
+          if (e is Map)
+            {
+              'source': '${e['source'] ?? ''}',
+              'id': '${e['id'] ?? ''}',
+              'name': '${e['name'] ?? ''}',
+              'flag': '${e['flag'] ?? ''}',
+            },
+      ];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  static Future<void> saveGroups(List<Map<String, String>> rows) async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setString(_kGroups, jsonEncode(rows));
+    } catch (_) {}
   }
 }
