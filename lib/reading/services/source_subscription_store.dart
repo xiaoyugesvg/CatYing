@@ -179,7 +179,7 @@ class SourceSubscriptionStore extends ChangeNotifier {
     if (i < 0) return (ok: false, message: '订阅不存在', count: 0);
     final sub = _items[i];
     if (sub.kind == SourceSubscriptionKind.venera) {
-      return _updateVenera(sub, i);
+      return _updateVenera(sub);
     }
     // 旧记录 / 在书源仓误加的 Venera 地址：自动纠正为 Venera 订阅
     if (sub.url.toLowerCase().contains('venera')) {
@@ -187,7 +187,7 @@ class SourceSubscriptionStore extends ChangeNotifier {
       _items[i] = fixed;
       await _persist();
       notifyListeners();
-      return _updateVenera(fixed, i);
+      return _updateVenera(fixed);
     }
     if (!sub.kind.supported) {
       const msg = '该源类型暂未支持';
@@ -196,8 +196,11 @@ class SourceSubscriptionStore extends ChangeNotifier {
       notifyListeners();
       return (ok: false, message: msg, count: 0);
     }
+    // ⚠️ Dio 必须 close：每次 update 都 new 一个（自带 keep-alive 连接池），
+    //    不关就会一直占着 socket/FD（批量更新时尤其明显）。
+    Dio? dio;
     try {
-      final dio = Dio(
+      dio = Dio(
         BaseOptions(
           connectTimeout: const Duration(seconds: 15),
           receiveTimeout: const Duration(seconds: 40),
@@ -278,7 +281,13 @@ class SourceSubscriptionStore extends ChangeNotifier {
       await SourceManager().reload();
 
       final now = DateTime.now().millisecondsSinceEpoch;
-      _items[i] = sub.copyWith(
+      // ⚠️ 上面有多处 await：期间用户可能删了/拖动了订阅，
+      //    原来直接用旧下标 i 写回会写错行（甚至复活已删订阅），这里按 id 重定位。
+      final i2 = _items.indexWhere((e) => e.id == id);
+      if (i2 < 0) {
+        return (ok: false, message: '订阅已被删除', count: 0);
+      }
+      _items[i2] = sub.copyWith(
         count: configDefs.length + storedBookIds.length,
         lastUpdated: now,
         lastError: '',
@@ -310,10 +319,16 @@ class SourceSubscriptionStore extends ChangeNotifier {
       );
     } catch (e) {
       final msg = _friendly(e);
-      _items[i] = sub.copyWith(lastError: msg);
-      await _persist();
-      notifyListeners();
+      final i3 = _items.indexWhere((x) => x.id == id);
+      if (i3 >= 0) {
+        _items[i3] = sub.copyWith(lastError: msg);
+        await _persist();
+        notifyListeners();
+      }
       return (ok: false, message: msg, count: 0);
+    } finally {
+      // 释放连接池（见方法开头说明）
+      dio?.close(force: true);
     }
   }
 
@@ -325,7 +340,6 @@ class SourceSubscriptionStore extends ChangeNotifier {
   /// 上游脚本更新后重新「更新订阅」即可。
   Future<({bool ok, String message, int count})> _updateVenera(
     SourceSubscription sub,
-    int i,
   ) async {
     Dio? client;
     try {
@@ -457,7 +471,12 @@ class SourceSubscriptionStore extends ChangeNotifier {
       await SourceManager().reload();
 
       final now = DateTime.now().millisecondsSinceEpoch;
-      _items[i] = sub.copyWith(
+      // ⚠️ 上面下载 33 个脚本（`Future.wait`）耗时可达十几秒，期间用户可能
+      //    删除 / 拖动订阅 ⇒ 原来直接用旧下标 `i` 写回会写错行、甚至把已删的
+      //    订阅复活（与 `update()` 里 i2 那处同源）。这里按 id 重定位。
+      final i2 = _items.indexWhere((e) => e.id == sub.id);
+      if (i2 < 0) return (ok: false, message: '订阅已被删除', count: 0);
+      _items[i2] = sub.copyWith(
         count: defs.length,
         lastUpdated: now,
         lastError: '',
@@ -474,9 +493,12 @@ class SourceSubscriptionStore extends ChangeNotifier {
       );
     } catch (e) {
       final msg = _friendly(e);
-      _items[i] = sub.copyWith(lastError: msg);
-      await _persist();
-      notifyListeners();
+      final i3 = _items.indexWhere((x) => x.id == sub.id);
+      if (i3 >= 0) {
+        _items[i3] = sub.copyWith(lastError: msg);
+        await _persist();
+        notifyListeners();
+      }
       return (ok: false, message: msg, count: 0);
     } finally {
       client?.close(force: true);

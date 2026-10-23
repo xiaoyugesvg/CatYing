@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:archive/archive.dart';
@@ -112,16 +113,26 @@ class _WarehouseTabState extends State<_WarehouseTab>
 
   /// 源搜索（放在 tab 栏下面的通长胶囊）
   final TextEditingController _searchCtl = TextEditingController();
+
+  /// 输入框当前文案（用于清除按钮显隐）
   String _query = '';
 
+  /// 真正参与过滤的关键词：**防抖后**才更新。
+  ///
+  /// 源多时（几百条）每敲一个字都 setState 会触发一次全量过滤 + 列表重建，
+  /// 输入明显掉帧；这里 220ms 合并一次。
+  String _appliedQuery = '';
+  Timer? _searchTimer;
+
   bool _matchQuery(String name, String id) {
-    final q = _query.trim().toLowerCase();
+    final q = _appliedQuery.trim().toLowerCase();
     if (q.isEmpty) return true;
     return name.toLowerCase().contains(q) || id.toLowerCase().contains(q);
   }
 
   @override
   void dispose() {
+    _searchTimer?.cancel();
     _searchCtl.dispose();
     super.dispose();
   }
@@ -1541,7 +1552,15 @@ class _WarehouseTabState extends State<_WarehouseTab>
               child: TextField(
                 controller: _searchCtl,
                 textInputAction: TextInputAction.search,
-                onChanged: (v) => setState(() => _query = v),
+                onChanged: (v) {
+                  // 防抖：输入过程中不 setState（不重建几百行列表）
+                  _query = v;
+                  _searchTimer?.cancel();
+                  _searchTimer =
+                      Timer(const Duration(milliseconds: 220), () {
+                    if (mounted) setState(() => _appliedQuery = v);
+                  });
+                },
                 style: TextStyle(fontSize: 13, color: _label),
                 decoration: InputDecoration(
                   isDense: true,
@@ -1560,7 +1579,9 @@ class _WarehouseTabState extends State<_WarehouseTab>
                 behavior: HitTestBehavior.opaque,
                 onTap: () {
                   _searchCtl.clear();
-                  setState(() => _query = '');
+                  _query = '';
+                  _searchTimer?.cancel();
+                  setState(() => _appliedQuery = '');
                 },
                 child: Padding(
                   padding: const EdgeInsets.only(left: 6),
@@ -2486,10 +2507,10 @@ class _WarehouseTabState extends State<_WarehouseTab>
       _tabVenera,
     ).where((s) => _matchQuery(s.name, s.id)).toList();
     if (sources.isEmpty && config.isEmpty && venera.isEmpty) {
-      if (_query.trim().isNotEmpty) {
+      if (_appliedQuery.trim().isNotEmpty) {
         return Center(
           child: Text(
-            '没有找到「${_query.trim()}」相关的源',
+            '没有找到「${_appliedQuery.trim()}」相关的源',
             style: TextStyle(
               fontSize: 13,
               color: JellyTheme.textSecondary,
@@ -2499,25 +2520,36 @@ class _WarehouseTabState extends State<_WarehouseTab>
       }
       return _emptyHint();
     }
-    final children = <Widget>[];
+
+    // ── 用 sliver 组合，**真正虚拟化** ─────────────────────────────
+    // 旧实现是 `ListView(children: [ ReorderableListView(shrinkWrap,
+    // NeverScrollable), GridView(shrinkWrap, NeverScrollable) ])`：
+    // 外层滚动时内层会一次性 build **全部**行（600 个源就是 600 个
+    // SwipeActionTile + 600 次 belongsTo 判定），搜索框每敲一个字都重建一次。
+    // 现在每个区块都是独立 sliver，只构建可见部分。
+    const hPad = EdgeInsets.symmetric(horizontal: 14);
+    Widget padded(Widget sliver) =>
+        SliverPadding(padding: hPad, sliver: sliver);
+    Widget hPadBox(Widget child) =>
+        SliverToBoxAdapter(child: Padding(padding: hPad, child: child));
+
+    final slivers = <Widget>[const SliverToBoxAdapter(child: SizedBox(height: 8))];
+
     if (sources.isNotEmpty) {
       if (_view.isList) {
-        children.add(_sourceListCard(sources));
+        slivers.add(padded(_sourceSliverList(sources)));
       } else {
         final columns = _view.columns;
         final ratio = _view == _ViewMode.card ? 4.2 : 2.25;
-        children.add(
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: columns,
-              mainAxisSpacing: 10,
-              crossAxisSpacing: 10,
-              childAspectRatio: ratio,
-            ),
-            itemCount: sources.length,
-            itemBuilder: (_, i) => DragTarget<String>(
+        slivers.add(padded(SliverGrid(
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: columns,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: ratio,
+          ),
+          delegate: SliverChildBuilderDelegate(
+            (_, i) => DragTarget<String>(
               onWillAcceptWithDetails: (d) => d.data != sources[i].id,
               onAcceptWithDetails: (d) =>
                   _moveBookSource(d.data, sources[i].id),
@@ -2536,49 +2568,58 @@ class _WarehouseTabState extends State<_WarehouseTab>
                 );
               },
             ),
+            childCount: sources.length,
           ),
-        );
+        )));
       }
     }
     if (config.isNotEmpty) {
-      children.add(const SizedBox(height: 16));
-      children.add(_mangaHeader('配置 / API 源', config.length));
-      children.add(const SizedBox(height: 8));
-      children.add(_view.isList ? _mangaList(config) : _mangaGrid(config));
+      slivers.add(const SliverToBoxAdapter(child: SizedBox(height: 16)));
+      slivers.add(hPadBox(_mangaHeader('配置 / API 源', config.length)));
+      slivers.add(const SliverToBoxAdapter(child: SizedBox(height: 8)));
+      slivers.add(hPadBox(
+        _view.isList ? _mangaList(config) : _mangaGrid(config),
+      ));
     }
     if (venera.isNotEmpty) {
-      children.add(const SizedBox(height: 16));
-      children.add(_mangaHeader('Venera 源', venera.length));
-      children.add(const SizedBox(height: 8));
-      children.add(_view.isList ? _mangaList(venera) : _mangaGrid(venera));
+      slivers.add(const SliverToBoxAdapter(child: SizedBox(height: 16)));
+      slivers.add(hPadBox(_mangaHeader('Venera 源', venera.length)));
+      slivers.add(const SliverToBoxAdapter(child: SizedBox(height: 8)));
+      slivers.add(hPadBox(
+        _view.isList ? _mangaList(venera) : _mangaGrid(venera),
+      ));
     }
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(14, 8, 14, 28),
-      children: children,
-    );
+    slivers.add(const SliverToBoxAdapter(child: SizedBox(height: 28)));
+    return CustomScrollView(slivers: slivers);
   }
 
-  /// 书源列表（列表视图）：**长按整行拖动排序**（用户 2026-10-18）。
+  /// 书源列表（列表视图，**sliver 版**）：长按整行拖动排序。
+  ///
+  /// 用 `SliverReorderableList` 取代原来的
+  /// `ReorderableListView(shrinkWrap: true, NeverScrollableScrollPhysics)`：
+  /// 旧写法被塞在 `ListView` 里 ⇒ 外层滚动时**所有行都会被 build**，
+  /// 600 个源会一次建 600 个 `SwipeActionTile`（搜索框每敲一个字都重来一遍）。
   ///
   /// 长按不再进多选（多选改到顶栏的 checklist 按钮），否则和拖动冲突。
-  Widget _sourceListCard(List<BookSource> sources) {
-    return Container(
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: _card,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: ReorderableListView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        padding: EdgeInsets.zero,
-        buildDefaultDragHandles: false,
-        itemCount: sources.length,
-        onReorder: (o, n) => _reorderBookSources(sources, o, n),
-        proxyDecorator: (child, i, animation) =>
-            Material(color: Colors.transparent, child: child),
-        itemBuilder: (_, i) {
-          Widget row = Column(
+  Widget _sourceSliverList(List<BookSource> sources) {
+    return SliverReorderableList(
+      itemCount: sources.length,
+      onReorder: (o, n) => _reorderBookSources(sources, o, n),
+      proxyDecorator: (child, i, animation) =>
+          Material(color: Colors.transparent, child: child),
+      itemBuilder: (_, i) {
+        final first = i == 0;
+        final last = i == sources.length - 1;
+        Widget row = Container(
+          decoration: BoxDecoration(
+            color: _card,
+            borderRadius: BorderRadius.vertical(
+              top: Radius.circular(first ? 16 : 0),
+              bottom: Radius.circular(last ? 16 : 0),
+            ),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               if (i > 0)
@@ -2631,19 +2672,19 @@ class _WarehouseTabState extends State<_WarehouseTab>
                 ),
               ),
             ],
-          );
-          if (!_selectMode) {
-            row = ReorderableDelayedDragStartListener(
-              index: i,
-              child: row,
-            );
-          }
-          return KeyedSubtree(
-            key: ValueKey('book-${sources[i].id}'),
+          ),
+        );
+        if (!_selectMode) {
+          row = ReorderableDelayedDragStartListener(
+            index: i,
             child: row,
           );
-        },
-      ),
+        }
+        return KeyedSubtree(
+          key: ValueKey('book-${sources[i].id}'),
+          child: row,
+        );
+      },
     );
   }
 

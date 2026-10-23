@@ -24,6 +24,12 @@ final RegExp _comicRuleDecisiveRe = RegExp(
   caseSensitive: false,
 );
 
+/// 目录名里的「话」字（判断弱信号漫画源用）。
+final RegExp _comicTocNameRe = RegExp(r'[话話]');
+
+/// 剥掉地址首尾的反引号 / 空白（社区导出的 Markdown 行内代码）。
+final RegExp _trimTicksRe = RegExp(r'^[`\s]+|[`\s]+$');
+
 /// 小说书源模型与存储。
 ///
 /// 支持两种书源形态：
@@ -72,7 +78,7 @@ class BookSource {
     // 社区导出的源常把地址写成 Markdown 行内代码：`` `http://xxx/` ``。
     // 反引号会被带进 new URL()（Invalid URL）和 Referer 请求头（图片 403 →
     // 详情页/书架没封面），这里统一剥掉首尾反引号与空白。
-    return v.replaceAll(RegExp(r'^[`\s]+|[`\s]+$'), '');
+    return v.replaceAll(_trimTicksRe, '');
   }
 
   String get group {
@@ -180,7 +186,7 @@ class BookSource {
 
     // 只剩 `img@src` 这类可能取插图的弱信号：目录用「第X话」才认
     final tocName = (readPath('ruleToc.chapterName') ?? '').toString();
-    return RegExp(r'[话話]').hasMatch(tocName);
+    return _comicTocNameRe.hasMatch(tocName);
   }
 
   /// 这条源属于哪个仓：`book`（书源仓） / `comic`（漫源仓库）。

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -35,6 +36,7 @@ import '../widgets/pomodoro_button.dart';
 import '../widgets/wavy_underline.dart';
 import 'tts_engine_page.dart';
 import 'book_source_editor_page.dart';
+import 'book_source_search_page.dart';
 import 'tts_full_player_page.dart';
 import '../../common/theme.dart';
 import '../../common/system_ui.dart';
@@ -131,7 +133,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   /// 字号 / 行距 / 背景（与设置页同一把尺子）
   double _fontSize = 18;
-  double _lineHeight = 1.9;
+  // 默认排版按中文正文的"标准呼吸感"调过（2026-10-23）：
+  // 行距 1.9 → 1.72、段距 1.0 字 → 0.5 字、字距 0 → 0.3，
+  // 原来 18px + 1.9 行高 + 整整一行段距叠起来，整体过松、看着"散"。
+  double _lineHeight = 1.72;
 
   /// 阅读底色索引（见 [_bgs]）。
   ///
@@ -221,8 +226,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   // ── 排版（截图 IMG_8491~8499 全文可调）───────────────────────
   double _fontWeight = 400; // 字重
-  double _letterSpacing = 0; // 字间距
-  double _paraSpacing = 1.0; // 段间距（× 字号）
+  double _letterSpacing = 0.3; // 字间距
+  double _paraSpacing = 0.5; // 段间距（× 字号）
   // 边距（内容区）
   double _padLeft = 20, _padRight = 20, _padTop = 16, _padBottom = 40;
   double _indent = 2; // 首行缩进（字符数）
@@ -255,6 +260,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   /// 隐藏重复标题：章首正文与章名相同时不再显示一遍（默认开）
   bool _hideRepeatTitle = true;
+
+  /// 分页块列表里「段落 pi」与「块下标」的偏移：
+  /// 有章标题块时是 1，隐藏标题（`_hideRepeatTitle`）时不生成标题块 ⇒ 0。
+  /// 两处（`_pageBody` / `_pageOfParagraph`）与 `_paginate` 必须用同一个偏移，
+  /// 否则书签 / 划线会落到上一段。
+  int get _blockOffset => _hideRepeatTitle ? 0 : 1;
 
   // ── 阅读设置（截图 IMG_71a10）────────────────────────────────
   ReadingSettings _rs = ReadingSettings();
@@ -581,6 +592,93 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   Timer? _sleepTimer;
 
+  // ── 自动阅读（对齐 Legado，2026-10-23）────────────────────────
+  /// 是否正在自动阅读（运行态，不持久化；速度持久化在 `_rs.autoReadIntervalSec`）
+  bool _autoReadOn = false;
+  Timer? _autoReadTimer;
+
+  /// 「上下滚动」模式下自动滚屏用的控制器（分页模式不用它）
+  final ScrollController _scrollReadCtrl = ScrollController();
+
+  /// 停自动阅读（触摸屏幕、切章、退出都会调；幂等）
+  void _stopAutoRead() {
+    final was = _autoReadOn;
+    _autoReadTimer?.cancel();
+    _autoReadTimer = null;
+    if (_autoReadOn && mounted) setState(() => _autoReadOn = false);
+    // 自动阅读期间强制亮屏；停掉后按用户的「屏幕休眠」设置还原
+    if (was) _applySleepMode();
+  }
+
+  /// 开关自动阅读
+  void _toggleAutoRead() {
+    if (_autoReadOn) {
+      _stopAutoRead();
+      return;
+    }
+    // 自动翻页期间不能息屏（否则翻着翻着黑屏了）
+    _tts.keepAwake();
+    _awakeRequested = true;
+    setState(() => _autoReadOn = true);
+    _scheduleAutoRead();
+    _toast('自动阅读：${_rs.autoReadIntervalSec} 秒/页（点屏幕停止）');
+  }
+
+  /// 按当前间隔排下一次翻页
+  void _scheduleAutoRead() {
+    _autoReadTimer?.cancel();
+    if (!_autoReadOn) return;
+    _autoReadTimer = Timer(Duration(seconds: _rs.autoReadIntervalSec), () {
+      if (!mounted || !_autoReadOn) return;
+      // 正在换章/加载：等这一轮结束再翻，避免连翻两页
+      if (_loading) {
+        _scheduleAutoRead();
+        return;
+      }
+      if (_rs.pageMode.paginates) {
+        // 末页 + 末章：没有可翻的了 ⇒ 自动停
+        final hasNextPage = _pageIndex + 1 < _pages.length;
+        final hasNextChapter = _index + 1 < widget.chapters.length;
+        if (!hasNextPage && !hasNextChapter) {
+          _stopAutoRead();
+          return;
+        }
+        _nextPageOrChapter();
+      } else {
+        _autoScrollStep();
+      }
+      _scheduleAutoRead();
+    });
+  }
+
+  /// 滚动模式：每次往下滚约 0.85 屏；到底则切下一章
+  void _autoScrollStep() {
+    if (!_scrollReadCtrl.hasClients) return;
+    final p = _scrollReadCtrl.position;
+    final target =
+        (p.pixels + p.viewportDimension * 0.85).clamp(0.0, p.maxScrollExtent);
+    _scrollReadCtrl.animateTo(
+      target,
+      duration: const Duration(milliseconds: 600),
+      curve: Curves.easeInOut,
+    );
+    if (target >= p.maxScrollExtent - 1) {
+      Future.delayed(const Duration(milliseconds: 700), () {
+        if (mounted && _autoReadOn) _go(1);
+      });
+    }
+  }
+
+  /// 清空章节缓存（保留当前章，避免正文闪空）
+  void _clearChapterCache() {
+    final cur = _cache[_index];
+    setState(() {
+      _cache.clear();
+      if (cur != null) _cache[_index] = cur;
+    });
+    _toast('已清空章节缓存');
+  }
+
   /// ⚡ `_savePrefs` 的**防抖句柄** ✓（性能项 ✓）。
   ///   背景 ✓：`_savePrefs` 一次要串行写 8~15 个 prefs ✗，而滑杆/悬浮球拖动
   ///   会**每秒触发几十次** ✗✗ → 大量 platform channel 往返 = 卡顿 ✓。
@@ -641,6 +739,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     //   与 `book_reader_page.dart` 的 dispose 同款写法 ✓
     _tts.onFinished = null;
     _tts.stop();
+    // 自动阅读定时器 / 滚动控制器（退出必须停，否则会继续翻页）
+    _autoReadTimer?.cancel();
+    _autoReadTimer = null;
+    _scrollReadCtrl.dispose();
     // ⚠️ 必须恢复息屏：否则用户离开阅读器后屏幕永远不灭（严重耗电）
     if (_awakeRequested) _tts.allowSleep();
     _sleepTimer?.cancel();
@@ -761,6 +863,16 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     'titleStyle': _titleStyle,
     // ℹ️ 有意**不含** `hideRepeatTitle` ✓：它在 `_savePrefs` 里**没有**对应全局写入 ✓
     //   （只读不写 ✓），纳入覆盖会变成"独立时改了却没处存"✗ —— 不纳入才是自洽的 ✓
+    // ✅ 字号之外的排版项全部入快照（原来漏了这几项 ⇒ 「独立排版」下
+    //   调完段距 / 字距 / 字重 / 边距 / 缩进，退出再进又回到默认值）
+    'fontWeight': _fontWeight,
+    'letterSpacing': _letterSpacing,
+    'paraSpacing': _paraSpacing,
+    'padLeft': _padLeft,
+    'padRight': _padRight,
+    'padTop': _padTop,
+    'padBottom': _padBottom,
+    'indent': _indent,
   };
 
   Future<void> _restorePrefs() async {
@@ -782,6 +894,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       final ov = _independent
           ? await BsrIndependentLayout.instance.read(_indepKey)
           : null;
+      // ✅ 一次性排版迁移（2026-10-23）
+      //   旧默认「行距 1.9 + 段距 1.0 字」叠起来整体过松，看着"散"。新默认 1.72。
+      //   但 `reading.lineHeight` 是老用户已经存下的值 ⇒ 不迁移的话新默认永远
+      //   不生效。只把**还停在旧默认 1.9** 的改过来，自己拖过滑杆的不碰。
+      final typoV2 = p.getBool('reading.typoV2') ?? false;
       // 阅读设置（截图 IMG_71a10）
       final rsRaw = p.getString('reading.settings');
       // 已保存的排版预设名列表
@@ -800,8 +917,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       setState(() {
         // ✅ **覆盖值优先，逐项回退全局**（本会话第 2 轮 ✓）
         final fsV = (ov?['fontSize'] as num?)?.toDouble() ?? fs;
-        final lhV = (ov?['lineHeight'] as num?)?.toDouble() ?? lh;
+        final lhRaw = (ov?['lineHeight'] as num?)?.toDouble() ?? lh;
         final bgV = (ov?['bgIndex'] as num?)?.toInt() ?? bg;
+        // 旧默认 1.9 → 新默认 1.72（只迁移一次）
+        final lhV = (!typoV2 &&
+                lhRaw != null &&
+                (lhRaw - 1.9).abs() < 0.001)
+            ? 1.72
+            : lhRaw;
         if (fsV != null && fsV >= 12 && fsV <= 30) _fontSize = fsV;
         if (lhV != null && lhV >= 1.2 && lhV <= 3.0) _lineHeight = lhV;
         if (bgV != null && bgV >= 0 && bgV < _bgs.length) _bgIndex = bgV;
@@ -875,6 +998,26 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         if (fb != null) _focusBold = fb;
         if (ta != null) _titleAlign = ta;
         if (ts != null) _titleStyle = ts;
+        // ✅ 字号之外的排版项：覆盖优先、逐项回退全局（与上面同款写法）。
+        //   这几项原来**既没存全局也没读回** ⇒ 调完退出再进又回到默认值。
+        double? num2(String k) =>
+            (ov?[k] as num?)?.toDouble() ?? p.getDouble('reading.$k');
+        final fw = num2('fontWeight');
+        if (fw != null && fw >= 300 && fw <= 900) _fontWeight = fw;
+        final ls = num2('letterSpacing');
+        if (ls != null && ls >= 0 && ls <= 5) _letterSpacing = ls;
+        final ps = num2('paraSpacing');
+        if (ps != null && ps >= 0 && ps <= 3) _paraSpacing = ps;
+        final pl = num2('padLeft');
+        if (pl != null && pl >= 0 && pl <= 60) _padLeft = pl;
+        final pr = num2('padRight');
+        if (pr != null && pr >= 0 && pr <= 60) _padRight = pr;
+        final pt = num2('padTop');
+        if (pt != null && pt >= 0 && pt <= 60) _padTop = pt;
+        final pb = num2('padBottom');
+        if (pb != null && pb >= 0 && pb <= 60) _padBottom = pb;
+        final idt = num2('indent');
+        if (idt != null && idt >= 0 && idt <= 4) _indent = idt;
         if (hr != null) _hideRepeatTitle = hr;
         if (rsRaw != null && rsRaw.isNotEmpty) {
           try {
@@ -912,6 +1055,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         if (tal != null) _ttsAutoLocate = tal;
       });
       if (_index != widget.initialIndex) _loadChapter(_index);
+      // 迁移只做一次（下次不再动用户的行距）
+      if (!typoV2) await p.setBool('reading.typoV2', true);
       // 恢复完偏好要立刻应用屏幕休眠设置
       _applySleepMode();
       // 以及「隐藏状态栏」（沉浸全屏）设置
@@ -1002,6 +1147,17 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         await p.setBool('reading.focusBold', _focusBold);
         await p.setInt('reading.titleAlign', _titleAlign);
         await p.setInt('reading.titleStyle', _titleStyle);
+        // ✅ 段距 / 字距 / 字重 / 边距 / 缩进也要**落全局**：
+        //   原来只写进「独立排版」快照，全局一个键都没有 ⇒ 调完退出再进
+        //   又回到默认值（用户视角："怎么调都不舒服/调了没用"）。
+        await p.setDouble('reading.fontWeight', _fontWeight);
+        await p.setDouble('reading.letterSpacing', _letterSpacing);
+        await p.setDouble('reading.paraSpacing', _paraSpacing);
+        await p.setDouble('reading.padLeft', _padLeft);
+        await p.setDouble('reading.padRight', _padRight);
+        await p.setDouble('reading.padTop', _padTop);
+        await p.setDouble('reading.padBottom', _padBottom);
+        await p.setDouble('reading.indent', _indent);
       }
       // ✅ TTS 面板的两个新设置也落盘 ✓（键名与 `_restorePrefs` 里的读回一一对应 ✓）
       await p.setBool('bsr.tts.directPlayer', _ttsDirectPlayer);
@@ -1135,7 +1291,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         if (_pageCtrl.hasClients) _pageCtrl.jumpToPage(0);
         await _saveProgress();
       }
-      _prefetch(i + 1);
+      _prefetchAhead(i);
       return;
     }
 
@@ -1204,7 +1360,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         }
         // 漫画章不缓存图片列表 ⇒ 预取结果会被丢弃（纯白耗流量/请求数），
         // 所以图片源不预取；文字源照旧预取下一章正文。
-        if (!isMangaSource) _prefetch(i + 1);
+        if (!isMangaSource) _prefetchAhead(i);
         return;
       }
       // C9 正文净化：净化 → 繁简 → 气泡（装载链路固定顺序）
@@ -1229,7 +1385,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         // 听书连播：上一章念完预约了续读、且本章正文**已就绪** ⇒ 现在开读
         if (ttsAutoNext) unawaited(_startTts());
       }
-      _prefetch(i + 1);
+      _prefetchAhead(i);
     } catch (e) {
       if (!prefetchOnly && mounted) {
         setState(() {
@@ -1242,6 +1398,38 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   /// 预取下一章 —— 翻页体验的关键。
   /// 不预取的话每次翻章都要等一次网络往返，长篇小说会非常难受。
+  /// 按设置预取「当前章之后 N 章」（N = `preloadChapters`，0 = 不预取）。
+  ///
+  /// 勾了「仅 WiFi 预取」时先查网络类型，非 WiFi 直接跳过（不偷跑流量）。
+  void _prefetchAhead(int from) {
+    final n = _rs.preloadChapters.clamp(0, 5);
+    if (n <= 0) return;
+    if (_rs.preloadWifiOnly) {
+      unawaited(_prefetchIfWifi(from, n));
+      return;
+    }
+    for (var k = 1; k <= n; k++) {
+      _prefetch(from + k);
+    }
+  }
+
+  Future<void> _prefetchIfWifi(int from, int n) async {
+    try {
+      final res = await Connectivity().checkConnectivity();
+      final wifi = res.any(
+        (c) =>
+            c == ConnectivityResult.wifi || c == ConnectivityResult.ethernet,
+      );
+      if (!wifi) return;
+    } catch (_) {
+      return;
+    }
+    if (!mounted) return;
+    for (var k = 1; k <= n; k++) {
+      _prefetch(from + k);
+    }
+  }
+
   void _prefetch(int i) {
     if (i < 0 || i >= widget.chapters.length) return;
     // 🔴 **必须有窗口上限** ✗：原来只挡"越界 / 已缓存" ✓，于是每抓完一章又会
@@ -1251,7 +1439,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     // 只预取"当前章之后 2 章" ✓：保住"下一章秒开" ✓，同时让链式预取**到此为止** ✓
     //（`_index` 就是当前章 ✓，另见 `_loadChapter` 的 `i != _index` 与
     //  `_evictIfNeeded` 的 `(b - _index).abs()` ✓）
-    if (i <= _index || i > _index + 2) return;
+    if (i <= _index || i > _index + _rs.preloadChapters.clamp(1, 5)) return;
     if (_cache.containsKey(i)) return;
     // 不 await：后台跑，失败也不影响当前阅读
     _loadChapter(i, prefetchOnly: true);
@@ -1313,6 +1501,23 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                         ),
                       ),
                       const Spacer(),
+                      // 导出：把当前规则集复制成 JSON（可分享/换机导入）
+                      IconButton(
+                        tooltip: '导出规则（复制 JSON）',
+                        icon: Icon(
+                          Icons.file_upload_outlined,
+                          color: _fgMuted,
+                          size: 20,
+                        ),
+                        onPressed: () async {
+                          final json = const JsonEncoder.withIndent('  ')
+                              .convert(
+                            list.map((r) => r.toJson()).toList(),
+                          );
+                          await Clipboard.setData(ClipboardData(text: json));
+                          _toast('已复制 ${list.length} 条规则到剪贴板');
+                        },
+                      ),
                       // 2026-10-22：导入 legado 替换净化规则（JSON 或 legado:// 链接）
                       IconButton(
                         tooltip: '导入 legado 规则',
@@ -2307,6 +2512,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 上下模式 / 分页失败时的兜底：整章滚动
   Widget _scrollView(Color fg) {
     final scroll = SingleChildScrollView(
+      // 自动阅读（上下模式）要用它滚屏
+      controller: _scrollReadCtrl,
       // 🔴 换章必须重建滚动视图（= 回到章首）✗：
       //    未命中缓存时会先走 `_loading` 分支（滚动视图被移除 ✓），所以看着正常；
       //    但**缓存命中**时没有 loading 帧 ⇒ 同一个 `SingleChildScrollView`
@@ -3172,8 +3379,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                           widget.chapters[_index].name.trim()) {
                     return const SizedBox.shrink();
                   }
+                  // 上下留白与分页器一致（top 4 + 段距）——分页器按
+                  // `tp.height + 4 + blockSpacing` 量，这里必须一模一样，
+                  // 否则每章第一页底部被裁 / 顶部留白。
                   return Padding(
-                    padding: const EdgeInsets.only(bottom: 14),
+                    padding: EdgeInsets.only(
+                      top: 4,
+                      bottom: _fontSize * _paraSpacing,
+                    ),
                     child: Text(
                       headingText,
                       textAlign: _titleAlign == 1
@@ -3184,6 +3397,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                         fontWeight: FontWeight.w700,
                         color: fg,
                         height: 1.5,
+                        // 标题不带正文字距（与分页器 headingStyle 一致）
+                        letterSpacing: 0,
                       ),
                     ),
                   );
@@ -3191,12 +3406,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 if (b is ParagraphBlock) {
                   // 分页后可能是半段（partialText），直接用它的文本渲染；
                   // 🔴 段落下标用**分页器带下来的全书块下标**直接换算 ✓
-                  // 本页 `blocks = [章标题, ...段落]` ⇒ 段落下标 = blockIndex - 1 ✓。
+                  // 本页 `blocks = [章标题?, ...段落]` ⇒ 段落下标 = blockIndex - 首块数 ✓。
                   // 原实现 `_paragraphs.indexOf(b.text)` 会命中**第一个同文本段** ✗：
                   // 正文里重复段（空行、"……"、重复短句）的第 2 处及之后，
                   // 书签/批注都会落到第 1 处 ✗（与笔记定位同源的错位 ✓）。
+                  // ⚠️ 隐藏重复标题时 `blocks` 里没有标题块 ⇒ 偏移量是 0，不是 1
+                  //   （见 `_paginate` 的 `hasHeading`）。
                   final pi = e.blockIndex >= 0
-                      ? e.blockIndex - 1
+                      ? e.blockIndex - _blockOffset
                       : _paragraphIndexOf(b);
                   // ✅ 首行缩进已在**分页块**里加过（见 `_paginate`）⇒ 这里直接用 ✓
                   //   （原来度量用原文、渲染再加 2 个全角空格 ✗ ⇒ 渲染比量出来的多占 36px 宽、
@@ -3400,6 +3617,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   Timer? _tapTimer;
 
   void _onPtrDown(PointerDownEvent e) {
+    // 自动阅读：任意触摸都停（与 Legado 一致，避免"想停下来却翻过去"）
+    if (_autoReadOn) _stopAutoRead();
     _ptrs[e.pointer] = (pos: e.position, at: DateTime.now());
     if (_ptrs.length >= 2) {
       // 第二根手指落下：本序列按双指处理，取消挂起的单击翻页
@@ -4445,9 +4664,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       }
       _pagesChapter = chapter;
     });
+    // ✅ 「隐藏重复标题」打开时**连标题块都不生成**：
+    //   原来照样生成、渲染时 `SizedBox.shrink()` 吃掉 ⇒ 度量按标题算（约 30px
+    //   字号 + 行高 ≈ 65px）、渲染却是 0 ⇒ 每章第一页顶上凭空空一大块，
+    //   看着就是"间距不对劲"。
+    final hasHeading = _blockOffset == 1;
     final blocks = <BookBlock>[
       // 章标题当 heading 块，保证它自己起一页
-      BookBlock.heading(widget.chapters[_index].name, 1),
+      if (hasHeading) BookBlock.heading(widget.chapters[_index].name, 1),
       // ✅ 首行缩进**一并交给分页度量**（渲染侧不再重复加 ✓）
       //   否则渲染比量出来的多占宽、多折行 ⇒ 页面底部溢出被裁 ✗
       ..._paragraphs.map(
@@ -4461,12 +4685,25 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     //   · 纵向：渲染侧上 / 下还有**页眉 + 页脚**占位 ✓
     //     原来 `viewportHeight` 直接用整块高度 ✗ ⇒ 量出来的页比真正能放文本的
     //     区域高约一个页眉 + 页脚 ⇒ 每页最后一行被裁 ✗
+    //   · 字距 / 字重 / 系统字号缩放：渲染端 `_bodyStyle` 带 letterSpacing，
+    //     且 `Text` 自动套 MediaQuery.textScaler ✓ —— 度量不带这些 ✗ ⇒
+    //     渲染比量出来更宽 ⇒ 每段多折行 ⇒ 页底被裁（"字间距怎么看都别扭"）
     final typo = BookTypography(
       fontSize: _fontSize,
       lineHeight: _lineHeight,
       padding: (_padLeft + _padRight) / 2,
       verticalPadding: _padTop,
       fontFamily: null,
+      inheritedStyle: TextStyle(
+        letterSpacing: _letterSpacing,
+        fontWeight: _fontWeightToW(_fontWeight),
+      ),
+      // 章标题在渲染端是「正文 +3 / 行高 1.5」，与分页器默认公式（+12）不同，
+      // 不覆盖就会多留一行空白
+      headingFontSizeOverride: _fontSize + 3,
+      headingHeightOverride: 1.5,
+      paragraphSpacingFactor: _paraSpacing,
+      textScaler: MediaQuery.textScalerOf(context),
     );
     final textAreaH = (_viewport.height - _headerFooterHeight()).clamp(
       1.0,
@@ -5533,9 +5770,53 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     }
   }
 
+  /// 当前排版是否正好等于某个预设（用于高亮预设 chip）
+  bool _isPreset(_TextPreset p) =>
+      (_fontSize - p.size).abs() < 0.01 &&
+      (_lineHeight - p.lineHeight).abs() < 0.01 &&
+      (_letterSpacing - p.letterSpacing).abs() < 0.01 &&
+      (_paraSpacing - p.paraSpacing).abs() < 0.01;
+
   /// 「文字」tab：字号/字重/段间距/字间距/行距/字体/标题对齐/隐藏重复标题
   List<Widget> _layoutTextTab(void Function(VoidCallback) upd) {
     return [
+      // ── 一键预设：中文正文的三种"呼吸感" ────────────────────
+      // 6 个滑杆各调一遍很难调到舒服的组合；给三档预设，点一下就是
+      // 「字号 / 行距 / 字距 / 段距」成套的推荐值（也可当"恢复默认"用）。
+      Padding(
+        padding: const EdgeInsets.only(top: 2, bottom: 8),
+        child: Row(
+          children: [
+            Text(
+              '预设',
+              style: TextStyle(
+                fontSize: AppTheme.fontBody,
+                color: _fgMuted,
+              ),
+            ),
+            const SizedBox(width: 10),
+            for (final p in _TextPreset.values)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: _chip(
+                  p.label,
+                  _isPreset(p),
+                  () {
+                    upd(() {
+                      _fontSize = p.size;
+                      _lineHeight = p.lineHeight;
+                      _letterSpacing = p.letterSpacing;
+                      _paraSpacing = p.paraSpacing;
+                      _fontWeight = 400;
+                    });
+                    _scheduleSavePrefs();
+                  },
+                  compact: true,
+                ),
+              ),
+          ],
+        ),
+      ),
       _layoutSlider(
         '字号',
         _fontSize,
@@ -5543,6 +5824,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         30,
         '${_fontSize.round()}',
         (v) => upd(() => _fontSize = v),
+        step: 1,
       ),
       _layoutSlider(
         '字重',
@@ -5551,6 +5833,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         900,
         '${_fontWeight.round()}',
         (v) => upd(() => _fontWeight = v),
+        step: 50,
       ),
       _layoutSlider(
         '段间距',
@@ -5559,6 +5842,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         3,
         '${_paraSpacing.toStringAsFixed(1)}x',
         (v) => upd(() => _paraSpacing = v),
+        step: 0.1,
       ),
       _layoutSlider(
         '字间距',
@@ -5567,14 +5851,16 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         5,
         _letterSpacing.toStringAsFixed(1),
         (v) => upd(() => _letterSpacing = v),
+        step: 0.1,
       ),
       _layoutSlider(
         '行距',
         _lineHeight,
         1.2,
         2.6,
-        _lineHeight.toStringAsFixed(1),
+        _lineHeight.toStringAsFixed(2),
         (v) => upd(() => _lineHeight = v),
+        step: 0.05,
       ),
       const SizedBox(height: 6),
       _layoutLabel('字体'),
@@ -5660,6 +5946,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         '隐藏重复标题',
         '章首正文与章名相同时不再显示一遍（默认开）',
         _hideRepeatTitle,
+        // 会改变分页块结构（有无标题块）⇒ 必须重排（本 tab 传入的就是 updLayout）
         (v) => upd(() => _hideRepeatTitle = v),
       ),
       const SizedBox(height: 14),
@@ -5671,6 +5958,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         4,
         '${_indent.round()}',
         (v) => upd(() => _indent = v),
+        step: 1,
       ),
     ];
   }
@@ -5723,6 +6011,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         60,
         '${_padLeft.round()}',
         (v) => upd(() => _padLeft = v),
+        step: 1,
       ),
       _layoutSlider(
         '右边距',
@@ -5731,6 +6020,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         60,
         '${_padRight.round()}',
         (v) => upd(() => _padRight = v),
+        step: 1,
       ),
       _layoutSlider(
         '上边距',
@@ -5739,6 +6029,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         60,
         '${_padTop.round()}',
         (v) => upd(() => _padTop = v),
+        step: 1,
       ),
       _layoutSlider(
         '下边距',
@@ -5747,6 +6038,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         60,
         '${_padBottom.round()}',
         (v) => upd(() => _padBottom = v),
+        step: 1,
       ),
       const SizedBox(height: 10),
       _layoutLabel('页眉（负值移进状态栏区域）'),
@@ -5757,6 +6049,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         40,
         '${_headerPadH.round()}',
         (v) => upd(() => _headerPadH = v),
+        step: 1,
       ),
       _layoutSlider(
         '上边距',
@@ -5765,6 +6058,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         40,
         '${_headerPadTop.round()}',
         (v) => upd(() => _headerPadTop = v),
+        step: 1,
       ),
       const SizedBox(height: 10),
       _layoutLabel('页脚'),
@@ -5775,6 +6069,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         40,
         '${_footerPadH.round()}',
         (v) => upd(() => _footerPadH = v),
+        step: 1,
       ),
       _layoutSlider(
         '下边距',
@@ -5783,6 +6078,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         40,
         '${_footerPadBottom.round()}',
         (v) => upd(() => _footerPadBottom = v),
+        step: 1,
       ),
       const SizedBox(height: 8),
       Text(
@@ -5903,6 +6199,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         4,
         _underlineWidth.toStringAsFixed(1),
         (v) => upd(() => _underlineWidth = v),
+        step: 0.1,
       ),
       _layoutSlider(
         '下间隔',
@@ -5959,15 +6256,17 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     ),
   );
 
-  /// 当前页首段下标（按住下滑书签的锚点 ✓）：blocks = [章标题, ...段落] ⇒
-  /// 段落下标 = blockIndex - 1（见本文件 :1787 同款换算 ✓）。空页 / 漫画回退 0。
+  /// 当前页首段下标（按住下滑书签的锚点 ✓）：blocks = [章标题?, ...段落] ⇒
+  /// 段落下标 = blockIndex - [_blockOffset]（隐藏重复标题时没有标题块 ⇒ 偏移 0）。
+  /// 空页 / 漫画回退 0。
   int _currentPageAnchorParagraph() {
     if (_images.isNotEmpty || _pages.isEmpty) return 0;
     final p = _pages[_safePageIndex()];
     if (p.entries.isEmpty) return 0;
     final e = p.entries.first;
     final bi = e.blockIndex >= 0 ? e.blockIndex : p.firstBlockIndex;
-    return bi > 0 ? bi - 1 : 0;
+    final pi = bi - _blockOffset;
+    return pi > 0 ? pi : 0;
   }
 
   /// 按住下滑一键书签（对齐 Cmbok）：当前页已有书签 → 直接取消；
@@ -6174,6 +6473,35 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                // 第二行：对齐 Legado 的选中菜单（复制 / 搜索 / 朗读）
+                Row(
+                  children: [
+                    Expanded(
+                      child: _longPressAction(
+                        Icons.copy_rounded,
+                        '复制',
+                        () => Navigator.pop(ctx, 'copy'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _longPressAction(
+                        Icons.search_rounded,
+                        '搜索',
+                        () => Navigator.pop(ctx, 'search'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _longPressAction(
+                        Icons.headphones_rounded,
+                        '朗读这段',
+                        () => Navigator.pop(ctx, 'tts'),
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -6213,7 +6541,29 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         if (!mounted) return;
         setState(() {});
         _toast('已划线并写入批注');
+      case 'copy':
+        await Clipboard.setData(ClipboardData(text: text));
+        _toast('已复制这一段');
+      case 'search':
+        await Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => BookSourceSearchPage(
+            initialKeyword: _searchSeed(text),
+          ),
+        ));
+      case 'tts':
+        await _tts.speak(text);
+        _toast('正在朗读这一段');
     }
+  }
+
+  /// 从段落里截一个"可搜索"的关键词（去掉空白/引号，最多 20 字）
+  String _searchSeed(String t) {
+    final cleaned = t
+        .replaceAll(RegExp(r'[\s\u3000]+'), ' ')
+        .replaceAll(RegExp(r'^[“”"「」『』\s]+|[“”"「」『』\s]+$'), '')
+        .trim();
+    if (cleaned.isEmpty) return t.trim();
+    return cleaned.length <= 20 ? cleaned : cleaned.substring(0, 20);
   }
 
   Widget _longPressAction(IconData icon, String label, VoidCallback onTap) {
@@ -6447,15 +6797,22 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   }
 
   /// 排版面板里的一行"标签 + 滑块 + 减 + 数值 + 加"
+  ///
+  /// [step] 显式步进（字号 1 / 行距 · 段距 · 字距 0.1 / 字重 50）：
+  /// 原来按 `(max-min)/20` 算 ⇒ 行距是 0.07 一档，显示成「1.9」但真实值是
+  /// 1.87，分页按 1.87 量、肉眼看着和 1.9 又不完全一样（"怎么调都不舒服"）。
   Widget _layoutSlider(
     String label,
     double value,
     double min,
     double max,
     String display,
-    ValueChanged<double> onChanged,
-  ) {
-    final step = (max - min) / 20;
+    ValueChanged<double> onChanged, {
+    double? step,
+  }) {
+    final st = step ?? (max - min) / 20;
+    double snap(double v) =>
+        ((v / st).round() * st).clamp(min, max).toDouble();
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
@@ -6472,12 +6829,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               value: value.clamp(min, max),
               min: min,
               max: max,
-              onChanged: onChanged,
+              onChanged: (v) => onChanged(snap(v)),
             ),
           ),
           IconButton(
             visualDensity: VisualDensity.compact,
-            onPressed: () => onChanged((value - step).clamp(min, max)),
+            onPressed: () => onChanged(snap(value - st)),
             icon: Icon(Icons.remove, size: 17, color: _fgMuted),
           ),
           SizedBox(
@@ -6494,7 +6851,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           ),
           IconButton(
             visualDensity: VisualDensity.compact,
-            onPressed: () => onChanged((value + step).clamp(min, max)),
+            onPressed: () => onChanged(snap(value + st)),
             icon: Icon(Icons.add, size: 17, color: _fgMuted),
           ),
         ],
@@ -6785,6 +7142,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   /// 开始朗读本章
   Future<void> _startTts() async {
+    // 朗读与自动翻页互斥（否则会出现"念着念着又被翻走"）
+    _stopAutoRead();
     final text = _paragraphs.join('\n');
     if (text.trim().isEmpty) {
       _toast('这一章没有可朗读的正文');
@@ -8482,6 +8841,120 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                 _paginate();
                               },
                             ),
+                        ],
+                      ),
+                    ),
+                    // ── 自动阅读（对齐 Legado：按间隔自动翻页/滚屏）────
+                    _setRowRight(
+                      '自动阅读',
+                      _chip(
+                        _autoReadOn ? '停止' : '开始',
+                        _autoReadOn,
+                        () {
+                          _toggleAutoRead();
+                        },
+                        compact: true,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SizedBox(
+                            width: 82,
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text(
+                                '翻页间隔',
+                                style: TextStyle(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: _fg,
+                                ),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: Wrap(
+                              alignment: WrapAlignment.end,
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: [
+                                for (final s in const [3, 5, 8, 12, 20, 30])
+                                  _chip(
+                                    '$s 秒',
+                                    _rs.autoReadIntervalSec == s,
+                                    () {
+                                      setState(
+                                        () => _rs = _rs.copyWith(
+                                          autoReadIntervalSec: s,
+                                        ),
+                                      );
+                                      _scheduleSavePrefs();
+                                      if (_autoReadOn) {
+                                        _scheduleAutoRead();
+                                      }
+                                    },
+                                    compact: true,
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // ── 预取与缓存（对齐 Legado：预下载 N 章 + 仅 WiFi）──
+                    _setRowRight(
+                      '预取章节',
+                      Wrap(
+                        alignment: WrapAlignment.end,
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          for (final n in const [0, 1, 2, 3, 5])
+                            _chip(
+                              '$n 章',
+                              _rs.preloadChapters == n,
+                              () {
+                                setState(
+                                  () => _rs = _rs.copyWith(preloadChapters: n),
+                                );
+                                _scheduleSavePrefs();
+                                // 立刻按新设置补预取，不用等翻章
+                                if (n > 0) _prefetchAhead(_index);
+                              },
+                              compact: true,
+                            ),
+                        ],
+                      ),
+                    ),
+                    _setRowRight(
+                      '仅 WiFi 预取',
+                      Switch.adaptive(
+                        value: _rs.preloadWifiOnly,
+                        onChanged: (v) {
+                          setState(
+                            () => _rs = _rs.copyWith(preloadWifiOnly: v),
+                          );
+                          _scheduleSavePrefs();
+                        },
+                      ),
+                    ),
+                    _setRowRight(
+                      '章节缓存',
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '${_cache.length} 章',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              color: _fg.withValues(alpha: 0.55),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          _chip('清空', false, _clearChapterCache, compact: true),
                         ],
                       ),
                     ),
@@ -10246,13 +10719,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 段落 → 所在页下标（书签跳转用）
   int? _pageOfParagraph(int pi) {
     if (pi >= _paragraphs.length) return null;
-    // 优先用「块下标」定位：`_pages` 是由 `[章标题, 段0, 段1, …]` 分页来的
-    // ⇒ 段落 pi 对应块 pi+1（见 `_paginate` 里构造 blocks 的地方）。
+    // 优先用「块下标」定位：`_pages` 是由 `[章标题?, 段0, 段1, …]` 分页来的
+    // ⇒ 段落 pi 对应块 pi + [_blockOffset]（见 `_paginate` 里构造 blocks 的地方）。
     // 原来按「段落文本相等」匹配 ✗ —— 同一章出现重复句子（"……"、"他说"）时
     // 会命中第一处 ⇒ 书签跳到错误页。
+    final offset = _blockOffset;
     for (var i = 0; i < _pages.length; i++) {
       for (final e in _pages[i].entries) {
-        if (e.blockIndex >= 0 && e.blockIndex - 1 == pi) return i;
+        if (e.blockIndex >= 0 && e.blockIndex - offset == pi) return i;
       }
     }
     // 兜底：极少数旧分页数据没有 blockIndex，仍按文本匹配
@@ -10349,4 +10823,29 @@ class _BatteryGlyphPainter extends CustomPainter {
   @override
   bool shouldRepaint(_BatteryGlyphPainter old) =>
       old.level != level || old.color != color;
+}
+
+/// 正文排版预设（中文正文的三种"呼吸感"）。
+///
+/// - 紧凑：小字 + 紧行距，一屏字多，适合快速扫读
+/// - 标准：默认，18px / 1.72 行距 / 0.5 字段距 / 0.3 字距
+/// - 宽松：大字 + 松行距，适合长时间慢读
+enum _TextPreset {
+  compact('紧凑', 17, 1.55, 0.2, 0.35),
+  standard('标准', 18, 1.72, 0.3, 0.5),
+  loose('宽松', 19, 1.9, 0.5, 0.9);
+
+  const _TextPreset(
+    this.label,
+    this.size,
+    this.lineHeight,
+    this.letterSpacing,
+    this.paraSpacing,
+  );
+
+  final String label;
+  final double size;
+  final double lineHeight;
+  final double letterSpacing;
+  final double paraSpacing;
 }

@@ -25,13 +25,16 @@
 /// | `bsToc` | `{ok:true, list:[{name,url}]}` |
 /// | `bsContent` | `{ok:true, content:'…'}` 或 `{ok:true, type:'images', images:[…]}` |
 ///
-/// ── 安全设计：失败/空结果一律返回 null ───────────────────────
-/// ⇒ 回落 Node（现行为不变）。所以开启本层**不会让原本能用的源变坏**，
-/// 只会让"Node 跑不通、Dart 引擎跑得通"的源多一条路。
+/// ── 安全设计：失败/未接管返回 null；"成功但为空"返回 empty 标记 ──
+/// · `null` = 本层没接管（扁平规则、解析异常）⇒ 回落下一层；
+/// · `{ok:true, list:[], empty:true}` = 本层跑通但没有结果。
+///   `_call` 见到 empty 只再回落 **Node 一次**（跳过 Python / QuickJS，
+///   它们会对同一站点、同一套规则重复抓取），Node 也没内容就交回这份空结果。
+///   2026-10-23 之前空结果直接返回 null ⇒ 同一关键词最多打 4 次站点。
 ///
 /// ── 已知取舍（如实标注）──────────────────────────────────────
 /// · 六个动作（bsSearch / bsExplore / bsBookInfo / bsToc / bsContent / bsLogin）
-///   均已接管；失败/空结果/异常一律返回 null ⇒ 回落 Node（现行为不变）。
+///   均已接管；失败/异常返回 null，空结果返回 `empty: true`（见上）。
 /// · `bsLogin` 仅处理表单 POST + Set-Cookie 提取；登录态写在 body 里的站点
 ///   （如返回 token JSON）会因无 Set-Cookie ⇒ 返回 null ⇒ 回落 Node。
 /// · `bsContent` **同时回 `content` 与 `images`**（不再二选一）✓ ——
@@ -51,6 +54,7 @@ import '../novel_source/model/xiaoshuo_book.dart';
 import '../novel_source/novel_block.dart';
 import '../novel_source/web_book/web_book.dart';
 import '../novel_source/web_book/runner_isolate.dart';
+import '../source/global_proxy.dart';
 
 /// 书源 Dart 原生引擎接入层（进程级单例）。
 class BookSourceDartEngine {
@@ -89,6 +93,11 @@ class BookSourceDartEngine {
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         'Accept': '*/*',
       });
+      // ✅ 与 `BookSourceService._createDio()` / `SourceSubscriptionStore` 同口径：
+      //   用户开了「网络代理」时登录请求也要走代理 —— 否则"能搜到书、
+      //   登录接口却直连不通"（很多书源站需要登录才给正文）。
+      //   本 Dio 没有自定义 HttpClient 工厂（UA 在 header 里），挂代理安全。
+      applyGlobalProxy(d);
       _loginDio = d;
     }
     return _loginDio!;
@@ -132,7 +141,17 @@ class BookSourceDartEngine {
             key: body['keyword']?.toString() ?? '',
             page: body['page'] is int ? body['page'] as int : 1,
           );
-          if (list.isEmpty) return null; // 空结果 ⇒ 交给 Node（现行为不变）
+          // 空结果不再返回 null：null 的含义是"本层没接管"，会被 Python /
+          // QuickJS / Node 各自重新打一次同一个站点（同一关键词最多 4 次请求）。
+          // 这里如实返回 `{ok:true, list:[], empty:true}`，由 `_call` 只再回落
+          // Node **一次**（Node 也没有内容时才把这份空结果交回上层）。
+          if (list.isEmpty) {
+            return <String, dynamic>{
+              'ok': true,
+              'list': const <Map<String, dynamic>>[],
+              'empty': true,
+            };
+          }
           return <String, dynamic>{
             'ok': true,
             'list': list.map(_searchItem).toList(),
@@ -159,7 +178,14 @@ class BookSourceDartEngine {
             categoryUrl: categoryUrl,
             page: body['page'] is int ? body['page'] as int : 1,
           );
-          if (books.isEmpty) return null; // 空结果 ⇒ 交给 Node（现行为不变）
+          if (books.isEmpty) {
+            // 同 bsSearch：如实标记"成功但为空"，只让 `_call` 回落一次 Node
+            return <String, dynamic>{
+              'ok': true,
+              'list': const <Map<String, dynamic>>[],
+              'empty': true,
+            };
+          }
           return <String, dynamic>{
             'ok': true,
             'list': books.map(_bookItem).toList(),
@@ -196,7 +222,16 @@ class BookSourceDartEngine {
             source: source,
             book: XiaoshuoBook(bookUrl: tocUrl, name: ''),
           );
-          if (chapters.isEmpty) return null;
+          if (chapters.isEmpty) {
+            // 目录为空通常是"规则没解析出来"：保留 Node 兜底（历史上
+            // QQ 阅读等源只有 Node 能解析，见 book_source_service 的 PATCH-24），
+            // 但用 empty 标记让 `_call` **只回落一次**，不再走 py/qjs 重复抓。
+            return <String, dynamic>{
+              'ok': true,
+              'list': const <Map<String, dynamic>>[],
+              'empty': true,
+            };
+          }
           return <String, dynamic>{
             'ok': true,
             'list': chapters
@@ -224,7 +259,14 @@ class BookSourceDartEngine {
           //   且客户端只能靠「images 非空」猜是否图片章 ⇒ 有插图的文字章被
           //   整章渲染成图片、正文全丢 ✗。
           //   现在由**客户端**按「正文是否为空」判定纯图（见阅读器 `_loadChapter`）✓
-          if (text.isEmpty && imgs.isEmpty) return null; // 空正文 ⇒ 交给 Node
+          if (text.isEmpty && imgs.isEmpty) {
+            // 空正文：保留 Node 兜底（规则差异），但标记 empty 只回落一次
+            return <String, dynamic>{
+              'ok': true,
+              'content': '',
+              'empty': true,
+            };
+          }
           return <String, dynamic>{
             'ok': true,
             'content': text,

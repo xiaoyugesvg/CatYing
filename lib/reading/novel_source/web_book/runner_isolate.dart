@@ -1,4 +1,4 @@
-/// 书源求值的 **worker isolate 执行器**（对应上游 2.0.8 的
+/// 书源求值的 **worker isolate 池**（对应上游 2.0.8 的
 /// `web_book/runner_pool.dart` + `killable_isolate.dart`）。
 ///
 /// ── 为什么必须有它 ────────────────────────────────────────────
@@ -12,27 +12,32 @@
 ///
 /// 本文件负责**在 worker isolate 内把闸门打开**，从而让 `java.ajax` 真正可用，
 /// 同时保证阻塞只发生在 worker 里。
-/// 实测依据：224 条内置书源里 `java.ajax` 出现 **45 次 / 25 条源**。
 ///
-/// ── 设计（照 `qsgy-edge/liber` 的 `content_processing.dart` 做法）──
-/// · **每个动作 spawn 一个 isolate**（不是常驻池）：
-///   简单、无泄漏、天然隔离缓存（`SyncHttpBridge.cache` / `HostBridge.cache`
-///   在新 isolate 里是全新的，不会串会话）。
-/// · **超时即杀**：`receive.first.timeout(...)` 触发后 `Isolate.kill(immediate)`
-///   —— 这是 `sync_http` 没有超时能力时**唯一**的兜底手段。
-/// · 输入输出全部 **JSON 往返**（模型都已有 `toJson/fromJson`），
-///   因此不需要在 isolate 之间传递任意对象。
+/// ── 2026-10-23 改为**常驻池**（原来每个动作 spawn 一个）──────────
+/// 旧实现每次调用都 `Isolate.spawn` + 新建 quickjs runtime + 重新注入
+/// `jsStandardPolyfills` / 繁简转换 / legado 宿主预置（几十万字符），
+/// 还要每次都 `rootBundle.loadString(fetch.js)`。搜索结果并发 10 个源 =
+/// 10 套 isolate × runtime 同时常驻，冷启动开销全压在每次搜索上。
+///
+/// 现在：
+/// · worker **常驻复用**（最多 `maxWorkers` 个），runtime / 预置脚本 /
+///   HTTP 缓存都只付一次代价；
+/// · `fetch.js` 在主 isolate **只读一次**（`_fetchJsCache`）；
+/// · 并发超过池容量时**排队**，而不是无限 spawn；
+/// · 仍然保留「超时即杀」：`sync_http` 没有超时能力，超时后该 worker 可能
+///   卡在阻塞 socket 上 ⇒ kill 掉并从池里移除，下次自动补一个新的。
 ///
 /// ── 为什么不会无限递归 ───────────────────────────────────────
 /// worker 内部调用 `WebBook.searchBook(...)`，而 `web_book.dart` 里判断
 /// `BookSourceRunner.enabled` 决定是否走 isolate。**静态变量是 per-isolate 的**：
-/// 新建的 worker 里 `enabled` 是初始值 `false`，所以 worker 走的是原始同步实现。
+/// 新建的 worker 里 `enabled` 是初始值 `false`，所以 worker 走原始同步实现。
 ///
 /// ── 已知取舍（如实标注）──────────────────────────────────────
 /// · `getChapterList` 的 `onBatch` 回调**无法跨 isolate**，isolate 路径丢弃它，
 ///   只返回最终完整列表（调用方若依赖"首屏快显"需保留主 isolate 路径）。
-/// · 每个动作一次 spawn（约 10~50ms 开销 + JS 引擎冷启动）。上游用常驻
-///   `runner_pool` 摊薄这个成本；若实测开销明显，再升级为池化。
+/// · 常驻 worker 里的 cookie / HTTP 缓存会跨请求保留（per-isolate 静态）。
+///   这是池化的收益（同站连查更快），但也意味着不同书源共享同一个 worker 的
+///   进程级缓存；缓存均按 URL / 域名分键，不会串源规则。
 /// · 超时值默认 60s（一章正文可能要多次翻页抓取）。可按书源调。
 library;
 
@@ -46,7 +51,7 @@ import '../model/search_book.dart';
 import '../model/xiaoshuo_book.dart';
 import '../model/xiaoshuo_book_chapter.dart';
 import '../novel_block.dart';
-import 'web_book.dart';   // 已 export 'web_book_types.dart'
+import 'web_book.dart'; // 已 export 'web_book_types.dart'
 import 'dart:ui' show DartPluginRegistrant, RootIsolateToken;
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/services.dart'
@@ -70,10 +75,11 @@ class RunnerResult {
   bool get isTimeout => !ok && error == 'timeout';
 
   @override
-  String toString() => ok ? 'RunnerResult(ok, $data)' : 'RunnerResult(fail: $error)';
+  String toString() =>
+      ok ? 'RunnerResult(ok, $data)' : 'RunnerResult(fail: $error)';
 }
 
-/// 书源链路 isolate 执行器（进程级单例）。
+/// 书源链路 isolate 池（进程级单例）。
 class BookSourceRunner {
   BookSourceRunner._();
   static final BookSourceRunner instance = BookSourceRunner._();
@@ -82,107 +88,117 @@ class BookSourceRunner {
   ///
   /// **默认 false** ⇒ 行为与打补丁前完全一致（零风险）。
   /// 打开后：`java.ajax` 等同步宿主调用才真正生效（因为闸门在 worker 里被打开）。
-  ///
-  /// 建议接入点：App 启动或书源模块初始化处
-  /// `BookSourceRunner.enabled = true;`
   static bool enabled = false;
 
   /// 默认超时：一章正文可能需要多次"下一页"抓取，给足时间。
   static const Duration defaultTimeout = Duration(seconds: 60);
 
+  /// 常驻 worker 上限。
+  ///
+  /// 4 个：一次聚搜 40 个源时是 10 批而不是 40 个 runtime；
+  /// 单个 worker 里 quickjs runtime 会复用，所以 4 个也够快。
+  static const int maxWorkers = 4;
+
+  /// worker 启动握手超时（spawn + binding 初始化）
+  static const Duration _spawnTimeout = Duration(seconds: 20);
+
+  final List<_Worker> _idle = [];
+  final List<_Worker> _all = [];
+  final List<Completer<_Worker>> _waiters = [];
+
+  /// 正在 spawn 的数量：spawn 是异步的，`_all.length` 会滞后，
+  /// 不单独计数的话并发 acquire 会超过 [maxWorkers]。
+  int _spawning = 0;
+  int _nextId = 1;
+
+  /// 空闲 worker 的回收阈值。
+  ///
+  /// 常驻 worker 里是一个完整的 quickjs runtime（几十 MB），用户不搜索时
+  /// 没必要一直占着内存。空闲超过 10 分钟就回收；下次要用时再 spawn
+  /// （代价是一次握手 + fetch.js 注入，已经在 `_fetchJsCache` 里缓存过）。
+  static const Duration _idleTtl = Duration(minutes: 10);
+  Timer? _reapTimer;
+
+  void _scheduleReap() {
+    _reapTimer ??= Timer.periodic(
+      const Duration(minutes: 1),
+      (_) => _reapIdle(),
+    );
+  }
+
+  void _reapIdle() {
+    if (_idle.isEmpty) {
+      _reapTimer?.cancel();
+      _reapTimer = null;
+      return;
+    }
+    final now = DateTime.now();
+    for (final w in List<_Worker>.of(_idle)) {
+      if (w.busy || w.dead) continue;
+      if (now.difference(w.lastUsed) <= _idleTtl) continue;
+      _idle.remove(w);
+      _kill(w, '空闲超时回收');
+    }
+  }
+
+  /// fetch.js 源码只在主 isolate 读一次（原来每次 run 都读 bundle）。
+  static String? _fetchJsCache;
+
+  static Future<String> _loadFetchJs() async {
+    final cached = _fetchJsCache;
+    if (cached != null) return cached;
+    String js;
+    try {
+      js = await rootBundle.loadString(kFetchJsAssetPath);
+    } catch (_) {
+      // iOS 打包时这条包资源偶发不在 asset manifest 里（日志里那句
+      // `Unable to load asset: "packages/quickjs_engine/assets/js/fetch.js"`）。
+      // 用内置常量顶上：内容等价，还能省掉 worker 侧的重复失败与日志噪音。
+      js = kBundledFetchJs;
+    }
+    _fetchJsCache = js;
+    return js;
+  }
+
   /// 在 worker isolate 里执行一次书源动作。
   ///
-  /// [action] ∈ `search` / `bookInfo` / `toc` / `content`
+  /// [action] ∈ `search` / `bookInfo` / `toc` / `content` / `exploreBooks`
   /// [payload] 必须是 JSON 可编码的（含 `source`）。
   Future<RunnerResult> run(
     String action,
     Map<String, dynamic> payload, {
     Duration? timeout,
   }) async {
-    final receive = ReceivePort();
-    // ── worker 崩溃 / 提前退出的**即时感知**（2026-10-14）────────────
-    //   原来只 `receive.first.timeout(60s)`：worker 里若发生 try/catch 之外的
-    //   致命错误（OOM、isolate 被杀）⇒ **一条消息都收不到** ⇒ 调用方白等满
-    //   60s 才拿到 timeout ✗。补上 onError / onExit 两个端口，崩溃立刻返回。
-    final errorPort = ReceivePort();
-    final exitPort = ReceivePort();
-    Isolate? isolate;
+    _Worker? w;
     try {
-      // 代理必须在**主 isolate**（= 本方法所在）启动：worker 里发起同步请求会
-      // 阻塞自身事件循环，代理若同在 worker 就永远无法响应（死锁）。
-      final proxyPort = await LegadoHttpProxy.ensureStarted();
-
-      // ── [FIX-JS-ISOLATE 步骤①] 主 isolate 先把 fetch.js **读成字符串** ──
-      //
-      // ⚠️ 这一步是"能不能用 @js 规则"的**决定性环节**：
-      //    worker 里 `rootBundle` 会因为"后台 isolate 没有 ServicesBinding"
-      //    而抛异常（实测量 16 次 Unhandled exception）✗
-      // ⇒ 老办法（传 RootIsolateToken + BackgroundIsolateBinaryMessenger
-      //    + DartPluginRegistrant）**都绕不过**，因为 `rootBundle` 用的是
-      //    binding **对象本身**，不是 messenger ✗
-      // ⇒ 只有"主 isolate 读好、把字符串传进去"才成立 ✓
-      //
-      // ⚠️ 读失败**不能影响主流程**：这里 catch 住，worker 侧还有
-      //    "磁盘兜底 / 内置常量"两级（见 fetch.dart）✓
-      String? fetchJs;
-      try {
-        fetchJs = await rootBundle.loadString(kFetchJsAssetPath);
-      } catch (_) {
-        // iOS 打包时这条包资源偶发不在 asset manifest 里（日志里那句
-        // `Unable to load asset: "packages/quickjs_engine/assets/js/fetch.js"`）。
-        // 用内置常量顶上：内容等价，还能省掉 worker 侧的重复失败与日志噪音。
-        fetchJs = kBundledFetchJs;
+      w = await _acquire();
+      // ⚠️ worker 没有 cmd 端口 = 它其实已经废了。原来 `w.cmd?.send` 是空操作，
+      //   于是调用方会**干等到 60s 超时**才失败（搜索页一直转圈）。就地判死。
+      final cmd = w.cmd;
+      if (cmd == null) {
+        _onWorkerGone(w, 'worker 未就绪（无命令端口）');
+        return const RunnerResult(ok: false, error: 'worker 未就绪');
       }
-
-      isolate = await Isolate.spawn<List<Object?>>(
-        _runnerMain,
-        <Object?>[
-          receive.sendPort,
-          action,
-          payload,
-          proxyPort,
-          // [FIX-JS-ISOLATE] 仍然带上 token：万一将来还有别的插件通道
-          // 需要它（`BackgroundIsolateBinaryMessenger`），留着无副作用；
-          // 但**fetch.js 的资源问题不靠它解决**（见上面的说明）。
-          RootIsolateToken.instance,
-          // 步骤①的产物：fetch.js 源码字符串（可能为 null → worker 走兜底）
-          fetchJs,
-        ],
-        debugName: 'book-source-runner',
-        onError: errorPort.sendPort, // worker 内未捕获异常 → [error, stack]
-        onExit: exitPort.sendPort, // worker 结束 → null
-      );
-      // 四路竞速：正常回包 / worker 异常 / worker 退出 / 超时。
+      final rid = w.nextRequestId();
       final done = Completer<Map<String, Object?>>();
-      receive.listen((m) {
-        if (done.isCompleted) return;
-        done.complete(m is Map
-            ? m.cast<String, Object?>()
-            : <String, Object?>{
-                'ok': false,
-                'error': 'isolate 返回了意外类型: ${m.runtimeType}',
-              });
-      });
-      errorPort.listen((e) {
-        if (done.isCompleted) return;
-        final detail = (e is List && e.isNotEmpty) ? e.first : e;
-        done.complete(
-            <String, Object?>{'ok': false, 'error': 'worker isolate 异常: $detail'});
-      });
-      // exit 事件在 isolate **真正终止后**才发出；而 `reply.send` 是异步投递，
-      // 两者可能竞争 ⇒ 给 50ms 宽限，避免把「正常回包 + 随即退出」误判成失败。
-      exitPort.listen((_) async {
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-        if (done.isCompleted) return;
-        done.complete(const <String, Object?>{
-          'ok': false,
-          'error': 'worker isolate 提前退出（无结果）',
-        });
-      });
-      final msg = await done.future.timeout(
-        timeout ?? defaultTimeout,
-        onTimeout: () => const <String, Object?>{'ok': false, 'error': 'timeout'},
-      );
+      w.pending[rid] = done;
+      cmd.send(<Object?>[rid, action, payload]);
+
+      Map<String, Object?> msg;
+      try {
+        msg = await done.future.timeout(
+          timeout ?? defaultTimeout,
+          onTimeout: () =>
+              const <String, Object?>{'ok': false, 'error': 'timeout'},
+        );
+      } finally {
+        w.pending.remove(rid);
+      }
+      if (msg['error'] == 'timeout') {
+        // sync_http 没有超时能力：超时后 worker 可能永远卡在阻塞 socket 上
+        // ⇒ 必须杀，并且不能放回池里
+        _kill(w, 'timeout');
+      }
       return RunnerResult(
         ok: msg['ok'] == true,
         data: msg['data'],
@@ -191,12 +207,172 @@ class BookSourceRunner {
     } catch (e) {
       return RunnerResult(ok: false, error: '$e');
     } finally {
-      // ⚠️ 必须杀：sync_http 无超时能力，超时后 isolate 仍可能卡在阻塞 socket 上
+      if (w != null) _release(w);
+    }
+  }
+
+  // ── 池管理 ───────────────────────────────────────────────────
+
+  Future<_Worker> _acquire() async {
+    // 取一个空闲 worker
+    while (_idle.isNotEmpty) {
+      final w = _idle.removeLast();
+      if (!w.dead) {
+        w.busy = true;
+        return w;
+      }
+    }
+    if (_all.length + _spawning < maxWorkers) {
+      _spawning++;
+      try {
+        final w = await _spawn();
+        _all.add(w);
+        w.busy = true;
+        return w;
+      } finally {
+        _spawning--;
+      }
+    }
+    // 池满：排队等释放
+    final c = Completer<_Worker>();
+    _waiters.add(c);
+    return c.future;
+  }
+
+  void _release(_Worker w) {
+    w.busy = false;
+    if (w.dead) {
+      _pump();
+      return;
+    }
+    w.touch();
+    if (_waiters.isNotEmpty) {
+      final c = _waiters.removeAt(0);
+      w.busy = true;
+      c.complete(w);
+      return;
+    }
+    _idle.add(w);
+    _scheduleReap();
+    _pump();
+  }
+
+  /// 把空闲 worker 分给等待者；不够就补 spawn。
+  void _pump() {
+    while (_waiters.isNotEmpty && _idle.isNotEmpty) {
+      final w = _idle.removeLast();
+      if (w.dead) continue;
+      final c = _waiters.removeAt(0);
+      w.busy = true;
+      c.complete(w);
+    }
+    if (_waiters.isNotEmpty && _all.length + _spawning < maxWorkers) {
+      final c = _waiters.removeAt(0);
+      _spawning++;
+      _spawn().then((w) {
+        _all.add(w);
+        w.busy = true;
+        if (!c.isCompleted) c.complete(w);
+      }).catchError((Object e) {
+        if (!c.isCompleted) c.completeError(e);
+      }).whenComplete(() {
+        _spawning--;
+        _pump();
+      });
+    }
+  }
+
+  void _onWorkerGone(_Worker w, String reason) {
+    if (w.dead) return;
+    w.dead = true;
+    _idle.remove(w);
+    _all.remove(w);
+    // 该 worker 上还挂着的请求：立刻失败，别让调用方等满 60s
+    for (final c in w.pending.values) {
+      if (!c.isCompleted) {
+        c.complete(<String, Object?>{'ok': false, 'error': reason});
+      }
+    }
+    w.pending.clear();
+    w.closePorts();
+    debugPrint('[书源/worker] ${w.id} 退出：$reason');
+    _pump();
+  }
+
+  void _kill(_Worker w, String reason) {
+    _onWorkerGone(w, reason);
+    w.isolate?.kill(priority: Isolate.immediate);
+  }
+
+  Future<_Worker> _spawn() async {
+    final id = _nextId++;
+    final handshake = ReceivePort();
+    final reply = ReceivePort();
+    final errorPort = ReceivePort();
+    final exitPort = ReceivePort();
+
+    // 代理必须在**主 isolate**（= 本方法所在）启动：worker 里发起同步请求会
+    // 阻塞自身事件循环，代理若同在 worker 就永远无法响应（死锁）。
+    final proxyPort = await LegadoHttpProxy.ensureStarted();
+    final fetchJs = await _loadFetchJs();
+
+    final worker = _Worker(
+      id: id,
+      handshake: handshake,
+      reply: reply,
+      errors: errorPort,
+      exits: exitPort,
+    );
+
+    Isolate? isolate;
+    try {
+      isolate = await Isolate.spawn<List<Object?>>(
+        _workerMain,
+        <Object?>[
+          handshake.sendPort,
+          reply.sendPort,
+          proxyPort,
+          // [FIX-JS-ISOLATE] 仍然带上 token：万一将来还有别的插件通道
+          // 需要它（`BackgroundIsolateBinaryMessenger`），留着无副作用
+          RootIsolateToken.instance,
+          fetchJs,
+        ],
+        debugName: 'book-source-runner-$id',
+        onError: errorPort.sendPort, // worker 内未捕获异常 → [error, stack]
+        onExit: exitPort.sendPort, // worker 结束 → null
+      );
+      worker.isolate = isolate;
+
+      // 握手：worker 把自己的命令端口发回来
+      final cmd = await handshake.first.timeout(_spawnTimeout);
+      if (cmd is! SendPort) throw StateError('worker 握手返回了意外类型');
+      worker.cmd = cmd;
+
+      reply.listen((m) {
+        if (m is! List || m.length < 2) return;
+        final rid = m[0];
+        if (rid is! int) return;
+        final c = worker.pending.remove(rid);
+        final body = m[1];
+        c?.complete(
+          body is Map
+              ? body.cast<String, Object?>()
+              : <String, Object?>{
+                  'ok': false,
+                  'error': 'worker 返回了意外类型: ${body.runtimeType}',
+                },
+        );
+      });
+      errorPort.listen((e) {
+        final detail = (e is List && e.isNotEmpty) ? e.first : e;
+        _onWorkerGone(worker, 'worker 异常: $detail');
+      });
+      exitPort.listen((_) => _onWorkerGone(worker, 'worker 已退出'));
+      return worker;
+    } catch (e) {
       isolate?.kill(priority: Isolate.immediate);
-      // close() 会连带取消上面三个 listen 的订阅，无需单独 cancel
-      receive.close();
-      errorPort.close();
-      exitPort.close();
+      worker.closePorts();
+      rethrow;
     }
   }
 
@@ -291,47 +467,76 @@ class BookSourceRunner {
   }
 }
 
-/// worker isolate 入口：**打开闸门**后执行动作，结果 JSON 化回传。
+/// 一个常驻 worker 的运行态。
+class _Worker {
+  _Worker({
+    required this.id,
+    required this.handshake,
+    required this.reply,
+    required this.errors,
+    required this.exits,
+  });
+
+  final int id;
+  final ReceivePort handshake;
+  final ReceivePort reply;
+  final ReceivePort errors;
+  final ReceivePort exits;
+
+  Isolate? isolate;
+  SendPort? cmd;
+  bool busy = false;
+  bool dead = false;
+
+  /// 未完成请求：rid → completer
+  final Map<int, Completer<Map<String, Object?>>> pending = {};
+
+  int _rid = 0;
+  int nextRequestId() => ++_rid;
+
+  DateTime lastUsed = DateTime.now();
+  void touch() => lastUsed = DateTime.now();
+
+  void closePorts() {
+    handshake.close();
+    reply.close();
+    errors.close();
+    exits.close();
+  }
+}
+
+/// worker isolate 入口：**打开闸门**后等待任务，结果 JSON 化回传。
 ///
 /// ⚠️ 这里是整个方案的关键一步：`SyncHttpBridge.allowBlockingOnCurrentIsolate = true`
 /// 只在这个 isolate 里生效（静态变量 per-isolate），所以阻塞不会落到 UI 线程。
 ///
 /// 返回类型必须是 **`void`**（不是 `Future<void>`）：`Isolate.spawn` 要求
 /// `void Function(T)`；`async` 函数写 `void` 返回是合法且惯用的。
-void _runnerMain(List<Object?> args) async {
-  final reply = args[0] as SendPort;
-  final action = args[1] as String? ?? '';
-  final payload = (args[2] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
+void _workerMain(List<Object?> args) async {
+  final handshake = args[0] as SendPort;
+  final toMain = args[1] as SendPort;
+  final proxyPort = args.length > 2 ? (args[2] as int? ?? 0) : 0;
+  final token = args.length > 3 ? args[3] : null;
+  final fetchJs = args.length > 4 ? args[4] as String? : null;
 
   // ★ 闸门只在此 isolate 打开（主 isolate 永远保持 false）
   SyncHttpBridge.allowBlockingOnCurrentIsolate = true;
   // 本机同步代理端口（主 isolate 启动，经 spawn 参数传入 —— 静态变量 per-isolate）
-  SyncHttpBridge.proxyPort = args.length > 3 ? (args[3] as int? ?? 0) : 0;
+  SyncHttpBridge.proxyPort = proxyPort;
 
-  // [FIX-JS-ISOLATE] 打通本 isolate 的资源访问：quickjs 的 fetch 扩展会
-  // `rootBundle.loadString(...)` 读 JS，而 `ServicesBinding.instance` 是
-  // **per-isolate** 的 ✗ ⇒ 之前这里抛「Binding has not yet been initialized」，
-  // 导致**所有 `@js` 规则（搜索 / 目录 / 正文）失败** ✗（发现页能用是因为它跑在主 isolate）。
-  // 官方做法：主 isolate 取 `RootIsolateToken` 经 spawn 传进来，这里 ensureInitialized ✓。
-  // ── [FIX-JS-ISOLATE 步骤①b] 把主 isolate 传来的 fetch.js 源码存好 ──
-  //
-  // ⚠️ 必须在**创建 runtime 之前**做：`getJavascriptRuntime()` 内部会
+  // [FIX-JS-ISOLATE] 把主 isolate 传来的 fetch.js 源码存好。
+  // ⚠️ 必须在创建 runtime 之前做：`getJavascriptRuntime()` 内部会
   //    `runtime.enableFetch()`，那时就要用这个静态字段了。
-  // ⚠️ **静态字段是 per-isolate 的** ⇒ 每个 worker 都必须自己 preload 一次 ✓
-  final preloaded = args.length > 5 ? args[5] as String? : null;
-  final preloadOk = preloadFetchJs(preloaded);
-  if (!preloadOk) {
-    // 不崩：包的 fetch 扩展有磁盘/内置常量兜底
-    // ignore: avoid_print
+  if (!preloadFetchJs(fetchJs)) {
     debugPrint('[BookSourceRunner] 未收到预加载的 fetch.js，将走兜底路径');
   }
 
-  if (args.length > 4 && args[4] is RootIsolateToken) {
+  if (token is RootIsolateToken) {
     try {
       // ⚠️ 这两句**必须配套**：只调 messenger 不够 ✗ —— `rootBundle` 走的是
       // `ServicesBinding.instance`（binding 本身 ✗），实测只加 messenger 时
       // quickjs 的 fetch 扩展仍抛「Binding has not yet been initialized」✗。
-      BackgroundIsolateBinaryMessenger.ensureInitialized(args[4] as RootIsolateToken);
+      BackgroundIsolateBinaryMessenger.ensureInitialized(token);
       DartPluginRegistrant.ensureInitialized();
     } catch (_) {
       // 拿不到绑定（纯 dart:io / flutter test 环境）时**不能崩** ✗：
@@ -339,72 +544,82 @@ void _runnerMain(List<Object?> args) async {
     }
   }
 
-  void sendBack(Map<String, Object?> msg) {
+  // ── 长驻：接收任务 → 执行 → 回包，直到被 kill ────────────────
+  final cmdPort = ReceivePort();
+  handshake.send(cmdPort.sendPort);
+
+  cmdPort.listen((m) async {
+    if (m is! List || m.length < 3) return;
+    final rid = m[0];
+    if (rid is! int) return;
+    final action = '${m[1]}';
+    final payload = m[2] is Map
+        ? (m[2] as Map).cast<String, dynamic>()
+        : <String, dynamic>{};
     try {
-      reply.send(msg);
-    } catch (e) {
-      // 兜底：结果里混入不可传输对象时，退化成纯文本错误，避免调用方一直等到超时
-      try {
-        reply.send(<String, Object?>{'ok': false, 'error': 'isolate 结果不可传输: $e'});
-      } catch (_) {/* 已无法回传，让调用方走超时分支 */}
+      final data = await _execute(action, payload);
+      toMain.send(<Object?>[
+        rid,
+        <String, Object?>{'ok': true, 'data': data},
+      ]);
+    } catch (e, st) {
+      toMain.send(<Object?>[
+        rid,
+        <String, Object?>{'ok': false, 'error': '$e', 'stack': '$st'},
+      ]);
     }
-  }
+  });
+}
 
-  try {
-    final source = XiaoshuoBookSource.fromJson(
-      (payload['source'] as Map).cast<String, dynamic>(),
-    );
-    final wb = WebBook();
+/// worker 内的动作实现（结果必须是可跨 isolate 传输的 JSON 结构）。
+Future<Object?> _execute(String action, Map<String, dynamic> payload) async {
+  final rawSource = payload['source'];
+  if (rawSource is! Map) throw Exception('缺少 source');
+  final source = XiaoshuoBookSource.fromJson(
+    rawSource.cast<String, dynamic>(),
+  );
+  final wb = WebBook();
 
-    switch (action) {
-      case 'search':
-        final list = await wb.searchBook(
-          source: source,
-          key: payload['key']?.toString() ?? '',
-          page: payload['page'] is int ? payload['page'] as int : 1,
-        );
-        sendBack(<String, Object?>{'ok': true, 'data': _jsonSafe(list)});
-        return;
-      case 'bookInfo':
-        final book = await wb.getBookInfo(
-          source: source,
-          bookUrl: payload['bookUrl']?.toString() ?? '',
-        );
-        sendBack(<String, Object?>{'ok': true, 'data': _jsonSafe(book)});
-        return;
-      case 'toc':
-        final book = XiaoshuoBook.fromJson(
-          (payload['book'] as Map).cast<String, dynamic>(),
-        );
-        // onBatch 无法跨 isolate：isolate 路径只回最终完整列表
-        final chapters = await wb.getChapterList(source: source, book: book);
-        sendBack(<String, Object?>{'ok': true, 'data': _jsonSafe(chapters)});
-        return;
-      case 'exploreBooks':
-        // [PATCH-13] 发现页分类列表（bsExplore + categoryUrl）
-        final books = await wb.exploreCategory(
-          source: source,
-          categoryUrl: payload['categoryUrl']?.toString() ?? '',
-          page: payload['page'] is int ? payload['page'] as int : 1,
-        );
-        sendBack(<String, Object?>{'ok': true, 'data': _jsonSafe(books)});
-        return;
-      case 'content':
-        final ob = payload['originalBook'];
-        final result = await wb.getContent(
-          source: source,
-          chapterUrl: payload['chapterUrl']?.toString() ?? '',
-          originalBook:
-              ob is Map ? XiaoshuoBook.fromJson(ob.cast<String, dynamic>()) : null,
-        );
-        sendBack(<String, Object?>{'ok': true, 'data': _contentToJson(result)});
-        return;
-      default:
-        sendBack(<String, Object?>{'ok': false, 'error': '未知动作: $action'});
-        return;
-    }
-  } catch (e, st) {
-    sendBack(<String, Object?>{'ok': false, 'error': '$e', 'stack': '$st'});
+  switch (action) {
+    case 'search':
+      final list = await wb.searchBook(
+        source: source,
+        key: payload['key']?.toString() ?? '',
+        page: payload['page'] is int ? payload['page'] as int : 1,
+      );
+      return _jsonSafe(list);
+    case 'bookInfo':
+      final book = await wb.getBookInfo(
+        source: source,
+        bookUrl: payload['bookUrl']?.toString() ?? '',
+      );
+      return _jsonSafe(book);
+    case 'toc':
+      final book = XiaoshuoBook.fromJson(
+        (payload['book'] as Map).cast<String, dynamic>(),
+      );
+      // onBatch 无法跨 isolate：isolate 路径只回最终完整列表
+      final chapters = await wb.getChapterList(source: source, book: book);
+      return _jsonSafe(chapters);
+    case 'exploreBooks':
+      // [PATCH-13] 发现页分类列表（bsExplore + categoryUrl）
+      final books = await wb.exploreCategory(
+        source: source,
+        categoryUrl: payload['categoryUrl']?.toString() ?? '',
+        page: payload['page'] is int ? payload['page'] as int : 1,
+      );
+      return _jsonSafe(books);
+    case 'content':
+      final ob = payload['originalBook'];
+      final result = await wb.getContent(
+        source: source,
+        chapterUrl: payload['chapterUrl']?.toString() ?? '',
+        originalBook:
+            ob is Map ? XiaoshuoBook.fromJson(ob.cast<String, dynamic>()) : null,
+      );
+      return _contentToJson(result);
+    default:
+      throw Exception('未知动作: $action');
   }
 }
 

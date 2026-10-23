@@ -58,8 +58,15 @@ class BookSourceResult {
     final b = other.name.trim().toLowerCase();
     if (a.isEmpty || b.isEmpty) return false;
     if (a == b) return true;
-    // 书名包含也算（有的源带"（精校版）"之类后缀）
-    return a.contains(b) || b.contains(a);
+    // 包含判定只对"够长的书名"生效：
+    //   原来任意包含即算同一本 ⇒ 单字书名（「剑」「蛊」）会命中一大片无关书，
+    //   换源结果里全是别的书。这里要求被包含的一方至少 2 个字，
+    //   且长度差不超过 6（"三体" vs "三体（精校版）" 之类后缀仍能匹配）。
+    final short = a.length <= b.length ? a : b;
+    final long = a.length <= b.length ? b : a;
+    if (short.length < 2) return false;
+    if (long.length - short.length > 6) return false;
+    return long.contains(short);
   }
 
   static BookSourceResult? fromJson(Map<String, dynamic> j, BookSource src) {
@@ -153,7 +160,12 @@ class SourceSearchState {
 /// 用户导入几十个源时**必须并发**，否则要等到天荒地老。
 /// 但也不能无限并发（会打爆内存 / 被目标站限流），所以用信号量限流。
 class BookSourceService {
-  BookSourceService._();
+  BookSourceService._() {
+    // 书源库一旦变动（导入 / 编辑规则 / 删除 / 启停），详情与目录缓存立即失效。
+    // 否则「改完规则点重试」在 5 分钟 TTL 内拿到的还是旧缓存 —— 用户视角
+    // 就是"改了没生效"。`revision` 是 `BookSourceStore` 的唯一变更出口。
+    BookSourceStore.instance.revision.addListener(clearCache);
+  }
   static final BookSourceService instance = BookSourceService._();
 
   /// 壳模式：已连接 qread 服务端时，详情/目录/正文由服务端执行规则。
@@ -320,11 +332,14 @@ class BookSourceService {
         if (!hit.isExpired) return hit.data;
         _cache.remove(cacheKey);
       }
-      final running = _inflight[cacheKey];
-      if (running != null) return running;
     } else {
       _cache.remove(cacheKey);
     }
+    // 进行中的同 key 请求 ——— **force 也复用**：
+    //   force 的语义是"别拿旧缓存"，不是"再打一次源站"。否则用户连点
+    //   「重试」会对同一个详情/目录页重复发请求（还会互相覆盖 `_inflight`）。
+    final running = _inflight[cacheKey];
+    if (running != null) return running;
 
     final future = _call(body);
     _inflight[cacheKey] = future;
@@ -357,38 +372,79 @@ class BookSourceService {
   /// 和内存压垮（每个源要持有整页 HTML 做 DOM 解析）。
   static const int maxConcurrent = 10;
 
-  Future<dynamic> _call(Map<String, dynamic> body) async {
+  /// 一次动作的**总时长上限**（整条回落链：Dart → Python → QuickJS → Node）。
+  ///
+  /// 为什么需要：Node 自己 120s 会超时，但 Dart / Python / QuickJS 三层都是
+  /// "await 到出结果为止" —— 某一层卡死在阻塞 socket 或死循环上时，搜索页
+  /// 会**一直转圈**，用户只能杀 App。这里给整条链一个兜底（略大于 Node 的
+  /// 120s，让 Node 自己的超时先给出更精确的错误）。
+  static const Duration _callTimeout = Duration(seconds: 135);
+
+  Future<dynamic> _call(Map<String, dynamic> body) => _callLayers(body).timeout(
+    _callTimeout,
+    onTimeout: () => <String, dynamic>{
+      'ok': false,
+      'error': '请求超时（源站长时间无响应，换源试试）',
+    },
+  );
+
+  Future<dynamic> _callLayers(Map<String, dynamic> body) async {
     // [PATCH-9] 先试 **Dart 原生 legado 引擎**（含 `@js:`/`<js>` 规则 + 同步宿主桥）。
-    // 返回 null（动作未接管 / 空结果 / 异常）⇒ 回落 Node 引擎，现行为不变。
+    // 返回 null（动作未接管 / 异常）⇒ 回落 Node 引擎，现行为不变。
     // 背景：本层原先是「含 JS 的源必须走 Node」（`legadoNeedsNode`），
     // 而 Dart 侧现在已有 quickjs 引擎与宿主方法表（补丁 0005/0007/0008）。
     final dartHandled = await BookSourceDartEngine.instance.handle(body);
-    if (dartHandled != null) return dartHandled;
-    // ── [PY-1] Python 书源分支：raw 带 pythonKey 的源走 CPython 引擎 ──
-    // 与 Dart 引擎同构：返回 null（非 Python 源/动作未接管/失败）⇒ 回落 Node。
-    final pythonHandled = await BookSourcePythonEngine.instance.handle(body);
-    if (pythonHandled != null) return pythonHandled;
-    // ── QuickJS 书源引擎（实验，2026-10-21）────────────────────────
-    // Dart / Python 都没接管时，按设置决定要不要先试 QuickJS；
-    // 失败 / 返回 null 继续回落 Node（默认 node，完全保持旧行为）。
-    await BookQuickJsEngine.instance.ensureInit();
-    final qjsMode = BookQuickJsEngine.instance.mode.value;
-    if (qjsMode != 'node') {
-      final action = (body['action'] ?? '').toString();
-      final q = await BookQuickJsEngine.instance.call(action, body);
-      if (q != null) return q;
-      if (qjsMode == 'quickjs') {
-        return {
-          'ok': false,
-          'error': 'QuickJS 书源引擎执行失败（设置 → 通用 → 书源引擎 可切回 Node）',
-        };
+
+    // Dart 引擎「跑通但没有结果」会回 `empty: true`：这说明它已经抓过页面、
+    // 只是解析为空。此时不再让 Python / QuickJS 各打一次同一个站点
+    // （旧行为：空结果也逐层回落 ⇒ 同一关键词最多 4 次请求），只回落 Node 一次。
+    final dartEmpty = dartHandled != null && dartHandled['empty'] == true;
+    if (dartHandled != null && !dartEmpty) return dartHandled;
+
+    if (!dartEmpty) {
+      // ── [PY-1] Python 书源分支：raw 带 pythonKey 的源走 CPython 引擎 ──
+      // 与 Dart 引擎同构：返回 null（非 Python 源/动作未接管/失败）⇒ 回落 Node。
+      final pythonHandled = await BookSourcePythonEngine.instance.handle(body);
+      if (pythonHandled != null) return pythonHandled;
+      // ── QuickJS 书源引擎（实验，2026-10-21）────────────────────────
+      // Dart / Python 都没接管时，按设置决定要不要先试 QuickJS；
+      // 失败 / 返回 null 继续回落 Node（默认 node，完全保持旧行为）。
+      await BookQuickJsEngine.instance.ensureInit();
+      final qjsMode = BookQuickJsEngine.instance.mode.value;
+      if (qjsMode != 'node') {
+        final action = (body['action'] ?? '').toString();
+        final q = await BookQuickJsEngine.instance.call(action, body);
+        if (q != null) return q;
+        if (qjsMode == 'quickjs') {
+          return {
+            'ok': false,
+            'error': 'QuickJS 书源引擎执行失败（设置 → 通用 → 书源引擎 可切回 Node）',
+          };
+        }
       }
     }
+
+    final nodeRes = await _callNode(body);
+    if (dartEmpty) {
+      if (nodeRes is Map) {
+        // Node 明确报错 → 用它的错误信息（比"没有内容"更好定位）
+        if (nodeRes['ok'] != true) return nodeRes;
+        // Node 也没内容 → 用 Dart 的空结果（ok:true），上层显示"没有内容"
+        if (!_hasNodeData(nodeRes)) return dartHandled;
+        return nodeRes;
+      }
+      return dartHandled;
+    }
+    return nodeRes;
+  }
+
+  /// Node 书源引擎兜底请求（原 `_call` 的后半段，逻辑未改）。
+  Future<dynamic> _callNode(Map<String, dynamic> body) async {
     // ── [PATCH-24-REVERT] 恢复 **Node 回退** ─────────────────────────────
     // 背景（实机证据）：我一度把这里改成"只走 Dart 引擎"，结果用户手机上
     // 《校花的贴身高手》(QQ阅读) 与《不死神王书城》的**目录直接报错**：
     //   「本地引擎未接管该动作（动作：bsToc）——旧 Node 书源引擎已移除」。
-    // 原因：Dart 引擎在"没解析出章节/详情"时会返回 null（原语义 = **交给 Node**），
+    // 原因：Dart 引擎在"没解析出章节/详情"时返回 null（原语义 = **交给 Node**），
     //       而回退被我删了 ⇒ 原本能用的源变成硬失败 ✗。
     // ⇒ 结论：Dart 引擎目前**还不是**所有书源的完全替代，回退必须保留。
     //   现行策略 = **Dart 优先**（含 @js，快）→ 未接管/空结果 → 回落 Node（兜底）。
@@ -413,6 +469,21 @@ class BookSourceService {
     } catch (e) {
       return {'ok': false, 'error': '请求失败：${_short(e)}'};
     }
+  }
+
+  /// Node 返回里是否真的有内容（用于"Dart 与 Node 都空"时挑选结果）
+  static bool _hasNodeData(Map m) {
+    for (final k in const ['list', 'categories', 'images']) {
+      final v = m[k];
+      if (v is List && v.isNotEmpty) return true;
+    }
+    final c = m['content'];
+    if (c != null && '$c'.trim().isNotEmpty) return true;
+    final info = m['info'];
+    if (info is Map && info.isNotEmpty) return true;
+    final cookie = m['cookie'];
+    if (cookie != null && '$cookie'.isNotEmpty) return true;
+    return false;
   }
 
   Map<String, dynamic> _asMap(dynamic raw) =>
@@ -915,10 +986,14 @@ class BookSourceService {
     }
     notes.add('目录 ${t.list.length} 章');
 
-    // 4) 正文（抽第一章，确认能读到字）
+    // 4) 正文（抽第一章，确认能读到字/图）
     final c = await content(source, t.list.first.url);
     sw.stop();
-    if (!c.ok || c.content.trim().isEmpty) {
+    // ⚠️ 漫画源的正文是 images（content 恒为空），只看 content 会把正常漫画源
+    //    判成"解析失败"并在体检后自动停用 —— 与 BookSourceHealthService 口径对齐。
+    final hasText = c.content.trim().isNotEmpty;
+    final hasImages = c.images.isNotEmpty;
+    if (!c.ok || (!hasText && !hasImages)) {
       final net = _isNetError(c.error);
       final h = BookSourceHealth(
         source: source,
@@ -928,7 +1003,7 @@ class BookSourceService {
       );
       return net ? await _retryWithProxy(h, keyword: keyword) : h;
     }
-    notes.add('正文 ${c.content.length} 字');
+    notes.add(hasText ? '正文 ${c.content.length} 字' : '正文 ${c.images.length} 张图');
 
     return BookSourceHealth(
       source: source,
@@ -1064,6 +1139,9 @@ class BookSourceService {
     return (ok: true, cookie: m['cookie']?.toString(), error: null);
   }
 
+  /// 单张图片的体积上限（20MB），见 [fetchBytes]。
+  static const int _maxImageBytes = 20 * 1024 * 1024;
+
   /// 下载一张图片的字节（图片模式「保存到相册」用）。
   ///
   /// ⚠️ 必须**带上书源的 header**（Referer / User-Agent）——
@@ -1093,6 +1171,12 @@ class BookSourceService {
       );
       final d = res.data;
       if (d == null || d.isEmpty) return null;
+      // 体积上限：坏规则会把整页 HTML / 超大原图当图片下，几十 MB 直接进内存
+      // 会把 App 顶掉（漫画长图偶尔 10MB+，20MB 留足余量）。
+      if (d.length > _maxImageBytes) {
+        debugPrint('[BookSource] 图片过大，已跳过（${d.length} bytes）');
+        return null;
+      }
       return Uint8List.fromList(d);
     } catch (_) {
       return null;

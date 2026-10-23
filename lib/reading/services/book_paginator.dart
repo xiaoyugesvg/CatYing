@@ -19,6 +19,19 @@ class BookTypography {
   /// TextStyle（颜色除外，不影响布局）。
   final TextStyle inheritedStyle;
 
+  /// 标题字号覆盖（null = 用默认公式 `fontSize + (6-level)*2 + 2`）。
+  ///
+  /// 书源阅读器的章标题走自己的字号（正文 +3），不套默认公式；若不显式覆盖，
+  /// 度量会按大标题量（正文 +12）而渲染只有 +3 ⇒ 标题页凭空多留一行空白。
+  final double? headingFontSizeOverride;
+
+  /// 标题行高覆盖（null = 用 lineHeight）。
+  final double? headingHeightOverride;
+
+  /// 段间距系数（× fontSize）。默认 0.55，与既有阅读器行为一致；
+  /// 书源阅读器把「排版 → 段间距」的滑块值传进来，让度量 = 渲染。
+  final double paragraphSpacingFactor;
+
   /// 系统字体缩放器（取自 MediaQuery.textScaler）。渲染由 SelectableText 自动应用，
   /// 度量须在 TextPainter 传入**同一对象**，保证度量与渲染缩放完全一致。系统
   /// TextScaler 可能非线性，不可用 scale(1.0) 重建 TextScaler.linear，否则大字号
@@ -38,12 +51,15 @@ class BookTypography {
     required this.verticalPadding,
     this.fontFamily,
     this.inheritedStyle = const TextStyle(),
+    this.headingFontSizeOverride,
+    this.headingHeightOverride,
+    this.paragraphSpacingFactor = 0.55,
     this.textScaler = TextScaler.noScaling,
     this.textHeightBehavior = const TextHeightBehavior(),
   });
 
   /// 段落 / 块之间的纵向间距
-  double get blockSpacing => fontSize * 0.55;
+  double get blockSpacing => fontSize * paragraphSpacingFactor;
 
   /// 段落度量样式（无颜色）。先 merge inheritedStyle，使度量与渲染 effective
   /// TextStyle 一致（消除 defaultTextStyle 残留字段差异）。
@@ -53,6 +69,7 @@ class BookTypography {
 
   /// 标题字号：level 越小字号越大
   double headingFontSize(int level) {
+    if (headingFontSizeOverride != null) return headingFontSizeOverride!;
     final l = level < 1 ? 1 : (level > 6 ? 6 : level);
     return fontSize + (6 - l) * 2.0 + 2;
   }
@@ -62,9 +79,12 @@ class BookTypography {
     return inheritedStyle.merge(
       TextStyle(
         fontSize: headingFontSize(level),
-        height: lineHeight,
+        height: headingHeightOverride ?? lineHeight,
         fontWeight: FontWeight.w700,
         fontFamily: fontFamily,
+        // 标题不带正文字距（渲染端标题同样不设 letterSpacing），
+        // 否则度量比渲染宽 ⇒ 标题可能多折一行。
+        letterSpacing: 0,
       ),
     );
   }
@@ -72,12 +92,19 @@ class BookTypography {
   /// 强制行高 strut：分页度量与渲染共用同一 strut，消除 TextPainter 与
   /// SelectableText/Text 的行高偏差（不同设备字体度量不同，否则多行累积
   /// 到页底会溢出）。
-  StrutStyle strutStyleFor(double size) =>
-      StrutStyle(fontSize: size, height: lineHeight, forceStrutHeight: true);
+  StrutStyle strutStyleFor(double size) => StrutStyle(
+    fontSize: size,
+    height: lineHeight,
+    forceStrutHeight: true,
+  );
 
   StrutStyle get paragraphStrut => strutStyleFor(fontSize);
 
-  StrutStyle headingStrut(int level) => strutStyleFor(headingFontSize(level));
+  StrutStyle headingStrut(int level) => StrutStyle(
+    fontSize: headingFontSize(level),
+    height: headingHeightOverride ?? lineHeight,
+    forceStrutHeight: true,
+  );
 }
 
 /// 一页中的一条内容（可能是整块，或段落被切分后的部分文本）

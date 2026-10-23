@@ -49,12 +49,12 @@ class PetSpeciesInfo {
 class PetSpecies {
   PetSpecies._();
 
-  // ── QQ 秀风格人形桌宠（内置，用户 2026-10-18）─────────────────
+  // ── QQ 企鹅桌宠（拟人化，用户 2026-10-23）───────────────────
   static const qqBoy = PetSpeciesInfo(
     id: 'qq_boy',
     name: '小Q',
     element: '风',
-    description: '爱穿卫衣的读书少年，衣柜里永远少一件。',
+    description: '围着红围巾的读书企鹅，衣柜里永远少一件卫衣。',
     palette: [Color(0xFF5C8DFF), Color(0xFFF2F6FF), Color(0xFF2C3E66)],
     unlockLevel: 1,
     price: 0,
@@ -64,7 +64,7 @@ class PetSpecies {
     id: 'qq_girl',
     name: '小秀',
     element: '花',
-    description: '爱搭配衣服的读书少女，今天也要美美地看书。',
+    description: '爱打扮的企鹅小姐，看书也要挑一支好看的书签。',
     palette: [Color(0xFFFF8FB1), Color(0xFFFFF3F7), Color(0xFF7A3B52)],
     unlockLevel: 1,
     price: 0,
@@ -74,7 +74,7 @@ class PetSpecies {
     id: 'qq_scholar',
     name: '书呆',
     element: '墨',
-    description: '抱着书不撒手的学霸，穿搭也一丝不苟。',
+    description: '抱书不撒手的企鹅学霸，围巾都要系得一丝不苟。',
     palette: [Color(0xFF8D9B6A), Color(0xFFF4F6EC), Color(0xFF3E4A32)],
     unlockLevel: 3,
     price: 260,

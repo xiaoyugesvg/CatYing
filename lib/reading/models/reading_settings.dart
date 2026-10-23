@@ -37,6 +37,9 @@ class ReadingSettings {
     this.eyeBreakEnabled = false,
     this.eyeBreakMinutes = 30,
     this.purifyRules = defaultPurifyRules,
+    this.autoReadIntervalSec = 8,
+    this.preloadChapters = 1,
+    this.preloadWifiOnly = false,
   });
 
   final PageMode pageMode;
@@ -101,6 +104,18 @@ class ReadingSettings {
   /// 正文净化规则（C9）：默认规则集 + 用户自定义，启停状态随设置持久化
   final List<PurifyRule> purifyRules;
 
+  /// 自动阅读的翻页间隔（秒）：3~60，默认 8 秒/页。
+  ///
+  /// 对齐 Legado 的「自动阅读」：到点自动翻下一页（滚动模式则是往下滚一屏），
+  /// 任意触摸/切章/退出阅读器都会停。
+  final int autoReadIntervalSec;
+
+  /// 后台预取章节数：0~5（0 = 只取当前章），默认 1（当前 + 下一章）。
+  final int preloadChapters;
+
+  /// 预取仅走 WiFi（避免用流量偷偷下载后面几章）。
+  final bool preloadWifiOnly;
+
   ReadingSettings copyWith({
     PageMode? pageMode,
     bool? flipReverse,
@@ -121,6 +136,9 @@ class ReadingSettings {
     bool? eyeBreakEnabled,
     int? eyeBreakMinutes,
     List<PurifyRule>? purifyRules,
+    int? autoReadIntervalSec,
+    int? preloadChapters,
+    bool? preloadWifiOnly,
   }) {
     return ReadingSettings(
       pageMode: pageMode ?? this.pageMode,
@@ -142,6 +160,9 @@ class ReadingSettings {
       eyeBreakEnabled: eyeBreakEnabled ?? this.eyeBreakEnabled,
       eyeBreakMinutes: eyeBreakMinutes ?? this.eyeBreakMinutes,
       purifyRules: purifyRules ?? this.purifyRules,
+      autoReadIntervalSec: autoReadIntervalSec ?? this.autoReadIntervalSec,
+      preloadChapters: preloadChapters ?? this.preloadChapters,
+      preloadWifiOnly: preloadWifiOnly ?? this.preloadWifiOnly,
     );
   }
 
@@ -178,6 +199,9 @@ class ReadingSettings {
         'eyeBreakEnabled': eyeBreakEnabled,
         'eyeBreakMinutes': eyeBreakMinutes,
         'purifyRules': purifyRules.map((r) => r.toJson()).toList(),
+        'autoReadIntervalSec': autoReadIntervalSec,
+        'preloadChapters': preloadChapters,
+        'preloadWifiOnly': preloadWifiOnly,
       };
 
   static ReadingSettings fromJson(Map<String, dynamic> j) {
@@ -245,6 +269,11 @@ class ReadingSettings {
       eyeBreakEnabled: eyeOn,
       eyeBreakMinutes: eyeMin,
       purifyRules: purify,
+      autoReadIntervalSec:
+          ((j['autoReadIntervalSec'] as num?)?.toInt() ?? 8).clamp(3, 60),
+      preloadChapters:
+          ((j['preloadChapters'] as num?)?.toInt() ?? 1).clamp(0, 5),
+      preloadWifiOnly: j['preloadWifiOnly'] == true,
     );
   }
 }
