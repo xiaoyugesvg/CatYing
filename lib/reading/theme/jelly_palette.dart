@@ -381,6 +381,185 @@ class JellyPalette {
       textPrimaryDark = const Color(0xFFF7ECE3),
       textSecondary = const Color(0xFFAE9480);
 
+  // ── 「公认最美的颜色」八色（2026-10-23，参考东丁设计色卡）────────────
+  //
+  // 用户给了一组色卡（碧青 #41B5C2 / 暖阳橙 #DB7A0E / 蕉红 #D4042D /
+  // 柠檬黄 #FACA2E / 矢车菊蓝 #5A92E5 / 皇家紫 #722169 / 翠微 #5E8034 /
+  // 梅洛粉 #EB6D98），要求按这个做主题。
+  //
+  // ⚠️ primary 有两处**故意**比色卡深一档：碧青、柠檬黄、梅洛粉。
+  //    App 里所有主按钮都是「primary 底 + 白色文字」，直接用色卡值
+  //    （尤其 #FACA2E 亮度 0.62）会让白字几乎看不见。
+  //    原始色值保留在 primaryLight 里，选色块时仍是色卡那个颜色。
+
+  /// 碧青 AZURE：治愈 / 自由 / 理性。
+  const JellyPalette.azure()
+    : primary = const Color(0xFF2E9AA6),
+      primaryLight = const Color(0xFF41B5C2),
+      primaryDark = const Color(0xFF1F7480),
+      accent = const Color(0xFFE8A44C),
+      success = const Color(0xFF5FAE8B),
+      warning = const Color(0xFFE8C15A),
+      error = const Color(0xFFD8564E),
+      blue = const Color(0xFF4E88B8),
+      backgroundLight = const Color(0xFFEFF8F9),
+      backgroundDark = const Color(0xFF0F2022),
+      cardLight = Colors.white,
+      cardDark = const Color(0xFF193033),
+      navSelectedBg = const Color(0xFFCFEAEE),
+      navSelectedFg = const Color(0xFF1F7480),
+      navUnselected = const Color(0xFF142A2C),
+      textPrimaryLight = const Color(0xFF123336),
+      textPrimaryDark = const Color(0xFFE6F4F5),
+      textSecondary = const Color(0xFF8FA9AB);
+
+  /// 暖阳橙 WARM SUN ORANGE：活力 / 时尚 / 温暖。
+  const JellyPalette.warmSun()
+    : primary = const Color(0xFFDB7A0E),
+      primaryLight = const Color(0xFFF09A3C),
+      primaryDark = const Color(0xFFA85704),
+      accent = const Color(0xFF2E9AA6),
+      success = const Color(0xFF6FAF7C),
+      warning = const Color(0xFFE8B44A),
+      error = const Color(0xFFD94040),
+      blue = const Color(0xFF4E7FB5),
+      backgroundLight = const Color(0xFFFDF4E8),
+      backgroundDark = const Color(0xFF201607),
+      cardLight = Colors.white,
+      cardDark = const Color(0xFF2E2213),
+      navSelectedBg = const Color(0xFFF8DFC0),
+      navSelectedFg = const Color(0xFFA85704),
+      navUnselected = const Color(0xFF2A1E10),
+      textPrimaryLight = const Color(0xFF3A2808),
+      textPrimaryDark = const Color(0xFFF7EBDC),
+      textSecondary = const Color(0xFFAD9271);
+
+  /// 蕉红 BANANA RED：热情 / 力量 / 浪漫。
+  const JellyPalette.bananaRed()
+    : primary = const Color(0xFFD4042D),
+      primaryLight = const Color(0xFFEF4767),
+      primaryDark = const Color(0xFF9C0020),
+      accent = const Color(0xFFD9A03A),
+      success = const Color(0xFF6FAF7C),
+      warning = const Color(0xFFE8B44A),
+      error = const Color(0xFFFF5A5A),
+      blue = const Color(0xFF4E7FB5),
+      backgroundLight = const Color(0xFFFDF2F3),
+      backgroundDark = const Color(0xFF200F12),
+      cardLight = Colors.white,
+      cardDark = const Color(0xFF2E171A),
+      navSelectedBg = const Color(0xFFF8D2D8),
+      navSelectedFg = const Color(0xFF9C0020),
+      navUnselected = const Color(0xFF2A1417),
+      textPrimaryLight = const Color(0xFF3D1015),
+      textPrimaryDark = const Color(0xFFF7E7E9),
+      textSecondary = const Color(0xFFAC8A8E);
+
+  /// 柠檬黄 LEMON YELLOW：奢华 / 阳光 / 明亮。
+  const JellyPalette.lemon()
+    : primary = const Color(0xFFC79700),
+      primaryLight = const Color(0xFFFACA2E),
+      primaryDark = const Color(0xFF997100),
+      accent = const Color(0xFF3E7B9A),
+      success = const Color(0xFF6FAF7C),
+      warning = const Color(0xFFE8B44A),
+      error = const Color(0xFFD94040),
+      blue = const Color(0xFF4E7FB5),
+      backgroundLight = const Color(0xFFFCF8E6),
+      backgroundDark = const Color(0xFF1E1A08),
+      cardLight = Colors.white,
+      cardDark = const Color(0xFF2C2712),
+      navSelectedBg = const Color(0xFFF7E9B8),
+      navSelectedFg = const Color(0xFF7A5C00),
+      navUnselected = const Color(0xFF272208),
+      textPrimaryLight = const Color(0xFF3A3006),
+      textPrimaryDark = const Color(0xFFF7F1DC),
+      textSecondary = const Color(0xFFA99C6B);
+
+  /// 矢车菊蓝 CORNFLOWER BLUE：希望 / 自由 / 理性。
+  const JellyPalette.cornflower()
+    : primary = const Color(0xFF4A83D6),
+      primaryLight = const Color(0xFF5A92E5),
+      primaryDark = const Color(0xFF3466B4),
+      accent = const Color(0xFFE8A44C),
+      success = const Color(0xFF5FAE8B),
+      warning = const Color(0xFFE8C15A),
+      error = const Color(0xFFD8564E),
+      blue = const Color(0xFF5A92E5),
+      backgroundLight = const Color(0xFFF1F5FC),
+      backgroundDark = const Color(0xFF10192B),
+      cardLight = Colors.white,
+      cardDark = const Color(0xFF1B2740),
+      navSelectedBg = const Color(0xFFD6E2F8),
+      navSelectedFg = const Color(0xFF3466B4),
+      navUnselected = const Color(0xFF172133),
+      textPrimaryLight = const Color(0xFF1B2C4A),
+      textPrimaryDark = const Color(0xFFE8EFFB),
+      textSecondary = const Color(0xFF8FA0BC);
+
+  /// 皇家紫 ROYAL PURPLE：神秘 / 感性 / 高贵。
+  const JellyPalette.royalPurple()
+    : primary = const Color(0xFF722169),
+      primaryLight = const Color(0xFF9A3D8F),
+      primaryDark = const Color(0xFF521348),
+      accent = const Color(0xFFD9A03A),
+      success = const Color(0xFF6FAF7C),
+      warning = const Color(0xFFE0B44A),
+      error = const Color(0xFFD64545),
+      blue = const Color(0xFF5A7DB5),
+      backgroundLight = const Color(0xFFF9F2F8),
+      backgroundDark = const Color(0xFF1C101B),
+      cardLight = Colors.white,
+      cardDark = const Color(0xFF2B1A29),
+      navSelectedBg = const Color(0xFFEBD6E8),
+      navSelectedFg = const Color(0xFF521348),
+      navUnselected = const Color(0xFF261822),
+      textPrimaryLight = const Color(0xFF38102F),
+      textPrimaryDark = const Color(0xFFF3E7F1),
+      textSecondary = const Color(0xFFA88CA5);
+
+  /// 翠微 JADE GREEN：生机 / 自然 / 平衡。
+  const JellyPalette.jade()
+    : primary = const Color(0xFF5E8034),
+      primaryLight = const Color(0xFF7FA352),
+      primaryDark = const Color(0xFF466126),
+      accent = const Color(0xFFD9A66A),
+      success = const Color(0xFF6FAF7C),
+      warning = const Color(0xFFE0B44A),
+      error = const Color(0xFFD64545),
+      blue = const Color(0xFF4E88B8),
+      backgroundLight = const Color(0xFFF4F8ED),
+      backgroundDark = const Color(0xFF131C0E),
+      cardLight = Colors.white,
+      cardDark = const Color(0xFF1F2C17),
+      navSelectedBg = const Color(0xFFDDE9C9),
+      navSelectedFg = const Color(0xFF466126),
+      navUnselected = const Color(0xFF1A2414),
+      textPrimaryLight = const Color(0xFF293A18),
+      textPrimaryDark = const Color(0xFFEDF3E4),
+      textSecondary = const Color(0xFF93A382);
+
+  /// 梅洛粉 MELO PINK：温柔 / 甜美 / 优雅。
+  const JellyPalette.melo()
+    : primary = const Color(0xFFD9507F),
+      primaryLight = const Color(0xFFEB6D98),
+      primaryDark = const Color(0xFFB23A63),
+      accent = const Color(0xFFD9A66A),
+      success = const Color(0xFF6FAF7C),
+      warning = const Color(0xFFE0B44A),
+      error = const Color(0xFFD64545),
+      blue = const Color(0xFF5A92E5),
+      backgroundLight = const Color(0xFFFDF1F4),
+      backgroundDark = const Color(0xFF201116),
+      cardLight = Colors.white,
+      cardDark = const Color(0xFF2E1A20),
+      navSelectedBg = const Color(0xFFF9D7E1),
+      navSelectedFg = const Color(0xFFB23A63),
+      navUnselected = const Color(0xFF2A161B),
+      textPrimaryLight = const Color(0xFF3D1420),
+      textPrimaryDark = const Color(0xFFF9E9EE),
+      textSecondary = const Color(0xFFAE8B97);
+
   final Color primary;
   final Color primaryLight;
   final Color primaryDark;
@@ -543,6 +722,23 @@ class JellyPalette {
         return const JellyPalette.christmas();
       case 'nationalDay':
         return const JellyPalette.nationalDay();
+      // ── 「公认最美的颜色」八色（2026-10-23）────────────────────
+      case 'azure':
+        return const JellyPalette.azure();
+      case 'warmSun':
+        return const JellyPalette.warmSun();
+      case 'bananaRed':
+        return const JellyPalette.bananaRed();
+      case 'lemon':
+        return const JellyPalette.lemon();
+      case 'cornflower':
+        return const JellyPalette.cornflower();
+      case 'royalPurple':
+        return const JellyPalette.royalPurple();
+      case 'jade':
+        return const JellyPalette.jade();
+      case 'melo':
+        return const JellyPalette.melo();
       default:
         return const JellyPalette.jelly();
     }
@@ -728,4 +924,16 @@ const List<ThemePresetInfo> themePresets = [
   ThemePresetInfo('newYear', '元旦新岁', JellyPalette.newYear()),
   ThemePresetInfo('christmas', '圣诞雪夜', JellyPalette.christmas()),
   ThemePresetInfo('nationalDay', '国庆华诞', JellyPalette.nationalDay()),
+  // ── 「公认最美的颜色」八色（2026-10-23，参考东丁设计色卡）──────────
+  // 名字后面带的三个词是色卡上标注的气质，方便用户凭感觉挑：
+  //   碧青·治愈 / 暖阳橙·温暖 / 蕉红·热情 / 柠檬黄·阳光
+  //   矢车菊蓝·自由 / 皇家紫·高贵 / 翠微·自然 / 梅洛粉·温柔
+  ThemePresetInfo('azure', '碧青 · 治愈', JellyPalette.azure()),
+  ThemePresetInfo('warmSun', '暖阳橙 · 温暖', JellyPalette.warmSun()),
+  ThemePresetInfo('bananaRed', '蕉红 · 热情', JellyPalette.bananaRed()),
+  ThemePresetInfo('lemon', '柠檬黄 · 阳光', JellyPalette.lemon()),
+  ThemePresetInfo('cornflower', '矢车菊蓝 · 自由', JellyPalette.cornflower()),
+  ThemePresetInfo('royalPurple', '皇家紫 · 高贵', JellyPalette.royalPurple()),
+  ThemePresetInfo('jade', '翠微 · 自然', JellyPalette.jade()),
+  ThemePresetInfo('melo', '梅洛粉 · 温柔', JellyPalette.melo()),
 ];

@@ -123,9 +123,28 @@ class AppTheme {
   /// ⚠️ 用户 2026-10-15：「新加的功能白天看着可以，**晚上完全看不清字**」：
   ///   [accentColor] 取调色板 `primary`，而默认「水墨书香」的 primary 是
   ///   **#3A3A3A 墨灰** ⇒ 压在暗底（#1C1C1E / 卡片 #2A2A2C）上几乎不可见。
-  ///   ⇒ 暗色模式改用 `textPrimaryDark`（浅色），浅色模式保持调色板 primary。
-  static Color get accentOnSurface =>
-      _light ? _palette.primary : _palette.textPrimaryDark;
+  ///
+  /// ⚠️ 2026-10-23：新增「碧青 / 蕉红 / 皇家紫…」这些**鲜艳**主题后，
+  ///   不能再"暗色一律用近白色" —— 那等于把这些主题的颜色全抹成灰白。
+  ///   改成**按对比度决定**：
+  ///     · 与当前底色的对比度 ≥ 3 → 直接用主题色（鲜艳色本来就够亮）
+  ///     · 不够（墨灰这类）→ 暗色向白提亮、浅色向黑压暗
+  static Color get accentOnSurface {
+    final p = _palette.primary;
+    if (_contrastRatio(p, backgroundPrimary) >= 3.0) return p;
+    return _light
+        ? Color.lerp(p, Colors.black, 0.45)!
+        : Color.lerp(p, Colors.white, 0.55)!;
+  }
+
+  /// WCAG 对比度（1~21），用于判断某个颜色压在底色上是否看得清
+  static double _contrastRatio(Color a, Color b) {
+    final la = a.computeLuminance();
+    final lb = b.computeLuminance();
+    final hi = la > lb ? la : lb;
+    final lo = la > lb ? lb : la;
+    return (hi + 0.05) / (lo + 0.05);
+  }
 
   /// 「在当前明暗下都看得清」的强调色**淡底**（chip / 徽标 / 选中块底用）
   static Color get accentSurface => _light
