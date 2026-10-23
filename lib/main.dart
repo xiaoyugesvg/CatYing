@@ -284,6 +284,10 @@ void main() async {
   // 因为要读它当前的阅读主题 id 来解析"跟随阅读"。
   await ModuleThemeStore.instance.init();
   ModuleThemeStore.instance.syncReadingPreset(SettingsService().themePreset);
+  // 自定义主题（custom_*）只有 SettingsService 认识：注入解析器，
+  // 否则「影视/音乐跟随阅读」会把自定义主题解析成默认的「魅力紫」。
+  ModuleThemeStore.instance.customPaletteResolver =
+      SettingsService().customPaletteOrNull;
   // 音乐模块的强调色由统一主题驱动：注册桥接（写在音乐侧，避免反向依赖）
   MusicThemeBridge.register((primary) {
     MusicTheme.setCustomAccent(primary);

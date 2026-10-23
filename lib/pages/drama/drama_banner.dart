@@ -2,10 +2,10 @@ import 'dart:async';
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:get/get.dart';
 
 import '../../common/theme.dart';
 import '../../models/movie.dart';
+import 'drama_entry.dart';
 
 /// 短剧页顶部的循环幻灯片。
 ///
@@ -128,7 +128,7 @@ class _DramaBannerState extends State<DramaBanner> {
       padding: const EdgeInsets.symmetric(horizontal: 5),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: () => Get.toNamed('/detail', arguments: v),
+        onTap: () => DramaEntry.openDetail(v),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(16),
           child: Stack(

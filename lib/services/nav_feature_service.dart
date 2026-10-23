@@ -89,14 +89,23 @@ enum NavFeature {
         NavFeature.music => 'assets/icons/music.png',
         NavFeature.books => 'assets/icons/books.png',
         NavFeature.live => 'assets/icons/live.png',
+        // 用户指定的两张图（2026-10-23）：
+        //   REX = 「C + 星」白色蒙版（跟随前景色）
+        //   房间 = 紫/粉对话气泡（保留原色，不透明白描边）
+        NavFeature.rex => 'assets/icons/rex.png',
+        NavFeature.room => 'assets/icons/room.png',
         _ => null,
       };
 
   /// 图标资源是否用前景色着色（[iconAsset] 对应的图）。
   ///
   /// · 首页图标是**彩色徽标**（七彩花瓣）：着色会把颜色全抹掉 ⇒ 原样显示；
+  /// · 房间图标是彩色气泡插画 ⇒ 同样原样显示（着色会变成灰块）；
   /// · 其余几张是白色蒙版，必须着色才能与 Material 图标颜色一致。
-  bool get iconAssetTinted => iconAsset != null && this != NavFeature.home;
+  bool get iconAssetTinted =>
+      iconAsset != null &&
+      this != NavFeature.home &&
+      this != NavFeature.room;
 
   /// 选中图标
   IconData get activeIcon => switch (this) {

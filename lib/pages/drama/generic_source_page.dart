@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../common/theme.dart';
@@ -230,6 +233,119 @@ class _GenericSourcePageState extends State<GenericSourcePage> {
     }
   }
 
+  // ── 本地源（离线 JSON）────────────────────────────────────────
+
+  /// 添加本地源：可以从文件选，也可以直接粘贴 JSON。
+  ///
+  /// 与上面的"在线源"不同，这份内容会存进 App 私有目录，
+  /// 之后分类/列表/详情/搜索全部读本地文件，断网也能用。
+  Future<void> _addLocal() async {
+    final nameC = TextEditingController();
+    final jsonC = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('添加本地源'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: nameC,
+                  decoration: const InputDecoration(
+                    labelText: '名称（可留空）',
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: jsonC,
+                  maxLines: 6,
+                  minLines: 4,
+                  decoration: const InputDecoration(
+                    labelText: 'MacCMS JSON（含 class / list）',
+                    alignLabelWithHint: true,
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                TextButton.icon(
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                  ),
+                  onPressed: () async {
+                    try {
+                      final files = await FilePicker.pickFiles(
+                        type: FileType.custom,
+                        allowedExtensions: const ['json', 'txt'],
+                      );
+                      if (files.isEmpty) return;
+                      final f = files.first;
+                      final text = utf8.decode(
+                        await f.readAsBytes(),
+                        allowMalformed: true,
+                      );
+                      jsonC.text = text;
+                      if (nameC.text.trim().isEmpty) {
+                        final base = (f.path ?? '')
+                            .split(RegExp(r'[\\/]'))
+                            .last
+                            .replaceAll(
+                              RegExp(r'\.(json|txt)$', caseSensitive: false),
+                              '',
+                            );
+                        nameC.text = base;
+                      }
+                    } catch (e) {
+                      AppToast.show('读取文件失败', '$e');
+                    }
+                  },
+                  icon: const Icon(Icons.folder_open_rounded, size: 19),
+                  label: const Text('从文件选择'),
+                ),
+                Text(
+                  '离线可用：导入后分类 / 列表 / 详情 / 搜索都直接读这份文件。',
+                  style: TextStyle(
+                    fontSize: AppTheme.fontCaption,
+                    height: 1.4,
+                    color: AppTheme.textTertiary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('添加'),
+          ),
+        ],
+      ),
+    );
+    final name = nameC.text;
+    final json = jsonC.text;
+    nameC.dispose();
+    jsonC.dispose();
+    if (ok != true || !mounted) return;
+    setState(() => _busy = true);
+    final r = await GenericSourceService.instance.addLocalJson(
+      name: name,
+      jsonText: json,
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    AppToast.show(r.message, '', isError: !r.ok);
+    if (r.ok) await _load();
+  }
+
   Future<void> _remove(Map<String, dynamic> item) async {
     final name = (item['name'] ?? '').toString();
     final yes = await showDialog<bool>(
@@ -271,6 +387,11 @@ class _GenericSourcePageState extends State<GenericSourcePage> {
                 fontWeight: FontWeight.w600,
                 color: _fg)),
         actions: [
+          IconButton(
+            tooltip: '添加本地源（离线 JSON）',
+            icon: Icon(Icons.folder_open_rounded, color: _fg),
+            onPressed: _busy ? null : _addLocal,
+          ),
           IconButton(
             tooltip: '批量导入',
             icon: Icon(Icons.playlist_add_rounded, color: _fg),
@@ -325,7 +446,7 @@ class _GenericSourcePageState extends State<GenericSourcePage> {
           children: [
             Row(
               children: [
-                Icon(Icons.dns_rounded, size: 17, color: _accent),
+                Icon(Icons.dns_rounded, size: 18, color: _accent),
                 const SizedBox(width: 7),
                 Text('MacCMS / TVBox JSON',
                     style: TextStyle(
@@ -337,6 +458,8 @@ class _GenericSourcePageState extends State<GenericSourcePage> {
             const SizedBox(height: 6),
             Text(
               '填站点域名会自动尝试 /api.php/provide/vod/。\n'
+              '右上角「文件夹」可导入本地源：粘贴或选择 MacCMS JSON，\n'
+              '离线也能浏览、搜索。\n'
               '添加后与订阅线路同权：首页分类、搜索、短剧聚合都能用。',
               style: TextStyle(
                   color: _sub, fontSize: AppTheme.fontCaption, height: 1.6),

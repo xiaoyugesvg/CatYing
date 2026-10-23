@@ -121,6 +121,9 @@ class _RexHomePageState extends State<RexHomePage> {
       _items.clear();
       _error = null;
       _loadingMore = false;
+      // ⚠️ 必须一起复位：否则上一个模块的请求在途时切到"没有分类函数"的模块，
+      //    _fetch 会在早退分支直接 return，_loading 永远停在 true → 永久转圈。
+      _loading = false;
     });
     await _fetch(seq: _seq);
   }
@@ -131,7 +134,17 @@ class _RexHomePageState extends State<RexHomePage> {
     // 翻页要防重入；重新加载（more=false）允许打断上一次请求，
     // 旧请求靠 _seq 丢弃结果 —— 否则快速切分类会卡在"永远加载中"
     if (more && (_loading || _loadingMore)) return;
-    if (_keyword.isEmpty && _fn == null) return;
+    if (_keyword.isEmpty && _fn == null) {
+      // 无可用的列表函数（仅有 search / loadHome 的模块）：直接退出，
+      // 但不能把 _loading 留在 true（那会让整页永远转圈）
+      if (_loading || _loadingMore) {
+        setState(() {
+          _loading = false;
+          _loadingMore = false;
+        });
+      }
+      return;
+    }
     final token = seq ?? _seq;
     setState(() {
       if (more) {

@@ -127,7 +127,17 @@ class SourceBean {
   }
 
   /// api 字段是否为有效 HTTP URL
-  bool get isHttpApi => api.startsWith('http://') || api.startsWith('https://');
+  /// api 是否可直接请求。
+  ///
+  /// 除 http(s) 外还放行 `file://`：那是「本地源」—— 用户导入一份
+  /// MacCMS 格式的 JSON（含 class/list），离线也能浏览/搜索。
+  bool get isHttpApi =>
+      api.startsWith('http://') ||
+      api.startsWith('https://') ||
+      api.startsWith('file://');
+
+  /// 本地 JSON 源（离线）
+  bool get isLocalSource => api.startsWith('file://');
 
   factory SourceBean.fromJson(Map<String, dynamic> json) {
     return SourceBean(

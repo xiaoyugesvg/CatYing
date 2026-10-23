@@ -41,7 +41,13 @@ enum FloatingNavStyle {
   aurora('aurora', '炫彩'),
 
   /// 霓虹：深色底 + 发光描边
-  neon('neon', '霓虹');
+  neon('neon', '霓虹'),
+
+  /// 描边：透明底 + 主题色细描边（最轻，几乎不遮挡内容）
+  outline('outline', '描边'),
+
+  /// 果冻：主题色半透明底 + 白色高光，选中项是实心主题色
+  jelly('jelly', '果冻');
 
   const FloatingNavStyle(this.id, this.label);
 
@@ -171,12 +177,34 @@ class FloatingNavSpec {
         return Colors.white.withValues(alpha: selected ? 1 : 0.76);
       case FloatingNavStyle.neon:
         return selected ? Colors.white : Colors.white.withValues(alpha: 0.58);
+      case FloatingNavStyle.jelly:
+        // 选中项是实心主题色 → 必须白字；未选中用可读的主题色
+        return selected
+            ? Colors.white
+            : _legibleAccent(isDark, palette).withValues(alpha: 0.72);
+      case FloatingNavStyle.outline:
+        return selected
+            ? _legibleAccent(isDark, palette)
+            : _legibleAccent(isDark, palette).withValues(alpha: 0.62);
       case FloatingNavStyle.liquid:
       case FloatingNavStyle.ink:
         return selected
             ? selectedColor(isDark, palette)
             : unselectedColor(isDark, palette);
     }
+  }
+
+  /// 压在**当前底色**上仍看得清的主题色。
+  ///
+  /// 描边/果冻两种风格都把主题色本身当前景：墨灰 (#3A3A3A) 压深色底
+  /// 会糊掉、亮黄压浅底也会糊 ⇒ 亮度不够就往白/黑偏一档。
+  static Color _legibleAccent(bool isDark, JellyPalette palette) {
+    final p = palette.primary;
+    final l = p.computeLuminance();
+    // 深色底需要 0.35 以上的亮度；浅色底需要 0.55 以下
+    if (isDark && l < 0.35) return Color.lerp(p, Colors.white, 0.55)!;
+    if (!isDark && l > 0.55) return Color.lerp(p, Colors.black, 0.40)!;
+    return p;
   }
 
   /// 炫彩风格的固定渐变色（不跟主题走：主题默认是墨灰，混出来不"炫"）
@@ -200,6 +228,13 @@ class FloatingNavSpec {
         return Colors.white.withValues(alpha: 0.26);
       case FloatingNavStyle.neon:
         return neonColor.withValues(alpha: 0.30);
+      case FloatingNavStyle.jelly:
+        // 果冻：选中项直接是实心主题色块
+        return _legibleAccent(isDark, palette);
+      case FloatingNavStyle.outline:
+        // 描边：选中项用主题色的淡底，不抢描边的视觉
+        return _legibleAccent(isDark, palette)
+            .withValues(alpha: isDark ? 0.20 : 0.12);
       case FloatingNavStyle.liquid:
         return Colors.white.withValues(alpha: isDark ? 0.20 : 0.62);
       case FloatingNavStyle.ink:

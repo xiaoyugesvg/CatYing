@@ -30,6 +30,7 @@ import '../../widgets/ks_player.dart';
 import '../../widgets/mpv_app_player.dart';
 import '../../widgets/video_player.dart';
 import '../../widgets/video_player_pip.dart';
+import '../drama/drama_entry.dart';
 import '../../widgets/window_fullscreen.dart';
 import '../play/webview_player_page.dart';
 import '../search/controller.dart' show TvSearchController;
@@ -80,6 +81,9 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   bool _isDescriptionExpanded = false;
+
+  /// 本次是从「短剧」进来的（播放在首帧后自动切竖屏刷剧模式）
+  final bool _fromDrama = DramaEntry.consumePending();
 
   /// 已为哪个关键词跑过快搜：切换 tab 不重复请求，除非用户点了别的关键词
   String? _quickSearchDoneFor;
@@ -189,6 +193,15 @@ class _DetailPageState extends State<DetailPage> {
     LiveService.pauseLivePlayer?.call();
     _loadPrefs();
     _loadDetailIfNeeded();
+    // 从短剧进来的：首帧就切全屏 —— 否则会先看到详情页布局一两秒，
+    // 等播放器拿到地址后才跳成竖屏，观感是"闪一下"。
+    if (_fromDrama) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_controller.isFullScreen.value) {
+          _onFullScreenChanged(true);
+        }
+      });
+    }
     // 监听 PiP 状态变化，确保退出 PiP 时退出全屏（互斥）
     VideoPlayerPip.instance.activeNotifier.addListener(_onPipChanged);
     // 监听 WindowFullScreen 状态变化：作为冗余同步通道，
@@ -1084,6 +1097,8 @@ class _DetailPageState extends State<DetailPage> {
       canPlayPrevious: _controller.selectedEpisodeIndex.value > 0,
       isPipMode: isPip,
       showAudioModeButton: true,
+      // 从短剧点进来的：直接进竖屏刷剧模式（上下滑切集）
+      initialDramaMode: _fromDrama,
       // 播放设置弹窗限高到播放器高度，避免盖住下方 tab 栏
       sheetMaxHeight: _playerSheetMaxHeight(context),
       skipIntroSeconds: _controller.skipIntroSeconds.value,

@@ -1,7 +1,9 @@
 import 'package:cached_network_image_ce/cached_network_image.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../common/theme.dart';
+import '../reading/pages/book_source_qr_scan_page.dart';
 import '../widgets/app_toast.dart';
 import 'rex_models.dart';
 import 'rex_service.dart';
@@ -45,8 +47,8 @@ class _RexMarketPageState extends State<RexMarketPage> {
 
   String _keyword = '';
 
-  /// 视图：true = 网格两列，false = 列表
-  bool _grid = false;
+  /// 视图：true = 卡片（两列，默认），false = 紧凑列表
+  bool _grid = true;
   _SortBy _sortBy = _SortBy.origin;
 
   @override
@@ -127,16 +129,17 @@ class _RexMarketPageState extends State<RexMarketPage> {
     setState(() {
       _loading = true;
       _error = null;
-      _collection = null;
-      _selected.clear();
-      _keyword = '';
-      _searchCtrl.clear();
+      // ⚠️ 不在请求前清空 _collection / _selected：网络抖动或地址写错时，
+      //    原来会把已经拉到、正在勾选的清单一起抹掉，用户得从头再拉一次。
     });
     try {
       final col = await _service.fetchCollection(input);
       if (!mounted) return;
       setState(() {
         _collection = col;
+        _selected.clear();
+        _keyword = '';
+        _searchCtrl.clear();
         _urlCtrl.text = col.url;
         // 默认只勾「还没导入过」的，避免重复添加
         for (final it in col.items) {
@@ -301,9 +304,38 @@ class _RexMarketPageState extends State<RexMarketPage> {
                 color: _fg)),
         actions: [
           IconButton(
-            tooltip: '只导入单个模块',
-            icon: Icon(Icons.link_rounded, color: _fg),
-            onPressed: _importing ? null : _singleImport,
+            tooltip: '扫码导入',
+            icon: Icon(Icons.qr_code_scanner_rounded, color: _fg),
+            onPressed: _importing ? null : _scanImport,
+          ),
+          PopupMenuButton<String>(
+            tooltip: '更多导入方式',
+            padding: EdgeInsets.zero,
+            icon: Icon(Icons.more_horiz_rounded, color: _fg),
+            onSelected: (v) {
+              if (v == 'link') _singleImport();
+              if (v == 'file') _importFromFile();
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: 'link',
+                child: ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.link_rounded, size: 19),
+                  title: Text('单个模块地址'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'file',
+                child: ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.folder_open_rounded, size: 19),
+                  title: Text('从本地 .js 文件导入'),
+                ),
+              ),
+            ],
           ),
           const SizedBox(width: 4),
         ],
@@ -354,7 +386,7 @@ class _RexMarketPageState extends State<RexMarketPage> {
             Row(
               children: [
                 Icon(Icons.storefront_rounded,
-                    size: 17, color: _accent),
+                    size: 18, color: _accent),
                 const SizedBox(width: 7),
                 Text('订阅集合地址',
                     style: TextStyle(
@@ -530,6 +562,9 @@ class _RexMarketPageState extends State<RexMarketPage> {
     final shown = _shown;
     final allSelected = shown.isNotEmpty &&
         shown.every((e) => _selected.contains(e.url));
+    // 工具行统一 36 高：搜索框是固定高度，两枚按钮必须显式收到底，
+    // 否则 IconButton 默认 48 会把整行撑高、和搜索框上下错位。
+    const btn = BoxConstraints(minWidth: 36, minHeight: 36);
     return Row(
       children: [
         Expanded(
@@ -542,7 +577,9 @@ class _RexMarketPageState extends State<RexMarketPage> {
                 hintText: '搜索模块名 / 作者',
                 hintStyle:
                     TextStyle(color: _sub, fontSize: AppTheme.fontSubhead),
-                prefixIcon: Icon(Icons.search_rounded, size: 17, color: _sub),
+                prefixIcon:
+                    Icon(Icons.search_rounded, size: 18, color: _sub),
+                prefixIconConstraints: btn,
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(vertical: 9),
                 filled: true,
@@ -561,7 +598,9 @@ class _RexMarketPageState extends State<RexMarketPage> {
         PopupMenuButton<_SortBy>(
           tooltip: '排序',
           padding: EdgeInsets.zero,
-          icon: Icon(Icons.sort_rounded, size: 19, color: _fg),
+          iconSize: 20,
+          constraints: btn,
+          icon: Icon(Icons.sort_rounded, size: 20, color: _fg),
           initialValue: _sortBy,
           onSelected: (v) => setState(() => _sortBy = v),
           itemBuilder: (_) => [
@@ -574,10 +613,11 @@ class _RexMarketPageState extends State<RexMarketPage> {
         // 视图切换
         IconButton(
           tooltip: _grid ? '切换为列表' : '切换为网格',
-          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          constraints: btn,
           icon: Icon(
             _grid ? Icons.view_list_rounded : Icons.grid_view_rounded,
-            size: 19,
+            size: 20,
             color: _fg,
           ),
           onPressed: () => setState(() => _grid = !_grid),
@@ -645,12 +685,13 @@ class _RexMarketPageState extends State<RexMarketPage> {
         GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          padding: const EdgeInsets.only(top: 8),
+          padding: const EdgeInsets.only(top: 10),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 2,
-            mainAxisSpacing: 8,
-            crossAxisSpacing: 8,
-            childAspectRatio: 2.6,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            // 1.22 ≈ 175×143：图标行 + 两行标题 + 作者 + 底部标签刚好放下
+            childAspectRatio: 1.22,
           ),
           itemCount: shown.length,
           itemBuilder: (_, i) => _gridCell(shown[i]),
@@ -660,10 +701,16 @@ class _RexMarketPageState extends State<RexMarketPage> {
     return [for (final it in shown) _itemTile(it)];
   }
 
-  /// 网格视图下的紧凑卡片：勾选框 + 标题 + 作者
+  /// 卡片视图（两列）：图标 + 标题 + 作者 + 底部标签，选中时整卡描边。
   Widget _gridCell(RexCollectionItem it) {
     final on = _selected.contains(it.url);
     final added = _service.hasUrl(it.url);
+    // 版本号可能很长（1.0.0-beta+20260101），截断避免撑破卡片
+    final ver = it.version.isEmpty
+        ? ''
+        : (it.version.length > 9
+            ? 'v${it.version.substring(0, 9)}…'
+            : 'v${it.version}');
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: _importing
@@ -675,52 +722,67 @@ class _RexMarketPageState extends State<RexMarketPage> {
                   _selected.add(it.url);
                 }
               }),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        padding: const EdgeInsets.fromLTRB(11, 11, 11, 10),
         decoration: BoxDecoration(
           color: on
-              ? _accent.withValues(alpha: _isDark ? 0.14 : 0.08)
+              ? _accent.withValues(alpha: _isDark ? 0.14 : 0.07)
               : _tile,
-          borderRadius: BorderRadius.circular(AppTheme.radiusLG),
+          borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
           border: Border.all(
-              color: on
-                  ? _accent.withValues(alpha: 0.42)
-                  : Colors.transparent,
-              width: 0.9),
+            color: on ? _accent.withValues(alpha: 0.45) : _line,
+            width: on ? 1.2 : 0.8,
+          ),
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _CheckBox(on: on),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    it.title.isEmpty ? '(未命名)' : it.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        color: _fg,
-                        fontSize: AppTheme.fontFootnote,
-                        fontWeight: FontWeight.w600),
+            Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: _accent.withValues(alpha: on ? 0.22 : 0.12),
+                    borderRadius: BorderRadius.circular(10),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    [
-                      if (added) '已添加',
-                      if (it.version.isNotEmpty) 'v${it.version}',
-                      if (it.author.isNotEmpty) it.author,
-                    ].join(' · '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        color: added ? _accent : _sub,
-                        fontSize: AppTheme.fontCaption),
-                  ),
-                ],
+                  child: Icon(Icons.extension_rounded,
+                      size: 18, color: _accent),
+                ),
+                const Spacer(),
+                _CheckBox(on: on),
+              ],
+            ),
+            const SizedBox(height: 9),
+            Text(
+              it.title.isEmpty ? '(未命名)' : it.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: _fg,
+                fontSize: AppTheme.fontSubhead,
+                fontWeight: FontWeight.w600,
+                height: 1.25,
               ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              it.author.isNotEmpty ? it.author : (it.description),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: _sub, fontSize: AppTheme.fontCaption),
+            ),
+            const Spacer(),
+            Row(
+              children: [
+                if (ver.isNotEmpty) _pill(ver),
+                if (added) ...[
+                  if (ver.isNotEmpty) const SizedBox(width: 4),
+                  _pill('已添加', accent: true),
+                ],
+              ],
             ),
           ],
         ),
@@ -819,7 +881,7 @@ class _RexMarketPageState extends State<RexMarketPage> {
           text,
           style: TextStyle(
             color: accent ? _accent : _sub,
-            fontSize: 9.5,
+            fontSize: 10,
             fontWeight: accent ? FontWeight.w600 : FontWeight.w400,
           ),
         ),
@@ -922,6 +984,70 @@ class _RexMarketPageState extends State<RexMarketPage> {
     );
   }
 
+  /// 扫码导入：复用书源仓库的扫码页，扫到的地址直接拉取。
+  Future<void> _scanImport() async {
+    final raw = await Navigator.of(context).push<String>(MaterialPageRoute(
+      settings: const RouteSettings(name: 'rex:scan'),
+      builder: (_) => const BookSourceQrScanPage(),
+    ));
+    final text = (raw ?? '').trim();
+    if (!mounted || text.isEmpty) return;
+    _urlCtrl.text = text;
+    await _fetch(text);
+  }
+
+  /// 从本地 `.js` 文件导入（可多选）。
+  ///
+  /// 源码复制进 App 私有目录、以 `local://文件名` 作为模块地址，
+  /// 由 [RexService] 在调用时把源码送给 Node（那边没有 fs）。
+  Future<void> _importFromFile() async {
+    if (_importing) return;
+    FocusScope.of(context).unfocus();
+    List<PlatformFile> files;
+    try {
+      // ⚠️ file_picker 13.x 没有 allowMultiple 参数（返回值本身就是
+      //    List<PlatformFile>），多选由系统选择器决定 —— 这里按列表处理即可。
+      files = await FilePicker.pickFiles(type: FileType.any);
+    } catch (e) {
+      if (mounted) AppToast.show('打不开文件选择器', '$e');
+      return;
+    }
+    if (!mounted || files.isEmpty) return;
+    final paths = <String>[];
+    for (final f in files) {
+      final p = f.path;
+      if (p == null) continue;
+      // 只收 js/mjs/txt：选错了（比如图片）直接放过，别让用户等一堆报错
+      if (!RegExp(r'\.(js|mjs|txt)$', caseSensitive: false).hasMatch(p)) {
+        continue;
+      }
+      paths.add(p);
+    }
+    if (paths.isEmpty) {
+      AppToast.show('请选择 .js 模块文件', '');
+      return;
+    }
+    setState(() => _importing = true);
+    try {
+      final res = await _service.importLocalFiles(paths);
+      if (!mounted) return;
+      if (res.errors.isEmpty) {
+        AppToast.show('已导入 ${res.imported.length} 个本地模块', '');
+      } else {
+        AppToast.show(
+          '成功 ${res.imported.length} 个，失败 ${res.errors.length} 个',
+          res.errors.first,
+        );
+        _showFailures(res.errors);
+      }
+      setState(() {});
+    } catch (e) {
+      if (mounted) AppToast.show('导入失败', '$e');
+    } finally {
+      if (mounted) setState(() => _importing = false);
+    }
+  }
+
   Future<void> _singleImport() async {
     final ctrl = TextEditingController();
     final ok = await showDialog<bool>(
@@ -963,6 +1089,8 @@ class _RexMarketPageState extends State<RexMarketPage> {
     final input = ctrl.text.trim();
     ctrl.dispose();
     if (ok != true || input.isEmpty || !mounted) return;
+    // 与批量导入共用 _importing：否则两条导入链并行，底部进度数字会被互相覆盖
+    setState(() => _importing = true);
     try {
       final col = await _service.fetchCollection(input);
       final res = await _service.importSelected(col.items);
@@ -975,6 +1103,8 @@ class _RexMarketPageState extends State<RexMarketPage> {
       }
     } catch (e) {
       if (mounted) AppToast.show('$e', '');
+    } finally {
+      if (mounted) setState(() => _importing = false);
     }
   }
 }

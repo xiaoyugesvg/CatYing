@@ -89,9 +89,19 @@ class ModuleThemeStore {
   bool isFollowingReading(String module) =>
       rawPreset(module) == followReading;
 
+  /// 自定义主题 id → 调色板（由 main.dart 注入）。
+  ///
+  /// [JellyPalette.fromPreset] 只认识内置预设，未知 id 一律回退「魅力紫」——
+  /// 而自定义主题的 id 是 `custom_xxx`，于是「阅读用自定义主题 + 影视跟随阅读」
+  /// 时影视会莫名变成紫色。这里留一个钩子让上层注入真实解析。
+  /// 返回 null 表示"不是自定义主题"，继续走内置预设。
+  JellyPalette? Function(String id)? customPaletteResolver;
+
   /// 该模块当前生效的调色板
-  JellyPalette paletteFor(String module) =>
-      JellyPalette.fromPreset(effectivePreset(module));
+  JellyPalette paletteFor(String module) {
+    final id = effectivePreset(module);
+    return customPaletteResolver?.call(id) ?? JellyPalette.fromPreset(id);
+  }
 
   Future<void> setPreset(String module, String presetId) async {
     if (_presets[module] == presetId) return;

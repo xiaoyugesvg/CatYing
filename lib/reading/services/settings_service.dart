@@ -636,6 +636,18 @@ class SettingsService extends ChangeNotifier {
     }
   }
 
+  /// 外部解析用：若 [id] 是已保存的自定义主题，返回它的调色板；否则 null。
+  ///
+  /// `JellyPalette.fromPreset` 不认识 `custom_*`，会回退成「魅力紫」——
+  /// 影视/音乐「跟随阅读」时会因此变紫，所以由 main.dart 把它注入
+  /// [ModuleThemeStore.customPaletteResolver]。
+  JellyPalette? customPaletteOrNull(String id) {
+    for (final t in _customThemes) {
+      if (t.id == id) return t.palette;
+    }
+    return null;
+  }
+
   /// 按 id 解析调色板：先查自定义，再回退内置 fromPreset。
   JellyPalette _resolvePalette(String id) {
     for (final t in _customThemes) {
@@ -1634,16 +1646,14 @@ class SettingsService extends ChangeNotifier {
   }
 
   /// id 是否为已知主题（内置预设或已存自定义）。
+  ///
+  /// 🔴 2026-10-23 修：原来手写 7 个内置 id（ink/jelly/pink/green/ocean/sunset/sky），
+  /// 后来新增的 forest、lavender、coffee、sand、四季主题、以及「公认最美的颜色」
+  /// 八色（azure/warmSun/…/melo）全都不在白名单里 —— 点选后会被 [setThemePreset]
+  /// 改写成 `ink`，用户看到的就是「选了半天没反应」。
+  /// 现在改为直接查 [themePresets] 这一唯一来源，以后加主题不用再改这里。
   bool _isKnownPreset(String id) {
-    if (id == 'ink' ||
-        id == 'jelly' ||
-        id == 'pink' ||
-        id == 'green' ||
-        id == 'ocean' ||
-        id == 'sunset' ||
-        id == 'sky') {
-      return true;
-    }
+    if (themePresets.any((p) => p.id == id)) return true;
     return _customThemes.any((t) => t.id == id);
   }
 
@@ -1736,15 +1746,20 @@ class SettingsService extends ChangeNotifier {
       _log('删除自定义主题失败: $e');
     }
     if (wasSelected) {
-      // 回退 jelly：直接改字段+应用，再走持久化（避免 setThemePreset 的相同 id 短路）
+      // 回退水墨书香：直接改字段+应用，再走持久化（避免 setThemePreset 的相同 id 短路）
+      //
+      // 🔴 原来写的是 `JellyTheme.apply(const JellyPalette.jelly())` ——
+      // id 记成 ink、调色板却是「魅力紫」，于是列表显示选中水墨书香、
+      // 实际全 App 是紫的（重启才恢复）。而且没同步影视/音乐。
       _themePreset = 'ink';
-      JellyTheme.apply(const JellyPalette.jelly());
+      JellyTheme.apply(const JellyPalette.ink());
       try {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString(_kThemePresetKey, 'ink');
       } catch (e) {
         _log('回退主题预设失败: $e');
       }
+      syncReadingPresetToModules('ink');
     }
     notifyListeners();
   }

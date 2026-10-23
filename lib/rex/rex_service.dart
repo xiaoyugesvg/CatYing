@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/nodejs_manager.dart';
@@ -19,6 +21,16 @@ class RexService {
   static final RexService instance = RexService._();
 
   static const _key = 'rex.modules.v1';
+
+  /// 本地模块的伪协议。
+  ///
+  /// REX 模块本质就是一段 JS，没必要非放到网上。用户从本地选一个 `.js`
+  /// 文件时：源码复制到 App 私有目录、`url` 记成 `local://<文件名>`，
+  /// 调用 `/rex/api` 时由 [_call] 把源码作为 `code` 一起送过去 ——
+  /// Node 侧不用碰文件系统（它的沙箱里没有 `fs`）。
+  static const localScheme = 'local://';
+
+  static bool isLocal(String url) => url.startsWith(localScheme);
 
   final _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 20),
@@ -115,11 +127,30 @@ class RexService {
     await _persist();
   }
 
+  /// 两个模块互换位置。
+  ///
+  /// 管理页按「已启用 / 已停用」分组展示，[move] 是在**整表**里交换，
+  /// 会越过组外的模块 —— 用户点一下上移，卡片却原地不动（中间夹着一个
+  /// 看不见的已停用模块）。分组内调整顺序要用这个按 url 精确交换。
+  Future<void> swap(String urlA, String urlB) async {
+    final i = modules.indexWhere((e) => e.url == urlA);
+    final j = modules.indexWhere((e) => e.url == urlB);
+    if (i < 0 || j < 0 || i == j) return;
+    final t = modules[i];
+    modules[i] = modules[j];
+    modules[j] = t;
+    await _persist();
+  }
+
   /// 改模块地址：重新拉元数据后替换（保留启用状态与顺序）
   Future<void> updateUrl(String oldUrl, String newUrl) async {
+    if (modules.indexWhere((e) => e.url == oldUrl) < 0) return;
+    // 中文路径必须编码，否则 Dio 抛 Invalid character in path（同 fetchCollection）
+    final fresh = await loadModule(normalizeUrl(newUrl.trim()));
+    // ⚠️ await 期间列表可能被「移除模块」改动过：必须按 url 重新定位，
+    //    否则会覆盖到别的模块，索引越界时直接 RangeError。
     final i = modules.indexWhere((e) => e.url == oldUrl);
     if (i < 0) return;
-    final fresh = await loadModule(newUrl.trim());
     modules[i] = fresh.copyWith(enabled: modules[i].enabled);
     await _persist();
   }
@@ -127,11 +158,14 @@ class RexService {
   /// 刷新全部模块的元数据；返回失败明细
   Future<List<String>> refreshAll() async {
     final errors = <String>[];
-    for (var i = 0; i < modules.length; i++) {
-      final m = modules[i];
+    // 快照当前列表再逐个刷新：循环体内 await 期间 modules 可能被移除，
+    // 用下标写回会把 A 的元数据写进 B（旧实现的问题）。
+    for (final m in List<RexModule>.from(modules)) {
       try {
         final fresh = await loadModule(m.url);
-        modules[i] = fresh.copyWith(enabled: m.enabled);
+        final i = modules.indexWhere((e) => e.url == m.url);
+        if (i < 0) continue; // 刷新期间被移除
+        modules[i] = fresh.copyWith(enabled: modules[i].enabled);
       } catch (e) {
         errors.add('${m.title}：$e');
       }
@@ -279,7 +313,9 @@ class RexService {
     if (items.isEmpty) return const RexImportResult();
     final total = items.length;
     final width = concurrency.clamp(1, 6);
-    final loaded = <RexModule>[];
+    // 按下标回填而不是 add：4 路并发完成顺序是随机的，
+    // 直接 add 会让订阅列表顺序与集合文件不一致（每次导入还不一样）。
+    final slots = List<RexModule?>.filled(total, null);
     final errors = <String>[];
     var next = 0;
     var done = 0;
@@ -292,7 +328,7 @@ class RexService {
         try {
           final m = await loadModule(it.url, fallbackTitle: it.title)
               .timeout(const Duration(seconds: 25));
-          loaded.add(m);
+          slots[i] = m;
         } catch (e) {
           errors.add('${it.title.isEmpty ? it.url : it.title}：${_short(e)}');
         }
@@ -304,6 +340,7 @@ class RexService {
     await Future.wait(
       List.generate(width > total ? total : width, (_) => worker()),
     );
+    final loaded = slots.whereType<RexModule>().toList();
     if (loaded.isNotEmpty) await addAll(loaded);
     return RexImportResult(imported: loaded, errors: errors);
   }
@@ -363,6 +400,76 @@ class RexService {
       modules[i] = fresh;
       await _persist();
     }
+  }
+
+  // ── 本地模块（从文件导入）─────────────────────────────────────
+
+  /// 本地模块源码目录（App 私有目录，不进相册/文档）
+  Future<Directory> _localDir() async {
+    final base = await getApplicationSupportDirectory();
+    final dir = Directory('${base.path}/rex_local');
+    if (!await dir.exists()) await dir.create(recursive: true);
+    return dir;
+  }
+
+  /// 读取本地模块源码；文件不存在返回 null
+  Future<String?> readLocalCode(String url) async {
+    try {
+      final name = url.substring(localScheme.length).split('/').last;
+      final dir = await _localDir();
+      final f = File('${dir.path}/$name');
+      if (!await f.exists()) return null;
+      return await f.readAsString();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 从本地文件导入一个 REX 模块（`.js` 源码）。
+  ///
+  /// 源码复制进 App 目录后以 `local://<文件名>` 作为模块地址，
+  /// 之后 list/detail/resource/search 都走同一条 [_call] 通道。
+  /// 同名文件重复导入 = 就地更新，不会出现两个同名模块。
+  Future<RexModule> importLocalFile(String path) async {
+    final file = File(path);
+    final code = await file.readAsString();
+    if (code.trim().isEmpty) throw const RexException('这个文件是空的');
+    final rawName = path.split(RegExp(r'[\\/]')).last;
+    // 只保留安全字符，避免 ../ 之类跑出目录
+    final safe = rawName.replaceAll(RegExp(r'[^A-Za-z0-9._\u4e00-\u9fa5-]'), '_');
+    final dir = await _localDir();
+    await File('${dir.path}/$safe').writeAsString(code);
+
+    final url = '$localScheme$safe';
+    // 同名文件重新导入时要丢掉旧编译缓存，否则 Node 还在跑上一版代码
+    try {
+      await _call({'action': 'clearCache', 'url': url}, checkOk: false);
+    } catch (_) {}
+    final fallback = safe.replaceAll(RegExp(r'\.(js|mjs|txt)$'), '');
+    final fresh = await loadModule(url, fallbackTitle: fallback);
+    final i = modules.indexWhere((e) => e.url == url);
+    if (i >= 0) {
+      modules[i] = fresh.copyWith(enabled: modules[i].enabled);
+    } else {
+      modules.add(fresh);
+    }
+    await _persist();
+    revision.value++;
+    return fresh;
+  }
+
+  /// 一次性导入多个本地文件；返回成功与失败明细
+  Future<RexImportResult> importLocalFiles(List<String> paths) async {
+    final imported = <RexModule>[];
+    final errors = <String>[];
+    for (final p in paths) {
+      try {
+        imported.add(await importLocalFile(p));
+      } catch (e) {
+        errors.add('${p.split(RegExp(r'[\\/]')).last}：$_short(e)');
+      }
+    }
+    return RexImportResult(imported: imported, errors: errors);
   }
 
   // ── 数据 ─────────────────────────────────────────────────────
@@ -475,10 +582,20 @@ class RexService {
     if (port <= 0) {
       throw const RexException('后台服务未就绪，请稍后重试');
     }
+    // 本地模块：源码由这里读出来塞进请求体（Node 侧没有 fs）
+    final payload = Map<String, dynamic>.from(body);
+    final target = '${payload['url'] ?? ''}';
+    if (isLocal(target)) {
+      final code = await readLocalCode(target);
+      if (code == null) {
+        throw const RexException('本地模块文件已丢失，请重新导入');
+      }
+      payload['code'] = code;
+    }
     try {
       final res = await _dio.post(
         'http://127.0.0.1:$port/rex/api',
-        data: body,
+        data: payload,
         options: Options(
           contentType: Headers.jsonContentType,
           // 不要因为 4xx/5xx 就抛异常：Node 侧出错时会带 `{ok:false,error}`，

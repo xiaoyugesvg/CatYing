@@ -91,13 +91,21 @@ class _RexManagePageState extends State<RexManagePage> {
                 const SizedBox(height: 18),
                 _sectionTitle('已启用', on.length),
                 for (var i = 0; i < on.length; i++)
-                  _card(on[i], onIndex: i, onTotal: on.length),
+                  _card(
+                    on[i],
+                    prevUrl: i > 0 ? on[i - 1].url : null,
+                    nextUrl: i < on.length - 1 ? on[i + 1].url : null,
+                  ),
               ],
               if (off.isNotEmpty) ...[
                 const SizedBox(height: 18),
                 _sectionTitle('已停用', off.length),
                 for (var i = 0; i < off.length; i++)
-                  _card(off[i], onIndex: -1, onTotal: off.length),
+                  _card(
+                    off[i],
+                    prevUrl: i > 0 ? off[i - 1].url : null,
+                    nextUrl: i < off.length - 1 ? off[i + 1].url : null,
+                  ),
               ],
               if (all.isNotEmpty) ...[
                 const SizedBox(height: 16),
@@ -218,8 +226,14 @@ class _RexManagePageState extends State<RexManagePage> {
         ],
       );
 
-  Widget _card(RexModule m, {required int onIndex, required int onTotal}) {
-    final host = Uri.tryParse(m.url)?.host ?? m.url;
+  /// [prevUrl] / [nextUrl] 是**同一分组内**相邻模块的地址。
+  ///
+  /// 分组展示下不能再用「全局上移/下移」：整表里相邻的那个可能是被折叠在
+  /// 另一组的模块，点一下卡片会原地不动。用相邻 url 精确交换。
+  Widget _card(RexModule m, {String? prevUrl, String? nextUrl}) {
+    final host = RexService.isLocal(m.url)
+        ? '本地文件'
+        : (Uri.tryParse(m.url)?.host ?? m.url);
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       // 长按 → 快捷操作（卸载 / 分享 / 刷新…），比一个个点小箭头快
@@ -271,6 +285,7 @@ class _RexManagePageState extends State<RexManagePage> {
                       runSpacing: 4,
                       children: [
                         if (m.version.isNotEmpty) _chip('v${m.version}'),
+                        if (RexService.isLocal(m.url)) _chip('本地', accent: true),
                         _chip('${m.listFunctions.length} 个分类'),
                         if (m.canSearch) _chip('可搜索'),
                         if (m.canPlay) _chip('可播放'),
@@ -300,11 +315,17 @@ class _RexManagePageState extends State<RexManagePage> {
                         color: _sub.withValues(alpha: 0.8),
                         fontSize: 10)),
               ),
-              if (onIndex >= 0) ...[
-                _mini(Icons.keyboard_arrow_up_rounded,
-                    onIndex == 0 ? null : () => _service.move(m.url, -1)),
-                _mini(Icons.keyboard_arrow_down_rounded,
-                    onIndex >= onTotal - 1 ? null : () => _service.move(m.url, 1)),
+              if (_service.modules.length > 1) ...[
+                _mini(
+                    Icons.keyboard_arrow_up_rounded,
+                    prevUrl == null
+                        ? null
+                        : () => _service.swap(m.url, prevUrl)),
+                _mini(
+                    Icons.keyboard_arrow_down_rounded,
+                    nextUrl == null
+                        ? null
+                        : () => _service.swap(m.url, nextUrl)),
               ],
               _more(m),
             ],
@@ -360,7 +381,7 @@ class _RexManagePageState extends State<RexManagePage> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(color: sub, fontSize: AppTheme.fontCaption)),
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
                 _action(ctx, Icons.ios_share_rounded, '分享（复制地址）', fg, () {
                   Clipboard.setData(ClipboardData(text: m.url));
                   AppToast.show('地址已复制', m.url);
@@ -385,10 +406,11 @@ class _RexManagePageState extends State<RexManagePage> {
           VoidCallback onTap) =>
       ListTile(
         dense: true,
+        minLeadingWidth: 28,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        leading: Icon(icon, size: 19, color: color),
+        leading: Icon(icon, size: 20, color: color),
         title: Text(label,
-            style: TextStyle(color: color, fontSize: AppTheme.fontSubhead)),
+            style: TextStyle(color: color, fontSize: AppTheme.fontBody)),
         onTap: () {
           Navigator.pop(ctx);
           onTap();
@@ -406,7 +428,7 @@ class _RexManagePageState extends State<RexManagePage> {
         child: Text(text,
             style: TextStyle(
               color: accent ? _accent : _sub,
-              fontSize: 9.5,
+              fontSize: 10,
               fontWeight: accent ? FontWeight.w600 : FontWeight.w400,
             )),
       );
@@ -414,9 +436,11 @@ class _RexManagePageState extends State<RexManagePage> {
   Widget _mini(IconData icon, VoidCallback? onTap) => IconButton(
         visualDensity: VisualDensity.compact,
         padding: EdgeInsets.zero,
-        constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+        // 34 起：30 的点击区在拇指下容易点空（iOS 建议 ≥44，但这里并排
+        // 两个箭头 + 更多，34 是能兼顾密度与准确度的折中）
+        constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
         icon: Icon(icon,
-            size: 19,
+            size: 20,
             color: onTap == null ? _sub.withValues(alpha: 0.3) : _sub),
         onPressed: onTap,
       );
@@ -424,7 +448,9 @@ class _RexManagePageState extends State<RexManagePage> {
   Widget _more(RexModule m) => PopupMenuButton<String>(
         tooltip: '更多',
         padding: EdgeInsets.zero,
-        icon: Icon(Icons.more_horiz_rounded, size: 19, color: _sub),
+        iconSize: 20,
+        constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+        icon: Icon(Icons.more_horiz_rounded, size: 20, color: _sub),
         onSelected: (v) {
           switch (v) {
             case 'refresh':
@@ -485,6 +511,9 @@ class _RexManagePageState extends State<RexManagePage> {
                 '${errors.length} 个失败：${errors.first}',
         '',
       );
+    } catch (e) {
+      // 没有 catch 时异常会逃出按钮回调，变成未捕获异步异常
+      if (mounted) AppToast.show('刷新失败：$e', '');
     } finally {
       if (mounted) setState(() => _busy = false);
     }

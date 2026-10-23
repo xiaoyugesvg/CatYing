@@ -147,9 +147,26 @@ class AppTheme {
   }
 
   /// 「在当前明暗下都看得清」的强调色**淡底**（chip / 徽标 / 选中块底用）
-  static Color get accentSurface => _light
-      ? _palette.primary.withValues(alpha: 0.10)
-      : Colors.white.withValues(alpha: 0.08);
+  ///
+  /// 2026-10-23：原来暗色一律用「白色 8%」—— 对墨灰主题没问题，但新增的
+  /// 蕉红/皇家紫/翠微这些鲜艳主题，夜间所有淡底都变成同一块灰白，
+  /// **主题色等于消失了**。现在改用 [_tint]（暗色下自动提亮的主题色）。
+  static Color get accentSurface =>
+      _tint.withValues(alpha: _light ? 0.10 : 0.16);
+
+  /// 用在「当前底色」上仍然可见的主题色。
+  ///
+  /// · 浅色：直接用主题色（宣纸米白底上墨灰很清晰）
+  /// · 暗色：亮度不足 0.35 的主题色（墨灰 #3A3A3A、皇家紫、蕉红…）
+  ///   往白提亮 55%；本来就亮的（柠檬黄、矢车菊蓝）只微调 10%。
+  ///
+  /// 提亮后的墨灰 ≈ #9E9E9E，与原来「白色 8%」的观感基本一致，
+  /// 所以水墨主题的旧观感不会变，只是鲜艳主题不再被抹平。
+  static Color get _tint {
+    if (_light) return _palette.primary;
+    final l = _palette.primary.computeLuminance();
+    return Color.lerp(_palette.primary, Colors.white, l < 0.35 ? 0.55 : 0.10)!;
+  }
 
   /// 强调色的浅一档（用于次要高亮、hover 态）
   static Color get accentLightColor => _palette.primaryLight;
@@ -164,15 +181,14 @@ class AppTheme {
 
   /// 淡底（圆形按钮底 / 未选中卡片底等）。
   ///
-  /// ⚠️ 暗色下**不能再用调色板 primary**（默认「水墨书香」是 #3A3A3A 墨灰）——
+  /// ⚠️ 暗色下**不能直接再用调色板 primary**（默认「水墨书香」是 #3A3A3A 墨灰）——
   ///   墨灰淡底压在暗底（#1C1C1E）上等于没有（用户 2026-10-15：
-  ///   「晚上完全看不清」）⇒ 暗色改成**白色淡底**；浅色保持原样，白天观感不变。
-  static Color get backgroundTertiary => _light
-      ? _palette.primary.withValues(alpha: 0.06)
-      : Colors.white.withValues(alpha: 0.08);
-  static Color get backgroundElevated => _light
-      ? _palette.primary.withValues(alpha: 0.08)
-      : Colors.white.withValues(alpha: 0.12);
+  ///   「晚上完全看不清」）⇒ 暗色走 [_tint]（自动提亮），
+  ///   墨灰提亮后观感与原来的"白色淡底"一致，鲜艳主题则保留自己的色调。
+  static Color get backgroundTertiary =>
+      _tint.withValues(alpha: _light ? 0.06 : 0.10);
+  static Color get backgroundElevated =>
+      _tint.withValues(alpha: _light ? 0.08 : 0.14);
 
   // ===== 半透明卡片色 =====
   // 用调色板的卡片色 + 不同 alpha，保持"同一套色、多层透明"的观感
@@ -186,16 +202,19 @@ class AppTheme {
   // ===== iOS 27 Liquid Glass 玻璃体系 =====
   // 玻璃底色仍用"墨色低透明度"来表达（而不是灰），
   // 这样玻璃面板在水墨底色上不会显脏。
+  //
+  // 2026-10-23：改用 [_tint] —— 暗色下墨灰的 alpha 太低，玻璃层几乎不存在；
+  // 提亮后既保住"水墨"的观感，鲜艳主题的玻璃也终于带上自己的色调。
   static Color get glassTint =>
-      _palette.primary.withValues(alpha: _light ? 0.06 : 0.10);
+      _tint.withValues(alpha: _light ? 0.06 : 0.12);
   static Color get glassTintDeep =>
-      _palette.primary.withValues(alpha: _light ? 0.05 : 0.12);
+      _tint.withValues(alpha: _light ? 0.05 : 0.16);
   /// 浅玻璃底（悬浮栏用）
   static Color get glassTintLight =>
-      _palette.primary.withValues(alpha: _light ? 0.03 : 0.05);
+      _tint.withValues(alpha: _light ? 0.03 : 0.07);
   /// 超浅玻璃底（沉浸式底栏用）
   static Color get glassTintClear =>
-      _palette.primary.withValues(alpha: _light ? 0.02 : 0.03);
+      _tint.withValues(alpha: _light ? 0.02 : 0.04);
 
   // 高光层: 顶部镜面高光（浅色下是白光、深色下也是白光，只是强弱不同）
   static Color get glassHighlightTop => _light
@@ -207,9 +226,9 @@ class AppTheme {
 
   // 描边：用墨色低透明度，边缘分离感更"干净"
   static Color get glassBorder =>
-      _palette.primary.withValues(alpha: _light ? 0.10 : 0.20);
+      _tint.withValues(alpha: _light ? 0.10 : 0.24);
   static Color get glassBorderSoft =>
-      _palette.primary.withValues(alpha: _light ? 0.06 : 0.12);
+      _tint.withValues(alpha: _light ? 0.06 : 0.14);
 
   // ---- Liquid Glass：内侧双色边缘 ----
   //
@@ -218,7 +237,7 @@ class AppTheme {
   static Color get glassInnerTop =>
       Colors.white.withValues(alpha: _light ? 0.65 : 0.24);
   static Color get glassInnerBottom =>
-      _palette.primary.withValues(alpha: _light ? 0.06 : 0.10);
+      _tint.withValues(alpha: _light ? 0.06 : 0.12);
   /// 顶部镜面弧线（很窄，模拟折射光带）
   static Color get glassSpecular =>
       Colors.white.withValues(alpha: _light ? 0.60 : 0.32);
@@ -252,9 +271,9 @@ class AppTheme {
       : Colors.white.withValues(alpha: 0.55);
 
   static Color get borderLight =>
-      _palette.primary.withValues(alpha: _light ? 0.10 : 0.12);
+      _tint.withValues(alpha: _light ? 0.10 : 0.14);
   static Color get borderMedium =>
-      _palette.primary.withValues(alpha: _light ? 0.16 : 0.18);
+      _tint.withValues(alpha: _light ? 0.16 : 0.20);
 
   // 间距
   static const double spacingXS = 4;
@@ -428,7 +447,8 @@ class AppTheme {
       // （9 种字号），所以这里照抄它的结构，只是颜色走浅色调色板。
       chipTheme: ChipThemeData(
         backgroundColor: backgroundTertiary,
-        selectedColor: accentColor.withValues(alpha: 0.15),
+        // 暗色下 accentColor 可能是墨灰（看不见），用 accentOnSurface
+        selectedColor: accentOnSurface.withValues(alpha: 0.15),
         labelStyle: TextStyle(color: textSecondary, fontSize: fontSubhead),
         side: BorderSide.none,
         shape: RoundedRectangleBorder(
@@ -437,7 +457,8 @@ class AppTheme {
       ),
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
         backgroundColor: Colors.transparent,
-        selectedItemColor: accentColor,
+        // 同上：选中文字必须用"压在底色上看得清"的强调色
+        selectedItemColor: accentOnSurface,
         unselectedItemColor: textTertiary,
         type: BottomNavigationBarType.fixed,
         selectedLabelStyle:
@@ -565,10 +586,15 @@ class AppTheme {
         },
       ),
       colorScheme: ColorScheme.dark(
-        primary: accentColor,
+        // ⚠️ 不能直接用 accentColor（= palette.primary）：默认「水墨书香」是
+        // #3A3A3A 墨灰，压在 #1C1C1E 上对比度 1.9:1 —— 而 colorScheme.primary
+        // 是全 App 未显式指定颜色的转圈/图标/空态图标（15+ 处）的取色，
+        // 深色下表现为"转圈看不见"。accentOnSurface 已按对比度做过提亮。
+        primary: accentOnSurface,
         secondary: accentLightColor,
         surface: backgroundSecondary,
-        error: Colors.red,
+        // 错误色也跟调色板走（原来硬编码 Material 红）
+        error: _palette.error,
       ),
       appBarTheme: AppBarTheme(
         // 透明 + 无 elevation: 让全局背景层透出, 配合页面顶部形成玻璃观感;
@@ -598,7 +624,8 @@ class AppTheme {
       ),
       chipTheme: ChipThemeData(
         backgroundColor: backgroundTertiary,
-        selectedColor: accentColor.withValues(alpha: 0.15),
+        // 暗色下 accentColor 可能是墨灰（看不见），用 accentOnSurface
+        selectedColor: accentOnSurface.withValues(alpha: 0.15),
         labelStyle: TextStyle(color: textSecondary, fontSize: fontSubhead),
         side: BorderSide.none,
         shape: RoundedRectangleBorder(
@@ -607,7 +634,8 @@ class AppTheme {
       ),
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
         backgroundColor: Colors.transparent,
-        selectedItemColor: accentColor,
+        // 同上：选中文字必须用"压在底色上看得清"的强调色
+        selectedItemColor: accentOnSurface,
         unselectedItemColor: textTertiary,
         type: BottomNavigationBarType.fixed,
         selectedLabelStyle:

@@ -64,10 +64,14 @@ class _RexDetailPageState extends State<RexDetailPage> {
     try {
       final d = await _service.detail(widget.module, widget.item);
       if (!mounted) return;
+      final linkChanged = d != null && d.link != _item.link;
       setState(() {
         if (d != null) _item = d;
         _loading = false;
       });
+      // 详情可能把列表里的简写 link 换成带 id 的真实 link：
+      // 那样之前用旧 link 解析出的线路就是错的 ⇒ 用新 link 重新解析。
+      if (linkChanged && _needsResolve()) _loadStreams();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -92,6 +96,8 @@ class _RexDetailPageState extends State<RexDetailPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
+        // 清空旧线路：解析失败时留着上一次的结果（可能已过期）更误导
+        _streams = const [];
         _streamsError = '$e';
         _streamsLoading = false;
       });
@@ -430,10 +436,19 @@ class _RexDetailPageState extends State<RexDetailPage> {
       );
     }
     if (_streams.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Text('没有解析到播放地址',
-            style: TextStyle(color: _sub, fontSize: AppTheme.fontCaption)),
+      // 空态也要给「重新解析」：详情返回后 link 变化、或首发请求没落地时，
+      // 用户不该只能退出重进（旧版这里是个死胡同）。
+      return Row(
+        children: [
+          Expanded(
+            child: Text('没有解析到播放地址',
+                style: TextStyle(color: _sub, fontSize: AppTheme.fontCaption)),
+          ),
+          TextButton(
+            onPressed: _loadStreams,
+            child: const Text('重新解析'),
+          ),
+        ],
       );
     }
     return Column(

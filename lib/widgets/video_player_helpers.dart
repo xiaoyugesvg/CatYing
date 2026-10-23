@@ -158,6 +158,8 @@ class _PersistedPlayerState {
   bool isImmersive = false;
   /// 续播是否已应用：跨 widget Element 重建持久化。
   bool resumeApplied = false;
+  /// 「进入即短剧竖屏」是否已执行过 —— 防止换集重建时反复锁屏/切方向
+  bool dramaApplied = false;
 }
 
 class _SettingsRowLabel extends StatelessWidget {

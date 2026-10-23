@@ -1,5 +1,6 @@
 import 'app_log.dart';
 import 'dart:convert';
+import 'dart:io';
 import '../models/movie.dart';
 import '../models/vod_info.dart';
 import '../models/source_bean.dart';
@@ -58,6 +59,11 @@ class SourceService {
     if (!sourceBean.isSupportedInSwift) {
       throw Exception(
           SourceError.unsupportedType.message(sourceBean.typeDescription));
+    }
+
+    // 本地 JSON 源：没有网络接口，直接从文件里取 class / list
+    if (sourceBean.isLocalSource) {
+      return _localSort(sourceBean);
     }
 
     if (!sourceBean.isHttpApi) {
@@ -271,6 +277,11 @@ class SourceService {
           page: page, filters: filters);
     }
 
+    // 本地 JSON 源：按 type_id 过滤 + 内存分页
+    if (sourceBean.isLocalSource) {
+      return _localList(sourceBean, sortData, page: page);
+    }
+
     if (!sourceBean.isSupportedInSwift) {
       throw Exception(
           SourceError.unsupportedType.message(sourceBean.typeDescription));
@@ -350,6 +361,119 @@ class SourceService {
       }
     }
     return videos;
+  }
+
+  // ============================================================
+  // 本地 JSON 源（离线）
+  // ============================================================
+  //
+  // 「通用源」里导入一份 MacCMS 格式的 JSON（class + list）时，文件会复制到
+  // App 私有目录，`api` 记为 `file://…`。这类源不联网：
+  // 分类取 class、列表按 type_id 过滤、详情按 id 找、搜索按名称包含。
+
+  /// 读本地源 JSON；坏文件/不存在都返回 null
+  Future<Map<String, dynamic>?> _readLocalJson(String api) async {
+    try {
+      final path = Uri.parse(api).toFilePath();
+      final f = File(path);
+      if (!await f.exists()) return null;
+      final txt = await f.readAsString();
+      final j = jsonDecode(txt);
+      return j is Map ? j.cast<String, dynamic>() : null;
+    } catch (e) {
+      AppLog.instance.log('[source_service] 本地源读取失败: $e');
+      return null;
+    }
+  }
+
+  /// 把原始 list 转成 Video（复用已有解析器，避免两套字段映射）
+  List<Video> _localVideos(SourceBean bean, dynamic list) {
+    if (list is! List) return const [];
+    try {
+      return _parseVideoList(jsonEncode({'list': list}),
+          sourceKey: bean.key, type: 1);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<(List<SortData>, List<Video>)> _localSort(SourceBean bean) async {
+    final j = await _readLocalJson(bean.api);
+    if (j == null) throw Exception('本地源文件读不出来（可能已被删除）');
+    final sorts = <SortData>[];
+    final cls = j['class'] ?? j['classes'];
+    if (cls is List) {
+      for (final c in cls) {
+        if (c is! Map) continue;
+        final id = '${c['type_id'] ?? c['typeId'] ?? c['id'] ?? ''}'.trim();
+        final name =
+            '${c['type_name'] ?? c['typeName'] ?? c['name'] ?? ''}'.trim();
+        if (id.isEmpty && name.isEmpty) continue;
+        sorts.add(SortData(id: id, name: name.isEmpty ? id : name));
+      }
+    }
+    final all = _localVideos(bean, j['list']);
+    return (sorts, all.take(12).toList());
+  }
+
+  Future<List<Video>> _localList(
+    SourceBean bean,
+    SortData sort, {
+    int page = 1,
+  }) async {
+    final j = await _readLocalJson(bean.api);
+    if (j == null) throw Exception('本地源文件读不出来（可能已被删除）');
+    final raw = j['list'];
+    final want = sort.id.trim();
+    final items = <dynamic>[];
+    if (raw is List) {
+      for (final e in raw) {
+        if (e is! Map) continue;
+        if (want.isNotEmpty && want != '0') {
+          final tid =
+              '${e['type_id'] ?? e['typeId'] ?? e['tid'] ?? ''}'.trim();
+          if (tid != want) continue;
+        }
+        items.add(e);
+      }
+    }
+    // 文件里是一次性全量，分页在这里切
+    const size = 24;
+    final from = (page - 1) * size;
+    if (from >= items.length) return const [];
+    return _localVideos(bean, items.skip(from).take(size).toList());
+  }
+
+  Future<VodInfo?> _localDetail(SourceBean bean, String vodId) async {
+    final j = await _readLocalJson(bean.api);
+    if (j == null) return null;
+    final raw = j['list'];
+    if (raw is! List) return null;
+    for (final e in raw) {
+      if (e is! Map) continue;
+      final id = '${e['vod_id'] ?? e['id'] ?? ''}'.trim();
+      if (id == vodId) {
+        return _parseDetail(jsonEncode({'list': [e]}),
+            sourceKey: bean.key, type: 1);
+      }
+    }
+    return null;
+  }
+
+  Future<List<Video>> _localSearch(SourceBean bean, String keyword) async {
+    final j = await _readLocalJson(bean.api);
+    if (j == null) return const [];
+    final kw = keyword.trim().toLowerCase();
+    if (kw.isEmpty) return const [];
+    final raw = j['list'];
+    if (raw is! List) return const [];
+    final hit = <dynamic>[];
+    for (final e in raw) {
+      if (e is! Map) continue;
+      final name = '${e['vod_name'] ?? e['name'] ?? ''}'.toLowerCase();
+      if (name.contains(kw)) hit.add(e);
+    }
+    return _localVideos(bean, hit);
   }
 
   List<Video> _parseVideoList(String jsonStr,
@@ -434,6 +558,11 @@ class SourceService {
 
     if (sourceBean.isSpiderSource) {
       return _getSpiderDetail(sourceBean, vodId);
+    }
+
+    // 本地 JSON 源：从文件里找这条
+    if (sourceBean.isLocalSource) {
+      return _localDetail(sourceBean, vodId);
     }
 
     if (!sourceBean.isSupportedInSwift) {
@@ -527,6 +656,11 @@ class SourceService {
 
     if (sourceBean.isSpiderSource) {
       return _spiderSearch(sourceBean, keyword);
+    }
+
+    // 本地 JSON 源：在文件里的 list 中做名称包含匹配
+    if (sourceBean.isLocalSource) {
+      return _localSearch(sourceBean, keyword);
     }
 
     if (!sourceBean.isSupportedInSwift) {

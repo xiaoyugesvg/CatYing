@@ -11,9 +11,11 @@
 // 不做的事：不解析私有签名接口（红果/剧果等），不绕过 VIP。
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../models/source_bean.dart';
 import '../reading/source/global_proxy.dart';
@@ -114,6 +116,62 @@ class GenericSourceService {
     );
     await ApiConfig.instance.addUserVideoSource(bean, enabled: true);
     return (ok: true, message: '已添加：${bean.name}');
+  }
+
+  /// 从一份 MacCMS 格式的 JSON 添加「本地源」（**离线可用**）。
+  ///
+  /// JSON 需要含 `class`（分类）或 `list`（条目），与 `?ac=list` 的响应一致。
+  /// 内容复制到 App 私有目录，`api` 记成 `file://…`；
+  /// [SourceService] 会识别这个前缀并直接读文件，不再发网络请求。
+  Future<({bool ok, String message})> addLocalJson({
+    required String name,
+    required String jsonText,
+  }) async {
+    final text = jsonText.trim();
+    if (text.isEmpty) return (ok: false, message: '内容为空');
+
+    Map<String, dynamic>? j;
+    try {
+      final d = jsonDecode(text);
+      if (d is Map) j = d.cast<String, dynamic>();
+    } catch (_) {
+      j = null;
+    }
+    if (j == null) return (ok: false, message: '不是合法的 JSON');
+
+    final cls = j['class'] ?? j['classes'];
+    final list = j['list'];
+    final hasClass = cls is List && cls.isNotEmpty;
+    final hasList = list is List && list.isNotEmpty;
+    if (!hasClass && !hasList) {
+      return (ok: false, message: 'JSON 里没有 class / list 字段（需要 MacCMS 格式）');
+    }
+
+    try {
+      final base = await getApplicationSupportDirectory();
+      final dir = Directory('${base.path}/local_sources');
+      if (!await dir.exists()) await dir.create(recursive: true);
+
+      final key =
+          '$_keyPrefix${md5.convert(utf8.encode(text)).toString().substring(0, 10)}';
+      final file = File('${dir.path}/$key.json');
+      await file.writeAsString(text);
+
+      final bean = SourceBean(
+        key: key,
+        name: name.trim().isEmpty ? '本地源' : name.trim(),
+        api: Uri.file(file.path).toString(),
+        type: 1,
+        searchable: 1,
+        filterable: 0,
+        quickSearch: 1,
+        playerType: 0,
+      );
+      await ApiConfig.instance.addUserVideoSource(bean, enabled: true);
+      return (ok: true, message: '已添加本地源：${bean.name}');
+    } catch (e) {
+      return (ok: false, message: '保存失败：$e');
+    }
   }
 
   /// 已添加的通用源（从用户线路里筛出来）

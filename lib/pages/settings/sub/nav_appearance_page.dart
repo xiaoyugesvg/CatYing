@@ -219,6 +219,51 @@ class _NavAppearancePageState extends State<NavAppearancePage> {
         );
         dot = FloatingNavSpec.neonColor;
         break;
+      case FloatingNavStyle.outline:
+        // 与真实底栏一致：淡底 + 主题色描边
+        final accent = FloatingNavSpec.styleContentColor(
+          FloatingNavStyle.outline,
+          selected: true,
+          isDark: isDark,
+          palette: pal,
+        );
+        deco = BoxDecoration(
+          color: (isDark ? const Color(0xFF101012) : Colors.white)
+              .withValues(alpha: isDark ? 0.30 : 0.42),
+          border: Border.all(
+            color: accent.withValues(alpha: isDark ? 0.70 : 0.55),
+            width: 1.2,
+          ),
+        );
+        dot = accent;
+        break;
+      case FloatingNavStyle.jelly:
+        final accent = FloatingNavSpec.styleContentColor(
+          FloatingNavStyle.outline,
+          selected: true,
+          isDark: isDark,
+          palette: pal,
+        );
+        deco = BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: isDark
+                ? [
+                    accent.withValues(alpha: 0.34),
+                    accent.withValues(alpha: 0.16),
+                  ]
+                : [
+                    accent.withValues(alpha: 0.22),
+                    accent.withValues(alpha: 0.10),
+                  ],
+          ),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: isDark ? 0.16 : 0.70),
+          ),
+        );
+        dot = accent;
+        break;
     }
     return Container(
       decoration: deco,

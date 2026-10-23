@@ -110,6 +110,12 @@ class _RoomPageState extends State<RoomPage> {
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
   Color get _fg => _isDark ? Colors.white : AppTheme.textPrimary;
   Color get _sub => _isDark ? Colors.white60 : Colors.black54;
+  Color get _line => _isDark
+      ? Colors.white.withValues(alpha: 0.08)
+      : Colors.black.withValues(alpha: 0.06);
+
+  /// 文字/图标用的强调色（暗色下 accentColor 是墨灰，看不见）
+  Color get _accent => AppTheme.accentOnSurface;
 
   void _onSession() {
     if (!mounted) return;
@@ -372,11 +378,11 @@ class _RoomPageState extends State<RoomPage> {
                     fontWeight: FontWeight.w600,
                     color: _fg)),
             Text(
-              _session.mode == RoomMode.lan
-                  ? '局域网 ${_session.lanAddress} · ${_session.members.length} 人'
-                      '${_session.connected ? '' : ' · 连接已断开'}'
-                  : '房间号 ${room.id} · ${_session.members.length} 人'
-                      '${_session.connected ? '' : ' · 连接已断开'}',
+              // 房间内不必再显示 IP：进房时已经用过一次了，
+              // 这里换成「模式 · 人数 · 连接状态」更有信息量
+              '${_session.mode == RoomMode.lan ? '局域网' : '房间 ${room.id}'}'
+              ' · ${_session.members.length} 人'
+              '${_session.connected ? '' : ' · 已断开'}',
               style: TextStyle(fontSize: AppTheme.fontCaption, color: _sub),
             ),
           ],
@@ -412,8 +418,7 @@ class _RoomPageState extends State<RoomPage> {
       body: Column(
         children: [
           _playerArea(),
-          _statusBar(),
-          _membersBar(),
+          _syncCard(),
           if (_session.error != null) _errorBar(),
           Expanded(child: _chatList()),
           _inputBar(),
@@ -425,50 +430,90 @@ class _RoomPageState extends State<RoomPage> {
   Widget _playerArea() {
     final media = _media;
     final player = _player;
-    return AspectRatio(
-      aspectRatio: 16 / 9,
-      child: Container(
-        color: Colors.black,
-        child: (media == null || player == null)
-            ? Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.live_tv_outlined,
-                        size: 30, color: Colors.white.withValues(alpha: 0.5)),
-                    const SizedBox(height: 8),
-                    Text(
-                      _session.isHost ? '点右上角「选片」挑一集开始' : '等房主选片…',
-                      style: const TextStyle(
-                          color: Colors.white54,
-                          fontSize: AppTheme.fontFootnote),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: AspectRatio(
+          aspectRatio: 16 / 9,
+          child: Container(
+            color: Colors.black,
+            child: (media == null || player == null)
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 44,
+                          height: 44,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.08),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(Icons.live_tv_rounded,
+                              size: 22,
+                              color: Colors.white.withValues(alpha: 0.6)),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          _session.isHost ? '点「选片」挑一集开始' : '等房主选片…',
+                          style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: AppTheme.fontFootnote),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-              )
-            : VideoPlayerWidget(
-                // key 跟随播放器实例：换内核/重建时整体 remount，避免残留旧纹理
-                key: ObjectKey(player),
-                player: player,
-                url: media.url,
-                headers: media.headers.isEmpty ? null : media.headers,
-                videoTitle: media.title,
-                initialVideoFit: VideoFitType.contain,
-                onBack: _leave,
-              ),
+                  )
+                : VideoPlayerWidget(
+                    // key 跟随播放器实例：换内核/重建时整体 remount，避免残留旧纹理
+                    key: ObjectKey(player),
+                    player: player,
+                    url: media.url,
+                    headers: media.headers.isEmpty ? null : media.headers,
+                    videoTitle: media.title,
+                    initialVideoFit: VideoFitType.contain,
+                    onBack: _leave,
+                  ),
+          ),
+        ),
       ),
     );
   }
 
-  Widget _statusBar() {
+  /// 同步卡：播放状态 + 片名 + 成员头像，替代原来的「状态栏 + 成员横条」两段。
+  Widget _syncCard() {
     final m = _media;
+    final playing = _player?.state.playing ?? false;
+    final members = _session.members;
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+      decoration: BoxDecoration(
+        color: _isDark
+            ? Colors.white.withValues(alpha: 0.05)
+            : Colors.black.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _line, width: 0.8),
+      ),
       child: Row(
         children: [
+          // 播放状态点：播放中亮、暂停时暗
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(
+              color: m == null
+                  ? _sub.withValues(alpha: 0.4)
+                  : (playing ? _accent : _sub.withValues(alpha: 0.5)),
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 9),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   m?.title ?? '还没有播放内容',
@@ -481,66 +526,128 @@ class _RoomPageState extends State<RoomPage> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  _session.isHost
-                      ? '你选片；播放/暂停/进度大家都能控'
-                      : '跟随房间同步；你也可以暂停或拖进度',
+                  m == null
+                      ? (_session.isHost ? '你是房主，选片后大家一起看' : '房主选片后会同步到这')
+                      : '${playing ? '同步播放中' : '已暂停'} · '
+                          '${_session.isHost ? '房主可换片' : '所有人都能暂停/拖进度'}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: _sub, fontSize: AppTheme.fontCaption),
                 ),
               ],
             ),
           ),
           if (_session.isHost)
-            TextButton.icon(
-              onPressed: _pick,
-              icon: const Icon(Icons.swap_horiz_rounded, size: 16),
-              label: Text(m == null ? '选片' : '换片',
-                  style: TextStyle(fontSize: AppTheme.fontFootnote)),
+            GestureDetector(
+              onTap: _pick,
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                margin: const EdgeInsets.only(left: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: _accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.swap_horiz_rounded, size: 15, color: _accent),
+                    const SizedBox(width: 3),
+                    Text(m == null ? '选片' : '换片',
+                        style: TextStyle(
+                            color: _accent,
+                            fontSize: AppTheme.fontCaption,
+                            fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            ),
+          const SizedBox(width: 8),
+          _memberAvatars(members),
+        ],
+      ),
+    );
+  }
+
+  /// 成员头像（最多 3 个 + 剩余人数）
+  ///
+  /// 不重叠排列：重叠式在 24px 圆上只露出 17px，昵称首字会被下一张压掉一半，
+  /// 反而看不清是谁。3 个 + "+N" 宽度约 100，同步卡放得下。
+  Widget _memberAvatars(List<RoomMemberInfo> members) {
+    if (members.isEmpty) return const SizedBox.shrink();
+    const size = 24.0;
+    const step = 26.0;
+    final shown = members.take(3).toList();
+    final extra = members.length - shown.length;
+    return SizedBox(
+      height: size,
+      width: shown.length * step - 2 + (extra > 0 ? step : 0),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          for (var i = 0; i < shown.length; i++)
+            Positioned(
+              left: i * step,
+              child: Container(
+                width: size,
+                height: size,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color:
+                      _accent.withValues(alpha: shown[i].isOwner ? 0.9 : 0.22),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: _isDark ? const Color(0xFF141416) : Colors.white,
+                    width: 1.5,
+                  ),
+                ),
+                child: Text(
+                  _initial(shown[i].name),
+                  style: TextStyle(
+                    color: shown[i].isOwner
+                        ? (_isDark ? const Color(0xFF141416) : Colors.white)
+                        : _accent,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          if (extra > 0)
+            Positioned(
+              left: shown.length * step,
+              child: Container(
+                width: size,
+                height: size,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: _isDark
+                      ? Colors.white.withValues(alpha: 0.10)
+                      : Colors.black.withValues(alpha: 0.06),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: _isDark ? const Color(0xFF141416) : Colors.white,
+                    width: 1.5,
+                  ),
+                ),
+                child: Text('+$extra',
+                    style: TextStyle(
+                        color: _sub,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w600)),
+              ),
             ),
         ],
       ),
     );
   }
 
-  Widget _membersBar() {
-    final members = _session.members;
-    if (members.isEmpty) return const SizedBox.shrink();
-    return SizedBox(
-      height: 34,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        itemCount: members.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 6),
-        itemBuilder: (context, i) {
-          final mb = members[i];
-          return Container(
-            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-            decoration: BoxDecoration(
-              color: AppTheme.accentColor
-                  .withValues(alpha: mb.isOwner ? 0.18 : 0.08),
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  mb.isOwner ? Icons.star_rounded : Icons.person_rounded,
-                  size: 12,
-                  color: AppTheme.accentColor,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  mb.name,
-                  style: TextStyle(
-                      color: AppTheme.accentColor,
-                      fontSize: AppTheme.fontCaption,
-                      fontWeight: mb.isOwner ? FontWeight.w600 : FontWeight.w400),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
+  /// 昵称首字（中文取第一个字，英文取首字母大写）
+  static String _initial(String name) {
+    final n = name.trim();
+    if (n.isEmpty) return '?';
+    return n.characters.first.toUpperCase();
   }
 
   Widget _errorBar() => Container(
@@ -560,24 +667,46 @@ class _RoomPageState extends State<RoomPage> {
     final msgs = _session.messages;
     if (msgs.isEmpty) {
       return Center(
-        child: Text('还没有人说话，打个招呼吧',
-            style: TextStyle(color: _sub, fontSize: AppTheme.fontFootnote)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.forum_outlined,
+                size: 30, color: _sub.withValues(alpha: 0.5)),
+            const SizedBox(height: 8),
+            Text('还没有人说话',
+                style: TextStyle(color: _fg, fontSize: AppTheme.fontFootnote)),
+            const SizedBox(height: 3),
+            Text('一起看的同时聊两句吧',
+                style: TextStyle(color: _sub, fontSize: AppTheme.fontCaption)),
+          ],
+        ),
       );
     }
     return ListView.builder(
       controller: _chatScroll,
-      padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+      padding: const EdgeInsets.fromLTRB(14, 6, 14, 10),
       itemCount: msgs.length,
       itemBuilder: (context, i) {
         final m = msgs[i];
         if (m.system) {
           return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
+            padding: const EdgeInsets.symmetric(vertical: 6),
             child: Center(
-              child: Text(m.content,
-                  style: TextStyle(
-                      color: _sub.withValues(alpha: 0.8),
-                      fontSize: AppTheme.fontCaption)),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                decoration: BoxDecoration(
+                  color: _isDark
+                      ? Colors.white.withValues(alpha: 0.06)
+                      : Colors.black.withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(m.content,
+                    style: TextStyle(
+                        color: _sub,
+                        fontSize: AppTheme.fontCaption,
+                        height: 1.4)),
+              ),
             ),
           );
         }
@@ -585,37 +714,59 @@ class _RoomPageState extends State<RoomPage> {
         //（socket.id 只有服务端知道），所以统一靠右显示自己的昵称
         final me = m.userName == _session.nickname;
         return Padding(
-          padding: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.only(bottom: 10),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment:
                 me ? MainAxisAlignment.end : MainAxisAlignment.start,
             children: [
+              if (!me) ...[
+                _chatAvatar(m.userName),
+                const SizedBox(width: 7),
+              ],
               Flexible(
                 child: Column(
                   crossAxisAlignment:
                       me ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                   children: [
-                    Text(m.userName,
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4, right: 4),
+                      child: Text(
+                        me ? '我' : m.userName,
                         style: TextStyle(
-                            color: _sub, fontSize: AppTheme.fontCaption)),
-                    const SizedBox(height: 2),
+                            color: _sub, fontSize: AppTheme.fontCaption),
+                      ),
+                    ),
+                    const SizedBox(height: 3),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 7),
+                          horizontal: 11, vertical: 8),
                       decoration: BoxDecoration(
+                        // 自己：主题色实心 + 白字；别人：淡底
                         color: me
-                            ? AppTheme.accentColor.withValues(alpha: 0.16)
+                            ? _accent
                             : (_isDark
                                 ? Colors.white.withValues(alpha: 0.08)
                                 : Colors.black.withValues(alpha: 0.05)),
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.only(
+                          topLeft: const Radius.circular(14),
+                          topRight: const Radius.circular(14),
+                          bottomLeft: Radius.circular(me ? 14 : 4),
+                          bottomRight: Radius.circular(me ? 4 : 14),
+                        ),
                       ),
-                      child: Text(m.content,
-                          style: TextStyle(
-                              color: _fg,
-                              fontSize: AppTheme.fontSubhead,
-                              height: 1.35)),
+                      child: Text(
+                        m.content,
+                        style: TextStyle(
+                          color: me
+                              ? (_isDark
+                                  ? const Color(0xFF141416)
+                                  : Colors.white)
+                              : _fg,
+                          fontSize: AppTheme.fontSubhead,
+                          height: 1.35,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -627,17 +778,38 @@ class _RoomPageState extends State<RoomPage> {
     );
   }
 
+  /// 聊天里的圆形头像（昵称首字）
+  Widget _chatAvatar(String name) => Container(
+        width: 28,
+        height: 28,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: _accent.withValues(alpha: 0.16),
+          shape: BoxShape.circle,
+        ),
+        child: Text(_initial(name),
+            style: TextStyle(
+                color: _accent,
+                fontSize: 11,
+                fontWeight: FontWeight.w700)),
+      );
+
   Widget _inputBar() => SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+          padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Expanded(
                 child: TextField(
                   controller: _chatCtrl,
                   textInputAction: TextInputAction.send,
                   onSubmitted: (_) => _send(),
+                  // 让发送按钮的可用态跟着输入内容变
+                  onChanged: (_) => setState(() {}),
+                  minLines: 1,
+                  maxLines: 4,
                   style: TextStyle(color: _fg, fontSize: AppTheme.fontSubhead),
                   decoration: InputDecoration(
                     hintText: _session.connected ? '说点什么…' : '连接已断开',
@@ -645,7 +817,7 @@ class _RoomPageState extends State<RoomPage> {
                         TextStyle(color: _sub, fontSize: AppTheme.fontSubhead),
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 11),
+                        horizontal: 14, vertical: 11),
                     filled: true,
                     fillColor: _isDark
                         ? Colors.white.withValues(alpha: 0.07)
@@ -659,17 +831,22 @@ class _RoomPageState extends State<RoomPage> {
               ),
               const SizedBox(width: 8),
               GestureDetector(
-                onTap: _send,
+                onTap: _chatCtrl.text.trim().isEmpty ? null : _send,
                 child: Container(
                   width: 38,
                   height: 38,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: AppTheme.accentColor,
+                    color: _chatCtrl.text.trim().isEmpty
+                        ? _accent.withValues(alpha: 0.35)
+                        : _accent,
                     borderRadius: BorderRadius.circular(19),
                   ),
-                  child: const Icon(Icons.send_rounded,
-                      size: 18, color: Colors.white),
+                  child: Icon(
+                    Icons.send_rounded,
+                    size: 17,
+                    color: _isDark ? const Color(0xFF141416) : Colors.white,
+                  ),
                 ),
               ),
             ],

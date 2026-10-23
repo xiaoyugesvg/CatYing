@@ -255,14 +255,26 @@ function extractModule(url, ctx) {
   };
 }
 
-async function getModule(url) {
+/**
+ * 取（并缓存）一个模块。
+ *
+ * [inlineCode] 非空时直接用这段源码 —— 这是「本地 JS 文件」通道：
+ * Dart 侧把文件内容随请求一并送来（沙箱里没有 fs，不能自己读盘），
+ * `url`（`local://xxx.js`）只作为缓存 key。
+ */
+async function getModule(url, inlineCode) {
   const cached = moduleCache.get(url);
   if (cached) return cached;
   let code;
-  try {
-    code = await fetchText(url);
-  } catch (e) {
-    throw new Error(`模块下载失败：${friendlyError(e)}`);
+  const inline = typeof inlineCode === 'string' ? inlineCode : '';
+  if (inline.trim()) {
+    code = inline;
+  } else {
+    try {
+      code = await fetchText(url);
+    } catch (e) {
+      throw new Error(`模块下载失败：${friendlyError(e)}`);
+    }
   }
   if (!code.trim()) throw new Error('模块内容为空');
   let ctx;
@@ -353,13 +365,14 @@ export async function handleRexApi(body) {
     return { ok: true };
   }
   if (!url) throw new Error('缺少模块地址');
+  const inlineCode = typeof data.code === 'string' ? data.code : '';
 
   if (action === 'load') {
-    const mod = await getModule(url);
+    const mod = await getModule(url, inlineCode);
     return { ok: true, meta: mod.meta };
   }
 
-  const mod = await getModule(url);
+  const mod = await getModule(url, inlineCode);
 
   if (action === 'list') {
     let fn = String(data.functionName || '');

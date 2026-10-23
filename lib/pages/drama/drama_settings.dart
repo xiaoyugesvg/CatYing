@@ -8,6 +8,9 @@
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../models/source_bean.dart';
+import '../../services/api_config.dart';
+
 class DramaSettings {
   DramaSettings._();
 
@@ -63,5 +66,23 @@ class DramaSettings {
       final sp = await SharedPreferences.getInstance();
       await sp.setStringList(_kSources, keys.toList());
     } catch (_) {}
+  }
+
+  /// 参与聚合的源：设置里选了就按选择，没选就只取当前源。
+  ///
+  /// 列表页扫描分类、搜索页搜内容都用同一份，避免两处各算一套
+  /// 导致"搜得到的源和看得到的源不一致"。
+  static Future<List<SourceBean>> targets() async {
+    final api = ApiConfig.instance;
+    final all = <SourceBean>[
+      ...api.sourceBeanList,
+      if (api.localSourcesEnabled.value) ...api.localVideoSources,
+    ];
+    final keys = await sourceKeys();
+    if (keys.isEmpty) {
+      final cur = api.homeSourceBean.value;
+      return cur == null ? const [] : [cur];
+    }
+    return all.where((s) => keys.contains(s.key)).toList();
   }
 }

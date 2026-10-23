@@ -78,6 +78,12 @@ class VideoPlayerWidget extends StatefulWidget {
   /// 是否显示"听剧模式"按钮（点播页开启；直播页有自己的听剧入口，不传）
   final bool showAudioModeButton;
 
+  /// 进入页面就切到「短剧竖屏模式」（锁竖屏 + 沉浸全屏 + 上下滑切集）。
+  ///
+  /// 短剧 tab / 短剧搜索点进详情时传 true，用户不必再点底栏那个「短」按钮。
+  /// 只在本实例首次构建时执行一次（换集重建不会重复锁屏）。
+  final bool initialDramaMode;
+
   /// 初始画面比例（null 默认 contain"自动"）。
   /// 详情页传入 cover，让 16:9 视频铺满 4:3 容器，画面与黑框完全一致
   /// （修复"播放器画面比黑框小、上下留黑边"的问题）。
@@ -151,6 +157,7 @@ class VideoPlayerWidget extends StatefulWidget {
     this.canPlayPrevious = false,
     this.isPipMode = false,
     this.showAudioModeButton = false,
+    this.initialDramaMode = false,
     this.initialVideoFit,
     this.skipIntroSeconds = 0,
     this.skipOutroSeconds = 0,
@@ -679,6 +686,16 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     _isNativeFullscreen = _persisted.isNativeFullscreen;
     _isImmersive = _persisted.isImmersive;
     _videoFit = widget.initialVideoFit ?? VideoFitType.contain;
+
+    // 短剧入口：首帧后直接切进竖屏模式 —— 用户从「短剧」点进来就是竖屏刷剧，
+    // 不用再到底栏找那个「短」按钮。
+    // 只执行一次：换集时 widget 会重建，_persisted 里记着已执行过。
+    if (widget.initialDramaMode && !_persisted.dramaApplied) {
+      _persisted.dramaApplied = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_dramaMode) unawaited(_enterDramaMode());
+      });
+    }
 
     // 启动时间定时器 (每分钟整点更新,用于全屏状态栏显示)
     _currentTime = _formatTimeNow();
@@ -3237,10 +3254,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   _gesturePanAxis == PanAxis.vertical) {
                 final dy = _dramaPanDy;
                 _dramaPanDy = 0;
+                // 与抖音一致：手指向上推 = 内容往上走 = 看下一集；
+                // 向下拉 = 回到上一集。（原来写反了：上滑反而回上一集）
                 if (dy < -60) {
-                  _dramaSwitchTo(forward: false); // 上滑 → 上一集/上一部
+                  _dramaSwitchTo(forward: true); // 上滑 → 下一集/下一部
                 } else if (dy > 60) {
-                  _dramaSwitchTo(forward: true); // 下滑 → 下一集/下一部
+                  _dramaSwitchTo(forward: false); // 下滑 → 上一集/上一部
                 }
                 _gesturePanAxis = null;
                 return;

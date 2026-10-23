@@ -1,15 +1,15 @@
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:get/get.dart';
 
 import '../../common/theme.dart';
 import '../../models/movie.dart';
 import '../../models/movie_sort.dart';
 import '../../models/source_bean.dart';
-import '../../services/api_config.dart';
 import '../../services/source_service.dart';
 import 'drama_banner.dart';
+import 'drama_entry.dart';
 import 'drama_manage_page.dart';
+import 'drama_search_page.dart';
 import 'drama_settings.dart';
 
 /// 「短剧」分类页（2026-10-22）。
@@ -76,19 +76,8 @@ class _DramaPageState extends State<DramaPage> {
   }
 
   /// 参与聚合的源：设置里选了就按选择，没选就只扫当前源
-  Future<List<SourceBean>> _targets() async {
-    final api = ApiConfig.instance;
-    final all = <SourceBean>[
-      ...api.sourceBeanList,
-      if (api.localSourcesEnabled.value) ...api.localVideoSources,
-    ];
-    final keys = await DramaSettings.sourceKeys();
-    if (keys.isEmpty) {
-      final cur = api.homeSourceBean.value;
-      return cur == null ? const [] : [cur];
-    }
-    return all.where((s) => keys.contains(s.key)).toList();
-  }
+  /// （实现与搜索页共用 [DramaSettings.targets]）
+  Future<List<SourceBean>> _targets() => DramaSettings.targets();
 
   Future<void> _load() async {
     setState(() {
@@ -229,6 +218,14 @@ class _DramaPageState extends State<DramaPage> {
           ),
         ),
         actions: [
+          IconButton(
+            tooltip: '搜索短剧',
+            icon: Icon(Icons.search_rounded, color: fg),
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+              settings: const RouteSettings(name: 'drama:search'),
+              builder: (_) => const DramaSearchPage(),
+            )),
+          ),
           IconButton(
             tooltip: '短剧设置',
             icon: Icon(Icons.tune_rounded, color: fg),
@@ -428,7 +425,7 @@ class _DramaPageState extends State<DramaPage> {
 
   Widget _card(Video v, bool isDark) {
     return GestureDetector(
-      onTap: () => Get.toNamed('/detail', arguments: v),
+      onTap: () => DramaEntry.openDetail(v),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
