@@ -506,15 +506,35 @@ class _RexHomePageState extends State<RexHomePage> {
 
   Widget _errorView() => Center(
         child: Padding(
-          padding: const EdgeInsets.all(28),
+          padding: const EdgeInsets.fromLTRB(28, 0, 28, 60),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(_error!,
+              Icon(Icons.cloud_off_rounded,
+                  size: 34, color: _sub.withValues(alpha: 0.55)),
+              const SizedBox(height: 10),
+              Text('这个模块暂时取不到内容',
+                  style: TextStyle(
+                      color: _fg,
+                      fontSize: AppTheme.fontHeadline,
+                      fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              Text(
+                _error!,
+                textAlign: TextAlign.center,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    color: _sub,
+                    fontSize: AppTheme.fontFootnote,
+                    height: 1.5),
+              ),
+              const SizedBox(height: 8),
+              Text('多半是模块对应的站点挂了或被墙。可以重试，或切到上面的其它模块。',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                      color: Colors.redAccent,
-                      fontSize: AppTheme.fontFootnote,
+                      color: _sub.withValues(alpha: 0.8),
+                      fontSize: AppTheme.fontCaption,
                       height: 1.5)),
               const SizedBox(height: 14),
               OutlinedButton(onPressed: _reload, child: const Text('重试')),

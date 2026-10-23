@@ -479,27 +479,52 @@ class RexService {
       final res = await _dio.post(
         'http://127.0.0.1:$port/rex/api',
         data: body,
-        options: Options(contentType: Headers.jsonContentType),
+        options: Options(
+          contentType: Headers.jsonContentType,
+          // 不要因为 4xx/5xx 就抛异常：Node 侧出错时会带 `{ok:false,error}`，
+          // 那段文案才是用户该看到的。默认 validateStatus 会把它整段吞掉，
+          // 界面上只剩一屏 "This exception was thrown because …"。
+          validateStatus: (_) => true,
+        ),
       );
       final data = res.data;
-      if (data is! Map) throw const RexException('模块返回格式异常');
-      final map = data.cast<String, dynamic>();
-      if (checkOk && map['ok'] == false) {
-        throw RexException('${map['error'] ?? '模块执行失败'}');
+      if (data is Map) {
+        final map = data.cast<String, dynamic>();
+        if (checkOk && map['ok'] == false) {
+          throw RexException('${map['error'] ?? '模块执行失败'}');
+        }
+        return map;
       }
-      return map;
+      final code = res.statusCode ?? 0;
+      if (code < 200 || code >= 300) {
+        throw RexException('后台返回 HTTP $code');
+      }
+      throw const RexException('模块返回格式异常');
     } on RexException {
       rethrow;
     } catch (e) {
-      throw RexException('请求失败：${_short(e)}');
+      throw RexException(_short(e));
     }
   }
 
   static String _short(Object e) {
     if (e is DioException) {
-      final msg = e.message ?? '';
-      final type = e.type.name;
-      return msg.isEmpty ? type : '$type（$msg）';
+      // badResponse 的 message 是一整段英文解释，对用户毫无意义 ——
+      // 只保留「连不上 / 超时」这类真正需要人看的信息。
+      switch (e.type) {
+        case DioExceptionType.connectionTimeout:
+        case DioExceptionType.sendTimeout:
+        case DioExceptionType.receiveTimeout:
+          return '请求超时，稍后重试';
+        case DioExceptionType.connectionError:
+          return '连不上后台服务（Node 可能正在启动）';
+        case DioExceptionType.badResponse:
+          return '后台返回 HTTP ${e.response?.statusCode ?? '?'}';
+        case DioExceptionType.cancel:
+          return '请求已取消';
+        default:
+          return '请求失败：${e.type.name}';
+      }
     }
     final s = '$e';
     return s.length > 160 ? '${s.substring(0, 160)}…' : s;

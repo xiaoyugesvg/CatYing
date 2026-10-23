@@ -740,7 +740,12 @@ const mgmtServer = createServer((req, res) => {
             } catch (e) {
                 console.error('ERROR in /rex/api:', (e && e.stack) || e);
                 try {
-                    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+                    // ⚠️ 这里故意回 **200** + ok:false，不回 500。
+                    // 客户端（Dio）默认 validateStatus 只认 2xx，回 500 会让它
+                    // 直接抛 badResponse，把服务端给的错误文案整段吞掉，
+                    // 界面上只剩一大段 "This exception was thrown because…"。
+                    // 业务失败不是传输失败，状态码保持 200 更合适。
+                    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
                     res.end(JSON.stringify({
                         ok: false,
                         error: String((e && e.message) || e),

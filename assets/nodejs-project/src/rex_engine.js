@@ -56,6 +56,32 @@ function withTimeout(promise, ms, label) {
   });
 }
 
+/**
+ * 把 axios / 系统异常翻译成一句人话。
+ *
+ * 🔴 原来直接把 `e.message` 抛出去：站点返回 500 时用户看到的是
+ * 「badResponse (This exception was thrown because the response has a
+ * status code of 500 and RequestOptions.validateStatus was configured to
+ * throw for this status code…)」整整一屏英文 —— 既看不懂也没法排查。
+ * 现在统一成「站点返回 HTTP 500」这类短句。
+ */
+function friendlyError(e) {
+  const raw = String((e && e.message) || e || '');
+  const status =
+    (e && e.response && e.response.status) ||
+    (e && e.status) ||
+    (e && e.statusCode);
+  if (status) return `站点返回 HTTP ${status}`;
+  if (/timeout|timed out/i.test(raw)) return '请求超时';
+  if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(raw)) return '域名解析失败';
+  if (/ECONNREFUSED/i.test(raw)) return '连接被拒绝';
+  if (/ECONNRESET|socket hang up|network|TLS/i.test(raw)) return '网络连接中断';
+  if (/not a function|is not defined|SyntaxError|Unexpected token/i.test(raw)) {
+    return `模块代码执行出错：${raw.slice(0, 80)}`;
+  }
+  return raw.length > 120 ? `${raw.slice(0, 120)}…` : raw;
+}
+
 function normalizeHeaders(raw) {
   const out = {};
   if (raw && typeof raw === 'object') {
@@ -232,9 +258,20 @@ function extractModule(url, ctx) {
 async function getModule(url) {
   const cached = moduleCache.get(url);
   if (cached) return cached;
-  const code = await fetchText(url);
+  let code;
+  try {
+    code = await fetchText(url);
+  } catch (e) {
+    throw new Error(`模块下载失败：${friendlyError(e)}`);
+  }
   if (!code.trim()) throw new Error('模块内容为空');
-  const ctx = compileModule(url, code);
+  let ctx;
+  try {
+    ctx = compileModule(url, code);
+  } catch (e) {
+    // 语法错误多半是模块本身坏了（例如返回了 Base64/加密内容）
+    throw new Error(`模块代码无法解析：${friendlyError(e)}`);
+  }
   const mod = extractModule(url, ctx);
   moduleCache.set(url, mod);
   if (moduleCache.size > 40) {
@@ -248,7 +285,11 @@ async function callFn(mod, name, args) {
   const fn = mod.fns[name];
   if (typeof fn !== 'function') throw new Error(`模块不支持 ${name}`);
   const run = Promise.resolve().then(() => fn(...args));
-  return withTimeout(run, CALL_TIMEOUT_MS, name);
+  try {
+    return await withTimeout(run, CALL_TIMEOUT_MS, name);
+  } catch (e) {
+    throw new Error(friendlyError(e));
+  }
 }
 
 function normalizeItem(raw) {

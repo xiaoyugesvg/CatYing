@@ -114,7 +114,7 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
             if (error.isForMainFrame == true && mounted) {
               setState(() {
                 _failed = true;
-                _failDesc = '${error.errorCode} ${error.description}'.trim();
+                _failDesc = _describeError(error);
               });
             }
           },
@@ -123,7 +123,66 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
     // 去广告：挂 JS 消息通道（必须在 loadRequest **之前** —— 页面一开始跑就可能回传）
     AdBlockService.attach(_controller);
     AdBlockService.instance.ensureLoaded();
-    _controller.loadRequest(Uri.parse(url));
+    _load(widget.url);
+  }
+
+  /// 把 WKWebView 的错误码翻成人话。
+  ///
+  /// 101 = WebKitErrorCannotShowURL：WebKit 直接拒绝显示这个地址
+  /// （不是网络问题，而是链接本身它不认，例如 `txvip://…`、`//host/x`、
+  ///  空白/中文未编码）。用户截图里那条「101 The URL can't be shown」
+  /// 就是它 —— 光看错误码根本不知道该怎么办。
+  static String _describeError(WebResourceError error) {
+    if (error.errorCode == 101) {
+      return '这条线路的链接无法在网页中打开（格式不被支持）';
+    }
+    final desc = error.description.trim();
+    return desc.isEmpty ? '错误码 ${error.errorCode}' : desc;
+  }
+
+  /// 载入前先规范化 URL：补协议、拦掉 WebView 肯定打不开的 scheme。
+  ///
+  /// 社区源的解析结果经常五花八门：`//cdn.x.com/a`、`www.x.com/a`、
+  /// `intent://…`、`txvip://…`。直接 `loadRequest` 会得到 101，
+  /// 与其让用户对着一串错误码发呆，不如先判一下。
+  void _load(String raw) {
+    var url = raw.trim();
+    if (url.isEmpty) {
+      setState(() {
+        _failed = true;
+        _failDesc = '这条线路没有返回播放地址';
+      });
+      return;
+    }
+    // 只有路径没有域名（`/play/123`）：WebView 无从下手，直接说清楚
+    if (url.startsWith('/')) {
+      setState(() {
+        _failed = true;
+        _failDesc = '这条线路只返回了路径，缺少域名：$raw';
+      });
+      return;
+    }
+    if (url.startsWith('//')) url = 'https:$url';
+    if (!url.contains('://')) url = 'https://$url';
+    // 中文 / 空格直接进 path 会被 WebKit 判 101，先做百分号编码
+    if (url.codeUnits.any((c) => c > 127)) {
+      try {
+        url = Uri.encodeFull(url);
+      } catch (_) {}
+    }
+
+    final uri = Uri.tryParse(url);
+    final scheme = uri?.scheme.toLowerCase() ?? '';
+    if (uri == null || (scheme != 'http' && scheme != 'https')) {
+      setState(() {
+        _failed = true;
+        _failDesc = scheme.isEmpty
+            ? '解析出的地址格式不对：$raw'
+            : '不支持的链接类型「$scheme」，请在网页/浏览器里打开';
+      });
+      return;
+    }
+    _controller.loadRequest(uri);
   }
 
   @override
@@ -135,7 +194,7 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
         _loadingProgress = 0;
         _failed = false; // 换集/换线路：复位失败态
       });
-      _controller.loadRequest(Uri.parse(widget.url));
+      _load(widget.url);
     }
   }
 
@@ -232,7 +291,7 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
                                   _failed = false;
                                   _loadingProgress = 0;
                                 });
-                                _controller.loadRequest(Uri.parse(widget.url));
+                                _load(widget.url);
                               },
                               child: const Text('重试'),
                             ),
