@@ -1,7 +1,9 @@
-import 'package:cached_network_image_ce/cached_network_image.dart';
+﻿import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 
 import '../../common/theme.dart';
+import '../../models/cache_store.dart';
 import '../../models/movie.dart';
 import '../../models/movie_sort.dart';
 import '../../models/source_bean.dart';
@@ -45,6 +47,10 @@ class _DramaPageState extends State<DramaPage> {
   List<_DramaGroup> _groups = [];
   int _groupIdx = 0;
   List<String> _keywords = DramaSettings.defaultKeywords;
+
+  /// 短剧源 key 集合（当前聚合到的源 + 设置里勾选的源）：
+  /// 「继续观看」只挑这些源下的记录，避免把普通影视记录混进来
+  final Set<String> _dramaSourceKeys = {};
 
   final List<Video> _videos = [];
   bool _loading = true;
@@ -122,8 +128,15 @@ class _DramaPageState extends State<DramaPage> {
       });
       return;
     }
+    // 设置里勾选的源 + 本次扫描到的源，都算「短剧源」
+    final picked = await DramaSettings.sourceKeys();
+    if (!mounted) return;
     setState(() {
       _groups = found;
+      _dramaSourceKeys
+        ..clear()
+        ..addAll(picked)
+        ..addAll(found.map((g) => g.source.key));
       _groupIdx = 0;
       _scanHint = '';
     });
@@ -306,6 +319,8 @@ class _DramaPageState extends State<DramaPage> {
         controller: _scroll,
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
+          // 「继续观看」：短剧源里看过、且存了进度的记录，点一下直接续播
+          _resumeSliver(isDark),
           // 分组 chips：多个「源 · 分类」时用来切换
           if (_groups.length > 1)
             SliverToBoxAdapter(
@@ -423,9 +438,170 @@ class _DramaPageState extends State<DramaPage> {
     );
   }
 
+  /// 「继续观看」记录：短剧源下、存过播放进度的，按最近观看排序
+  List<VodRecord> _resumeRecords() {
+    final keys = _dramaSourceKeys;
+    if (keys.isEmpty) return const [];
+    final out = <VodRecord>[];
+    for (final r in CacheStore.instance.records) {
+      if (!keys.contains(r.sourceKey)) continue;
+      final st = CacheStore.instance.getPlaybackState(r.vodId, r.sourceKey);
+      if (st == null || st.progressSeconds <= 0) continue;
+      out.add(r);
+    }
+    out.sort((a, b) => b.updateTime.compareTo(a.updateTime));
+    return out.take(12).toList();
+  }
+
+  Widget _resumeSliver(bool isDark) {
+    return Obx(() {
+      final items = _resumeRecords();
+      if (items.isEmpty) {
+        return const SliverToBoxAdapter(child: SizedBox.shrink());
+      }
+      return SliverToBoxAdapter(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+              child: Row(
+                children: [
+                  Icon(Icons.play_circle_fill_rounded,
+                      size: 16, color: AppTheme.accentColor),
+                  const SizedBox(width: 6),
+                  Text(
+                    '继续观看',
+                    style: TextStyle(
+                      fontSize: AppTheme.fontSubhead,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(
+              height: 188,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                itemCount: items.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                itemBuilder: (_, i) => _resumeCard(items[i], isDark),
+              ),
+            ),
+          ],
+        ),
+      );
+    });
+  }
+
+  Widget _resumeCard(VodRecord r, bool isDark) {
+    final st = CacheStore.instance.getPlaybackState(r.vodId, r.sourceKey);
+    final ep = (st?.episodeIndex ?? 0) + 1;
+    final sec = st?.progressSeconds.toInt() ?? 0;
+    final time = sec <= 0
+        ? ''
+        : '${(sec ~/ 60).toString().padLeft(2, '0')}:'
+            '${(sec % 60).toString().padLeft(2, '0')}';
+    final label = time.isEmpty ? '第 $ep 集' : '第 $ep 集 · $time';
+    return GestureDetector(
+      onTap: () => _openResume(r),
+      child: SizedBox(
+        width: 112,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: AspectRatio(
+                aspectRatio: 3 / 4,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (r.vodPic.isEmpty)
+                      _ph(isDark)
+                    else
+                      CachedNetworkImage(
+                        imageUrl: r.vodPic,
+                        fit: BoxFit.cover,
+                        errorWidget: (_, __, ___) => _ph(isDark),
+                      ),
+                    // 压暗 + 播放小标：一眼看出「点了就接着放」
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Color(0x00000000), Color(0x8C000000)],
+                        ),
+                      ),
+                    ),
+                    Center(
+                      child: Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.42),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.7),
+                            width: 1,
+                          ),
+                        ),
+                        child: const Icon(Icons.play_arrow_rounded,
+                            size: 20, color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              r.vodName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: AppTheme.fontFootnote,
+                height: 1.2,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                color: AppTheme.accentColor,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 点「继续观看」：直接进短剧播放页，由它按历史续到上次的集/进度
+  Future<void> _openResume(VodRecord r) async {
+    await DramaEntry.open(Video(
+      id: r.vodId,
+      name: r.vodName,
+      pic: r.vodPic,
+      sourceKey: r.sourceKey,
+    ));
+    if (mounted) setState(() {});
+  }
+
   Widget _card(Video v, bool isDark) {
     return GestureDetector(
-      onTap: () => DramaEntry.openDetail(v),
+      onTap: () async {
+        await DramaEntry.open(v);
+        // 回来刷新「继续观看」：刚看的这部进度变了
+        if (mounted) setState(() {});
+      },
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

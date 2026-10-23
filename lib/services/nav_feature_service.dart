@@ -100,12 +100,9 @@ enum NavFeature {
   /// 图标资源是否用前景色着色（[iconAsset] 对应的图）。
   ///
   /// · 首页图标是**彩色徽标**（七彩花瓣）：着色会把颜色全抹掉 ⇒ 原样显示；
-  /// · 房间图标是彩色气泡插画 ⇒ 同样原样显示（着色会变成灰块）；
-  /// · 其余几张是白色蒙版，必须着色才能与 Material 图标颜色一致。
-  bool get iconAssetTinted =>
-      iconAsset != null &&
-      this != NavFeature.home &&
-      this != NavFeature.room;
+  /// · 其余几张（含房间的两个圆）都是**白色蒙版**：白色圆 alpha 全、
+  ///   内部圆点 alpha 半，着色后颜色跟着主题走，圆点仍看得出层次。
+  bool get iconAssetTinted => iconAsset != null && this != NavFeature.home;
 
   /// 选中图标
   IconData get activeIcon => switch (this) {

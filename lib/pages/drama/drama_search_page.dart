@@ -1,4 +1,4 @@
-import 'package:cached_network_image_ce/cached_network_image.dart';
+﻿import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../common/theme.dart';
@@ -323,7 +323,7 @@ class _DramaSearchPageState extends State<DramaSearchPage> {
 
   Widget _card(Video v) {
     return GestureDetector(
-      onTap: () => DramaEntry.openDetail(v),
+      onTap: () => DramaEntry.open(v),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

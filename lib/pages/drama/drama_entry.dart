@@ -1,30 +1,18 @@
 import 'package:get/get.dart';
 
 import '../../models/movie.dart';
+import 'drama_player_page.dart';
 
-/// 从「短剧」进入详情页的入口标记。
+/// 从「短剧」打开播放的入口。
 ///
-/// 为什么不用 `arguments: {'video': v, 'from': 'drama'}`：
-///   `/detail` 在「TMDB 媒体库模式」下会换成另一个页面，而它（以及详情页）
-///   都只认 `Get.arguments is Video`。改参数结构要同时改两处，容易漏。
-///
-/// 这里用一个**一次性标记**：跳转前置位，详情页 initState 读走并清空。
-/// 单线程顺序执行，不存在被别的跳转"截胡"的问题。
+/// 2026-10-23：不再跳 `/detail`（那会先渲染一屏详情布局再切竖屏，
+/// 用户看到的是「闪一下详情」），直接打开短剧专用播放页 ——
+/// 该页面内部自己取剧集与播放地址，进去就是黑底封面，取到即播。
 class DramaEntry {
   DramaEntry._();
 
-  static bool _pending = false;
-
-  /// 详情页 initState 调用：取出并清空标记
-  static bool consumePending() {
-    final v = _pending;
-    _pending = false;
-    return v;
-  }
-
-  /// 从短剧打开详情（进入后自动切竖屏刷剧模式）
-  static void openDetail(Video v) {
-    _pending = true;
-    Get.toNamed('/detail', arguments: v);
+  /// 返回 Future：调用方 await 之后可以刷新「继续观看」进度
+  static Future<void> open(Video v) async {
+    await Get.to(() => DramaPlayerPage(video: v));
   }
 }

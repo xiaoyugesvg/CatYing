@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 
 import '../common/theme.dart';
 import '../reading/pages/book_source_qr_scan_page.dart';
+import '../services/player_prefs.dart';
 import '../widgets/app_toast.dart';
+import 'rex_layout_sheet.dart';
 import 'rex_models.dart';
 import 'rex_service.dart';
 
@@ -610,17 +612,17 @@ class _RexMarketPageState extends State<RexMarketPage> {
             _sortItem(_SortBy.notAdded, '未添加优先'),
           ],
         ),
-        // 视图切换
+        // 视图：列表 / 2 列 / 3 列
         IconButton(
-          tooltip: _grid ? '切换为列表' : '切换为网格',
+          tooltip: '切换视图',
           padding: EdgeInsets.zero,
           constraints: btn,
           icon: Icon(
-            _grid ? Icons.view_list_rounded : Icons.grid_view_rounded,
+            _grid ? Icons.grid_view_rounded : Icons.view_list_rounded,
             size: 20,
             color: _fg,
           ),
-          onPressed: () => setState(() => _grid = !_grid),
+          onPressed: _openLayout,
         ),
         TextButton(
           style: TextButton.styleFrom(
@@ -681,28 +683,46 @@ class _RexMarketPageState extends State<RexMarketPage> {
       ];
     }
     if (_grid) {
+      // 列数跟着首页的 gridColumns 走（2/3，市场卡片信息多，最多三列）
+      final cols = PlayerPrefs.instance.gridColumns.value.clamp(2, 3);
+      // 3 列时卡片更窄 → 纵向拉高，避免标题/标签被挤掉
+      final ratio = cols == 2 ? 1.22 : 0.86;
       return [
         GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           padding: const EdgeInsets.only(top: 10),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: cols,
             mainAxisSpacing: 10,
             crossAxisSpacing: 10,
-            // 1.22 ≈ 175×143：图标行 + 两行标题 + 作者 + 底部标签刚好放下
-            childAspectRatio: 1.22,
+            childAspectRatio: ratio,
           ),
           itemCount: shown.length,
-          itemBuilder: (_, i) => _gridCell(shown[i]),
+          itemBuilder: (_, i) =>
+              _gridCell(shown[i], compact: cols >= 3),
         ),
       ];
     }
     return [for (final it in shown) _itemTile(it)];
   }
 
-  /// 卡片视图（两列）：图标 + 标题 + 作者 + 底部标签，选中时整卡描边。
-  Widget _gridCell(RexCollectionItem it) {
+  /// 视图面板：列表 / 2 列 / 3 列
+  Future<void> _openLayout() async {
+    final picked = await showRexLayoutSheet(
+      context,
+      listMode: !_grid,
+      maxColumns: 3,
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _grid = picked > 0);
+  }
+
+  /// 卡片视图：图标 + 标题 + 作者 + 底部标签，选中时整卡描边。
+  ///
+  /// [compact] = 3 列模式：卡片更窄，图标缩小、底部只留一个标签
+  /// （版本号和「已添加」并排会横向溢出）。
+  Widget _gridCell(RexCollectionItem it, {bool compact = false}) {
     final on = _selected.contains(it.url);
     final added = _service.hasUrl(it.url);
     // 版本号可能很长（1.0.0-beta+20260101），截断避免撑破卡片
@@ -741,15 +761,15 @@ class _RexMarketPageState extends State<RexMarketPage> {
             Row(
               children: [
                 Container(
-                  width: 34,
-                  height: 34,
+                  width: compact ? 28 : 34,
+                  height: compact ? 28 : 34,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: _accent.withValues(alpha: on ? 0.22 : 0.12),
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(compact ? 8 : 10),
                   ),
                   child: Icon(Icons.extension_rounded,
-                      size: 18, color: _accent),
+                      size: compact ? 15 : 18, color: _accent),
                 ),
                 const Spacer(),
                 _CheckBox(on: on),
@@ -777,10 +797,17 @@ class _RexMarketPageState extends State<RexMarketPage> {
             const Spacer(),
             Row(
               children: [
-                if (ver.isNotEmpty) _pill(ver),
-                if (added) ...[
-                  if (ver.isNotEmpty) const SizedBox(width: 4),
-                  _pill('已添加', accent: true),
+                if (compact)
+                  if (added)
+                    _pill('已添加', accent: true)
+                  else if (ver.isNotEmpty)
+                    _pill(ver),
+                if (!compact) ...[
+                  if (ver.isNotEmpty) _pill(ver),
+                  if (added) ...[
+                    if (ver.isNotEmpty) const SizedBox(width: 4),
+                    _pill('已添加', accent: true),
+                  ],
                 ],
               ],
             ),

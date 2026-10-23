@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../common/theme.dart';
@@ -6,13 +9,14 @@ import '../services/player_prefs.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/vod_card.dart';
 import 'rex_detail_page.dart';
+import 'rex_layout_sheet.dart';
 import 'rex_manage_page.dart';
 import 'rex_market_page.dart';
 import 'rex_models.dart';
 import 'rex_service.dart';
 
 /// 「REX」首页 —— 视觉与交互对齐影视首页：
-///   模块（源）横排 chips → 模块分类 chips → 海报网格（VodCard）
+///   顶栏源切换 + 幻灯片 → 模块分类 chips → 海报网格（VodCard）
 ///
 /// 底栏里的「REX」tab **默认关闭**，在「设置 → 主页页面」里打开。
 /// 导入 / 启停 / 排序 / 改地址 / 删除统一放在「REX 订阅管理」页。
@@ -26,6 +30,11 @@ class RexHomePage extends StatefulWidget {
 class _RexHomePageState extends State<RexHomePage> {
   final _service = RexService.instance;
   final _scroll = ScrollController();
+
+  /// 顶部幻灯片（用当前列表前几条当大图）
+  final _bannerCtrl = PageController(viewportFraction: 0.9);
+  Timer? _bannerTimer;
+  int _bannerIndex = 0;
 
   String? _selectedUrl;
   RexFunction? _fn;
@@ -45,6 +54,18 @@ class _RexHomePageState extends State<RexHomePage> {
     super.initState();
     _scroll.addListener(_onScroll);
     _service.revision.addListener(_onServiceChanged);
+    // 幻灯片自动轮播：内容不够两条时自动跳过
+    _bannerTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!mounted || !_bannerCtrl.hasClients) return;
+      final count = _bannerCount;
+      if (count < 2) return;
+      final next = (_bannerIndex + 1) % count;
+      _bannerCtrl.animateToPage(
+        next,
+        duration: const Duration(milliseconds: 380),
+        curve: Curves.easeOutCubic,
+      );
+    });
     _service.load().then((_) {
       if (!mounted) return;
       _ensureSelection();
@@ -56,9 +77,14 @@ class _RexHomePageState extends State<RexHomePage> {
   void dispose() {
     _scroll.removeListener(_onScroll);
     _service.revision.removeListener(_onServiceChanged);
+    _bannerTimer?.cancel();
+    _bannerCtrl.dispose();
     _scroll.dispose();
     super.dispose();
   }
+
+  /// 幻灯片最多 6 张
+  int get _bannerCount => _items.length < 6 ? _items.length : 6;
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
   Color get _fg => _isDark ? Colors.white : AppTheme.textPrimary;
@@ -124,7 +150,10 @@ class _RexHomePageState extends State<RexHomePage> {
       // ⚠️ 必须一起复位：否则上一个模块的请求在途时切到"没有分类函数"的模块，
       //    _fetch 会在早退分支直接 return，_loading 永远停在 true → 永久转圈。
       _loading = false;
+      // 换模块/换分类：幻灯片回到第一张
+      _bannerIndex = 0;
     });
+    if (_bannerCtrl.hasClients) _bannerCtrl.jumpToPage(0);
     await _fetch(seq: _seq);
   }
 
@@ -201,35 +230,101 @@ class _RexHomePageState extends State<RexHomePage> {
     _reload();
   }
 
+  /// 幻灯片是否显示：搜索中不显示，内容不足两条也没有
+  bool get _bannerVisible => _keyword.isEmpty && _bannerCount >= 2;
+
+  /// 幻灯片是否「从屏幕顶部开始」：此时内容延伸到状态栏/顶栏下面，
+  /// 顶栏只做浮层 —— 必须保证源切换按钮还是能看清（见 _buildAppBar）
+  bool get _bannerBleed => _modules.isNotEmpty && _bannerVisible;
+
   @override
   Widget build(BuildContext context) {
+    final bleed = _bannerBleed;
+    // 幻灯片压到顶栏下面时，顶栏文字一律用白色（图片上可读），
+    // 没有幻灯片时沿用主题前景色。
+    final headerFg = bleed ? Colors.white : _fg;
     return Scaffold(
       backgroundColor: Colors.transparent,
+      // 幻灯片从屏幕最顶部开始（含状态栏区域），顶栏浮在它上面
+      extendBodyBehindAppBar: bleed,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        centerTitle: true,
-        title: Text('REX',
-            style: TextStyle(
-                fontSize: AppTheme.fontHeadline,
-                fontWeight: FontWeight.w600,
-                color: _fg)),
+        centerTitle: false,
+        titleSpacing: 8,
+        // 顶栏底色：一条从上到下的黑→透明渐变，保证文字压在图片上仍可读，
+        // 也避免滚动时内容从文字背后穿过去看不清
+        flexibleSpace: bleed
+            ? const IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Color(0x8C000000), Color(0x00000000)],
+                    ),
+                  ),
+                ),
+              )
+            : null,
+        // 左上角：源（模块）切换 —— 与影视首页同一个交互：点名称弹面板
+        title: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: _openModuleSheet,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.extension_rounded,
+                  size: 17,
+                  color: bleed ? Colors.white : AppTheme.accentColor),
+              const SizedBox(width: 6),
+              // Flexible：模块名过长 / 窄屏 + 多个 action 时自动省略，
+              // 不把 AppBar 顶成黄黑溢出条
+              Flexible(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 150),
+                  child: Text(
+                    _module?.title ?? '选择模块',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: AppTheme.fontHeadline,
+                        fontWeight: FontWeight.w600,
+                        color: headerFg,
+                        shadows: bleed
+                            ? const [
+                                Shadow(blurRadius: 6, color: Colors.black54)
+                              ]
+                            : null),
+                  ),
+                ),
+              ),
+              Icon(Icons.arrow_drop_down_rounded,
+                  size: 20, color: bleed ? Colors.white70 : _sub),
+            ],
+          ),
+        ),
         actions: [
+          IconButton(
+            tooltip: '切换布局',
+            icon: Icon(Icons.grid_view_rounded, color: headerFg),
+            onPressed: _openLayout,
+          ),
           if (_module?.canSearch == true)
             IconButton(
               tooltip: '搜索',
-              icon: Icon(Icons.search, color: _fg),
+              icon: Icon(Icons.search, color: headerFg),
               onPressed: _showSearch,
             ),
           IconButton(
             tooltip: 'REX 订阅管理',
-            icon: Icon(Icons.tune_rounded, color: _fg),
+            icon: Icon(Icons.tune_rounded, color: headerFg),
             onPressed: _openManage,
           ),
           IconButton(
             tooltip: 'REX 市场',
-            icon: Icon(Icons.storefront_rounded, color: _fg),
+            icon: Icon(Icons.storefront_rounded, color: headerFg),
             onPressed: _openMarket,
           ),
           const SizedBox(width: 4),
@@ -259,8 +354,8 @@ class _RexHomePageState extends State<RexHomePage> {
             controller: _scroll,
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
-              if (_modules.length > 1)
-                SliverToBoxAdapter(child: _moduleChips()),
+              // 顶部幻灯片：用当前列表前几条当大图轮播
+              if (_keyword.isEmpty) _bannerSliver(),
               if (fns.isNotEmpty)
                 SliverToBoxAdapter(child: _functionChips(fns)),
               if (_keyword.isNotEmpty)
@@ -297,57 +392,243 @@ class _RexHomePageState extends State<RexHomePage> {
     );
   }
 
-  Widget _moduleChips() {
-    final list = _modules;
-    return SizedBox(
-      height: 42,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
-        itemCount: list.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (context, i) {
-          final m = list[i];
-          final active = m.url == _module?.url;
-          return GestureDetector(
-            onTap: () => _selectModule(m),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
-              decoration: BoxDecoration(
-                color: active
-                    ? AppTheme.accentColor.withValues(alpha: 0.16)
-                    : (_isDark
-                        ? Colors.white.withValues(alpha: 0.06)
-                        : Colors.black.withValues(alpha: 0.04)),
-                borderRadius: BorderRadius.circular(9),
-                border: Border.all(
-                    color: active
-                        ? AppTheme.accentColor.withValues(alpha: 0.45)
-                        : Colors.transparent,
-                    width: 0.8),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.extension_rounded,
-                      size: 13,
-                      color: active ? AppTheme.accentColor : _sub),
-                  const SizedBox(width: 5),
-                  Text(
-                    m.title,
-                    style: TextStyle(
-                        color: active ? AppTheme.accentColor : _sub,
-                        fontSize: AppTheme.fontSubhead,
-                        fontWeight:
-                            active ? FontWeight.w600 : FontWeight.w400),
+  /// 顶部幻灯片：取当前列表前 6 条，自动轮播 + 指示点。
+  ///
+  /// REX 模块没有统一的「首页推荐」接口（各家 loadHome 形状不一），
+  /// 所以直接用列表前几条当大图 —— 影视首页的幻灯片本质上也是这么来的。
+  Widget _bannerSliver() {
+    final count = _bannerCount;
+    if (count < 2 || _keyword.isNotEmpty) {
+      return const SliverToBoxAdapter(child: SizedBox.shrink());
+    }
+    final slides = _items.take(count).toList();
+    // 「从顶部开始」：图片铺到屏幕最上沿（含状态栏 + 顶栏那一截），
+    // 顶栏浮在图片上面，所以这里的高度要把它们算进来 ——
+    // 否则图片只是从顶栏下面才开始，看起来仍然"没到顶"。
+    final bleed = _bannerBleed;
+    final topInset =
+        bleed ? MediaQuery.of(context).padding.top + kToolbarHeight : 0.0;
+    final cardRadius = bleed
+        ? const BorderRadius.vertical(bottom: Radius.circular(18))
+        : BorderRadius.circular(AppTheme.glassRadiusCard);
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Column(
+          children: [
+            SizedBox(
+              height: 172 + topInset,
+              child: PageView.builder(
+                controller: _bannerCtrl,
+                itemCount: slides.length,
+                onPageChanged: (i) => setState(() => _bannerIndex = i),
+                itemBuilder: (_, i) => Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 5),
+                  child: GestureDetector(
+                    onTap: () => _openItem(slides[i]),
+                    child: ClipRRect(
+                      borderRadius: cardRadius,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          if (slides[i].cover.isNotEmpty)
+                            CachedNetworkImage(
+                              imageUrl: slides[i].cover,
+                              fit: BoxFit.cover,
+                              errorWidget: (_, __, ___) => ColoredBox(
+                                  color: AppTheme.backgroundTertiary),
+                            )
+                          else
+                            ColoredBox(color: AppTheme.backgroundTertiary),
+                          const DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Color(0x22000000),
+                                  Color(0xCC000000),
+                                ],
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            left: 14,
+                            right: 14,
+                            bottom: 12,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  slides[i].title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: AppTheme.fontHeadline,
+                                    fontWeight: FontWeight.w700,
+                                    shadows: [
+                                      Shadow(
+                                          blurRadius: 6,
+                                          color: Colors.black87)
+                                    ],
+                                  ),
+                                ),
+                                if (slides[i].description.isNotEmpty) ...[
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    slides[i].description,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.78),
+                                      fontSize: AppTheme.fontCaption,
+                                      shadows: const [
+                                        Shadow(
+                                            blurRadius: 5,
+                                            color: Colors.black87)
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ],
+                ),
               ),
             ),
-          );
-        },
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                for (var i = 0; i < slides.length; i++)
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: i == _bannerIndex ? 14 : 5,
+                    height: 5,
+                    margin: const EdgeInsets.symmetric(horizontal: 2.5),
+                    decoration: BoxDecoration(
+                      color: i == _bannerIndex
+                          ? AppTheme.accentColor
+                          : _sub.withValues(alpha: 0.35),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+  /// 源（模块）切换面板 —— 顶栏左上角那个名字点开就是它
+  Future<void> _openModuleSheet() async {
+    final list = _modules;
+    if (list.isEmpty) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.62),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Row(
+                  children: [
+                    Text('切换模块',
+                        style: TextStyle(
+                            color: _fg,
+                            fontSize: AppTheme.fontHeadline,
+                            fontWeight: FontWeight.w600)),
+                    const Spacer(),
+                    Text('${list.length} 个',
+                        style: TextStyle(
+                            color: _sub, fontSize: AppTheme.fontCaption)),
+                  ],
+                ),
+              ),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.only(bottom: 12),
+                  itemCount: list.length,
+                  itemBuilder: (_, i) {
+                    final m = list[i];
+                    final on = m.url == _module?.url;
+                    return ListTile(
+                      dense: true,
+                      leading: Icon(
+                        on
+                            ? Icons.check_circle_rounded
+                            : Icons.radio_button_unchecked,
+                        size: 18,
+                        color: on ? AppTheme.accentColor : _sub,
+                      ),
+                      title: Text(
+                        m.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            color: on ? AppTheme.accentColor : _fg,
+                            fontSize: AppTheme.fontSubhead,
+                            fontWeight:
+                                on ? FontWeight.w600 : FontWeight.w400),
+                      ),
+                      subtitle: m.description.isEmpty
+                          ? null
+                          : Text(
+                              m.description,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  color: _sub,
+                                  fontSize: AppTheme.fontCaption),
+                            ),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _selectModule(m);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 切换布局：2 / 3 / 4 列
+  Future<void> _openLayout() async {
+    final picked =
+        await showRexLayoutSheet(context, listMode: false, allowList: false);
+    if (picked == null || !mounted) return;
+    setState(() {});
+  }
+
+  void _openItem(RexItem item) {
+    final m = _module;
+    if (m == null) return;
+    Navigator.of(context).push(MaterialPageRoute(
+      settings: const RouteSettings(name: 'rex:detail'),
+      builder: (_) => RexDetailPage(module: m, item: item),
+    ));
   }
 
   Widget _functionChips(List<RexFunction> fns) {

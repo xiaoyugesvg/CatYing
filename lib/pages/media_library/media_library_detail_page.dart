@@ -8,7 +8,6 @@ import 'dart:ui' as ui;
 
 import '../../common/theme.dart';
 import '../../models/cache_store.dart';
-import '../drama/drama_entry.dart';
 import '../../models/movie.dart';
 import '../../models/vod_info.dart';
 import '../../pages/detail/controller.dart';
@@ -239,10 +238,6 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
   @override
   void initState() {
     super.initState();
-    // 短剧入口的「进竖屏模式」标记在这里消费掉：
-    // 媒体库模式的详情页不支持竖屏刷剧，但标记若不清空会泄漏到下一次
-    // 普通进入（那部片会莫名其妙竖屏）。
-    DramaEntry.consumePending();
     _selectedIndex = _controller.selectedEpisodeIndex.value;
     // 收藏状态（主路径）
     final video = Get.arguments;

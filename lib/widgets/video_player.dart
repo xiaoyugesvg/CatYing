@@ -84,6 +84,13 @@ class VideoPlayerWidget extends StatefulWidget {
   /// 只在本实例首次构建时执行一次（换集重建不会重复锁屏）。
   final bool initialDramaMode;
 
+  /// 点「短」按钮时的外部处理（传了就不走内置的竖屏模式）。
+  ///
+  /// 2026-10-23：**只有普通影视详情页传** —— 它跳短剧专用页
+  /// `DramaPlayerPage`（抖音式右侧栏），与短剧 tab 进去的完全一致。
+  /// 媒体库详情页 / 媒体库播放器**不传**，继续用它自己那套竖屏 UI。
+  final VoidCallback? onEnterDramaMode;
+
   /// 初始画面比例（null 默认 contain"自动"）。
   /// 详情页传入 cover，让 16:9 视频铺满 4:3 容器，画面与黑框完全一致
   /// （修复"播放器画面比黑框小、上下留黑边"的问题）。
@@ -158,6 +165,7 @@ class VideoPlayerWidget extends StatefulWidget {
     this.isPipMode = false,
     this.showAudioModeButton = false,
     this.initialDramaMode = false,
+    this.onEnterDramaMode,
     this.initialVideoFit,
     this.skipIntroSeconds = 0,
     this.skipOutroSeconds = 0,
@@ -1029,21 +1037,22 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           ),
         ),
         const SizedBox(width: 10),
-        Icon(
-          stateName == 'charging'
-              ? Icons.battery_charging_full
-              : _batteryLevel > 80
-              ? Icons.battery_full
-              : _batteryLevel > 50
-              ? Icons.battery_5_bar
-              : _batteryLevel > 20
-              ? Icons.battery_3_bar
-              : Icons.battery_1_bar,
-          color: Colors.white,
-          size: 16,
-          shadows: const [
-            Shadow(blurRadius: 4, color: Colors.black87),
-          ],
+        // Material 只有竖向电池；顺时针转 90° 变成横向（正极朝右，与 iOS 状态栏一致）
+        RotatedBox(
+          quarterTurns: 1,
+          child: Icon(
+            stateName == 'charging'
+                ? Icons.battery_charging_full
+                : _batteryLevel > 80
+                ? Icons.battery_full
+                : _batteryLevel > 50
+                ? Icons.battery_5_bar
+                : _batteryLevel > 20
+                ? Icons.battery_3_bar
+                : Icons.battery_1_bar,
+            color: Colors.white,
+            size: 15,
+          ),
         ),
         const SizedBox(width: 2),
         Text(
@@ -2003,18 +2012,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   /// 「始终显示网速」的展示文案。
   ///
-  /// 说明：本项目在 iOS 上走 IosAvPlayer（共享原生 AVPlayer），
-  /// 底层没有暴露实时下载带宽，**不能**凭空编一个 MB/s 数字。
-  /// 这里改用播放器**确实拥有**的指标 —— 已缓冲提前量（秒）——
-  /// 它同样是"网络够不够快"的真实信号：数字掉到 1~2 秒就说明要卡了。
+  /// 🔴 2026-10-23 修：原来写的是 `_duration - _position` 当"已缓冲提前量"，
+  /// 那是**剩余时长**——一部两小时的片子会显示「缓冲 7752s」，完全不成立。
+  /// `AppPlayerStateView` 只暴露 playing/buffering/position/duration，
+  /// iOS 的 AVPlayer 也没把 loadedTimeRanges 接出来，拿不到真实缓冲位置。
+  /// 所以这里只如实反映"是不是在缓冲"，不再编一个秒数。
   String get _netSpeedText {
-    final bufferedAhead = _duration - _position;
-    if (_duration <= Duration.zero || bufferedAhead <= Duration.zero) {
-      return '';
-    }
-    final sec = bufferedAhead.inSeconds;
-    // 提前量很小说明网络吃紧，用更醒目的颜色语义（此处只回文案）
-    return '缓冲 ${sec}s';
+    return _player.state.buffering ? '缓冲中…' : '';
   }
 
   void _updateResolutionFromTrack() {
@@ -2200,96 +2204,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     widget.onFullScreenChanged?.call(false);
     // 直播同款：SystemUiController.exit 还原进入前方向/系统栏
     await SystemUiController.exit('videoDrama');
-    try {
-      if (!_player.state.playing) {
-        await AudioFocus.request(_focusKey);
-        await _player.play();
-      }
-    } catch (e) {
-      AppLog.instance.log('[video_player] swallowed: $e');
-    }
-  }
-
-  /// 抖音模式切换（点「抖」进入/退出）
-  Future<void> _toggleDouyinMode() async {
-    if (VideoPlayerPip.instance.isActive) {
-      await VideoPlayerPip.instance.exit();
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-    }
-    if (_douyinMode) {
-      await _exitDouyinMode();
-    } else {
-      await _enterDouyinMode();
-    }
-  }
-
-  /// 进入抖音模式：锁竖屏 + immersive 全屏（与直播播放器同款轻量实现）。
-  /// 画面按当前画幅比例居中（横视频上下黑边），与短剧模式互斥。
-  /// 区别：抖音模式右侧有竖排切换胶囊（↟ 上一集/⏩/↡ 下一集），
-  /// 短剧模式只有中间滑动切集。
-  Future<void> _enterDouyinMode() async {
-    AppLog.instance.log('=== _enterDouyinMode: start ===');
-    // 若正处于横屏全屏，先退出还原方向，避免方向锁冲突
-    if (WindowFullScreen.instance.isActive || _isImmersive) {
-      await _exitFullScreen();
-    }
-    _dramaMode = false;
-    if (mounted) {
-      setState(() {
-        _douyinMode = true;
-        _isImmersive = true;
-        _isNativeFullscreen = true;
-        _persisted.isImmersive = true;
-        _persisted.isNativeFullscreen = true;
-      });
-    } else {
-      _douyinMode = true;
-      _isImmersive = true;
-      _isNativeFullscreen = true;
-      _persisted.isImmersive = true;
-      _persisted.isNativeFullscreen = true;
-    }
-    widget.onFullScreenChanged?.call(true);
-    // 直播同款：SystemUiController 沉浸 + 锁竖屏
-    await SystemUiController.enter(
-      'videoDouyin',
-      mode: SystemUiMode.immersiveSticky,
-      orientations: Platform.isIOS
-          ? const [DeviceOrientation.portraitUp]
-          : null,
-      overlayStyle: SystemUiOverlayStyle.light,
-    );
-    try {
-      if (!_player.state.playing) {
-        await AudioFocus.request(_focusKey);
-        await _player.play();
-      }
-    } catch (e) {
-      AppLog.instance.log('[video_player] swallowed: $e');
-    }
-  }
-
-  Future<void> _exitDouyinMode() async {
-    AppLog.instance.log('=== _exitDouyinMode: start ===');
-    // 同 _exitDramaMode：先同步清模式刷新，再异步还原系统栏/方向
-    if (mounted) {
-      setState(() {
-        _douyinMode = false;
-        _isImmersive = false;
-        _isNativeFullscreen = false;
-        _persisted.isImmersive = false;
-        _persisted.isNativeFullscreen = false;
-      });
-    } else {
-      _douyinMode = false;
-      _isImmersive = false;
-      _isNativeFullscreen = false;
-      _persisted.isImmersive = false;
-      _persisted.isNativeFullscreen = false;
-    }
-    widget.onFullScreenChanged?.call(false);
-    // 直播同款：SystemUiController.exit 还原进入前方向/系统栏
-    await SystemUiController.exit('videoDouyin');
     try {
       if (!_player.state.playing) {
         await AudioFocus.request(_focusKey);
@@ -3451,30 +3365,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               onTap: _handleHeaderBack,
             ),
 
-            // 网速/缓冲状态：紧跟返回键右侧（用户要求）
-            if (_alwaysShowSpeed && _netSpeedText.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(left: 8, right: 6),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.network_check,
-                      size: 12,
-                      color: Colors.white.withValues(alpha: 0.7),
-                    ),
-                    const SizedBox(width: 3),
-                    Text(
-                      _netSpeedText,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.8),
-                        fontSize: AppTheme.fontCaption,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+            // 网速/缓冲状态已移到底栏（进度条右侧）——
+            // 顶栏只留返回与功能按钮，竖屏短剧/全屏看电影都不挡画面。
 
             const Spacer(),
 
@@ -3489,13 +3381,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
             // 弹幕开关已移到**底部功能栏**（见 _buildBottomControls）
 
-            // 画中画
-            _iconButton(
-              icon: Icons.picture_in_picture_alt,
-              size: 20,
-              width: 36,
-              onTap: () => _safeTap(_togglePiP),
-            ),
+            // 画中画已移到底栏（与播放控制放在一起，顶栏不再堆图标）
 
             // 投屏（AirPlay / DLNA 入口）
             _iconButton(
@@ -3520,7 +3406,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
             if (_isNativeFullscreen) ...[
               const SizedBox(width: 4),
-              _buildStatusBarInfo(),
             ],
 
             // 设置
@@ -3625,6 +3510,27 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            // 时钟 / 电量 / 缓冲：放在音量按钮**左边**（用户 2026-10-23），
+                            // 顶栏不再显示这些，画面更干净。
+                            if (_isNativeFullscreen) ...[
+                              if (_alwaysShowSpeed && _netSpeedText.isNotEmpty) ...[
+                                Icon(Icons.network_check,
+                                    size: 12,
+                                    color: Colors.white.withValues(alpha: 0.7)),
+                                const SizedBox(width: 3),
+                                Text(
+                                  _netSpeedText,
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.8),
+                                    fontSize: AppTheme.fontCaption,
+                                    fontFamily: 'monospace',
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                              ],
+                              _buildStatusBarInfo(),
+                              const SizedBox(width: 4),
+                            ],
                             _iconButton(
                               icon: _volume > 0
                                   ? (_volume < 0.33
@@ -3672,8 +3578,16 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                             // 弹幕开关 / 播放器核心切换：**2026-10-14 已移到顶栏**
                             // （见 `_buildHeaderBar` 里对应说明）。
                             // 短剧模式：纯竖屏全屏
+                            // （「抖」按钮已移除：普通影视用不到竖屏刷剧，
+                            //   短剧改用独立的 DramaPlayerPage 整页翻动）
                             _dramaModeButton(),
-                            _douyinModeButton(),
+                            // 画中画：从顶栏移到这里（和播放控制放一起更顺手）
+                            _iconButton(
+                              icon: Icons.picture_in_picture_alt,
+                              size: 22,
+                              width: 36,
+                              onTap: () => _safeTap(_togglePiP),
+                            ),
                             // 播放设置入口仅保留标题栏右上角「…」，底部不放齿轮
                             _iconButton(
                               icon: _isNativeFullscreen
@@ -5605,52 +5519,16 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             ),
         ],
       ),
-      onTap: () => _safeTap(() => _toggleDramaMode()),
-    );
-  }
-
-  /// 抖音模式按钮 —— 与「短」同款：圆角方块内一个「抖」字，
-  /// 开启时右下角带对勾角标。点击进入**纯竖屏全屏 + 右侧切换胶囊**
-  /// （↟ 上一集 / ⏩ / ↡ 下一集，抖音风格），再点退出。
-  Widget _douyinModeButton() {
-    return _iconButton(
-      icon: Icons.smart_display,
-      size: 20,
-      width: 38,
-      child: Stack(
-        clipBehavior: Clip.none,
-        alignment: Alignment.center,
-        children: [
-          Text(
-            '抖',
-            style: TextStyle(
-              color: _douyinMode
-                  ? Colors.white
-                  : Colors.white.withValues(alpha: 0.72),
-              fontSize: AppTheme.fontHeadline,
-              fontWeight: FontWeight.w600,
-              height: 1.0,
-            ),
-          ),
-          // 开启角标：对勾（与「短」一致）
-          if (_douyinMode)
-            Positioned(
-              right: -2,
-              bottom: -2,
-              child: Container(
-                width: 13,
-                height: 13,
-                decoration: BoxDecoration(
-                  color: AppTheme.accentColor,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.black54, width: 1),
-                ),
-                child: const Icon(Icons.check, size: 9, color: Colors.white),
-              ),
-            ),
-        ],
-      ),
-      onTap: () => _safeTap(() => _toggleDouyinMode()),
+      onTap: () => _safeTap(() {
+        // 普通影视详情页传了外部处理 → 跳短剧专用页；
+        // 其它页面（媒体库等）没传 → 继续用这里的竖屏模式
+        final ext = widget.onEnterDramaMode;
+        if (ext != null) {
+          ext();
+          return;
+        }
+        _toggleDramaMode();
+      }),
     );
   }
 

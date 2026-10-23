@@ -30,8 +30,8 @@ import '../../widgets/ks_player.dart';
 import '../../widgets/mpv_app_player.dart';
 import '../../widgets/video_player.dart';
 import '../../widgets/video_player_pip.dart';
-import '../drama/drama_entry.dart';
 import '../../widgets/window_fullscreen.dart';
+import '../drama/drama_player_page.dart';
 import '../play/webview_player_page.dart';
 import '../search/controller.dart' show TvSearchController;
 import 'controller.dart';
@@ -81,9 +81,6 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   bool _isDescriptionExpanded = false;
-
-  /// 本次是从「短剧」进来的（播放在首帧后自动切竖屏刷剧模式）
-  final bool _fromDrama = DramaEntry.consumePending();
 
   /// 已为哪个关键词跑过快搜：切换 tab 不重复请求，除非用户点了别的关键词
   String? _quickSearchDoneFor;
@@ -193,15 +190,6 @@ class _DetailPageState extends State<DetailPage> {
     LiveService.pauseLivePlayer?.call();
     _loadPrefs();
     _loadDetailIfNeeded();
-    // 从短剧进来的：首帧就切全屏 —— 否则会先看到详情页布局一两秒，
-    // 等播放器拿到地址后才跳成竖屏，观感是"闪一下"。
-    if (_fromDrama) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && !_controller.isFullScreen.value) {
-          _onFullScreenChanged(true);
-        }
-      });
-    }
     // 监听 PiP 状态变化，确保退出 PiP 时退出全屏（互斥）
     VideoPlayerPip.instance.activeNotifier.addListener(_onPipChanged);
     // 监听 WindowFullScreen 状态变化：作为冗余同步通道，
@@ -1097,14 +1085,14 @@ class _DetailPageState extends State<DetailPage> {
       canPlayPrevious: _controller.selectedEpisodeIndex.value > 0,
       isPipMode: isPip,
       showAudioModeButton: true,
-      // 从短剧点进来的：直接进竖屏刷剧模式（上下滑切集）
-      initialDramaMode: _fromDrama,
       // 播放设置弹窗限高到播放器高度，避免盖住下方 tab 栏
       sheetMaxHeight: _playerSheetMaxHeight(context),
       skipIntroSeconds: _controller.skipIntroSeconds.value,
       skipOutroSeconds: _controller.skipOutroSeconds.value,
       onPlayNext: () => _playNextEpisode(),
       onPlayPrevious: () => _playPreviousEpisode(),
+      // 「短」按钮：跳到短剧专用页（媒体库等页面不传，用自己的竖屏 UI）
+      onEnterDramaMode: _openDramaPlayer,
       // 抖音模式：无剧集（电影）时的上/下一部电影（走推荐队列）
       onDramaNextMovie: () => _switchMovieInQueue(delta: 1),
       onDramaPrevMovie: () => _switchMovieInQueue(delta: -1),
@@ -2591,6 +2579,43 @@ class _DetailPageState extends State<DetailPage> {
     if (moved) {
       _saveHistoryForCurrentEpisode();
     }
+  }
+
+  /// 播放器「短」按钮：跳到短剧专用页（与短剧 tab 进去的 UI 完全一致）。
+  /// 媒体库详情页 / 媒体库播放器不传这个回调，继续用它们自己的竖屏 UI。
+  Future<void> _openDramaPlayer() async {
+    final info = _controller.vodInfo.value;
+    if (info == null) return;
+    final p = _player;
+    final resumeAt = p?.state.position ?? Duration.zero;
+    p?.pause();
+    await Get.to(() => DramaPlayerPage(
+          video: Video(
+            id: info.id,
+            name: info.name,
+            pic: info.pic,
+            des: info.des,
+            sourceKey: info.sourceKey,
+          ),
+          initialIndex: _controller.selectedEpisodeIndex.value,
+          // 从播放器点进来的：就留在当前这一集，别按历史跳到别的集
+          startFromHistory: false,
+        ));
+    if (!mounted) return;
+    // ⚠️ iOS 的 AVPlayer / KSPlayer 是**全进程共用一个原生播放器**：
+    //    短剧页 open() 时已经把原生实例接管了，返回后本页手上的实例
+    //    指向的还是短剧那一集（画面/进度全错）。
+    //    这里用原地址 + 离开前的进度重新 open 一次，把播放器拿回来。
+    final url = _controller.playUrl.value;
+    final self = _player;
+    if (self == null || url == null || url.isEmpty) return;
+    final headers = _controller.playHeaders;
+    self.open(AppMedia(
+      url,
+      httpHeaders:
+          headers.isEmpty ? null : Map<String, String>.from(headers),
+      start: resumeAt,
+    ));
   }
 
   /// 抖音模式：电影无剧集可切时，从推荐队列切上一部/下一部电影。

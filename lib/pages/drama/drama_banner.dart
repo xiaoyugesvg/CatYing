@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -128,7 +128,7 @@ class _DramaBannerState extends State<DramaBanner> {
       padding: const EdgeInsets.symmetric(horizontal: 5),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: () => DramaEntry.openDetail(v),
+        onTap: () => DramaEntry.open(v),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(16),
           child: Stack(
