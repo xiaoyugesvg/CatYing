@@ -184,7 +184,7 @@ class RexService {
       );
       return res.data ?? '';
     } catch (e) {
-      throw RexException('拉取失败：${_short(e)}');
+      throw RexException('拉取失败：${_shortNet(e)}');
     }
   }
 
@@ -505,6 +505,42 @@ class RexService {
     } catch (e) {
       throw RexException(_short(e));
     }
+  }
+
+  /// **外网**请求的错误翻译（集合/模块地址直连）。
+  ///
+  /// 🔴 不能复用 [_short]：那是给 localhost Node 桥写的，外网失败被翻成
+  /// 「连不上后台服务（Node 可能正在启动）」会完全误导 —— 用户截图里的
+  /// 真实失败就是设备直连 workers.dev 被 DNS 阻断，跟 Node 毫无关系。
+  static String _shortNet(Object e) {
+    if (e is DioException) {
+      switch (e.type) {
+        case DioExceptionType.connectionTimeout:
+        case DioExceptionType.sendTimeout:
+        case DioExceptionType.receiveTimeout:
+          return '请求超时，检查网络后重试';
+        case DioExceptionType.connectionError:
+          // e.error 里通常带着 SocketException 的具体原因
+          final raw = '${e.error ?? e.message ?? ''}';
+          if (raw.contains('Failed host lookup') ||
+              raw.contains('No address associated')) {
+            return '域名解析失败（站点可能被阻断，换个网络或稍后再试）';
+          }
+          if (raw.contains('refused')) return '连接被拒绝（站点可能已下线）';
+          if (raw.contains('reset')) return '连接被重置（站点可能被阻断，换个网络试试）';
+          return '网络连接失败（检查网络，或确认地址没过期）';
+        case DioExceptionType.badResponse:
+          return '站点返回 HTTP ${e.response?.statusCode ?? '?'}';
+        case DioExceptionType.badCertificate:
+          return '证书校验失败（站点证书异常）';
+        case DioExceptionType.cancel:
+          return '请求已取消';
+        default:
+          return '请求失败：${e.type.name}';
+      }
+    }
+    final s = '$e';
+    return s.length > 160 ? '${s.substring(0, 160)}…' : s;
   }
 
   static String _short(Object e) {

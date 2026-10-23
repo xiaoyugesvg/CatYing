@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../common/theme.dart';
 import '../widgets/app_toast.dart';
@@ -219,7 +220,11 @@ class _RexManagePageState extends State<RexManagePage> {
 
   Widget _card(RexModule m, {required int onIndex, required int onTotal}) {
     final host = Uri.tryParse(m.url)?.host ?? m.url;
-    return Container(
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      // 长按 → 快捷操作（卸载 / 分享 / 刷新…），比一个个点小箭头快
+      onLongPress: _busy ? null : () => _quickActions(m),
+      child: Container(
       margin: const EdgeInsets.only(top: 8),
       padding: const EdgeInsets.fromLTRB(12, 11, 6, 6),
       decoration: BoxDecoration(
@@ -306,8 +311,89 @@ class _RexManagePageState extends State<RexManagePage> {
           ),
         ],
       ),
+      ),
     );
   }
+
+  /// 长按卡片 → 快捷操作面板。
+  ///
+  /// 用户 2026-10-23：「长按可以卸载、分享」。分享 = 把模块地址复制到
+  /// 剪贴板（社区里分享 REX 模块就是分享它的 raw 地址）。
+  void _quickActions(RexModule m) {
+    HapticFeedback.mediumImpact();
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final dark = Theme.of(ctx).brightness == Brightness.dark;
+        final fg = dark ? Colors.white : AppTheme.textPrimary;
+        final sub = dark ? Colors.white60 : Colors.black54;
+        return Container(
+          decoration: BoxDecoration(
+            color: dark ? const Color(0xFF1C1C1E) : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: sub.withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(m.title.isEmpty ? 'REX 模块' : m.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: fg,
+                        fontSize: AppTheme.fontHeadline,
+                        fontWeight: FontWeight.w700)),
+                const SizedBox(height: 2),
+                Text(m.url,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: sub, fontSize: AppTheme.fontCaption)),
+                const SizedBox(height: 8),
+                _action(ctx, Icons.ios_share_rounded, '分享（复制地址）', fg, () {
+                  Clipboard.setData(ClipboardData(text: m.url));
+                  AppToast.show('地址已复制', m.url);
+                }),
+                _action(ctx, Icons.sync_rounded, '刷新元数据', fg, () {
+                  _refreshOne(m);
+                }),
+                _action(ctx, Icons.delete_outline_rounded, '卸载模块',
+                    Colors.redAccent, () {
+                  _confirmRemove(m);
+                }),
+                const SizedBox(height: 6),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _action(BuildContext ctx, IconData icon, String label, Color color,
+          VoidCallback onTap) =>
+      ListTile(
+        dense: true,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        leading: Icon(icon, size: 19, color: color),
+        title: Text(label,
+            style: TextStyle(color: color, fontSize: AppTheme.fontSubhead)),
+        onTap: () {
+          Navigator.pop(ctx);
+          onTap();
+        },
+      );
 
   Widget _chip(String text, {bool accent = false}) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),

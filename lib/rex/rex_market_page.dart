@@ -13,6 +13,9 @@ import 'rex_service.dart';
 ///   2. 只加载勾选的模块（4 路并发 + 进度条 + 单项超时）。
 ///
 /// 这样坏模块不会拖死整批，也不会出现「点了导入什么反应都没有」。
+///
+/// ⚠️ 不内置任何集合地址（用户 2026-10-23：「不要内置」）——
+///    地址一律由用户粘贴，避免内置源失效后变成甩不掉的死链。
 class RexMarketPage extends StatefulWidget {
   const RexMarketPage({super.key});
 
@@ -20,19 +23,8 @@ class RexMarketPage extends StatefulWidget {
   State<RexMarketPage> createState() => _RexMarketPageState();
 }
 
-class _Preset {
-  const _Preset(this.name, this.url);
-  final String name;
-  final String url;
-}
-
-/// 内置推荐集合。都是公开的 REX 合集索引（`.rex`），不是内置内容。
-const _presets = <_Preset>[
-  _Preset('花花（rextv）',
-      'https://rextv.huagit.workers.dev/api/collections/花花.rex'),
-  _Preset('花花（huamu）',
-      'https://rex.huamu.shop/api/collections/花花.rex'),
-];
+/// 列表排序方式
+enum _SortBy { origin, name, author, notAdded }
 
 class _RexMarketPageState extends State<RexMarketPage> {
   final _service = RexService.instance;
@@ -53,10 +45,13 @@ class _RexMarketPageState extends State<RexMarketPage> {
 
   String _keyword = '';
 
+  /// 视图：true = 网格两列，false = 列表
+  bool _grid = false;
+  _SortBy _sortBy = _SortBy.origin;
+
   @override
   void initState() {
     super.initState();
-    _urlCtrl.text = _presets.first.url;
     _service.load();
   }
 
@@ -86,14 +81,34 @@ class _RexMarketPageState extends State<RexMarketPage> {
 
   List<RexCollectionItem> get _shown {
     final all = _collection?.items ?? const <RexCollectionItem>[];
-    if (_keyword.isEmpty) return all;
-    final k = _keyword.toLowerCase();
-    return all
-        .where((e) =>
-            e.title.toLowerCase().contains(k) ||
-            e.author.toLowerCase().contains(k) ||
-            e.id.toLowerCase().contains(k))
-        .toList();
+    Iterable<RexCollectionItem> it = all;
+    if (_keyword.isNotEmpty) {
+      final k = _keyword.toLowerCase();
+      it = it.where((e) =>
+          e.title.toLowerCase().contains(k) ||
+          e.author.toLowerCase().contains(k) ||
+          e.id.toLowerCase().contains(k));
+    }
+    final list = it.toList();
+    switch (_sortBy) {
+      case _SortBy.origin:
+        break; // 保持集合文件里的原顺序
+      case _SortBy.name:
+        list.sort((a, b) => a.title.compareTo(b.title));
+        break;
+      case _SortBy.author:
+        list.sort((a, b) => a.author.compareTo(b.author));
+        break;
+      case _SortBy.notAdded:
+        // 没添加过的排前面，已添加的沉底
+        list.sort((a, b) {
+          final aa = _service.hasUrl(a.url) ? 1 : 0;
+          final bb = _service.hasUrl(b.url) ? 1 : 0;
+          return aa - bb;
+        });
+        break;
+    }
+    return list;
   }
 
   int get _importedCount => (_collection?.items ?? const <RexCollectionItem>[])
@@ -378,34 +393,6 @@ class _RexMarketPageState extends State<RexMarketPage> {
                 ),
               ),
             ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: [
-                for (final p in _presets)
-                  GestureDetector(
-                    onTap: _loading
-                        ? null
-                        : () {
-                            _urlCtrl.text = p.url;
-                            _fetch(p.url);
-                          },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: _accent.withValues(alpha: 0.10),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(p.name,
-                          style: TextStyle(
-                              color: _accent,
-                              fontSize: AppTheme.fontCaption)),
-                    ),
-                  ),
-              ],
-            ),
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
@@ -569,11 +556,36 @@ class _RexMarketPageState extends State<RexMarketPage> {
             ),
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 4),
+        // 排序
+        PopupMenuButton<_SortBy>(
+          tooltip: '排序',
+          padding: EdgeInsets.zero,
+          icon: Icon(Icons.sort_rounded, size: 19, color: _fg),
+          initialValue: _sortBy,
+          onSelected: (v) => setState(() => _sortBy = v),
+          itemBuilder: (_) => [
+            _sortItem(_SortBy.origin, '默认顺序'),
+            _sortItem(_SortBy.name, '按名称'),
+            _sortItem(_SortBy.author, '按作者'),
+            _sortItem(_SortBy.notAdded, '未添加优先'),
+          ],
+        ),
+        // 视图切换
+        IconButton(
+          tooltip: _grid ? '切换为列表' : '切换为网格',
+          visualDensity: VisualDensity.compact,
+          icon: Icon(
+            _grid ? Icons.view_list_rounded : Icons.grid_view_rounded,
+            size: 19,
+            color: _fg,
+          ),
+          onPressed: () => setState(() => _grid = !_grid),
+        ),
         TextButton(
           style: TextButton.styleFrom(
             minimumSize: const Size(0, 36),
-            padding: const EdgeInsets.symmetric(horizontal: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 8),
           ),
           onPressed: shown.isEmpty
               ? null
@@ -597,6 +609,24 @@ class _RexMarketPageState extends State<RexMarketPage> {
     );
   }
 
+  PopupMenuItem<_SortBy> _sortItem(_SortBy v, String label) =>
+      PopupMenuItem<_SortBy>(
+        value: v,
+        child: Row(
+          children: [
+            Icon(
+              _sortBy == v
+                  ? Icons.radio_button_checked_rounded
+                  : Icons.radio_button_off_rounded,
+              size: 16,
+              color: _sortBy == v ? _accent : _sub,
+            ),
+            const SizedBox(width: 8),
+            Text(label),
+          ],
+        ),
+      );
+
   List<Widget> _list() {
     final shown = _shown;
     if (shown.isEmpty) {
@@ -610,7 +640,92 @@ class _RexMarketPageState extends State<RexMarketPage> {
         ),
       ];
     }
+    if (_grid) {
+      return [
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.only(top: 8),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            mainAxisSpacing: 8,
+            crossAxisSpacing: 8,
+            childAspectRatio: 2.6,
+          ),
+          itemCount: shown.length,
+          itemBuilder: (_, i) => _gridCell(shown[i]),
+        ),
+      ];
+    }
     return [for (final it in shown) _itemTile(it)];
+  }
+
+  /// 网格视图下的紧凑卡片：勾选框 + 标题 + 作者
+  Widget _gridCell(RexCollectionItem it) {
+    final on = _selected.contains(it.url);
+    final added = _service.hasUrl(it.url);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _importing
+          ? null
+          : () => setState(() {
+                if (on) {
+                  _selected.remove(it.url);
+                } else {
+                  _selected.add(it.url);
+                }
+              }),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+        decoration: BoxDecoration(
+          color: on
+              ? _accent.withValues(alpha: _isDark ? 0.14 : 0.08)
+              : _tile,
+          borderRadius: BorderRadius.circular(AppTheme.radiusLG),
+          border: Border.all(
+              color: on
+                  ? _accent.withValues(alpha: 0.42)
+                  : Colors.transparent,
+              width: 0.9),
+        ),
+        child: Row(
+          children: [
+            _CheckBox(on: on),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    it.title.isEmpty ? '(未命名)' : it.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: _fg,
+                        fontSize: AppTheme.fontFootnote,
+                        fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    [
+                      if (added) '已添加',
+                      if (it.version.isNotEmpty) 'v${it.version}',
+                      if (it.author.isNotEmpty) it.author,
+                    ].join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: added ? _accent : _sub,
+                        fontSize: AppTheme.fontCaption),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _itemTile(RexCollectionItem it) {

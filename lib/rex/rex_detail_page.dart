@@ -8,10 +8,11 @@ import 'rex_player_page.dart';
 import 'rex_service.dart';
 
 /// REX 详情页 —— 布局对齐影视详情：
-///   大幅头图 + 悬浮返回键 → 海报 + 标题/元数据 + 播放按钮 → 简介。
+///   大幅头图 + 悬浮返回键 → 海报 + 标题/元数据 + 播放按钮 → 简介 → 播放列表。
 ///
-/// 播放地址通常是**带时效签名**的（如 helvid 的 m3u8），所以不在进页面时
-/// 预解析，而是用户点「播放」那一刻才去取，保证签名新鲜。
+/// ⚠️ 播放列表在**进入页面时**就自动解析（用户 2026-10-23：「不是点击播放
+///    加载列表，而是点击进去就有播放列表」）。部分模块返回的地址带时效签名，
+///    放太久再点可能失效 —— 届时回到列表重进即可，列表上有「重新解析」。
 class RexDetailPage extends StatefulWidget {
   const RexDetailPage({
     super.key,
@@ -31,21 +32,35 @@ class _RexDetailPageState extends State<RexDetailPage> {
 
   late RexItem _item = widget.item;
   bool _loading = true;
-  bool _resolving = false;
   bool _expanded = false;
   String? _error;
+
+  // 播放列表（进页面即解析）
+  List<RexStream> _streams = const [];
+  bool _streamsLoading = false;
+  String? _streamsError;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    // 详情与线路并行加载，谁也不等谁
+    _loadDetail();
+    if (_needsResolve()) _loadStreams();
   }
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
   Color get _fg => _isDark ? Colors.white : AppTheme.textPrimary;
   Color get _sub => _isDark ? Colors.white60 : Colors.black54;
 
-  Future<void> _load() async {
+  /// 是否需要调 loadResource：直链 detail 直接能播，就不用
+  bool _needsResolve() {
+    if (_item.link.startsWith('http') && _looksLikeMedia(_item.link)) {
+      return false;
+    }
+    return widget.module.canPlay;
+  }
+
+  Future<void> _loadDetail() async {
     try {
       final d = await _service.detail(widget.module, widget.item);
       if (!mounted) return;
@@ -58,6 +73,27 @@ class _RexDetailPageState extends State<RexDetailPage> {
       setState(() {
         _error = '$e';
         _loading = false;
+      });
+    }
+  }
+
+  Future<void> _loadStreams() async {
+    setState(() {
+      _streamsLoading = true;
+      _streamsError = null;
+    });
+    try {
+      final streams = await _service.resource(widget.module, _item);
+      if (!mounted) return;
+      setState(() {
+        _streams = streams;
+        _streamsLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _streamsError = '$e';
+        _streamsLoading = false;
       });
     }
   }
@@ -181,8 +217,8 @@ class _RexDetailPageState extends State<RexDetailPage> {
                                           borderRadius: BorderRadius.circular(
                                               AppTheme.radiusMD)),
                                     ),
-                                    onPressed: _resolving ? null : _play,
-                                    icon: _resolving
+                                    onPressed: _streamsLoading ? null : _play,
+                                    icon: _streamsLoading
                                         ? const SizedBox(
                                             width: 16,
                                             height: 16,
@@ -192,7 +228,7 @@ class _RexDetailPageState extends State<RexDetailPage> {
                                         : const Icon(Icons.play_arrow_rounded,
                                             size: 22),
                                     label: Text(
-                                        _resolving ? '解析线路中…' : '立即播放'),
+                                        _streamsLoading ? '解析线路中…' : '立即播放'),
                                   ),
                                 ),
                               ],
@@ -215,6 +251,13 @@ class _RexDetailPageState extends State<RexDetailPage> {
                                 color: Colors.redAccent,
                                 fontSize: AppTheme.fontFootnote,
                                 height: 1.5)),
+                      // ── 播放列表：进页面就摆在这，点哪条播哪条 ──────
+                      if (_needsResolve()) ...[
+                        _sectionTitle('播放列表'),
+                        const SizedBox(height: 8),
+                        _streamList(),
+                        const SizedBox(height: 6),
+                      ],
                       if (_item.description.isNotEmpty) ...[
                         _sectionTitle('简介'),
                         const SizedBox(height: 6),
@@ -258,7 +301,7 @@ class _RexDetailPageState extends State<RexDetailPage> {
                       Text(
                         '${widget.module.title}'
                         '${_item.playerType.isNotEmpty ? ' · ${_item.playerType}' : ''}\n'
-                        '播放地址由模块实时解析，可能带时效签名，失效请重新点播放。',
+                        '播放地址由模块实时解析，可能带时效签名，失效请点「重新解析」。',
                         style: TextStyle(
                             color: _sub,
                             fontSize: AppTheme.fontCaption,
@@ -342,7 +385,123 @@ class _RexDetailPageState extends State<RexDetailPage> {
         child: Icon(Icons.movie_outlined, size: 24, color: _sub),
       );
 
-  Future<void> _play() async {
+  Widget _streamList() {
+    if (_streamsLoading) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2)),
+            const SizedBox(width: 8),
+            Text('正在解析线路…',
+                style: TextStyle(color: _sub, fontSize: AppTheme.fontCaption)),
+          ],
+        ),
+      );
+    }
+    if (_streamsError != null) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.redAccent.withValues(alpha: _isDark ? 0.10 : 0.06),
+          borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(_streamsError!,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      color: _sub,
+                      fontSize: AppTheme.fontCaption,
+                      height: 1.5)),
+            ),
+            TextButton(
+              onPressed: _loadStreams,
+              child: const Text('重新解析'),
+            ),
+          ],
+        ),
+      );
+    }
+    if (_streams.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Text('没有解析到播放地址',
+            style: TextStyle(color: _sub, fontSize: AppTheme.fontCaption)),
+      );
+    }
+    return Column(
+      children: [
+        for (var i = 0; i < _streams.length; i++) _streamTile(_streams[i], i),
+      ],
+    );
+  }
+
+  Widget _streamTile(RexStream s, int index) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _open(s),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: _isDark
+              ? Colors.white.withValues(alpha: 0.05)
+              : Colors.black.withValues(alpha: 0.025),
+          borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 22,
+              height: 22,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AppTheme.accentColor.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(7),
+              ),
+              child: Text('${index + 1}',
+                  style: TextStyle(
+                      color: AppTheme.accentOnSurface,
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600)),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(s.name.isEmpty ? '线路 ${index + 1}' : s.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: _fg,
+                          fontSize: AppTheme.fontSubhead,
+                          fontWeight: FontWeight.w500)),
+                  if (s.description.isNotEmpty)
+                    Text(s.description,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            color: _sub, fontSize: AppTheme.fontCaption)),
+                ],
+              ),
+            ),
+            Icon(Icons.play_circle_outline_rounded,
+                size: 20, color: AppTheme.accentOnSurface),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _play() {
     // 少数模块的 detail 直接给直链（没有 loadResource）
     if (_item.link.startsWith('http') && _looksLikeMedia(_item.link)) {
       _open(RexStream(name: '直链', url: _item.link));
@@ -352,72 +511,17 @@ class _RexDetailPageState extends State<RexDetailPage> {
       AppToast.show('这个模块没有 loadResource，不能播放', '');
       return;
     }
-    setState(() => _resolving = true);
-    try {
-      final streams = await _service.resource(widget.module, _item);
-      if (!mounted) return;
-      if (streams.isEmpty) {
-        AppToast.show('没有解析到播放地址', '');
-        return;
-      }
-      if (streams.length == 1) {
-        _open(streams.first);
-        return;
-      }
-      final picked = await showModalBottomSheet<RexStream>(
-        context: context,
-        backgroundColor: _isDark ? const Color(0xFF1C1C1E) : Colors.white,
-        shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
-        builder: (ctx) => SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 12),
-              Text('选择线路',
-                  style: TextStyle(
-                      color: _fg,
-                      fontSize: AppTheme.fontHeadline,
-                      fontWeight: FontWeight.w600)),
-              const SizedBox(height: 6),
-              Flexible(
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: streams.length,
-                  separatorBuilder: (_, __) =>
-                      Divider(height: 0.5, color: _sub.withValues(alpha: 0.2)),
-                  itemBuilder: (context, i) {
-                    final s = streams[i];
-                    return ListTile(
-                      title: Text(s.name,
-                          style: TextStyle(
-                              color: _fg, fontSize: AppTheme.fontSubhead)),
-                      subtitle: s.description.isEmpty
-                          ? null
-                          : Text(s.description,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  color: _sub,
-                                  fontSize: AppTheme.fontCaption)),
-                      trailing: Icon(Icons.play_arrow_rounded, color: _sub),
-                      onTap: () => Navigator.pop(context, s),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        ),
-      );
-      if (picked != null) _open(picked);
-    } catch (e) {
-      if (mounted) AppToast.show('$e', '');
-    } finally {
-      if (mounted) setState(() => _resolving = false);
+    // 线路在进页面时就解析好了：直接播第一条。
+    // 列表空 / 加载失败过 → 点按钮相当于再试一次
+    if (_streams.isNotEmpty) {
+      _open(_streams.first);
+      return;
     }
+    if (_streamsError != null) {
+      _loadStreams();
+      return;
+    }
+    AppToast.show('没有解析到播放地址', '');
   }
 
   bool _looksLikeMedia(String url) {
