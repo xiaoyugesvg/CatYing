@@ -8,6 +8,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:get/get.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -305,6 +306,27 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 章末/章首"越界滑动"切章的节流时间戳 —— 一次拖动会连续派发多帧
   /// `OverscrollNotification`，不节流会被切到后面好几章去。
   DateTime? _lastEdgeTurnAt;
+
+  // ── 上下滚动模式的「无缝连读」────────────────────────────────
+  //
+  // 滚动模式没有"页"，所以无缝不是拼页、而是把**下一章的正文接着排在
+  // 同一个滚动视图里**：滚到底自然接下一章，不用点「下一章」。
+  /// 当前滚动视图里按顺序渲染的章节（首项 = 基准章；换章/目录跳转时重建）
+  List<int> _scrollChapters = const [];
+
+  /// 每一章在滚动视图里的定位键（判断"滚到哪一章了"用）
+  final Map<int, GlobalKey> _scrollKeys = {};
+
+  /// 滚动时判定"当前章"的节流时间戳
+  DateTime? _scrollSyncAt;
+
+  /// 滚动视图的"代次"：换章时 +1 ⇒ key 变化 ⇒ 回到章首。
+  /// 章链内部追加/裁剪章节**不动它**（否则滚动位置会被重置）。
+  int _scrollEpoch = 0;
+
+  /// 还没缓存、正在为"无缝连读"补抓的章节（防每次滚动都重复请求）
+  int _appendFetchChapter = -1;
+  DateTime? _appendFetchAt;
 
   // ── 漫画（Legado bookSourceType=2）───────────────────────────
   //
@@ -1310,6 +1332,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           _chapterImages = const [];
           _mangaImgHeaders = const {};
           _paragraphs = _applyConvert(_cache[i]!);
+          // 换章 ⇒ 滚动章链回到单章（滚动视图随之重建、回到章首）
+          _resetScrollChain(i);
           _invalidateTtsSegs();
           _loading = false;
           _error = null;
@@ -1389,6 +1413,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             _mangaImgHeaders = r.headers;
             _chapterImages = const [];
             _paragraphs = const [];
+            _resetScrollChain(i);
             _invalidateTtsSegs();
             _pages = const [];
             _pageChapterOf = const [];
@@ -1408,10 +1433,15 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       _cache[i] = paras; // 缓存**净化后原文**（A2 繁简切换时从原文重转 ✓）
       _evictIfNeeded();
       // 预取晚到 ⇒ 补一次"拼下一章"（用户可能已经停在章末等无缝连读了）
-      if (prefetchOnly) _maybeAppendAhead();
+      if (prefetchOnly) {
+        _maybeAppendAhead();
+        _maybeAppendScrollAhead();
+      }
       if (!prefetchOnly) {
         setState(() {
           _paragraphs = _applyConvert(paras);
+          // 换章 ⇒ 滚动章链回到单章（滚动视图随之重建、回到章首）
+          _resetScrollChain(i);
           _invalidateTtsSegs();
           _images = const []; // 切回文字章节要把漫画图清掉
           _mangaImgHeaders = const {};
@@ -2284,14 +2314,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             canPrev: pi > 0,
             onTurnNext: () {
               if (pi + 1 < _pages.length) {
-                setState(() => _pageIndex = pi + 1);
+                _setPageIndex(pi + 1);
               } else {
                 _go(1);
               }
             },
             onTurnPrev: () {
               if (pi > 0) {
-                setState(() => _pageIndex = pi - 1);
+                _setPageIndex(pi - 1);
               } else {
                 _go(-1);
               }
@@ -2301,9 +2331,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         }
 
         // 双页模式：横屏左右并排（截图里的「双页模式」）
-        final isLandscape =
-            MediaQuery.of(context).orientation == Orientation.landscape;
-        if (_rs.dualPage && isLandscape && _pages.length > 1) {
+        if (_dualPageActive && _pages.length > 1) {
           // 把页成对合并：第 0 页单独，之后 (1,2) (3,4) …
           final spreads = <List<int>>[];
           for (var i = 0; i < _pages.length; i += 2) {
@@ -2313,21 +2341,26 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               spreads.add([i, if (i + 1 < _pages.length) i + 1]);
             }
           }
-          return PageView.builder(
-            controller: _pageCtrl,
-            physics: const _TapFriendlyPagePhysics(),
-            itemCount: spreads.length,
-            onPageChanged: (i) {
-              final page = spreads[i].first;
-              setState(() => _pageIndex = page);
-              _syncChapterWithPage(page);
-              _saveProgress();
-            },
-            itemBuilder: (c, i) => Row(
-              children: [
-                for (final pi in spreads[i])
-                  Expanded(child: _pageContent(fg, _pages[pi])),
-              ],
+          return NotificationListener<ScrollNotification>(
+            // 章末再滑一次 → 下一章（无缝拼接接不上时的兜底）
+            onNotification: _onPageScrollNotification,
+            child: PageView.builder(
+              controller: _pageCtrl,
+              physics: const _TapFriendlyPagePhysics(),
+              itemCount: spreads.length,
+              onPageChanged: (i) {
+                final page = spreads[i].first;
+                setState(() => _pageIndex = page);
+                _syncChapterWithPage(page);
+                _maybeAppendAhead();
+                _saveProgress();
+              },
+              itemBuilder: (c, i) => Row(
+                children: [
+                  for (final pi in spreads[i])
+                    Expanded(child: _pageContent(fg, _pages[pi])),
+                ],
+              ),
             ),
           );
         }
@@ -2350,14 +2383,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               canPrev: pi > 0,
               onTurnNext: () {
                 if (pi + 1 < _pages.length) {
-                  setState(() => _pageIndex = pi + 1);
+                  _setPageIndex(pi + 1);
                 } else {
                   _go(1);
                 }
               },
               onTurnPrev: () {
                 if (pi > 0) {
-                  setState(() => _pageIndex = pi - 1);
+                  _setPageIndex(pi - 1);
                 } else {
                   _go(-1);
                 }
@@ -2562,36 +2595,30 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   /// 上下模式 / 分页失败时的兜底：整章滚动
   Widget _scrollView(Color fg) {
-    final scroll = SingleChildScrollView(
-      // 自动阅读（上下模式）要用它滚屏
-      controller: _scrollReadCtrl,
-      // 🔴 换章必须重建滚动视图（= 回到章首）✗：
-      //    未命中缓存时会先走 `_loading` 分支（滚动视图被移除 ✓），所以看着正常；
-      //    但**缓存命中**时没有 loading 帧 ⇒ 同一个 `SingleChildScrollView`
-      //    被复用、滚动偏移留在上一章 ✗（目录跳转会"落在新章中间"）。
-      key: ValueKey('reader-scroll-$_index'),
-      padding: EdgeInsets.fromLTRB(_padLeft, _padTop, _padRight, _padBottom),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            widget.chapters[_index].name,
-            style: TextStyle(
-              fontSize: _fontSize + 3,
-              fontWeight: FontWeight.w700,
-              color: fg,
-              height: 1.5,
-            ),
+    // 无缝连读：滚动视图里可以**连着排多章**（首章 = 基准章）。
+    // 换章 / 目录跳转会把章链重置成单章 ⇒ key 变了 ⇒ 自然回到章首。
+    final chain = _scrollChain;
+    final scroll = NotificationListener<ScrollNotification>(
+      // 快到底 → 续排下一章；停手 → 同步"当前章"
+      onNotification: _onScrollNotification,
+      // 换章必须重建滚动视图（= 回到章首）：key 用**代次** ⇒
+      // 章链内部追加/裁剪章节时 key 不变（位置不跳），真正换章时才换 key。
+      // ⚠️ 滚动视图上**不能挂 GlobalKey**：GlobalKey 会让旧 Element 被复用，
+      //    代次变化时滚动位置就"回不到章首"了。
+      child: KeyedSubtree(
+        key: ValueKey('reader-scroll-$_scrollEpoch'),
+        child: SingleChildScrollView(
+          // 自动阅读（上下模式）要用它滚屏
+          controller: _scrollReadCtrl,
+          padding: EdgeInsets.fromLTRB(_padLeft, _padTop, _padRight, _padBottom),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var k = 0; k < chain.length; k++)
+                _scrollChapterBlock(chain[k], fg, first: k == 0),
+            ],
           ),
-          const SizedBox(height: 18),
-          for (var pi = 0; pi < _paragraphs.length; pi++)
-            _paragraphWidget(pi, fg),
-          // 「查看插图」：正文末尾展示本章插图（点开走既有的大图查看器）
-          if (_rs.showIllustrations && _chapterImages.isNotEmpty) ...[
-            const SizedBox(height: 18),
-            _illustrationStrip(fg),
-          ],
-        ],
+        ),
       ),
     );
     // ✅ 信息栏在「上下滚动」模式下也要显示（用户 2026-10-21：
@@ -2610,6 +2637,65 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         ),
         Expanded(child: scroll),
         _statusFooter(fg, showPage: false),
+      ],
+    );
+  }
+
+  /// 滚动视图里"下一章"的段落（带繁简转换的**按章缓存**）。
+  ///
+  /// 不缓存的话每帧滚动同步都会把后面几章全转换一遍（繁简表不便宜）；
+  /// 缓存里记了当时的转换模式，模式一变自动重算。
+  final Map<int, ({ChineseConvertMode mode, List<String> paras})> _scrollConv =
+      {};
+
+  List<String> _scrollParas(int ch) {
+    if (ch == _index) return _paragraphs;
+    final raw = _cache[ch];
+    if (raw == null) return const <String>[];
+    final mode = _rs.convertMode;
+    final hit = _scrollConv[ch];
+    if (hit != null && hit.mode == mode) return hit.paras;
+    final conv = _applyConvert(raw);
+    _scrollConv[ch] = (mode: mode, paras: conv);
+    return conv;
+  }
+
+  /// 滚动视图里的一"章"：章标题 + 全部段落（下一章就是接着往下排）。
+  ///
+  /// 只有当前章的段落走 [_paragraphWidget]（带 TTS 高亮 / 书签 / 笔记），
+  /// 其它章用缓存的段落文本渲染 —— 点长按会先把当前章切过去，再走原有菜单。
+  Widget _scrollChapterBlock(
+    int ch,
+    Color fg, {
+    required bool first,
+  }) {
+    final current = ch == _index;
+    final paras = current ? _paragraphs : _scrollParas(ch);
+    final key = _scrollKeys.putIfAbsent(ch, () => GlobalKey());
+    return Column(
+      key: key,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (!first) const SizedBox(height: 26),
+        Text(
+          widget.chapters[ch].name,
+          style: TextStyle(
+            fontSize: _fontSize + 3,
+            fontWeight: FontWeight.w700,
+            color: fg,
+            height: 1.5,
+          ),
+        ),
+        const SizedBox(height: 18),
+        for (var pi = 0; pi < paras.length; pi++)
+          current
+              ? _paragraphWidget(pi, fg)
+              : _paragraphWidget(pi, fg, overrideText: paras[pi], chapter: ch),
+        // 「查看插图」：正文末尾展示本章插图（点开走既有的大图查看器）
+        if (current && _rs.showIllustrations && _chapterImages.isNotEmpty) ...[
+          const SizedBox(height: 18),
+          _illustrationStrip(fg),
+        ],
       ],
     );
   }
@@ -2678,14 +2764,24 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   }
 
   /// 一个段落的渲染（含首行缩进 / 字间距 / 字重 / 底线 / 书签竖线 / 划线背景 / 长按菜单）
-  Widget _paragraphWidget(int pi, Color fg, {String? overrideText}) {
+  ///
+  /// [chapter]：上下滚动无缝连读时，排在后面的**下一章的段落**要按它自己的
+  /// 章号过滤笔记/书签，且不做 TTS 高亮（朗读分段只属于当前章，段落下标会串）。
+  Widget _paragraphWidget(
+    int pi,
+    Color fg, {
+    String? overrideText,
+    int? chapter,
+  }) {
+    final ch = chapter ?? _index;
+    final current = ch == _index;
     final text = overrideText ?? _paragraphs[pi];
     final note = ReaderNotesService.instance.all
         .where(
           (n) =>
               n.sourceId == widget.source.id &&
               n.bookName == widget.bookName &&
-              n.chapterIndex == _index &&
+              n.chapterIndex == ch &&
               n.paragraphIndex == pi,
         )
         .firstOrNull;
@@ -2693,10 +2789,16 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     final noteBg = note == null
         ? null
         : Color(note.color).withValues(alpha: 0.35);
+    // 书签是按章存换的：只有"书签当前所在章"才画竖线
+    final bookmark = (_bookmarksChapter == ch) ? _bookmarks[pi] : null;
     return Padding(
       padding: EdgeInsets.only(bottom: _fontSize * _paraSpacing),
       child: GestureDetector(
-        onLongPress: () => _onParagraphLongPress(pi),
+        onLongPress: () {
+          // 下一章的段落：先切过去（书签/笔记/划线都按章存），再弹菜单
+          if (!current) _syncChapterFromScroll(ch);
+          _onParagraphLongPress(pi);
+        },
         // 有笔记/划线的段落：点一下弹「笔记气泡」，可直接改批注或删除
         onTap: note == null ? null : () => _showNoteBubble(note),
         child: Container(
@@ -2705,25 +2807,31 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             border: Border(
               left: BorderSide(
                 color:
-                    _bookmarks[pi] ??
+                    bookmark ??
                     (note != null ? Color(note.color) : Colors.transparent),
                 width: 3,
               ),
             ),
           ),
           padding: EdgeInsets.only(
-            left: (_bookmarks.containsKey(pi) || hasNote) ? 8 : 0,
+            left: (bookmark != null || hasNote) ? 8 : 0,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _wrapWithHighlight(
-                pi,
+              if (current)
+                _wrapWithHighlight(
+                  pi,
+                  Text(
+                    _indent > 0 ? '\u3000' * _indent.round() + text : text,
+                    style: _bodyStyle(fg),
+                  ),
+                )
+              else
                 Text(
                   _indent > 0 ? '\u3000' * _indent.round() + text : text,
                   style: _bodyStyle(fg),
                 ),
-              ),
               if (note != null)
                 WavyUnderline(
                   color: Color(note.color),
@@ -3552,7 +3660,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             _rs.pageMode == PageMode.cover ||
             !_pageCtrl.hasClients;
         if (noPager) {
-          setState(() => _pageIndex = _pageIndex + 1);
+          _setPageIndex(_pageIndex + 1);
         } else {
           _pageCtrl.nextPage(
             duration: _rs.pageMode == PageMode.none
@@ -3577,7 +3685,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             _rs.pageMode == PageMode.cover ||
             !_pageCtrl.hasClients;
         if (noPager) {
-          setState(() => _pageIndex = _pageIndex - 1);
+          _setPageIndex(_pageIndex - 1);
         } else {
           _pageCtrl.previousPage(
             duration: _rs.pageMode == PageMode.none
@@ -4657,21 +4765,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   /// 当前是否走「内容级无缝翻页」：把下一章的页直接拼到 `_pages` 末尾。
   ///
-  /// 只对**单页**的「左右 / 无动画」开启：
-  ///   · 双页（横屏 spread）页码/切片语义不同，先不动；
-  ///   · 仿真 / 覆盖本来就会在章末 `_go(1)`，且不挂 PageView；
-  ///   · 上下滚动模式不分页。
-  bool get _seamlessPaging {
-    if (_rs.pageMode != PageMode.slide && _rs.pageMode != PageMode.none) {
-      return false;
-    }
-    // 双页（横屏 + dualPage）先不拼：它的"页"是两页并排的 spread，
-    // 页码/切片语义都不同，拼进来容易把页码算错。
-    final landscape =
-        MediaQuery.of(context).orientation == Orientation.landscape;
-    if (_rs.dualPage && landscape) return false;
-    return true;
-  }
+  /// **所有分页模式**（左右 / 无动画 / 仿真 / 覆盖 / 双页横屏）都开启：
+  /// 拼进来之后 `canNext` 依然成立，翻页组件的"翻不过去"就自然失效了。
+  /// 上下滚动模式不分页，走另一套（[_scrollChapters] 连排多章）。
+  bool get _seamlessPaging => _rs.pageMode.paginates;
 
   /// 某章在 `_pages` 里的页范围 `[start, end)`（无缝拼接后一章可能有多段）。
   /// 找不到时返回整段（退化成旧行为）。
@@ -4755,7 +4852,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     if (_appendingChapter == next) return;
     if (_pages.length >= _kSeamlessPageCap) return;
     final paras = _cache[next];
-    if (paras == null || paras.isEmpty) return;
+    if (paras == null || paras.isEmpty) {
+      // 下一章还没缓存（网络慢 / 关了预取）→ 主动补抓一次；
+      // 抓回来后会走 `_loadChapter` 里的 `_maybeAppendAhead()` 自动补拼。
+      _requestAppendFetch(next);
+      return;
+    }
     // 视口还没量出来（首帧）→ 拼出来的页高不对，等下次翻页再补
     if (_viewport.width <= 0 || _viewport.height <= 0) return;
 
@@ -4784,10 +4886,18 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         await WidgetsBinding.instance.endOfFrame;
       }
       if (!mounted || gen != _paginateGen || out.isEmpty) return;
+      // 双页横屏：新章最好从**左侧单页**开始。spread 是 [0], (1,2), (3,4)…
+      // ⇒ 只有奇数下标是"左页"；当前页数为偶数时补一张空白页对齐。
+      final pad = (_dualPageActive && _pages.length.isEven) ? 1 : 0;
       setState(() {
-        _pages = [..._pages, ...out];
+        _pages = [
+          ..._pages,
+          if (pad == 1) const BookPage(firstBlockIndex: -1, entries: []),
+          ...out,
+        ];
         _pageChapterOf = [
           ..._pageChapterOf,
+          if (pad == 1) cur,
           ...List<int>.filled(out.length, next),
         ];
         _appendedChapter = next;
@@ -4809,6 +4919,16 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     _appendNextChapter(_paginateGen, base);
   }
 
+  /// 是不是已经翻到"最后一张可显示的页 / spread"
+  bool get _atLastDisplayedPage {
+    if (_pages.isEmpty) return true;
+    if (!_dualPageActive) return _pageIndex >= _pages.length - 1;
+    // 双页 spread：[0], (1,2), (3,4)… ⇒ 末页若是偶数下标，它属于 (L-1, L)
+    final l = _pages.length - 1;
+    final lastSpreadFirst = l == 0 ? 0 : (l.isEven ? l - 1 : l);
+    return _pageIndex >= lastSpreadFirst;
+  }
+
   /// PageView 越界滑动的兜底：无缝拼接接不上时，章末再滑一次就进下一章。
   ///
   /// 接不上的情况有三种：
@@ -4819,7 +4939,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     if (n is! OverscrollNotification) return false;
     if (n.depth != 0) return false; // 只认 PageView 自身的越界
     if (!_rs.pageMode.paginates) return false;
-    if (n.overscroll > 4 && _pageIndex >= _pages.length - 1) {
+    if (n.overscroll > 4 && _atLastDisplayedPage) {
       _edgeTurn(1);
     } else if (n.overscroll < -4 && _pageIndex <= 0) {
       _edgeTurn(-1);
@@ -4835,6 +4955,181 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     }
     _lastEdgeTurnAt = now;
     _go(delta);
+  }
+
+  /// 双页横屏是否生效（页码 / 切片 / spread 语义与单页不同）
+  bool get _dualPageActive =>
+      _rs.dualPage &&
+      MediaQuery.of(context).orientation == Orientation.landscape;
+
+  /// 仿真 / 覆盖 / 无 PageView 的"翻一页"入口：统一走这里。
+  ///
+  /// 无缝拼接后 `_pages[i]` 可能已经属于**下一章** ⇒ 页号一变就必须
+  /// 同步章节（书签 / TTS / 进度跟着走），并检查要不要继续拼下一章。
+  void _setPageIndex(int i) {
+    if (i < 0 || i >= _pages.length) return;
+    setState(() => _pageIndex = i);
+    _syncChapterWithPage(i);
+    _maybeAppendAhead();
+  }
+
+  /// 无缝连读要"下一章"但还没缓存 → 补抓一次。
+  /// 同一章 10 秒内只抓一次，避免每次翻页都重复请求。
+  void _requestAppendFetch(int chapter) {
+    if (chapter < 0 || chapter >= widget.chapters.length) return;
+    if (_cache.containsKey(chapter)) return;
+    final now = DateTime.now();
+    final last = _appendFetchAt;
+    if (_appendFetchChapter == chapter &&
+        last != null &&
+        now.difference(last) < const Duration(seconds: 10)) {
+      return;
+    }
+    _appendFetchChapter = chapter;
+    _appendFetchAt = now;
+    _loadChapter(chapter, prefetchOnly: true);
+  }
+
+  // ── 上下滚动模式的无缝连读 ─────────────────────────────────
+
+  /// 换章 / 目录跳转：滚动章链回到"只有这一章"（滚动视图随之重建、回到章首）
+  void _resetScrollChain(int chapter) {
+    _scrollChapters = [chapter];
+    _scrollKeys.clear();
+    _scrollConv.clear();
+    _scrollEpoch++;
+  }
+
+  /// 当前滚动视图里实际渲染的章链。
+  ///
+  /// 换过章 / 从目录跳转后 `_scrollChapters` 可能是旧的 ⇒ 只认**包含当前章**的
+  /// 那一份，否则退回"只渲染本章"（等价于旧行为）。
+  List<int> get _scrollChain {
+    if (_scrollChapters.isNotEmpty && _scrollChapters.contains(_index)) {
+      return _scrollChapters;
+    }
+    return <int>[_index];
+  }
+
+  /// 滚到接近底部时，把**下一章**的正文接在同一个滚动视图后面。
+  ///
+  /// 滚动模式没有"页"，所以这里拼的是"章节段落"而不是 `BookPage`。
+  /// 章链上限 12 章：到顶时把**当前章之前**的部分剪掉（见 [_trimScrollChainBefore]）
+  /// 再继续拼 —— 这样连读可以一直往下，内存也不会无限涨。
+  void _maybeAppendScrollAhead() {
+    if (_rs.pageMode != PageMode.scroll) return;
+    final chain = _scrollChain;
+    final next = chain.last + 1;
+    if (next >= widget.chapters.length) return;
+    if (chain.contains(next)) return;
+    final paras = _cache[next];
+    if (paras == null || paras.isEmpty) {
+      _requestAppendFetch(next);
+      return;
+    }
+    if (chain.length >= 12) {
+      // 同一帧里"删 + 加"容易让滚动位置算错 ⇒ 先剪，下一次滚动通知再拼
+      _trimScrollChainBefore();
+      return;
+    }
+    setState(() => _scrollChapters = [...chain, next]);
+  }
+
+  /// 章链太长：把当前章**之前**的章节从视图里剪掉。
+  ///
+  /// 剪掉的内容都在视口上方 ⇒ 直接删会让可见内容整体上移（跳一下）。
+  /// 所以先量出被剪章节的总高度，重建后把滚动偏移减去同样的高度 ——
+  /// 视觉上完全不动。
+  void _trimScrollChainBefore() {
+    final chain = _scrollChain;
+    if (chain.length < 6) return;
+    final idx = chain.indexOf(_index);
+    if (idx <= 0) return; // 当前章就是链首 → 没得剪（交给翻章按钮）
+    var removed = 0.0;
+    for (var k = 0; k < idx; k++) {
+      final box = _scrollKeys[chain[k]]?.currentContext?.findRenderObject();
+      if (box is RenderBox) removed += box.size.height;
+    }
+    final offset = _scrollReadCtrl.hasClients ? _scrollReadCtrl.offset : null;
+    final removedChapters = chain.sublist(0, idx);
+    setState(() {
+      _scrollChapters = chain.sublist(idx);
+      for (final ch in removedChapters) {
+        _scrollKeys.remove(ch);
+        _scrollConv.remove(ch);
+      }
+    });
+    if (offset == null) return;
+    final target = offset - removed;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollReadCtrl.hasClients) return;
+      final max = _scrollReadCtrl.position.maxScrollExtent;
+      _scrollReadCtrl.jumpTo(target.clamp(0.0, max).toDouble());
+    });
+  }
+
+  /// 滚动视图的通知：快到底就续排下一章；停手时同步"当前章"。
+  bool _onScrollNotification(ScrollNotification n) {
+    if (n.depth != 0) return false;
+    final nearBottom = n.metrics.extentAfter < 900;
+    final ended = n is ScrollEndNotification;
+    if (!nearBottom && !ended) return false;
+    // 通知可能来自布局阶段 ⇒ 统一推到帧后执行（setState 时机才安全）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _maybeAppendScrollAhead();
+      if (ended) _syncChapterFromScrollViewport();
+    });
+    return false;
+  }
+
+  /// 按"视口顶部落在哪一章"反推当前章（滚动模式下没有页号可用）
+  void _syncChapterFromScrollViewport() {
+    if (_rs.pageMode != PageMode.scroll) return;
+    final chain = _scrollChain;
+    if (chain.length <= 1) return;
+    if (!_scrollReadCtrl.hasClients) return;
+    final now = DateTime.now();
+    final last = _scrollSyncAt;
+    if (last != null &&
+        now.difference(last) < const Duration(milliseconds: 250)) {
+      return;
+    }
+    _scrollSyncAt = now;
+    final pixels = _scrollReadCtrl.position.pixels;
+    int? visible;
+    for (final ch in chain) {
+      final box = _scrollKeys[ch]?.currentContext?.findRenderObject();
+      if (box is! RenderBox || !box.attached) continue;
+      // 该章顶部对齐视口顶部时需要的滚动偏移
+      double off;
+      try {
+        off = RenderAbstractViewport.of(box).getOffsetToReveal(box, 0.0).offset;
+      } catch (_) {
+        continue;
+      }
+      // 已经滚过它顶部（+48px 余量）⇒ 算"读到这一章"（取最后一个满足的）
+      if (off <= pixels + 48) visible = ch;
+    }
+    if (visible != null && visible != _index) _syncChapterFromScroll(visible);
+  }
+
+  /// 滚动中翻到了别的章 → 把"当前章"切过去（页码 / 书签 / TTS / 进度跟着走）。
+  /// **不重建滚动视图**（key 用代次，只有 `_loadChapter` 才 +1），所以位置不跳。
+  void _syncChapterFromScroll(int ch) {
+    if (ch == _index || ch < 0 || ch >= widget.chapters.length) return;
+    final paras = _cache[ch];
+    setState(() {
+      _index = ch;
+      _pagesChapter = ch;
+      if (paras != null) _paragraphs = _applyConvert(paras);
+      _chapterImages = const [];
+    });
+    _invalidateTtsSegs();
+    unawaited(_switchBookmarksTo(ch));
+    unawaited(_saveProgress());
+    _prefetchAhead(ch);
+    _maybeAppendScrollAhead();
   }
 
   /// 页号落在别的章上 → 把"当前章"切过去（无缝翻页的核心）。
