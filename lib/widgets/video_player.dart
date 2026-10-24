@@ -1836,14 +1836,17 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }
   }
 
-  /// 用 Logvr-danmu 的 `POST /api/v2/match` 直接把「剧名 SxxExx」匹配成 episodeId。
+  /// 用 Logvr-danmu 的 `POST /api/v2/match` 把「剧名 SxxExx」匹配成候选 episodeId。
   ///
   /// 相比 `search/anime → bangumi → comment` 三步链：**一次往返**、由服务端做
   /// 文件名解析与平台优先级匹配（该接口本来就是 Logvr 推荐的主匹配入口），
   /// 非标准命名的剧集命中率高得多。
   ///
-  /// 返回：`null` = 请求失败（可重试）；`0` = 服务在线但没匹配到；>0 = episodeId。
-  Future<int?> _danmuMatchEpisode(String base, String title) async {
+  /// 返回**列表**是因为同一部剧常有多平台条目，而某个平台可能一条弹幕都没有
+  /// （实测：匹配到同名竖屏短剧，全剧 count=0）⇒ 调用方要能依次试下一个。
+  ///
+  /// 返回：`null` = 请求失败（可重试）；空列表 = 服务在线但没匹配到。
+  Future<List<int>?> _danmuMatchEpisodes(String base, String title) async {
     // 集号：该服务按「剧名 S01E01」格式解析最稳（实测中文「第N集」不稳）
     final epNo = widget.selectedEpisodeIndex + 1;
     final fileName = '$title S01E${epNo.toString().padLeft(2, '0')}';
@@ -1854,27 +1857,25 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (body == null) return null;
     try {
       final decoded = jsonDecode(body);
-      if (decoded is! Map) return 0;
+      if (decoded is! Map) return const [];
       final matches = decoded['matches'];
       if (matches is! List || matches.isEmpty) {
         AppLog.instance.log('[video_player] danmu match 未匹配: $fileName');
-        return 0;
+        return const [];
       }
-      final first = matches.first;
-      if (first is! Map) return 0;
-      final id = (first['episodeId'] as num?)?.toInt() ?? 0;
-      if (id > 0) {
-        AppLog.instance.log(
-          '[video_player] danmu match 命中: $fileName → episodeId=$id '
-          '(${first['animeTitle']} / ${first['episodeTitle']})',
-        );
-      } else {
-        AppLog.instance.log('[video_player] danmu match 无 episodeId: $fileName');
+      final out = <int>[];
+      for (final m in matches) {
+        if (m is! Map) continue;
+        final id = (m['episodeId'] as num?)?.toInt() ?? 0;
+        if (id > 0 && !out.contains(id)) out.add(id);
       }
-      return id;
+      AppLog.instance.log(
+        '[video_player] danmu match 命中 $fileName → 候选 ${out.length} 个: $out',
+      );
+      return out;
     } catch (e) {
       AppLog.instance.log('[video_player] danmu match 解析失败: $e');
-      return 0;
+      return const [];
     }
   }
 
@@ -1932,12 +1933,19 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }
 
     // ① 先用 match 接口（一次往返，服务端自己解析「剧名 S01E01」）
-    final matchedEp = await _danmuMatchEpisode(base, clean);
-    if (matchedEp != null && matchedEp > 0) {
-      _rememberDanmuEp(cacheKey, matchedEp);
-      final list = await _danmuFetchComments(base, matchedEp);
-      if (list != null && list.isNotEmpty) _rememberDanmuList(cacheKey, list);
-      return list;
+    final matchedEps = await _danmuMatchEpisodes(base, clean);
+    if (matchedEps != null && matchedEps.isNotEmpty) {
+      for (final ep in matchedEps) {
+        final list = await _danmuFetchComments(base, ep);
+        if (list == null) continue; // 该候选请求失败 → 试下一个
+        if (list.isNotEmpty) {
+          _rememberDanmuEp(cacheKey, ep);
+          _rememberDanmuList(cacheKey, list);
+          return list;
+        }
+        // count=0：匹配到的可能是同名短剧（全剧无弹幕）→ 继续试下一个候选
+        AppLog.instance.log('[video_player] danmu match 候选 $ep 无弹幕，换下一个');
+      }
     }
 
     // ② 搜索番剧（若调用方已并行发起，直接复用那个 future，省一轮往返）
@@ -1958,55 +1966,72 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       return const [];
     }
 
-    // 只在「首条标题与片名互相包含」时才采用，避免搜到同名无关内容就贴弹幕。
-    // ⚠️ 原来是单向 `firstName.contains(clean)`：片名里带年份/副标题时
-    //   （如 clean = "仙逆 2023"，而结果叫 "仙逆第一季(2023)"）永远判不中 ⇒
-    //   明明搜到了也放弃 ⇒ 一条弹幕都没有。改成去掉空格/标点后双向包含。
-    final firstName = (animes.first['animeTitle'] ?? '').toString().trim();
-    if (firstName.isEmpty || !_titleLooseMatch(firstName, clean)) {
+    // 逐个候选试（最多 3 个）：
+    // ⚠️ 原来只看首条，且只做单向 `firstName.contains(clean)` ——
+    //   ① 片名里多一个年份/副标题就永远判不中；
+    //   ② 首条恰好是「同名但没有弹幕」的条目时直接放弃（实测：正剧
+    //      《凤栖》搜到竖屏短剧《凤栖梧桐》，全剧 count=0，于是永远 0 条）。
+    //   现在按宽松匹配挑出候选依次试，谁的某一集真有弹幕就用谁。
+    var tried = 0;
+    for (final a in animes) {
+      if (tried >= 3) break;
+      if (a is! Map) continue;
+      final candidate = (a['animeTitle'] ?? '').toString().trim();
+      if (candidate.isEmpty || !_titleLooseMatch(candidate, clean)) continue;
+      final animeId = a['animeId'];
+      if (animeId == null) continue;
+      tried++;
+      final epId = await _danmuPickEpisode(base, animeId, episodeName);
+      if (epId == null) return null; // 请求失败 → 可重试
+      if (epId <= 0) continue;
+      final list = await _danmuFetchComments(base, epId);
+      if (list == null) return null;
+      if (list.isNotEmpty) {
+        _rememberDanmuEp(cacheKey, epId);
+        _rememberDanmuList(cacheKey, list);
+        AppLog.instance.log(
+          '[video_player] danmu title-fallback 命中: "$candidate" episodeId=$epId',
+        );
+        return list;
+      }
       AppLog.instance.log(
-        '[video_player] danmu search 首条不匹配，放弃: "$firstName" !~ "$clean"',
+        '[video_player] danmu search 候选 "$candidate" 无弹幕，换下一个',
       );
-      return const [];
     }
-    final animeId = animes.first['animeId'];
-    if (animeId == null) return const [];
+    AppLog.instance.log('[video_player] danmu 所有候选均无弹幕: $clean');
+    return const [];
+  }
 
-    // ③ 取分集列表
+  /// 从番剧详情里选出当前集的 episodeId。
+  ///
+  /// 返回 `null` = 请求失败（可重试）；`0` = 服务在线但没这一集。
+  Future<int?> _danmuPickEpisode(
+    String base,
+    Object? animeId,
+    String episodeName,
+  ) async {
     final bgBody = await _danmuGetText('$base/api/v2/bangumi/$animeId');
     if (bgBody == null) return null; // 请求失败 → 可重试
-    if (bgBody.isEmpty) return const [];
+    if (bgBody.isEmpty) return 0;
     final bangumi = _danmuParseMap(bgBody, 'bangumi');
     final episodes = (bangumi?['episodes'] as List?) ?? const [];
-    if (episodes.isEmpty) return const [];
+    if (episodes.isEmpty) return 0;
 
-    // ④ 选集：优选用「当前集名」在分集标题里找，否则退回按集号顺序
-    int episodeId = 0;
+    // 选集：优选用「当前集名」在分集标题里找，否则退回按集号顺序
     if (episodeName.isNotEmpty) {
       for (final e in episodes) {
         if (e is! Map) continue;
         final t = (e['episodeTitle'] ?? '').toString();
         if (t.isNotEmpty && episodeName.contains(t)) {
-          episodeId = (e['episodeId'] as num?)?.toInt() ?? 0;
-          if (episodeId > 0) break;
+          final id = (e['episodeId'] as num?)?.toInt() ?? 0;
+          if (id > 0) return id;
         }
       }
     }
-    if (episodeId == 0) {
-      final idx = widget.selectedEpisodeIndex.clamp(0, episodes.length - 1);
-      final e = episodes[idx];
-      if (e is Map) episodeId = (e['episodeId'] as num?)?.toInt() ?? 0;
-    }
-    if (episodeId == 0) return const [];
-
-    _rememberDanmuEp(cacheKey, episodeId);
-    AppLog.instance.log(
-      '[video_player] danmu title-fallback 命中: "$firstName" episodeId=$episodeId',
-    );
-    final list = await _danmuFetchComments(base, episodeId);
-    // ✅ 存"整集弹幕"结果缓存 → 重进同一集秒出
-    if (list != null && list.isNotEmpty) _danmuTitleListCache[cacheKey] = list;
-    return list;
+    final idx = widget.selectedEpisodeIndex.clamp(0, episodes.length - 1);
+    final e = episodes[idx];
+    if (e is! Map) return 0;
+    return (e['episodeId'] as num?)?.toInt() ?? 0;
   }
 
   /// 用 episodeId 取弹幕（兜底链路的最后一步）。失败返回 `null`（可重试）。
