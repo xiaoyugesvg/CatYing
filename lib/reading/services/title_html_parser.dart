@@ -611,15 +611,19 @@ class TitleHtml {
   // ── 度量（与渲染同参，保证分页一致）──────────────────────
 
   /// 量出整块标题的高度（含 margin / padding）
+  ///
+  /// [fontFamily]：阅读器当前的自定义字体（源阅读样式里的 `font-family` 我们
+  /// 拿不到对应文件，就用阅读器字体兜底 —— 与渲染必须同参）。
   static double measure(
     TitleHtmlDoc doc, {
     required double width,
     required double baseFontSize,
     required TextScaler textScaler,
+    String? fontFamily,
   }) {
     var h = 0.0;
     for (final b in doc.root.children) {
-      h += _measureBlock(b, width, baseFontSize, textScaler);
+      h += _measureBlock(b, width, baseFontSize, textScaler, fontFamily);
     }
     return h;
   }
@@ -629,6 +633,7 @@ class TitleHtml {
     double width,
     double base,
     TextScaler textScaler,
+    String? fontFamily,
   ) {
     final fs = b.style.fontSize(base);
     final pad = b.style.resolvedPadding(fs);
@@ -639,8 +644,12 @@ class TitleHtml {
     double contentH;
     if (b is TitleTextBlock) {
       final tp = TextPainter(
-        text: TextSpan(text: b.text, style: b.style.textStyle(fs)),
+        text: TextSpan(
+          text: b.text,
+          style: b.style.textStyle(fs, fontFamily: fontFamily),
+        ),
         strutStyle: StrutStyle(
+          fontFamily: fontFamily,
           fontSize: fs,
           height: b.style.lineHeight,
           forceStrutHeight: true,
@@ -653,7 +662,7 @@ class TitleHtml {
     } else {
       contentH = 0;
       for (final c in (b as TitleBoxBlock).children) {
-        contentH += _measureBlock(c, innerW, base, textScaler);
+        contentH += _measureBlock(c, innerW, base, textScaler, fontFamily);
       }
     }
     return mar.vertical + pad.vertical + contentH;
@@ -665,6 +674,7 @@ class TitleHtml {
     TitleHtmlDoc doc, {
     required double baseFontSize,
     required Color fallbackColor,
+    String? fontFamily,
   }) {
     return Column(
       // ⚠️ 不能用 stretch：`display:inline-block` 的药丸会被拉满整行。
@@ -673,7 +683,7 @@ class TitleHtml {
       mainAxisSize: MainAxisSize.min,
       children: [
         for (final b in doc.root.children)
-          _buildBlock(b, baseFontSize, fallbackColor),
+          _buildBlock(b, baseFontSize, fallbackColor, fontFamily),
       ],
     );
   }
@@ -682,6 +692,7 @@ class TitleHtml {
     TitleBlock b,
     double base,
     Color fallbackColor,
+    String? fontFamily,
   ) {
     final fs = b.style.fontSize(base);
     final pad = b.style.resolvedPadding(fs);
@@ -691,8 +702,13 @@ class TitleHtml {
       child = Text(
         b.text,
         textAlign: b.style.textAlign,
-        style: b.style.textStyle(fs, fallback: fallbackColor),
+        style: b.style.textStyle(
+          fs,
+          fallback: fallbackColor,
+          fontFamily: fontFamily,
+        ),
         strutStyle: StrutStyle(
+          fontFamily: fontFamily,
           fontSize: fs,
           height: b.style.lineHeight,
           forceStrutHeight: true,
@@ -704,7 +720,7 @@ class TitleHtml {
         mainAxisSize: MainAxisSize.min,
         children: [
           for (final c in (b as TitleBoxBlock).children)
-            _buildBlock(c, base, fallbackColor),
+            _buildBlock(c, base, fallbackColor, fontFamily),
         ],
       );
     }
@@ -811,14 +827,16 @@ class TitleHtml {
 }
 
 extension on TitleCss {
-  TextStyle textStyle(double fs, {Color? fallback}) => TextStyle(
-    fontSize: fs,
-    height: lineHeight,
-    color: color ?? fallback,
-    fontWeight: fontWeight,
-    fontStyle: fontStyle,
-    letterSpacing: letterSpacing?.resolve(fs),
-    shadows: shadows,
-    decoration: underline ? TextDecoration.underline : null,
-  );
+  TextStyle textStyle(double fs, {Color? fallback, String? fontFamily}) =>
+      TextStyle(
+        fontFamily: fontFamily,
+        fontSize: fs,
+        height: lineHeight,
+        color: color ?? fallback,
+        fontWeight: fontWeight,
+        fontStyle: fontStyle,
+        letterSpacing: letterSpacing?.resolve(fs),
+        shadows: shadows,
+        decoration: underline ? TextDecoration.underline : null,
+      );
 }

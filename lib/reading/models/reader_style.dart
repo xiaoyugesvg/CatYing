@@ -30,6 +30,7 @@ class ReaderStyle {
     this.lineHeight = 1.72,
     this.letterSpacing = 0.3,
     this.fontWeight = 400,
+    this.fontId = '',
     this.paraSpacing = 0.5,
     this.indent = 2,
     this.titleAlign = 0,
@@ -110,6 +111,9 @@ class ReaderStyle {
   final double letterSpacing;
 
   final double fontWeight;
+
+  /// 自定义字体 id（'' = 系统默认；见 ReaderFontService）
+  final String fontId;
   final double paraSpacing;
   final double indent;
   final int titleAlign;
@@ -174,6 +178,7 @@ class ReaderStyle {
     lineHeight: lineHeight,
     letterSpacing: letterSpacing,
     fontWeight: fontWeight,
+    fontId: fontId,
     paraSpacing: paraSpacing,
     indent: indent,
     titleAlign: titleAlign,
@@ -225,6 +230,7 @@ class ReaderStyle {
     'lineHeight': lineHeight,
     'letterSpacing': letterSpacing,
     'fontWeight': fontWeight,
+    'fontId': fontId,
     'paraSpacing': paraSpacing,
     'indent': indent,
     'titleAlign': titleAlign,
@@ -281,6 +287,7 @@ class ReaderStyle {
     lineHeight: _d(j['lineHeight'], 1.72),
     letterSpacing: _d(j['letterSpacing'], 0.3),
     fontWeight: _d(j['fontWeight'], 400),
+    fontId: (j['fontId'] as String?) ?? '',
     paraSpacing: _d(j['paraSpacing'], 0.5),
     indent: _d(j['indent'], 2),
     titleAlign: _i(j['titleAlign']) ?? 0,

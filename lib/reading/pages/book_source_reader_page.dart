@@ -26,6 +26,7 @@ import '../novel_source/novel_chinese_converter.dart';
 import '../services/book_paginator.dart';
 import '../services/book_source_service.dart';
 import '../services/chapter_alignment.dart';
+import '../services/reader_font_service.dart';
 import '../services/reader_notes_service.dart';
 import '../services/reader_style_store.dart';
 import '../services/srs_style_importer.dart';
@@ -268,6 +269,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   /// 我保存的标题样式（HTML + 名字），来自 [ReaderStyleStore]
   List<TitleStylePreset> _myTitleStyles = [];
+
+  /// 自定义字体 id（null = 系统默认）；[_fontFamily] 是注册到引擎后的 family
+  String? _fontId;
+  String? _fontFamily;
 
   /// 页眉 / 页脚自定义格式串（左 / 中 / 右）。
   /// 只要有一个非空就走"格式串"渲染，否则退回「信息栏项目」开关的老逻辑。
@@ -1006,10 +1011,16 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       final myStyles = await _styleStore.loadCustom();
       final activeStyle = await _styleStore.loadActiveId();
       final myTitles = await _styleStore.loadTitleStyles();
+      // 自定义字体：把 family 注册到引擎（分页度量必须用同一个 family）
+      await ReaderFontService.instance.load();
+      final fontId = p.getString('reading.fontId');
+      final fontFamily = await ReaderFontService.instance.familyOf(fontId);
       if (!mounted) return;
       _myStyles = myStyles;
       _activeStyleId = activeStyle;
       _myTitleStyles = myTitles;
+      _fontId = fontFamily == null ? null : fontId;
+      _fontFamily = fontFamily;
       setState(() {
         // ✅ **覆盖值优先，逐项回退全局**（本会话第 2 轮 ✓）
         final fsV = (ov?['fontSize'] as num?)?.toDouble() ?? fs;
@@ -1163,6 +1174,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         if (tal != null) _ttsAutoLocate = tal;
       });
       if (_index != widget.initialIndex) _loadChapter(_index);
+      // 恢复完排版/字体后再排一次：首帧那次可能还是默认字号/系统字体
+      _scheduleRepaginate();
       // 迁移只做一次（下次不再动用户的行距）
       if (!typoV2) await p.setBool('reading.typoV2', true);
       // 恢复完偏好要立刻应用屏幕休眠设置
@@ -1282,6 +1295,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       await p.setBool('reading.hideRepeatTitle', _hideRepeatTitle);
       await p.setString('reading.chapterTitleStyle', _chapterTitleStyle.id);
       await p.setString('reading.chapterTitleHtml', _chapterTitleHtml);
+      await p.setString('reading.fontId', _fontId ?? '');
       await p.setString('reading.headerL', _headerL);
       await p.setString('reading.headerC', _headerC);
       await p.setString('reading.headerR', _headerR);
@@ -2772,6 +2786,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           Text(
             widget.chapters[ch].name,
             style: TextStyle(
+              fontFamily: _fontFamily,
               fontSize: _fontSize + 3,
               fontWeight: FontWeight.w700,
               color: fg,
@@ -3175,6 +3190,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     bool bold = false,
     bool noUnderline = false,
   }) => TextStyle(
+    fontFamily: _fontFamily,
     fontSize: _fontSize,
     height: _lineHeight,
     letterSpacing: _letterSpacing,
@@ -5088,6 +5104,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       width: width,
       baseFontSize: _fontSize,
       textScaler: MediaQuery.textScalerOf(context),
+      fontFamily: _fontFamily,
     );
     // 标题再大也不能吃掉半页（否则正文没地方放；分页器会把它挤到下一页）
     return h.clamp(0.0, _textAreaHeight * 0.55);
@@ -5108,6 +5125,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       doc,
       baseFontSize: _fontSize,
       fallbackColor: fallbackColor,
+      fontFamily: _fontFamily,
     );
     final h = height ?? _titleHeightFor(chapter);
     if (h == null) return child;
@@ -5131,7 +5149,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       lineHeight: _lineHeight,
       padding: (_padLeft + _padRight) / 2,
       verticalPadding: _padTop,
-      fontFamily: null,
+      fontFamily: _fontFamily,
       inheritedStyle: TextStyle(
         letterSpacing: _letterSpacing,
         fontWeight: _fontWeightToW(_fontWeight),
@@ -7201,6 +7219,80 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           ],
         ),
       ),
+      // ── 自定义字体（导入 ttf/otf，长按删除）────────────────────
+      Padding(
+        padding: const EdgeInsets.only(top: 2, bottom: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 7),
+              child: Text(
+                '字体',
+                style: TextStyle(fontSize: AppTheme.fontBody, color: _fgMuted),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _chip(
+                    '默认',
+                    _fontId == null,
+                    () {
+                      upd(() {
+                        _fontId = null;
+                        _fontFamily = null;
+                      });
+                      _scheduleRepaginate();
+                    },
+                    compact: true,
+                  ),
+                  for (final f in ReaderFontService.instance.fonts)
+                    GestureDetector(
+                      onLongPress: () async {
+                        await _deleteFont(f);
+                        upd(() {});
+                      },
+                      child: _chip(
+                        f.name,
+                        _fontId == f.id,
+                        () async {
+                          final fam = await ReaderFontService.instance
+                              .familyOf(f.id);
+                          if (!mounted) return;
+                          if (fam == null) {
+                            _toast('字体加载失败（文件可能已丢失）');
+                            return;
+                          }
+                          setState(() {
+                            _fontId = f.id;
+                            _fontFamily = fam;
+                          });
+                          _scheduleSavePrefs();
+                          _scheduleRepaginate();
+                          upd(() {});
+                        },
+                        compact: true,
+                      ),
+                    ),
+                  _chip(
+                    '导入字体',
+                    false,
+                    () async {
+                      await _importFont();
+                      upd(() {});
+                    },
+                    compact: true,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
       _layoutSlider(
         '字号',
         _fontSize,
@@ -8655,11 +8747,23 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     }
 
     final id = 'srs:${DateTime.now().millisecondsSinceEpoch}';
+    // 内嵌字体（fontData）：注册到引擎并落盘（4~5MB 的 ttf 很常见）
+    String? fontId;
+    final fontBytes = SrsStyleImporter.fontBytes(json);
+    if (fontBytes != null) {
+      final f = await ReaderFontService.instance.importBytes(
+        fontBytes,
+        name: SrsStyleImporter.fontName(json) ?? '源阅读字体',
+        ext: 'ttf',
+      );
+      fontId = f?.id;
+    }
     final style = SrsStyleImporter.toReaderStyle(
       json,
       id: id,
       night: night,
       bgImagePath: imagePath,
+      fontId: fontId,
     );
     setState(() => _myStyles = [..._myStyles, style]);
     await _styleStore.saveCustom(_myStyles);
@@ -8684,6 +8788,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       lineHeight: _lineHeight,
       letterSpacing: _letterSpacing,
       fontWeight: _fontWeight,
+      fontId: _fontId ?? '',
       paraSpacing: _paraSpacing,
       indent: _indent,
       titleAlign: _titleAlign,
@@ -8789,7 +8894,121 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     _styleStore.saveActiveId(s.id);
     _scheduleSavePrefs();
     _scheduleRepaginate();
+    // 字体是异步注册的 → 单独处理（同步能拿到就直接切，省一次重排）
+    _applyFontId(s.fontId);
     _toast('已套用「${s.name}」');
+  }
+
+  /// 切换自定义字体（[id] 为空 = 恢复系统默认）
+  void _applyFontId(String id) {
+    if (id.isEmpty) {
+      setState(() {
+        _fontId = null;
+        _fontFamily = null;
+      });
+      _scheduleRepaginate();
+      return;
+    }
+    final sync = ReaderFontService.instance.familyOfSync(id);
+    if (sync != null) {
+      setState(() {
+        _fontId = id;
+        _fontFamily = sync;
+      });
+      _scheduleRepaginate();
+      return;
+    }
+    unawaited(() async {
+      final fam = await ReaderFontService.instance.familyOf(id);
+      if (!mounted) return;
+      setState(() {
+        _fontId = fam == null ? null : id;
+        _fontFamily = fam;
+      });
+      _scheduleRepaginate();
+    }());
+  }
+
+  /// 导入自定义字体（ttf / otf / ttc）并立即应用
+  Future<void> _importFont() async {
+    final files = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['ttf', 'otf', 'ttc'],
+    );
+    if (files.isEmpty) return;
+    final picked = files.first;
+    final baseName = picked.name.replaceAll(
+      RegExp(r'\.(ttf|otf|ttc)$', caseSensitive: false),
+      '',
+    );
+    _toast('正在导入字体…');
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    ReaderFont? font;
+    try {
+      final bytes = await picked.readAsBytes();
+      font = await ReaderFontService.instance.importBytes(
+        bytes,
+        name: baseName,
+        ext: picked.extension,
+      );
+    } catch (_) {}
+    if (font == null) {
+      _toast('字体加载失败（请确认是 ttf / otf 文件）');
+      return;
+    }
+    final fam = await ReaderFontService.instance.familyOf(font.id);
+    if (!mounted) return;
+    setState(() {
+      _fontId = font!.id;
+      _fontFamily = fam;
+    });
+    _scheduleSavePrefs();
+    _scheduleRepaginate();
+    _toast('已应用字体「${font.name}」');
+  }
+
+  /// 删除一个自定义字体（正在用就退回系统默认）
+  Future<void> _deleteFont(ReaderFont f) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: _bgTop,
+        title: Text(
+          '删除字体',
+          style: TextStyle(fontSize: AppTheme.fontTitle3, color: _fg),
+        ),
+        content: Text(
+          '确定删除「${f.name}」？',
+          style: TextStyle(fontSize: AppTheme.fontBody, color: _fgMuted),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: Text('取消', style: TextStyle(color: _fgMuted)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: _fg.withValues(alpha: 0.9),
+              foregroundColor: _bgTop,
+            ),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await ReaderFontService.instance.remove(f);
+    if (!mounted) return;
+    setState(() {
+      if (_fontId == f.id) {
+        _fontId = null;
+        _fontFamily = null;
+      }
+    });
+    _scheduleSavePrefs();
+    _scheduleRepaginate();
+    _toast('已删除字体「${f.name}」');
   }
 
   /// 「保存当前为样式」：把此刻的外观存成一条**我的样式**

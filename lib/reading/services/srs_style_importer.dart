@@ -90,6 +90,30 @@ class SrsStyleImporter {
     }
   }
 
+  /// 内嵌字体（base64 TTF/OTF），没有返回 null
+  static Uint8List? fontBytes(Map<String, dynamic> json) {
+    final v = json['fontData'];
+    if (v is! String || v.trim().isEmpty) return null;
+    try {
+      return base64Decode(v.trim());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 字体显示名（config.textFontName，如 `DFPNewChuan-B5`）
+  static String? fontName(Map<String, dynamic> json) {
+    final s = json['style'];
+    if (s is Map) {
+      final c = s['config'];
+      if (c is Map) {
+        final n = c['textFontName'];
+        if (n is String && n.trim().isNotEmpty) return n.trim();
+      }
+    }
+    return null;
+  }
+
   /// 转成我们的 [ReaderStyle]。
   ///
   /// [bgImagePath] 是调用方已经把背景图落盘后的本地路径（没有就传 null）。
@@ -98,6 +122,7 @@ class SrsStyleImporter {
     required String id,
     required bool night,
     String? bgImagePath,
+    String? fontId,
   }) {
     final styleMap = json['style'];
     Map<String, dynamic> cfg = {};
@@ -159,6 +184,7 @@ class SrsStyleImporter {
       lineHeight: lh,
       letterSpacing: ls,
       fontWeight: 400 + (d('textBold', 0) * 100).clamp(0, 500),
+      fontId: fontId ?? '',
       paraSpacing: ps,
       indent: indent,
       padLeft: d('paddingLeft', 20).clamp(0.0, 80.0),
