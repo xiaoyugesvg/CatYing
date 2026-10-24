@@ -51,8 +51,9 @@ class ReaderStyle {
     // ── ④ 翻页 ──
     this.pageMode = 'slide',
     this.dualPage = false,
-    // ── 章标题版式（默认 / 仙鹤日间 / 仙鹤夜间 / 微信读书）──
+    // ── 章标题版式（默认 / 仙鹤日间 / 仙鹤夜间 / 微信读书 / 自定义）──
     this.chapterTitleStyle = '',
+    this.chapterTitleHtml = '',
     // ── 底线（信纸行线）──
     this.underlineColor,
     this.underlineStyle = 0,
@@ -132,6 +133,9 @@ class ReaderStyle {
   /// 章标题版式 id（'' = 默认；见 ReaderTitleStyle 的 id）
   final String chapterTitleStyle;
 
+  /// 自定义标题样式的 HTML（`chapterTitleStyle == 'custom'` 时生效）
+  final String chapterTitleHtml;
+
   final int? underlineColor;
   final int underlineStyle;
   final double underlineAlpha;
@@ -175,6 +179,7 @@ class ReaderStyle {
     pageMode: pageMode,
     dualPage: dualPage,
     chapterTitleStyle: chapterTitleStyle,
+    chapterTitleHtml: chapterTitleHtml,
     underlineColor: underlineColor,
     underlineStyle: underlineStyle,
     underlineAlpha: underlineAlpha,
@@ -219,6 +224,7 @@ class ReaderStyle {
     'pageMode': pageMode,
     'dualPage': dualPage,
     'chapterTitleStyle': chapterTitleStyle,
+    'chapterTitleHtml': chapterTitleHtml,
     'underlineColor': underlineColor,
     'underlineStyle': underlineStyle,
     'underlineAlpha': underlineAlpha,
@@ -270,6 +276,7 @@ class ReaderStyle {
     pageMode: (j['pageMode'] as String?) ?? 'slide',
     dualPage: j['dualPage'] as bool? ?? false,
     chapterTitleStyle: (j['chapterTitleStyle'] as String?) ?? '',
+    chapterTitleHtml: (j['chapterTitleHtml'] as String?) ?? '',
     underlineColor: _i(j['underlineColor']),
     underlineStyle: _i(j['underlineStyle']) ?? 0,
     underlineAlpha: _d(j['underlineAlpha'], 0.35),

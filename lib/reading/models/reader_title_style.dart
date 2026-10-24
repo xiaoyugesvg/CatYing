@@ -1,35 +1,33 @@
-import 'package:flutter/material.dart';
-
 /// 「标题样式」= 章标题的版式。
 ///
-/// 参考用户提供的三个「源阅读」标题样式（HTML）：
-///   · 仙鹤·日间 / 仙鹤·夜间：左侧仙鹤插画 + 右上角章节数 + 圆角药丸里的章节名
-///     （插画是透明 PNG，已随包内置 `assets/images/reader_title/xianhe.png`）
-///   · 微信读书：小号章节数 + 大号加粗章节名，大留白
-///
-/// 为什么不用 HTML：源阅读是 WebView 渲染，Flutter 侧没有 HTML/CSS 引擎；
-/// 这里把这三套的**版式与配色**原样搬成原生 Widget，分页高度按同一套常量算，
-/// 所以度量与渲染一致（不会页底被裁）。任意 HTML 不支持，但颜色/字号都能改。
+/// 用户提供的三套是「源阅读」的 HTML 标题样式，这里内置成模板（图片换成
+/// 随包 asset），由 `TitleHtml`（HTML/CSS 子集解析器）解析成 Widget 并度量。
+/// 用户还可以选「自定义」，直接粘贴源阅读的标题 HTML（支持 http 图片 /
+/// data URI / asset:）。
 enum ReaderTitleStyle {
-  none('默认', '', ''),
-  xianheDay('仙鹤·日间', 'xianhe_day', 'assets/images/reader_title/xianhe.png'),
-  xianheNight('仙鹤·夜间', 'xianhe_night', 'assets/images/reader_title/xianhe.png'),
-  weRead('微信读书', 'weread', '');
+  none('默认', ''),
+  xianheDay('仙鹤·日间', 'xianhe_day'),
+  xianheNight('仙鹤·夜间', 'xianhe_night'),
+  weRead('微信读书', 'weread'),
+  custom('自定义', 'custom');
 
-  const ReaderTitleStyle(this.label, this.id, this.artAsset);
+  const ReaderTitleStyle(this.label, this.id);
 
   /// 卡片/按钮上的名字
   final String label;
 
-  /// 持久化 id（空串 = 默认，不写 prefs 也行）
+  /// 持久化 id（空串 = 默认）
   final String id;
 
-  /// 左侧插画 asset（空串 = 无插画）
-  final String artAsset;
+  bool get isCustomTemplate => this != ReaderTitleStyle.none;
 
-  bool get custom => this != ReaderTitleStyle.none;
-
-  bool get hasArt => artAsset.isNotEmpty;
+  /// 内置模板（custom 返回空串，用用户自己存的那份）
+  String get html => switch (this) {
+    ReaderTitleStyle.xianheDay => _xianheDay,
+    ReaderTitleStyle.xianheNight => _xianheNight,
+    ReaderTitleStyle.weRead => _weRead,
+    _ => '',
+  };
 
   static ReaderTitleStyle fromId(String? id) {
     final v = id ?? '';
@@ -39,26 +37,38 @@ enum ReaderTitleStyle {
     return none;
   }
 
-  /// 章节数（右上角小字）颜色
-  Color get numberColor => switch (this) {
-    ReaderTitleStyle.xianheDay => const Color(0xFF3A4654),
-    ReaderTitleStyle.xianheNight => const Color(0xFF97897A),
-    ReaderTitleStyle.weRead => const Color(0xFF386068),
-    ReaderTitleStyle.none => const Color(0xFF888888),
-  };
+  /// 自定义编辑框的初始模板（用户没存过时给仙鹤日间，方便改颜色/换图）
+  static String get starterTemplate => _xianheDay;
 
-  /// 药丸底色（仅仙鹤样式）
-  Color get pillColor => switch (this) {
-    ReaderTitleStyle.xianheDay => const Color(0xCC3A4654),
-    ReaderTitleStyle.xianheNight => const Color(0xCC97897A),
-    _ => Colors.transparent,
-  };
+  // ── 内置模板（参数来自用户提供的源阅读样式，图片改成本地 asset）──
 
-  /// 章节名颜色（微信读书是纯文字，用 numberColor）
-  Color get nameColor => switch (this) {
-    ReaderTitleStyle.xianheDay => const Color(0xFFCBBA75),
-    ReaderTitleStyle.xianheNight => const Color(0xFF2D3B6C),
-    ReaderTitleStyle.weRead => const Color(0xFF386068),
-    ReaderTitleStyle.none => const Color(0xFF888888),
-  };
+  static const _xianheDay = '''
+<div style="background-image:url('asset:assets/images/reader_title/xianhe.png');
+            background-repeat:no-repeat; background-position:left; background-size:auto 100%;">
+  <div style="text-align:right;">
+    <h3 style="color:#3a4654; margin:0.5em 0.5em 3em 0; font-size:1.5em; font-weight:200;">章节数</h3>
+    <h4 style="box-shadow:0px 15px 10px -15px #000; display:inline-block;
+               background-color:rgba(58,70,84,0.8); border-radius:16px;
+               margin:0 0 5em 0; padding:0.5em 2em; text-align:right;
+               color:#cbba75; font-weight:200; font-size:1em;">章节名</h4>
+  </div>
+</div>''';
+
+  static const _xianheNight = '''
+<div style="background-image:url('asset:assets/images/reader_title/xianhe.png');
+            background-repeat:no-repeat; background-position:left; background-size:auto 100%;">
+  <div style="text-align:right;">
+    <h3 style="color:#97897a; margin:0.5em 0.5em 3em 0; font-size:1.5em; font-weight:200;">章节数</h3>
+    <h4 style="box-shadow:0px 15px 10px -15px #000; display:inline-block;
+               background-color:rgba(151,137,122,0.8); border-radius:16px;
+               margin:0 0 5em 0; padding:0.5em 2em; text-align:right;
+               color:#2d3b6c; font-weight:200; font-size:1em;">章节名</h4>
+  </div>
+</div>''';
+
+  static const _weRead = '''
+<p style="text-align:left; color:#386068; font-size:1.5em; margin-top:2em;
+          margin-bottom:0; padding-bottom:1.5em;">章节数</p>
+<p style="text-align:left; font-weight:bold; color:#386068; font-size:2em;
+          padding-bottom:4em;">章节名</p>''';
 }
