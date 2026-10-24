@@ -275,6 +275,14 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   // 弹幕（Logvr-danmu / 弹弹play 兼容）
   List<DanmuItem> _danmus = [];
+
+  /// 弹幕条数（播放设置面板标题用）。
+  ///
+  /// ⚠️ 不能直接读 `_danmus.length`：设置面板是 `showModalBottomSheet` +
+  ///   `StatefulBuilder`，它挂在**独立路由**里，父级 `setState` 重建不到它。
+  ///   若面板在弹幕还在加载时打开，标题会永远停在「弹幕」不动；
+  ///   用 ValueNotifier 才能在数据到达时自己刷新。
+  final ValueNotifier<int> _danmuCountVN = ValueNotifier<int>(0);
   bool _danmuOn = true;
   bool _danmuLoaded = false;
   /// 正在加载的弹幕地址（去重锁）。
@@ -1095,7 +1103,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       // 弹幕跟随剧集：清空并重新按新 URL 拉取（否则 _danmuLoaded 卡住永远不换）
       _danmuLoaded = false;
       _danmuLoadGen++;
-      _danmus = [];
+      _setDanmus(const []);
       _danmuLastFailAt = null; // 新集是新目标，上一集的失败节流不该挡它
       // 「切集提示」：换到新的一集时在顶部轻提示（默认关闭）
       if (_switchEpisodeHint) {
@@ -1408,8 +1416,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     return b;
   }
 
-  /// 按当前 [_danmuBlockWords] 过滤（原始列表 → 上屏列表）。
+  /// 写入上屏列表，并同步 [_danmuCountVN]。
   ///
+  /// 所有对 `_danmus` 的赋值都必须走这里，否则设置面板标题的条数会停在旧值。
+  void _setDanmus(List<DanmuItem> list) {
+    _danmus = list;
+    if (_danmuCountVN.value != list.length) _danmuCountVN.value = list.length;
+  }
+
+  /// 按当前 [_danmuBlockWords] 过滤（原始列表 → 上屏列表）。
   /// 抽出来是为了让"改屏蔽词后重新过滤"和"首次请求返回时过滤"共用同一套规则。
   List<DanmuItem> _filterByBlockWords(List<DanmuItem> src) {
     if (_danmuBlockWords.isEmpty) return src;
@@ -1451,7 +1466,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (!mounted) return;
     final changed = before != _danmuBlockWords.join('\u0001');
     setState(() {
-      if (changed) _danmus = _filterByBlockWords(_danmusRaw);
+      if (changed) _setDanmus(_filterByBlockWords(_danmusRaw));
     });
   }
 
@@ -1545,7 +1560,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       );
       _danmuLastFailAt = null;
       setState(() {
-        _danmus = filtered;
+        _setDanmus(filtered);
         _danmuLoaded = true;
       });
       return;
@@ -1655,7 +1670,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (!mounted || loadGen != _danmuLoadGen) return;
     _danmuLastFailAt = null; // 成功拿到结果（含真 0 条）→ 清掉失败节流
     setState(() {
-      _danmus = list;
+      _setDanmus(list);
       // ✅ 有结果（哪怕 0 条）才标记"已加载"，失败不算 —— 失败了还能重试
       _danmuLoaded = true;
     });
@@ -2618,6 +2633,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     _danmuHttpClient = null;
     _positionVN.dispose();
     _durationVN.dispose();
+    _danmuCountVN.dispose();
     // iOS：离开播放页，释放原生 PiP 常驻实例
     if (Platform.isIOS) {
       VideoPlayerPip.instance.releaseIos();
@@ -4448,9 +4464,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                             // ===== 弹幕设置（按参考图重排）=====
                             Row(
                               children: [
-                                // 带上条数：能一眼区分「没匹配到」和「上屏失败」
-                                _SettingsRowLabel(
-                                  _danmus.isEmpty ? '弹幕' : '弹幕 ${_danmus.length} 条',
+                                // 带上条数：能一眼区分「没匹配到」和「上屏失败」。
+                                // ⚠️ 用 ValueListenableBuilder 而不是直接读 `_danmus`：
+                                //   面板在独立路由里，父级 setState 重建不到它 ⇒
+                                //   边加载边开面板时条数会永远停在 0。
+                                ValueListenableBuilder<int>(
+                                  valueListenable: _danmuCountVN,
+                                  builder: (_, count, __) => _SettingsRowLabel(
+                                    count == 0 ? '弹幕' : '弹幕 $count 条',
+                                  ),
                                 ),
                                 const Spacer(),
                                 Switch(
