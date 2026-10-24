@@ -82,4 +82,16 @@ class ReaderBgAssets {
     pikaNight,
     pikaPink,
   ];
+
+  /// 选「日间壁纸」时用的清单：成对的夜间版不再重复占格
+  /// （选中日版会自动带出夜版，见 [pairOf]）。
+  static const picker = <String>[
+    ...plain,
+    ...weRead,
+    nightForest,
+    gufengDay,
+    pomoDay,
+    pikaDay,
+    pikaPink,
+  ];
 }

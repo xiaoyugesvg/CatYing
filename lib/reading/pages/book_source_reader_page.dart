@@ -163,7 +163,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   String? _customBgPath;
 
   /// 内置阅读背景壁纸（清单集中在 [ReaderBgAssets]，与样式编辑器共用）
-  static const List<String> _builtinBgImages = ReaderBgAssets.all;
+  ///
+  /// 用 [ReaderBgAssets.picker]（不含成对夜间版）：古风/泼墨/皮卡的夜版
+  /// 选中日版时自动带出，避免列表里同一张图占两格、用户选错。
+  static const List<String> _builtinBgImages = ReaderBgAssets.picker;
 
   /// 当前选中的内置壁纸（null = 不用壁纸，走 `_bgIndex` 的纯色底 ✓）
   String? _bgImageAsset;
@@ -298,6 +301,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 日夜自动切换：白天 / 夜间各绑定一套样式（null = 只切底色，不换样式）
   String? _dayStyleId;
   String? _nightStyleId;
+
+  /// 日夜是否跟随系统 / 全局明暗（默认跟随；用户手动切过一次就关掉，
+  /// 避免"我自己点了夜间，系统一翻白天又被切回去"）。
+  bool _followSystem = true;
+
+  /// 偏好是否已恢复完（恢复前的全局明暗回调要忽略，否则会按默认值乱切）
+  bool _prefsReady = false;
 
   final ReaderStyleStore _styleStore = ReaderStyleStore();
 
@@ -671,6 +681,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     _index = widget.initialIndex.clamp(0, widget.chapters.length - 1);
     _pageCtrl = PageController();
     HardwareKeyboard.instance.addHandler(_onKey);
+    // 跟随系统日夜：全局明暗（设置里的明暗 / 系统深色）一变就跟着换
+    AppBrightness.isLight.addListener(_onAppAppearanceChanged);
     _restorePrefs();
     _syncDockBrightness();
     _loadChapter(_index);
@@ -861,6 +873,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_onKey);
+    AppBrightness.isLight.removeListener(_onAppAppearanceChanged);
     // 🆕 **退出阅读器必须停掉朗读** ✓ —— `TtsService` 是**进程单例** ✓，
     //   原来这里既不 `stop()` 也不清 `onFinished` ✗ → 用户点朗读后按返回键
     //   离开阅读器，语音会**继续在书架/首页念** ✗；`onFinished` 闭包还一直
@@ -1047,6 +1060,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       final activeStyle = await _styleStore.loadActiveId();
       _dayStyleId = await _styleStore.loadDayStyleId();
       _nightStyleId = await _styleStore.loadNightStyleId();
+      _followSystem = await _styleStore.loadFollowSystem();
       final myTitles = await _styleStore.loadTitleStyles();
       // 自定义字体：把 family 注册到引擎（分页度量必须用同一个 family）
       await ReaderFontService.instance.load();
@@ -1245,6 +1259,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       _applySleepMode();
       // 以及「隐藏状态栏」（沉浸全屏）设置
       _applyReaderSystemUi();
+      // 跟随系统：偏好就绪后按当前全局明暗对齐一次（含绑定样式的自动套用）
+      _prefsReady = true;
+      _onAppAppearanceChanged();
     } catch (_) {
       // 偏好读不到就用默认值，不影响阅读
     }
@@ -2129,9 +2146,21 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     final bgAsset =
         _bgIndex == 5 ? (_bgImageAssetNight ?? _bgImageAsset) : _bgImageAsset;
     final useImgBg = useFileBg || bgAsset != null;
-    return Scaffold(
-      backgroundColor: useImgBg ? Colors.transparent : bg[0],
-      body: Stack(
+    // 状态栏 / Home 指示条图标明暗（db 的 darkStatusIcon）：深底换浅色图标，
+    // 否则夜间是一排看不见的黑色图标。用背景实际明暗判断，不看昼夜按钮 ——
+    // 白天选了深色壁纸同样要浅色图标。
+    final darkSurface = _bgIndex == 5 || (_bgImageDark ?? false);
+    final overlayStyle =
+        (darkSurface ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark)
+            .copyWith(
+              statusBarColor: Colors.transparent,
+              systemNavigationBarColor: Colors.transparent,
+            );
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: overlayStyle,
+      child: Scaffold(
+        backgroundColor: useImgBg ? Colors.transparent : bg[0],
+        body: Stack(
         fit: StackFit.expand,
         children: [
           // 背景层：自定义图片优先（cover 铺满），否则内置/自定义色
@@ -2363,6 +2392,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             ),
           if (_showSettingsPanel) _settingsPanel(bg[1], extraBottom: extraBottom),
         ],
+        ),
       ),
     );
   }
@@ -3513,8 +3543,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     if (!mounted) return;
     setState(() {
       _bgImageAsset = picked;
-      // 手动选壁纸 ⇒ 不再用样式的夜间专用图
-      _bgImageAssetNight = null;
+      // 黑白成对的图（古风/泼墨/皮卡）顺手带出夜间版；其余夜间压暗
+      _bgImageAssetNight = ReaderBgAssets.pairOf(picked);
       _bgImageDark = dark;
     });
     _scheduleSavePrefs();
@@ -4346,7 +4376,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   ///
   /// 若在「阅读样式」里给白天 / 夜间各绑了一套样式，切换后自动套用那一套
   /// （先切明暗，再套用 —— `_applyReaderStyle` 按当前模式取对应配色）。
-  void _toggleDayNight() {
+  ///
+  /// [manual] 为真 = 用户自己点的 ⇒ 关闭「跟随系统」（之后系统翻昼夜不再抢）；
+  /// 由 [AppBrightness] 回调触发时传 false，保持跟随。
+  void _toggleDayNight({bool manual = true}) {
     final toNight = _bgIndex != 5;
     setState(() {
       if (!toNight) {
@@ -4360,6 +4393,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         _customBgColor = _styleBgNight == null ? null : Color(_styleBgNight!);
       }
     });
+    if (manual && _followSystem) {
+      _followSystem = false;
+      _styleStore.saveFollowSystem(false);
+    }
     // 自选图片不再在切夜间时被清掉（原来清一次就永久丢了，切回白天也回不来）；
     // 夜里照常显示，没有夜间专属壁纸时由 `_nightDim` 压暗。
     final bound = _styleById(toNight ? _nightStyleId : _dayStyleId);
@@ -4368,6 +4405,16 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       _toast('已切换到「${bound.name}」');
     }
     _scheduleSavePrefs();
+  }
+
+  /// 全局明暗（跟随系统 / 设置里的明暗开关）变化 → 阅读器跟着切。
+  ///
+  /// 只在「跟随系统」且偏好已恢复时生效；手动切过昼夜就不再被覆盖。
+  void _onAppAppearanceChanged() {
+    if (!mounted || !_prefsReady || !_followSystem) return;
+    final wantNight = !AppBrightness.isLight.value;
+    if (wantNight == (_bgIndex == 5)) return;
+    _toggleDayNight(manual: false);
   }
 
   /// 按 id 找样式（内置 + 我的）
@@ -6918,7 +6965,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     return GestureDetector(
       onTap: () => upd(() {
         _bgImageAsset = asset;
-        _bgImageAssetNight = null;
+        // 成对的图自动带出夜间版（古风/泼墨/皮卡）
+        _bgImageAssetNight = ReaderBgAssets.pairOf(asset);
       }),
       child: Container(
         width: 44,
@@ -9100,16 +9148,18 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       ),
     );
     if (!mounted) return;
-    // 页里可能改了「白天 / 夜间绑定样式」，回来后同步（下次切日夜立即生效）
+    // 页里可能改了「白天 / 夜间绑定样式」或「跟随系统」，回来后同步
     final d = await _styleStore.loadDayStyleId();
     final n = await _styleStore.loadNightStyleId();
+    final f = await _styleStore.loadFollowSystem();
     if (!mounted) return;
-    if (d != _dayStyleId || n != _nightStyleId) {
-      setState(() {
-        _dayStyleId = d;
-        _nightStyleId = n;
-      });
-    }
+    setState(() {
+      _dayStyleId = d;
+      _nightStyleId = n;
+      _followSystem = f;
+    });
+    // 刚把「跟随系统」打开 ⇒ 立刻按当前全局明暗对齐一次
+    if (f) _onAppAppearanceChanged();
   }
 
   /// 一键套用一套样式：配色 / 背景 / 排版 / 边距 / 信息栏 / 翻页动画一次改完。

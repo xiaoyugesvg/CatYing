@@ -61,6 +61,9 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
   String? _dayStyleId;
   String? _nightStyleId;
 
+  /// 阅读器日夜是否跟随系统 / 全局明暗
+  bool _followSystem = true;
+
   @override
   void initState() {
     super.initState();
@@ -70,10 +73,12 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
   Future<void> _loadAutoStyles() async {
     final d = await _store.loadDayStyleId();
     final n = await _store.loadNightStyleId();
+    final f = await _store.loadFollowSystem();
     if (!mounted) return;
     setState(() {
       _dayStyleId = d;
       _nightStyleId = n;
+      _followSystem = f;
     });
   }
 
@@ -401,6 +406,48 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
             '夜间样式',
             _nightStyleId,
             () => _pickAutoStyle(night: true),
+          ),
+          Divider(height: 0.6, thickness: 0.6, color: _fg.withValues(alpha: 0.08)),
+          _followRow(),
+        ],
+      ),
+    );
+  }
+
+  /// 「跟随系统」开关：开启后系统/全局明暗一变，阅读器跟着切（并套用绑定样式）
+  Widget _followRow() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 4, 8, 4),
+      child: Row(
+        children: [
+          Icon(
+            Icons.brightness_auto_rounded,
+            size: 18,
+            color: _fg.withValues(alpha: 0.75),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('跟随系统日夜', style: TextStyle(fontSize: 14, color: _fg)),
+                Text(
+                  '手动切过一次昼夜后会自动关闭',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: _fg.withValues(alpha: 0.45),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: _followSystem,
+            activeThumbColor: _fg,
+            onChanged: (v) async {
+              setState(() => _followSystem = v);
+              await _store.saveFollowSystem(v);
+            },
           ),
         ],
       ),

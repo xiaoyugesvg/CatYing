@@ -44,6 +44,9 @@ class ReaderStyleStore {
   static const _kDayStyle = 'reading.styles.dayStyle';
   static const _kNightStyle = 'reading.styles.nightStyle';
 
+  /// 阅读器日夜是否跟随系统 / 全局明暗（默认跟随；用户手动切过一次就变 false）
+  static const _kFollowSystem = 'reading.styles.followSystem';
+
   Future<List<ReaderStyle>> loadCustom() async {
     try {
       final p = await SharedPreferences.getInstance();
@@ -126,6 +129,23 @@ class ReaderStyleStore {
       } else {
         await p.setString(_kNightStyle, id);
       }
+    } catch (_) {}
+  }
+
+  /// 是否跟随系统 / 全局明暗（默认 true）
+  Future<bool> loadFollowSystem() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      return p.getBool(_kFollowSystem) ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  Future<void> saveFollowSystem(bool value) async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setBool(_kFollowSystem, value);
     } catch (_) {}
   }
 

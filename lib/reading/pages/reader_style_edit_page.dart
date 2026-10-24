@@ -226,7 +226,7 @@ class _ReaderStyleEditPageState extends State<ReaderStyleEditPage> {
               final pair = ReaderBgAssets.pairOf(v);
               if (pair != null && _bgAssetNight == null) _bgAssetNight = pair;
             });
-          }),
+          }, assets: ReaderBgAssets.picker),
           _wallpapers('夜间', _bgAssetNight, (v) {
             setState(() => _bgAssetNight = v);
           }),
@@ -375,11 +375,14 @@ class _ReaderStyleEditPageState extends State<ReaderStyleEditPage> {
   }
 
   /// 日间 / 夜间壁纸选择（横向缩略图，第一格是「无」）
+  ///
+  /// [assets] 缺省 = 全部；日间列表传 [ReaderBgAssets.picker]（不重复列夜版）。
   Widget _wallpapers(
     String label,
     String? current,
-    ValueChanged<String?> onChanged,
-  ) {
+    ValueChanged<String?> onChanged, {
+    List<String> assets = ReaderBgAssets.all,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Column(
@@ -394,11 +397,11 @@ class _ReaderStyleEditPageState extends State<ReaderStyleEditPage> {
             height: 54,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              itemCount: ReaderBgAssets.all.length + 1,
+              itemCount: assets.length + 1,
               separatorBuilder: (_, __) => const SizedBox(width: 8),
               itemBuilder: (c, i) {
                 if (i == 0) return _wallTile(null, current == null, onChanged);
-                final asset = ReaderBgAssets.all[i - 1];
+                final asset = assets[i - 1];
                 return _wallTile(asset, current == asset, onChanged);
               },
             ),
