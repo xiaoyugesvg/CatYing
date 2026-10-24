@@ -4264,7 +4264,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   return Padding(
                     padding: EdgeInsets.only(
                       top: 4,
-                      bottom: _fontSize * _paraSpacing,
+                      // 默认标题也吃「标题间距」滑杆（分页端同参：headingExtraBottom）
+                      bottom: _fontSize * _paraSpacing + _titleGap,
                     ),
                     child: Text(
                       headingText,
@@ -5650,7 +5651,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       height: h,
       child: ClipRect(
         child: OverflowBox(
-          alignment: Alignment.topCenter,
+          // 「标题对齐」对 HTML 标题样式也生效：OverflowBox 自身撑满页宽，
+          // 用 alignment 把真实宽度的标题推到左 / 居中（不破坏内部 CSS 版式）。
+          // minWidth: 0 让内容按自身宽度收缩，否则 Column 被紧约束撑满、
+          // alignment 不起作用。
+          alignment: _titleAlign == 1
+              ? Alignment.topCenter
+              : Alignment.topLeft,
+          minWidth: 0,
           maxHeight: double.infinity,
           child: child,
         ),
@@ -5683,6 +5691,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       textScaler: MediaQuery.textScalerOf(context),
       // 自定义标题样式是复合版式 ⇒ 用固定高度，度量与渲染一致
       headingFixedHeight: _titleHeightFor(chapter ?? _index),
+      // 默认标题走文本度量 ⇒ 把「标题间距」也计入（与渲染端 Padding 同参）
+      headingExtraBottom: _titleGap,
     );
   }
 
@@ -9387,6 +9397,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       titleAlign: _titleAlign,
       titleStyle: _titleStyle,
       titleFontSize: _titleFontSize,
+      titleScale: _titleScale,
+      titleGap: _titleGap,
       titleBold: _titleBold,
       hideRepeatTitle: _hideRepeatTitle,
       focusBold: _focusBold,
@@ -9522,6 +9534,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           ? null
           : Color(s.fgColorNight!);
       _titleFontSize = s.titleFontSize;
+      // 标题缩放/间距是样式的组成部分（样式库里可调、可导出）
+      _titleScale = s.titleScale.clamp(0.6, 1.6);
+      _titleGap = s.titleGap.clamp(0.0, 40.0);
       _titleBold = s.titleBold;
       _bgImageAsset = s.bgImageAsset;
       _bgImageAssetNight = s.bgImageAssetNight;

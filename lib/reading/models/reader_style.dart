@@ -39,6 +39,8 @@ class ReaderStyle {
     this.titleAlign = 0,
     this.titleStyle = 0,
     this.titleFontSize,
+    this.titleScale = 1.0,
+    this.titleGap = 0,
     this.titleBold = true,
     this.hideRepeatTitle = true,
     this.focusBold = false,
@@ -139,6 +141,16 @@ class ReaderStyle {
   /// 章标题字号（px）。null = 正文字号 + 3（旧默认）
   final double? titleFontSize;
 
+  /// 章标题**整体缩放**（1.0 = 原尺寸，0.6~1.6）。
+  ///
+  /// HTML 标题样式里的 font-size 是相对正文的固定倍数，不同屏幕/正文号下
+  /// 差异很大；这个系数连 px 一起缩放（见 `TitleHtml.build(pxScale:)`）。
+  final double titleScale;
+
+  /// 章标题下方额外留白（0~40）。CSS 里的 margin 是相对标题字号的固定值，
+  /// 换屏后间距会变形，用它统一微调标题与正文的距离。
+  final double titleGap;
+
   /// 章标题是否加粗。Legado 的 `titleBold < 0` 视为不加粗
   final bool titleBold;
   final bool hideRepeatTitle;
@@ -215,6 +227,8 @@ class ReaderStyle {
     titleAlign: titleAlign,
     titleStyle: titleStyle,
     titleFontSize: titleFontSize,
+    titleScale: titleScale,
+    titleGap: titleGap,
     titleBold: titleBold,
     hideRepeatTitle: hideRepeatTitle,
     focusBold: focusBold,
@@ -273,6 +287,8 @@ class ReaderStyle {
     'titleAlign': titleAlign,
     'titleStyle': titleStyle,
     'titleFontSize': titleFontSize,
+    'titleScale': titleScale,
+    'titleGap': titleGap,
     'titleBold': titleBold,
     'hideRepeatTitle': hideRepeatTitle,
     'focusBold': focusBold,
@@ -336,6 +352,8 @@ class ReaderStyle {
     titleAlign: _i(j['titleAlign']) ?? 0,
     titleStyle: _i(j['titleStyle']) ?? 0,
     titleFontSize: (j['titleFontSize'] as num?)?.toDouble(),
+    titleScale: _d(j['titleScale'], 1.0).clamp(0.6, 1.6),
+    titleGap: _d(j['titleGap'], 0).clamp(0, 40),
     titleBold: j['titleBold'] as bool? ?? true,
     hideRepeatTitle: j['hideRepeatTitle'] as bool? ?? true,
     focusBold: j['focusBold'] as bool? ?? false,

@@ -59,6 +59,13 @@ class BookTypography {
   /// 只有阅读器里选了自定义标题样式时才会传。
   final double? headingFixedHeight;
 
+  /// 默认（无 HTML 样式）章标题下方的额外留白。
+  ///
+  /// 渲染端在标题 Padding.bottom 里加了它，度量端也要计入，否则两处不一致
+  /// ⇒ 每章首页累积溢出。选了 HTML 标题样式时用 [headingFixedHeight]，
+  /// 那不参与这里（已经包含间距）。
+  final double headingExtraBottom;
+
   const BookTypography({
     required this.fontSize,
     required this.lineHeight,
@@ -74,6 +81,7 @@ class BookTypography {
     this.textScaler = TextScaler.noScaling,
     this.textHeightBehavior = const TextHeightBehavior(),
     this.headingFixedHeight,
+    this.headingExtraBottom = 0,
   });
 
   /// 段落 / 块之间的纵向间距
@@ -355,7 +363,9 @@ class BookPaginator {
     // 自定义「标题样式」是复合版式（插画/药丸）⇒ 用两边共用的固定高度。
     final totalH = (isHeading && typo.headingFixedHeight != null)
         ? typo.headingFixedHeight!
-        : tp.height + (isHeading ? 4.0 : 0.0) + extraV;
+        : tp.height +
+              (isHeading ? 4.0 + typo.headingExtraBottom : 0.0) +
+              extraV;
 
     if (totalH + _kEps <= _remaining) {
       // 整块放得下

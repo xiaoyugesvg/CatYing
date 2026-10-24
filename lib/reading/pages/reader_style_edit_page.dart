@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/reader_style.dart';
 import '../models/reader_bg_assets.dart';
 import '../models/reader_title_style.dart';
+import '../services/title_html_parser.dart';
 
 /// 单套「阅读样式」编辑器。
 ///
@@ -52,6 +53,13 @@ class _ReaderStyleEditPageState extends State<ReaderStyleEditPage> {
   late String? _bgAssetNight;
   late ReaderTitleStyle _titleStyle;
   late bool _titleBold;
+  late double _titleScale;
+  late double _titleGap;
+  late int _titleAlign;
+  late double? _titleFontSize;
+
+  /// 预览卡当前显示的是日间还是夜间
+  bool _previewNight = false;
 
   Color get _fg => widget.foreground;
   Color get _bg => widget.background;
@@ -112,6 +120,10 @@ class _ReaderStyleEditPageState extends State<ReaderStyleEditPage> {
     _bgAssetNight = s.bgImageAssetNight;
     _titleStyle = ReaderTitleStyle.fromId(s.chapterTitleStyle);
     _titleBold = s.titleBold;
+    _titleScale = s.titleScale;
+    _titleGap = s.titleGap;
+    _titleAlign = s.titleAlign;
+    _titleFontSize = s.titleFontSize;
   }
 
   @override
@@ -145,6 +157,10 @@ class _ReaderStyleEditPageState extends State<ReaderStyleEditPage> {
       'bgImageAssetNight': _bgAssetNight,
       'chapterTitleStyle': _titleStyle.id,
       'titleBold': _titleBold,
+      'titleScale': _titleScale,
+      'titleGap': _titleGap,
+      'titleAlign': _titleAlign,
+      'titleFontSize': _titleFontSize,
       'footerC': _footerC.text.trim(),
     });
     Navigator.of(context).pop(out);
@@ -170,9 +186,17 @@ class _ReaderStyleEditPageState extends State<ReaderStyleEditPage> {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 30),
+      body: Column(
         children: [
+          // 常驻预览：调任何滑杆都即时反映（点一下切换日/夜）
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 2),
+            child: _previewCard(),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 30),
+              children: [
           _field(
             TextField(
               controller: _name,
@@ -284,6 +308,75 @@ class _ReaderStyleEditPageState extends State<ReaderStyleEditPage> {
             ),
             onChanged: (v) => setState(() => _titleBold = v),
           ),
+          // 标题大小/间距：内置 HTML 标题样式的 font-size 是相对正文的固定倍数，
+          // 换机型/调字号后容易过大，直接在这里连 px 一起缩放。
+          _slider(
+            '标题大小',
+            _titleScale,
+            0.6,
+            1.6,
+            '${(_titleScale * 100).round()}%',
+            (v) => setState(() => _titleScale = v),
+            step: 0.05,
+          ),
+          _slider('标题间距', _titleGap, 0, 40, _titleGap.round().toString(), (v) {
+            setState(() => _titleGap = v);
+          }, step: 2),
+          // 默认标题（未选标题样式时）的字号，0 = 跟随正文 +3
+          _slider(
+            '标题字号',
+            _titleFontSize ?? 0,
+            0,
+            40,
+            _titleFontSize == null ? '跟随' : _titleFontSize!.round().toString(),
+            (v) {
+              setState(() => _titleFontSize = v <= 0 ? null : v);
+            },
+            step: 1,
+          ),
+          Row(
+            children: [
+              SizedBox(
+                width: 58,
+                child: Text(
+                  '标题对齐',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _fg.withValues(alpha: 0.75),
+                  ),
+                ),
+              ),
+              for (final n in ['靠左', '居中'])
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: GestureDetector(
+                    onTap: () =>
+                        setState(() => _titleAlign = n == '靠左' ? 0 : 1),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _titleAlign == (n == '靠左' ? 0 : 1)
+                            ? _fg.withValues(alpha: 0.85)
+                            : _fg.withValues(alpha: 0.07),
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: Text(
+                        n,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: _titleAlign == (n == '靠左' ? 0 : 1)
+                              ? _bg
+                              : _fg,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
           _section('页脚'),
           TextField(
             controller: _footerC,
@@ -304,7 +397,200 @@ class _ReaderStyleEditPageState extends State<ReaderStyleEditPage> {
             '占位符：p 页码 · P 总页 · % 进度 · c 章号 · C 总章 · # 章节名 · B 书名 · t 时间 · b/n 电量',
             style: TextStyle(fontSize: 11, color: _fg.withValues(alpha: 0.45)),
           ),
+              ],
+            ),
+          ),
         ],
+      ),
+    );
+  }
+
+  /// 预览用的底色（null = 没有设定，用日/夜默认）
+  Color _previewBg(bool night) {
+    final v = night ? _bgNight : _bgDay;
+    if (v != null) return Color(v);
+    return night ? const Color(0xFF1F232B) : const Color(0xFFFAF8F3);
+  }
+
+  /// 预览用的字色
+  Color _previewFg(bool night) {
+    final v = night ? _fgNight : _fgDay;
+    if (v != null) return Color(v);
+    return night ? const Color(0xFFC8C8C8) : const Color(0xFF2B2B2B);
+  }
+
+  /// 实时预览卡：改任何滑杆即时生效；点一下切换日/夜。
+  ///
+  /// 按真机 1:1 渲染（字号/行高/字距/边距都用真实值），只有高度裁到 178
+  /// —— 这样"标题会不会太大/被裁"能直接看出来，而不是盲调数字。
+  Widget _previewCard() {
+    final night = _previewNight;
+    final bgColor = _previewBg(night);
+    final fgColor = _previewFg(night);
+    final asset = night ? _bgAssetNight : _bgAssetDay;
+    const demoChapter = '第一章 风起于青萍之末';
+    const demoText = '山色空蒙雨亦奇，水光潋滟晴方好。远处传来几声钟响，惊起了林间的宿鸟，扑簌簌掠过窗前。';
+    return LayoutBuilder(
+      builder: (c, box) {
+        final w = box.maxWidth;
+        // 边距按预览宽度收一下，避免 80 的边距把 343 宽的预览挤爆
+        final pl = _padLeft.clamp(0.0, w * 0.3).toDouble();
+        final pr = _padRight.clamp(0.0, w * 0.3).toDouble();
+        final indent = List.filled(_indent.round(), '\u3000').join();
+        return GestureDetector(
+          onTap: () => setState(() => _previewNight = !night),
+          child: Container(
+            height: 178,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: bgColor,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: _fg.withValues(alpha: 0.12)),
+              image: asset == null
+                  ? null
+                  : DecorationImage(
+                      image: AssetImage(asset),
+                      fit: BoxFit.cover,
+                    ),
+            ),
+            child: Stack(
+              children: [
+                if (night)
+                  Positioned.fill(
+                    child: ColoredBox(
+                      color: Colors.black.withValues(alpha: 0.2),
+                    ),
+                  ),
+                Padding(
+                  padding: EdgeInsets.fromLTRB(pl, 10, pr, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '風起於青萍之末',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 9,
+                                color: fgColor.withValues(alpha: 0.55),
+                              ),
+                            ),
+                          ),
+                          Text(
+                            '12:30  87%',
+                            style: TextStyle(
+                              fontSize: 9,
+                              color: fgColor.withValues(alpha: 0.55),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      if (_titleStyle != ReaderTitleStyle.none)
+                        _previewHtmlTitle(fgColor, demoChapter)
+                      else
+                        Text(
+                          demoChapter,
+                          textAlign: _titleAlign == 1
+                              ? TextAlign.center
+                              : TextAlign.left,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize:
+                                (_titleFontSize ?? _fontSize + 3) * _titleScale,
+                            fontWeight: _titleBold
+                                ? FontWeight.w700
+                                : FontWeight.w400,
+                            color: fgColor,
+                            height: 1.5,
+                            letterSpacing: 0,
+                          ),
+                        ),
+                      SizedBox(height: _titleGap),
+                      Expanded(
+                        child: ClipRect(
+                          child: Text(
+                            '$indent$demoText',
+                            style: TextStyle(
+                              fontSize: _fontSize,
+                              height: _lineHeight,
+                              letterSpacing: _letterSpacing,
+                              color: fgColor,
+                            ),
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '第 1 页 / 共 3 页',
+                        style: TextStyle(
+                          fontSize: 9,
+                          color: fgColor.withValues(alpha: 0.55),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // 日/夜切换提示
+                Positioned(
+                  right: 8,
+                  top: 6,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: fgColor.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      night ? '夜间' : '日间',
+                      style: TextStyle(fontSize: 9, color: fgColor),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// 预览里的 HTML 章节标题（与阅读器同参：base 缩放 + pxScale）
+  Widget _previewHtmlTitle(Color fg, String chapter) {
+    final src = _previewNight
+        ? (_titleStyle.nightHtml.isNotEmpty
+              ? _titleStyle.nightHtml
+              : _titleStyle.html)
+        : _titleStyle.html;
+    if (src.trim().isEmpty) return const SizedBox.shrink();
+    final doc = TitleHtml.compile(
+      src,
+      chapterNumber: '',
+      chapterName: chapter,
+    );
+    if (doc.isEmpty) return const SizedBox.shrink();
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 84),
+      child: ClipRect(
+        child: OverflowBox(
+          alignment: _titleAlign == 1
+              ? Alignment.topCenter
+              : Alignment.topLeft,
+          minWidth: 0,
+          maxHeight: double.infinity,
+          child: TitleHtml.build(
+            doc,
+            baseFontSize: _fontSize * _titleScale,
+            fallbackColor: fg,
+            pxScale: _titleScale,
+          ),
+        ),
       ),
     );
   }

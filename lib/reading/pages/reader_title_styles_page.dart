@@ -588,7 +588,9 @@ class _ReaderTitleStylesPageState extends State<ReaderTitleStylesPage> {
           width: 300,
           child: TitleHtml.build(
             doc,
-            baseFontSize: 16,
+            // 与阅读器一致：HTML 标题的 em 基准是**正文字号**（内置样式多为
+            // 19/20）。原来预览用 16，看起来比真机小一号，"预览挺好、进去太大"。
+            baseFontSize: 19,
             fallbackColor: _fg,
           ),
         ),
