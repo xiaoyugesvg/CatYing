@@ -186,10 +186,11 @@ class _BookPageCoverState extends State<BookPageCover>
     final content = dir == 1 ? widget.nextPage : widget.prevPage;
     // 滑动页前沿 x（dir=1: 左沿=slide；dir=-1: 右沿=w+slide）
     final leadingEdge = dir == 1 ? slide : (w + slide);
-    // 投影颜色随纸面明暗：浅色纸用黑、深色纸用白（黑投影在深色纸上隐形）
+    // 投影颜色：**始终用黑**。深色纸上用白色会画出一道假亮边（纸在暗处翻页，
+    // 边缘只会更暗，不会发光）；深色纸只是把黑色投影加深一点才看得清。
     final isDark =
         widget.dark ?? (Theme.of(context).brightness == Brightness.dark);
-    final shadow = isDark ? Colors.white : Colors.black;
+    final shadowAlpha = isDark ? 0.45 : 0.28;
     return [
       Positioned.fill(child: widget.page),
       if (content != null)
@@ -217,10 +218,10 @@ class _BookPageCoverState extends State<BookPageCover>
                 colors: dir == 1
                     ? [
                         Colors.transparent,
-                        shadow.withValues(alpha: 0.28),
+                        Colors.black.withValues(alpha: shadowAlpha),
                       ]
                     : [
-                        shadow.withValues(alpha: 0.28),
+                        Colors.black.withValues(alpha: shadowAlpha),
                         Colors.transparent,
                       ],
               ),

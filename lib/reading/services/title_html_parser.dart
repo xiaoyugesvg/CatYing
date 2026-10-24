@@ -135,8 +135,12 @@ class TitleCss {
   List<BoxShadow> boxShadows = const [];
   bool underline = false;
 
-  /// 当前元素的字号（px）= 绝对 px ?? 基准字号 × 相对倍数
-  double fontSize(double base) => fontPx ?? base * fontScale;
+  /// 当前元素的字号（px）= 绝对 px × [pxScale] ?? 基准字号 × 相对倍数
+  ///
+  /// [pxScale] 用于"整体缩放"：源阅读样式里常写死 `font-size:24px`，换手机
+  /// 尺寸后完全不跟着变；由调用方传一个统一系数让 px 也随屏幕/用户设置缩放。
+  double fontSize(double base, [double pxScale = 1.0]) =>
+      fontPx == null ? base * fontScale : fontPx! * pxScale;
 
   /// 子节点继承用：只保留 CSS 里**可继承**的属性。
   ///
@@ -629,10 +633,18 @@ class TitleHtml {
     required double baseFontSize,
     required TextScaler textScaler,
     String? fontFamily,
+    double pxScale = 1.0,
   }) {
     var h = 0.0;
     for (final b in doc.root.children) {
-      h += _measureBlock(b, width, baseFontSize, textScaler, fontFamily);
+      h += _measureBlock(
+        b,
+        width,
+        baseFontSize,
+        textScaler,
+        fontFamily,
+        pxScale,
+      );
     }
     return h;
   }
@@ -643,8 +655,9 @@ class TitleHtml {
     double base,
     TextScaler textScaler,
     String? fontFamily,
+    double pxScale,
   ) {
-    final fs = b.style.fontSize(base).clamp(base * 0.5, base * 1.4);
+    final fs = b.style.fontSize(base, pxScale).clamp(base * 0.5, base * 1.4);
     final pad = b.style.resolvedPadding(fs);
     final mar = b.style.margin.resolve(fs);
     final innerW = (width - pad.horizontal - mar.horizontal)
@@ -671,7 +684,14 @@ class TitleHtml {
     } else {
       contentH = 0;
       for (final c in (b as TitleBoxBlock).children) {
-        contentH += _measureBlock(c, innerW, base, textScaler, fontFamily);
+        contentH += _measureBlock(
+          c,
+          innerW,
+          base,
+          textScaler,
+          fontFamily,
+          pxScale,
+        );
       }
     }
     return mar.vertical + pad.vertical + contentH;
@@ -684,6 +704,7 @@ class TitleHtml {
     required double baseFontSize,
     required Color fallbackColor,
     String? fontFamily,
+    double pxScale = 1.0,
   }) {
     return Column(
       // ⚠️ 不能用 stretch：`display:inline-block` 的药丸会被拉满整行。
@@ -692,7 +713,7 @@ class TitleHtml {
       mainAxisSize: MainAxisSize.min,
       children: [
         for (final b in doc.root.children)
-          _buildBlock(b, baseFontSize, fallbackColor, fontFamily),
+          _buildBlock(b, baseFontSize, fallbackColor, fontFamily, pxScale),
       ],
     );
   }
@@ -702,8 +723,9 @@ class TitleHtml {
     double base,
     Color fallbackColor,
     String? fontFamily,
+    double pxScale,
   ) {
-    final fs = b.style.fontSize(base).clamp(base * 0.5, base * 1.4);
+    final fs = b.style.fontSize(base, pxScale).clamp(base * 0.5, base * 1.4);
     final pad = b.style.resolvedPadding(fs);
     final mar = b.style.margin.resolve(fs);
     Widget child;
@@ -729,7 +751,7 @@ class TitleHtml {
         mainAxisSize: MainAxisSize.min,
         children: [
           for (final c in (b as TitleBoxBlock).children)
-            _buildBlock(c, base, fallbackColor, fontFamily),
+            _buildBlock(c, base, fallbackColor, fontFamily, pxScale),
         ],
       );
     }

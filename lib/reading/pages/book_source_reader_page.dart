@@ -266,6 +266,47 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   double? _titleFontSize;
   bool _titleBold = true;
 
+  /// 章节标题**整体缩放**（1.0 = 原尺寸，0.6~1.6）。
+  ///
+  /// 内置 HTML 标题样式（泼墨山水 / 仙鹤 / 古风…）里的 `font-size:1.5em~2.6em`
+  /// 是相对正文的固定倍数，屏幕窄、正文字号大时会撑满半页甚至换行截断。
+  /// 除了下面的按屏宽自动系数，再给用户一个手动缩放（排版面板里的「标题大小」）。
+  double _titleScale = 1.0;
+
+  /// 标题的自动屏幕系数：窄屏缩小、宽屏不放大（0.82 ~ 1.0）。
+  ///
+  /// 以 400 逻辑像素为基准（iPhone 14/15 ≈ 390、Pro Max ≈ 430）。
+  /// 只缩不放 —— 大屏本来就有空间，放大反而更容易顶到页眉。
+  double get _autoTitleScale {
+    final w = _viewport.width;
+    if (w <= 0) return 1.0;
+    return (w / 400).clamp(0.82, 1.0).toDouble();
+  }
+
+  /// HTML 章节标题的基准字号（CSS 里 `1em` 的实际大小）。
+  ///
+  /// 取**正文字号**而不是样式的 `titleFontSize`：CSS 的 em 本来就是相对正文，
+  /// 而 db 的 titleSize 语义是"默认标题字号"（常为 25~30），一旦拿它当 em 基准，
+  /// 内置样式里 `2.6em` 就会被放大到离谱。再乘自动屏宽系数 + 手动缩放。
+  double get _titleHtmlBase =>
+      _fontSize * _autoTitleScale * _titleScale;
+
+  /// 默认（无 HTML）标题字号：保持「正文 +3」的既有观感，但同样吃手动缩放。
+  double get _defaultTitleFontSize =>
+      (_titleFontSize ?? _fontSize + 3) * _titleScale;
+
+  /// HTML 标题里**写死 px 的字号/内衬**的缩放系数。
+  ///
+  /// px 是绝对值，不像 em 那样跟着正文字号走 ⇒ 换手机尺寸后完全不变。
+  /// 这里只乘屏幕自适应 + 用户手动缩放（不含「标题字号」设置，那是 em 的基准）。
+  double get _titlePxScale => _autoTitleScale * _titleScale;
+
+  /// HTML 标题下方的额外留白（0~40，默认 0）。
+  ///
+  /// 内置样式的间距写死在 CSS 的 margin 里（em 相对标题字号），不同屏幕/字号下
+  /// 观感差异很大；给一个统一的「标题间距」让用户把标题往下推、和正文拉开。
+  double _titleGap = 0;
+
   /// 已保存的排版预设名
   final List<String> _savedPresets = [];
 
@@ -1279,6 +1320,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         if (ps != null && ps >= 0 && ps <= 2) _paraSpacing = ps;
         final tfs = num2('titleFontSize');
         if (tfs != null && tfs >= 8 && tfs <= 60) _titleFontSize = tfs;
+        final tsc = num2('titleScale');
+        if (tsc != null && tsc >= 0.6 && tsc <= 1.6) _titleScale = tsc;
+        final tgp = num2('titleGap');
+        if (tgp != null && tgp >= 0 && tgp <= 40) _titleGap = tgp;
         final tb =
             (ov?['titleBold'] as bool?) ?? p.getBool('reading.titleBold');
         if (tb != null) _titleBold = tb;
@@ -1472,6 +1517,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         } else {
           await p.remove('reading.titleFontSize');
         }
+        await p.setDouble('reading.titleScale', _titleScale);
+        await p.setDouble('reading.titleGap', _titleGap);
         await p.setBool('reading.titleBold', _titleBold);
         // ✅ 段距 / 字距 / 字重 / 边距 / 缩进也要**落全局**：
         //   原来只写进「独立排版」快照，全局一个键都没有 ⇒ 调完退出再进
@@ -2658,7 +2705,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 // 页缘投影同款），避免"无缝得看不出是两页"；有壁纸时壁纸是
                 // 连续一整幅，不需要分隔。
                 final sep = !_hasImageBg && pair.length == 2;
-                final shadowColor = _paperIsDark ? Colors.white : Colors.black;
+                // 分隔投影同样只用黑（深色纸上白色会亮成一条线），深色纸加深
+                final sepAlpha = _paperIsDark ? 0.22 : 0.10;
                 return Row(
                   children: [
                     for (var k = 0; k < pair.length; k++)
@@ -2689,12 +2737,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                         colors: k == 0
                                             ? [
                                                 Colors.transparent,
-                                                shadowColor
-                                                    .withValues(alpha: 0.10),
+                                                Colors.black.withValues(
+                                                  alpha: sepAlpha,
+                                                ),
                                               ]
                                             : [
-                                                shadowColor
-                                                    .withValues(alpha: 0.10),
+                                                Colors.black.withValues(
+                                                  alpha: sepAlpha,
+                                                ),
                                                 Colors.transparent,
                                               ],
                                       ),
@@ -2741,8 +2791,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             // 纸面明暗按**样式底色**判断，不看 App 主题：米黄/古风纸在深色主题下
             // 若按 App 主题算，卷起的纸背会被画成近黑色（明显的"翻页发黑"）
             dark: _paperIsDark,
-            // 纸背颜色从当前样式底色同一色调推导（米黄纸卷出米黄纸背）
-            paperTint: _bgTop,
+            // 纸背颜色从当前样式底色同一色调推导（米黄纸卷出米黄纸背）。
+            // 有壁纸时不能推 —— `_bgTop` 只是"无壁纸时的底色"，和壁纸颜色无关，
+            // 推出来的纸背会跟壁纸对不上；这时交给 dark 用固定两档。
+            paperTint: _hasImageBg ? null : _bgTop,
             canNext: pi + 1 < _pages.length,
             canPrev: pi > 0,
             onTurnNext: () {
@@ -4220,7 +4272,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                           ? TextAlign.center
                           : TextAlign.left,
                       style: TextStyle(
-                        fontSize: _titleFontSize ?? _fontSize + 3,
+                        fontSize: _defaultTitleFontSize,
                         fontWeight: _titleBold
                             ? FontWeight.w700
                             : FontWeight.w400,
@@ -5555,18 +5607,23 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   double? _titleHeightFor(int chapter) {
     final doc = _titleDoc(chapter);
     if (doc == null) return null;
-    final width = (_viewport.width - _padLeft - _padRight)
-        .clamp(1.0, _viewport.width)
+    // 双页模式下每页只有半屏宽 ⇒ 度量也必须用半宽（原来用全宽，
+    // 标题在并排页里会多折行、高度被低估，底部被 ClipRect 裁掉）
+    final pageW = _dualPageActive ? _viewport.width / 2 : _viewport.width;
+    final width = (pageW - _padLeft - _padRight)
+        .clamp(1.0, pageW)
         .toDouble();
     final h = TitleHtml.measure(
       doc,
       width: width,
-      baseFontSize: _fontSize,
+      // em 的基准 = 标题字号 × 自动屏宽系数 × 手动缩放（见 _titleHtmlBase）
+      baseFontSize: _titleHtmlBase,
       textScaler: MediaQuery.textScalerOf(context),
       fontFamily: _fontFamily,
+      pxScale: _titlePxScale,
     );
     // 标题再大也不能吃掉半页（否则正文没地方放；分页器会把它挤到下一页）
-    return h.clamp(0.0, _textAreaHeight * 0.55);
+    return (h + _titleGap).clamp(0.0, _textAreaHeight * 0.55);
   }
 
   /// 渲染某一章的标题。
@@ -5582,9 +5639,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     if (doc == null) return const SizedBox.shrink();
     final child = TitleHtml.build(
       doc,
-      baseFontSize: _fontSize,
+      baseFontSize: _titleHtmlBase,
       fallbackColor: fallbackColor,
       fontFamily: _fontFamily,
+      pxScale: _titlePxScale,
     );
     final h = height ?? _titleHeightFor(chapter);
     if (h == null) return child;
@@ -5618,7 +5676,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       ),
       // 章标题在渲染端是「正文 +3 / 行高 1.5」，与分页器默认公式（+12）不同；
       // 配了样式的 db titleSize / titleBold 就以样式为准（两边必须同参）
-      headingFontSizeOverride: _titleFontSize ?? _fontSize + 3,
+      headingFontSizeOverride: _defaultTitleFontSize,
       headingFontWeight: _titleBold ? FontWeight.w700 : FontWeight.w400,
       headingHeightOverride: 1.5,
       paragraphSpacingFactor: _paraSpacing,
@@ -7873,6 +7931,29 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         ],
       ),
       const SizedBox(height: 14),
+      // 章标题整体缩放 + 下方留白。
+      // 内置 HTML 标题样式（泼墨山水 / 仙鹤 / 古风…）的 font-size 是相对正文的
+      // **固定倍数**（1.5em ~ 2.6em），换手机尺寸、调大正文字号后就"标题比正文
+      // 大太多、还换行截断"。这里给两个滑杆直接调，不必去改样式源码。
+      _layoutSlider(
+        '标题大小',
+        _titleScale,
+        0.6,
+        1.6,
+        '${(_titleScale * 100).round()}%',
+        (v) => upd(() => _titleScale = v),
+        step: 0.05,
+      ),
+      _layoutSlider(
+        '标题间距',
+        _titleGap,
+        0,
+        40,
+        '${_titleGap.round()}',
+        (v) => upd(() => _titleGap = v),
+        step: 2,
+      ),
+      const SizedBox(height: 8),
       _layoutLabel('标题对齐'),
       Row(
         children: [
