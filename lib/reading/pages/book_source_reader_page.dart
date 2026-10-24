@@ -30,6 +30,7 @@ import '../services/reader_font_service.dart';
 import '../services/reader_notes_service.dart';
 import '../services/reader_style_store.dart';
 import 'reader_styles_page.dart';
+import 'reader_title_styles_page.dart';
 import '../services/srs_style_importer.dart';
 import '../services/title_html_parser.dart';
 import '../services/tts_service.dart';
@@ -6342,6 +6343,21 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             ),
         ],
       ),
+      Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: _chip(
+            '管理标题样式（预览 / 复制 / 编辑 HTML）',
+            false,
+            () async {
+              await _openTitleStylesPage();
+              setSheet(() {});
+            },
+            compact: true,
+          ),
+        ),
+      ),
       if (_chapterTitleStyle == ReaderTitleStyle.custom)
         Padding(
           padding: const EdgeInsets.only(top: 8),
@@ -8913,6 +8929,33 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       underlineWidth: _underlineWidth,
       underlineGap: _underlineGap,
       underlineFull: _underlineFull,
+    );
+  }
+
+  /// 打开「标题样式」库：内置模板 + 我的 HTML（预览 / 复制 / 编辑 / 删除）
+  Future<void> _openTitleStylesPage() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => ReaderTitleStylesPage(
+          mine: _myTitleStyles,
+          current: _chapterTitleStyle,
+          currentHtml: _chapterTitleHtml,
+          background: _sheetBg,
+          foreground: _fg,
+          onApply: (style, html) {
+            setState(() {
+              _chapterTitleStyle = style;
+              if (html.trim().isNotEmpty) _chapterTitleHtml = html;
+            });
+            _scheduleSavePrefs();
+            _scheduleRepaginate();
+          },
+          onChanged: (list) {
+            if (!mounted) return;
+            setState(() => _myTitleStyles = list);
+          },
+        ),
+      ),
     );
   }
 

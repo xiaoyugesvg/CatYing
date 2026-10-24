@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/reader_style.dart';
+import '../models/reader_title_style.dart';
 import '../services/reader_style_store.dart';
 import 'reader_style_edit_page.dart';
+import 'reader_title_styles_page.dart';
 
 /// 「阅读样式」库：内置样式 + 我的样式 + 管理（复制/编辑/删除/排序）。
 ///
@@ -171,6 +174,27 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
     await _setMine(list);
   }
 
+  /// 打开「标题样式」库（内置模板 + 我的 HTML）
+  Future<void> _openTitleStyles() async {
+    final titles = await _store.loadTitleStyles();
+    final p = await SharedPreferences.getInstance();
+    final id = p.getString('reading.chapterTitleStyle') ?? '';
+    final html = p.getString('reading.chapterTitleHtml') ?? '';
+    if (!mounted) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => ReaderTitleStylesPage(
+          mine: titles,
+          current: ReaderTitleStyle.fromId(id),
+          currentHtml: html,
+          background: _bg,
+          foreground: _fg,
+          standalone: true,
+        ),
+      ),
+    );
+  }
+
   Future<void> _saveCurrentAsCopy() async {
     if (widget.onSaveCurrent != null) {
       final list = await widget.onSaveCurrent!();
@@ -267,6 +291,15 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
           '阅读样式',
           style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: _fg),
         ),
+        actions: [
+          TextButton(
+            onPressed: _openTitleStyles,
+            child: Text(
+              '标题样式',
+              style: TextStyle(color: _fg, fontSize: 13),
+            ),
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
