@@ -806,5 +806,76 @@ class ReaderStyle {
       footerC: 'p',
       statusItems: [],
     ),
+
+    // 「古风·完美版」「泼墨山水」：参数照搬 db 的 readerStyle。
+    // 这两套在源设备上用的是自定义背景图（db 里只有文件名，图不在 db 内），
+    // 这里先用相近的宣纸色打底；图片放进 assets/images/reader_bg/ 后，
+    // 补一个 bgImageAsset 即可，其余不用动。
+    ReaderStyle(
+      id: 'builtin:gufeng',
+      name: '古风·完美版',
+      builtin: true,
+      bgIndex: 3,
+      dayBgIndex: 3,
+      bgColor: 0xFFF3ECDD,
+      bgColorNight: 0xFF2A2724,
+      fontSize: 24,
+      lineHeight: 1.63,
+      letterSpacing: 0.8,
+      paraSpacing: 0.33,
+      indent: 2,
+      padLeft: 25,
+      padRight: 25,
+      padTop: 36,
+      padBottom: 38,
+      headerPadTop: 30,
+      footerPadBottom: 25,
+      // db 页脚：时间 / 电量% / 第几章
+      footerL: 't',
+      footerC: 'b',
+      footerR: '第c/C章',
+      statusItems: [],
+      chapterTitleStyle: 'gufeng',
+    ),
+    ReaderStyle(
+      id: 'builtin:pomo',
+      name: '泼墨山水',
+      builtin: true,
+      bgIndex: 3,
+      dayBgIndex: 3,
+      bgColor: 0xFFF5F2EA,
+      bgColorNight: 0xFF1E2224,
+      fontSize: 24,
+      lineHeight: 1.63,
+      letterSpacing: 0.8,
+      paraSpacing: 0.33,
+      indent: 2,
+      padLeft: 25,
+      padRight: 25,
+      padTop: 12,
+      padBottom: 12,
+      headerPadTop: 48,
+      footerPadBottom: 17,
+      // db 页脚：章节名（左） / 书名（右）
+      footerL: '#',
+      footerR: 'B',
+      statusItems: [],
+      chapterTitleStyle: 'custom',
+      chapterTitleHtml: _pomoTitleHtml,
+    ),
   ];
+
+  /// 「泼墨山水」的标题版式（源阅读 HTML 原文有断行/引号损坏，这里按原参数重排；
+  /// 原图是网络水墨图，未内置，只保留文字部分 —— 拿到图后可在 HTML 里加
+  /// `background-image`）
+  static const _pomoTitleHtml = '''
+<div style="text-align:left;">
+  <h3 style="color:#236178; text-shadow:0 0 10px #236178; margin:0 0.5em 3em 0;
+             font-weight:200; font-size:1.5em;">章节数</h3>
+  <h4 style="box-shadow:0px 15px 10px -15px #000; display:inline-block;
+             background-color:rgba(35,97,120,0.5); border-radius:16px;
+             margin:3em 0 2em 0; padding:0.5em 2em; text-align:left;
+             color:#f3f7fa; text-shadow:0 0 10px #f3f7fa;
+             font-weight:200; font-size:1em;">章节名</h4>
+</div>''';
 }
