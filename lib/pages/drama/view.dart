@@ -7,6 +7,7 @@ import '../../models/movie_sort.dart';
 import '../../models/source_bean.dart';
 import '../../services/api_config.dart';
 import '../../services/source_service.dart';
+import '../../widgets/app_toast.dart';
 import 'drama_banner.dart';
 import 'drama_entry.dart';
 import 'drama_history_page.dart';
@@ -95,13 +96,33 @@ class _DramaPageState extends State<DramaPage> {
     return null;
   }
 
+  /// 短剧可用的源白名单（「短剧设置 → 参与聚合的源」里勾选的）。
+  ///
+  /// 返回空列表 = **没勾过**，此时表示"不限"（沿用旧的跟随首页源行为）——
+  /// 否则新用户第一次进短剧页会一个源都没有。
+  Future<List<SourceBean>> _allowedSources() async {
+    final api = ApiConfig.instance;
+    final all = <SourceBean>[
+      ...api.sourceBeanList,
+      if (api.localSourcesEnabled.value) ...api.localVideoSources,
+    ];
+    final keys = await DramaSettings.sourceKeys();
+    if (keys.isEmpty) return const [];
+    return all.where((s) => keys.contains(s.key)).toList();
+  }
+
   /// 当前源：设置里挑过的优先，否则跟随首页当前源
   Future<SourceBean?> _currentSource() async {
+    final allowed = await _allowedSources();
     final key = await DramaSettings.pickedSourceKey();
-    if (key.isNotEmpty) {
+    final inWhite = allowed.isEmpty || allowed.any((s) => s.key == key);
+    if (key.isNotEmpty && inWhite) {
       final hit = _findSource(key);
       if (hit != null) return hit;
     }
+    // 白名单里有源就用第一个（和左上角切换器的范围保持一致），
+    // 否则（没勾 / 全部失效）跟随首页当前源
+    if (allowed.isNotEmpty) return allowed.first;
     return ApiConfig.instance.homeSourceBean.value;
   }
 
@@ -284,7 +305,12 @@ class _DramaPageState extends State<DramaPage> {
     _load(rescan: true);
   }
 
-  /// 左上角换源：列出全部源，扫出过短剧分类的标「短剧」徽章排前面。
+  /// 左上角换源：**只列「短剧设置」里勾选的源**。
+  ///
+  /// 用户 2026-10-24：「源切换界面前面的必须只有我在短剧设置里面选择的」——
+  /// 之前这里列的是全部源，跟设置里的白名单不一致，等于设置白设了。
+  /// 没勾过（空集合）时仍列全部：否则新用户第一次进短剧页一个源都选不了。
+  ///
   /// 选中后先读缓存，没缓存才扫 —— 换源不再是「把十几个源全刷一遍」。
   Future<void> _pickSource() async {
     final api = ApiConfig.instance;
@@ -293,6 +319,15 @@ class _DramaPageState extends State<DramaPage> {
       if (api.localSourcesEnabled.value) ...api.localVideoSources,
     ];
     if (all.isEmpty) return;
+
+    final white = await _allowedSources();
+    final allowed = white.isEmpty ? all : white;
+    if (!mounted) return;
+    if (allowed.isEmpty) {
+      AppToast.message('短剧设置里勾选的源都不可用，请重新选择');
+      return;
+    }
+
     final rows = await DramaSettings.cachedGroups();
     // 已经扫出过短剧分类的源（面板里标徽章 + 缓存优先排序）
     final dramaKeys =
@@ -302,7 +337,7 @@ class _DramaPageState extends State<DramaPage> {
     // 面板能力与影视的源切换一致：两列网格 / 搜索 / 定位 / 排序 / 长按菜单
     final picked = await DramaSourceSheet.show(
       context,
-      sources: all,
+      sources: allowed,
       cachedKeys: dramaKeys,
       currentKey: _source?.key,
     );
