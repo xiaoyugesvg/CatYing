@@ -6071,21 +6071,32 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             ),
           ),
         ),
-      _sectionLabel('内置样式'),
+      _sectionLabel('内置样式（左滑可复制成我的样式）'),
       Wrap(
         spacing: 10,
         runSpacing: 10,
         children: [
-          for (final s in ReaderStyle.builtins) _styleCard(s, setSheet),
+          for (final s in ReaderStyle.builtins)
+            _SwipeActions(
+              background: _sheetBg,
+              actions: [
+                (
+                  label: '复制',
+                  icon: Icons.copy_rounded,
+                  tint: const Color(0xFF4C9A6A),
+                  onTap: () async {
+                    await _duplicateStyle(s);
+                    setSheet(() {});
+                  },
+                ),
+              ],
+              child: _styleCard(s, setSheet),
+            ),
         ],
       ),
       if (_myStyles.isNotEmpty) ...[
-        _sectionLabel('我的样式（长按可重命名 / 删除）'),
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [for (final s in _myStyles) _styleCard(s, setSheet)],
-        ),
+        _sectionLabel('我的样式（左滑可编辑 / 删除）'),
+        for (final s in _myStyles) _myStyleRow(s, setSheet),
       ],
       if (_savedPresets.isNotEmpty) ...[
         _sectionLabel('排版预设'),
@@ -6162,6 +6173,142 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         ),
       ),
     );
+  }
+
+  /// 「我的样式」的一行：小缩略图 + 名字 + 关键参数；**左滑**露出「编辑 / 删除」。
+  Widget _myStyleRow(ReaderStyle s, StateSetter setSheet) {
+    final selected = _activeStyleId == s.id;
+    final titleLabel = ReaderTitleStyle.fromId(s.chapterTitleStyle).label;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: _SwipeActions(
+        background: _sheetBg,
+        actions: [
+          (
+            label: '编辑',
+            icon: Icons.edit_outlined,
+            tint: const Color(0xFF3A7BD5),
+            onTap: () async {
+              await _editStyle(s);
+              setSheet(() {});
+            },
+          ),
+          (
+            label: '删除',
+            icon: Icons.delete_outline,
+            tint: const Color(0xFFE05252),
+            onTap: () async {
+              await _deleteStyle(s);
+              setSheet(() {});
+            },
+          ),
+        ],
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            _applyReaderStyle(s);
+            setSheet(() {});
+          },
+          onLongPress: () async {
+            await _showStyleActions(s);
+            setSheet(() {});
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              children: [
+                _styleThumb(s, selected: selected),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        s.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: AppTheme.fontBody,
+                          fontWeight: FontWeight.w600,
+                          color: selected ? _fg : _fg.withValues(alpha: 0.85),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '$titleLabel · ${s.fontSize.toStringAsFixed(0)}px · ${_pageModeLabel(s.pageMode)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: AppTheme.fontFootnote,
+                          color: _fgMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (selected)
+                  Icon(Icons.check_circle_rounded, size: 18, color: _fg),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 列表里的小缩略图（比卡片小样简单，保证 44×54 不溢出）
+  Widget _styleThumb(ReaderStyle s, {bool selected = false}) {
+    final bg = s.bgColor != null
+        ? Color(s.bgColor!)
+        : _bgs[s.bgIndex.clamp(0, _bgs.length - 1)][0];
+    final dark = ThemeData.estimateBrightnessForColor(bg) == Brightness.dark;
+    final fg = s.fgColor != null
+        ? Color(s.fgColor!)
+        : (dark ? const Color(0xFFE2E2E2) : const Color(0xFF1A1A1A));
+    final asset = s.bgImageAsset;
+    return Container(
+      width: 44,
+      height: 54,
+      padding: const EdgeInsets.all(5),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: selected ? _fg : _fg.withValues(alpha: 0.18),
+          width: selected ? 2 : 0.8,
+        ),
+        image: asset == null
+            ? null
+            : DecorationImage(image: AssetImage(asset), fit: BoxFit.cover),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            height: 3,
+            width: 20,
+            color: fg.withValues(alpha: 0.8),
+          ),
+          const SizedBox(height: 3),
+          for (var i = 0; i < 3; i++) ...[
+            Container(
+              height: 2,
+              width: i == 2 ? 14 : double.infinity,
+              color: fg.withValues(alpha: 0.55),
+            ),
+            const SizedBox(height: 2),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// 翻页模式 id → 中文名
+  String _pageModeLabel(String id) {
+    for (final m in PageMode.values) {
+      if (m.name == id) return m.label;
+    }
+    return '左右';
   }
 
   /// 样式小样：按样式自己的底色 / 壁纸 / 文字色 / 行距画一张"迷你书页"，
@@ -7771,13 +7918,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   // ── 阅读样式（预设样式 / 我的样式 / Legado 排版导入）────────────
 
-  /// 编辑「自定义标题 HTML」：直接粘贴源阅读的标题样式整段。
-  Future<void> _editTitleHtml() async {
-    final ctrl = TextEditingController(
-      text: _chapterTitleHtml.trim().isEmpty
-          ? ReaderTitleStyle.starterTemplate
-          : _chapterTitleHtml,
-    );
+  /// 标题 HTML 输入框（返回 null = 取消）。阅读器全局与「样式编辑」共用。
+  Future<String?> _promptTitleHtml(String initial) async {
+    final ctrl = TextEditingController(text: initial);
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
@@ -7855,7 +7998,18 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     );
     final text = ctrl.text.trim();
     ctrl.dispose();
-    if (ok != true || text.isEmpty) return;
+    if (ok != true || text.isEmpty) return null;
+    return text;
+  }
+
+  /// 编辑阅读器当前的「自定义标题 HTML」
+  Future<void> _editTitleHtml() async {
+    final text = await _promptTitleHtml(
+      _chapterTitleHtml.trim().isEmpty
+          ? ReaderTitleStyle.starterTemplate
+          : _chapterTitleHtml,
+    );
+    if (text == null) return;
     setState(() {
       _chapterTitleHtml = text;
       _chapterTitleStyle = ReaderTitleStyle.custom;
@@ -8121,6 +8275,349 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     });
     await _styleStore.saveCustom(_myStyles);
     _toast('已删除「${s.name}」');
+  }
+
+  /// 在 [s] 的基础上改几项（用 JSON 往返，避免给 ReaderStyle 写一大堆 copyWith）
+  ReaderStyle _patched(ReaderStyle s, Map<String, dynamic> patch) =>
+      ReaderStyle.fromJson({...s.toJson(), ...patch});
+
+  /// 「复制成我的样式」：内置样式不能直接改，先复制一份再打开编辑器。
+  Future<void> _duplicateStyle(ReaderStyle s) async {
+    final id = 'user:${DateTime.now().millisecondsSinceEpoch}';
+    final copy = ReaderStyle.fromJson({
+      ...s.toJson(),
+      'id': id,
+      'name': '${s.name} 副本',
+      'builtin': false,
+    });
+    setState(() => _myStyles = [..._myStyles, copy]);
+    await _styleStore.saveCustom(_myStyles);
+    await _editStyle(copy);
+  }
+
+  /// 「编辑样式」：名称 / 标题样式 / 排版 / 边距 / 配色 / 信息栏 / 翻页。
+  Future<void> _editStyle(ReaderStyle style) async {
+    var draft = style;
+    final nameCtrl = TextEditingController(text: draft.name);
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          void upd(Map<String, dynamic> patch) =>
+              setSheet(() => draft = _patched(draft, patch));
+          final titleNow = ReaderTitleStyle.fromId(draft.chapterTitleStyle);
+          final items = draft.statusItems;
+          return Container(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.85,
+            ),
+            decoration: BoxDecoration(
+              color: _sheetBg,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(22),
+              ),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _sheetHandle(),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 12, 8),
+                    child: Row(
+                      children: [
+                        Text(
+                          '编辑样式',
+                          style: TextStyle(
+                            fontSize: AppTheme.fontTitle3,
+                            fontWeight: FontWeight.w700,
+                            color: _fg,
+                          ),
+                        ),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: Text(
+                            '取消',
+                            style: TextStyle(color: _fgMuted),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(0, 34),
+                            padding: const EdgeInsets.symmetric(horizontal: 14),
+                            backgroundColor: _fg.withValues(alpha: 0.9),
+                            foregroundColor: _bgTop,
+                          ),
+                          child: const Text('保存'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Flexible(
+                    child: ListView(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                      children: [
+                        TextField(
+                          controller: nameCtrl,
+                          style: TextStyle(color: _fg),
+                          decoration: InputDecoration(
+                            labelText: '样式名',
+                            labelStyle: TextStyle(
+                              fontSize: AppTheme.fontSubhead,
+                              color: _fgMuted,
+                            ),
+                          ),
+                        ),
+                        _sectionLabel('标题样式'),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final t in ReaderTitleStyle.values)
+                              _chip(
+                                t.label,
+                                titleNow == t,
+                                () {
+                                  final patch = <String, dynamic>{
+                                    'chapterTitleStyle': t.id,
+                                  };
+                                  if (t == ReaderTitleStyle.custom &&
+                                      draft.chapterTitleHtml.trim().isEmpty) {
+                                    patch['chapterTitleHtml'] =
+                                        ReaderTitleStyle.starterTemplate;
+                                  }
+                                  upd(patch);
+                                },
+                                compact: true,
+                              ),
+                          ],
+                        ),
+                        if (titleNow == ReaderTitleStyle.custom)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: _chip(
+                                '编辑 HTML',
+                                false,
+                                () async {
+                                  final text = await _promptTitleHtml(
+                                    draft.chapterTitleHtml.trim().isEmpty
+                                        ? ReaderTitleStyle.starterTemplate
+                                        : draft.chapterTitleHtml,
+                                  );
+                                  if (text != null) {
+                                    upd({
+                                      'chapterTitleHtml': text,
+                                      'chapterTitleStyle': 'custom',
+                                    });
+                                  }
+                                },
+                                compact: true,
+                              ),
+                            ),
+                          ),
+                        _sectionLabel('排版'),
+                        _layoutSlider(
+                          '字号',
+                          draft.fontSize,
+                          12,
+                          30,
+                          draft.fontSize.toStringAsFixed(1),
+                          (v) => upd({'fontSize': v}),
+                          step: 1,
+                        ),
+                        _layoutSlider(
+                          '行距',
+                          draft.lineHeight,
+                          1.2,
+                          2.6,
+                          draft.lineHeight.toStringAsFixed(2),
+                          (v) => upd({'lineHeight': v}),
+                          step: 0.05,
+                        ),
+                        _layoutSlider(
+                          '字距',
+                          draft.letterSpacing,
+                          -1,
+                          3,
+                          draft.letterSpacing.toStringAsFixed(1),
+                          (v) => upd({'letterSpacing': v}),
+                          step: 0.1,
+                        ),
+                        _layoutSlider(
+                          '段距',
+                          draft.paraSpacing,
+                          0,
+                          1.5,
+                          draft.paraSpacing.toStringAsFixed(1),
+                          (v) => upd({'paraSpacing': v}),
+                          step: 0.1,
+                        ),
+                        _layoutSlider(
+                          '缩进',
+                          draft.indent,
+                          0,
+                          4,
+                          draft.indent.toStringAsFixed(0),
+                          (v) => upd({'indent': v}),
+                          step: 1,
+                        ),
+                        _sectionLabel('边距'),
+                        _layoutSlider(
+                          '左右',
+                          (draft.padLeft + draft.padRight) / 2,
+                          0,
+                          60,
+                          ((draft.padLeft + draft.padRight) / 2)
+                              .toStringAsFixed(0),
+                          (v) => upd({'padLeft': v, 'padRight': v}),
+                          step: 1,
+                        ),
+                        _layoutSlider(
+                          '上',
+                          draft.padTop,
+                          0,
+                          80,
+                          draft.padTop.toStringAsFixed(0),
+                          (v) => upd({'padTop': v}),
+                          step: 1,
+                        ),
+                        _layoutSlider(
+                          '下',
+                          draft.padBottom,
+                          0,
+                          80,
+                          draft.padBottom.toStringAsFixed(0),
+                          (v) => upd({'padBottom': v}),
+                          step: 1,
+                        ),
+                        _sectionLabel('配色'),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: [
+                            for (var i = 0; i < _bgs.length; i++)
+                              GestureDetector(
+                                onTap: () => upd({
+                                  'bgIndex': i,
+                                  'dayBgIndex': i,
+                                  'bgColor': null,
+                                  'bgColorNight': null,
+                                  'bgImageAsset': null,
+                                  'bgImagePath': null,
+                                }),
+                                child: Container(
+                                  width: 34,
+                                  height: 34,
+                                  decoration: BoxDecoration(
+                                    color: _bgs[i][0],
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: draft.bgColor == null &&
+                                              draft.bgImageAsset == null &&
+                                              draft.bgIndex == i
+                                          ? _fg
+                                          : _fg.withValues(alpha: 0.2),
+                                      width: 2,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final e in const [
+                              ('自动', null),
+                              ('墨黑', 0xFF1A1A1A),
+                              ('深灰', 0xFF4A4545),
+                              ('米白', 0xFFE2E2E2),
+                            ])
+                              _chip(
+                                e.$1,
+                                draft.fgColor == e.$2,
+                                () => upd({'fgColor': e.$2}),
+                                compact: true,
+                              ),
+                          ],
+                        ),
+                        _sectionLabel('信息栏'),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final item in const [
+                              '时间',
+                              '书名',
+                              '章节',
+                              '电量',
+                              '页码',
+                              '进度',
+                            ])
+                              _chip(
+                                item,
+                                items.contains(item),
+                                () {
+                                  final next = [...items];
+                                  if (next.contains(item)) {
+                                    next.remove(item);
+                                  } else {
+                                    next.add(item);
+                                  }
+                                  upd({'statusItems': next});
+                                },
+                                compact: true,
+                              ),
+                          ],
+                        ),
+                        _sectionLabel('翻页'),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final m in PageMode.values)
+                              _chip(
+                                m.label,
+                                draft.pageMode == m.name,
+                                () => upd({'pageMode': m.name}),
+                                compact: true,
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    final newName = nameCtrl.text.trim();
+    nameCtrl.dispose();
+    if (saved != true) return;
+    final next = _patched(draft, {
+      'name': newName.isEmpty ? draft.name : newName,
+      'builtin': false,
+    });
+    setState(() {
+      _myStyles = [for (final e in _myStyles) e.id == style.id ? next : e];
+    });
+    await _styleStore.saveCustom(_myStyles);
+    if (_activeStyleId == next.id) _applyReaderStyle(next);
+    _toast('已保存样式「${next.name}」');
   }
 
   /// 导入 Legado 排版：贴「导入排版」链接（`legado://import/readConfig?src=…`
@@ -12287,4 +12784,114 @@ enum _TextPreset {
   final double lineHeight;
   final double letterSpacing;
   final double paraSpacing;
+}
+
+/// 「左滑露出操作」的小容器（样式卡片 / 列表行用）。
+///
+/// 为什么自己做：`Dismissible` 只能"滑走删除"，不会停在中途露出按钮；
+/// 这里用 Transform + 横向拖拽就够，不引入依赖。
+class _SwipeActions extends StatefulWidget {
+  const _SwipeActions({
+    required this.child,
+    required this.actions,
+    this.background,
+  });
+
+  final Widget child;
+  final List<({String label, IconData icon, Color tint, VoidCallback onTap})>
+  actions;
+
+  /// 前景卡片的不透明底色（否则滑开时会透出后面的按钮）
+  final Color? background;
+
+  @override
+  State<_SwipeActions> createState() => _SwipeActionsState();
+}
+
+class _SwipeActionsState extends State<_SwipeActions> {
+  static const double _actionWidth = 56;
+
+  double _dx = 0;
+  bool _dragging = false;
+
+  double get _max => widget.actions.length * _actionWidth;
+
+  void _endDrag(DragEndDetails d) {
+    final v = d.velocity.pixelsPerSecond.dx;
+    final open = v < -250 || (v <= 250 && _dx < -_max / 2);
+    setState(() {
+      _dragging = false;
+      _dx = open ? -_max : 0;
+    });
+  }
+
+  void _close() => setState(() => _dx = 0);
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.hardEdge,
+      children: [
+        // 背后的操作按钮：只占右端 _max 宽，滑开多少露多少
+        Positioned(
+          top: 0,
+          bottom: 0,
+          right: 0,
+          width: _max,
+          child: Row(
+            children: [
+              for (final a in widget.actions)
+                Expanded(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {
+                      _close();
+                      a.onTap();
+                    },
+                    child: Container(
+                      color: a.tint,
+                      alignment: Alignment.center,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(a.icon, size: 18, color: Colors.white),
+                          const SizedBox(height: 2),
+                          Text(
+                            a.label,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragStart: (_) => setState(() => _dragging = true),
+          onHorizontalDragUpdate: (d) {
+            setState(() {
+              _dx = (_dx + d.delta.dx).clamp(-_max, 0.0);
+            });
+          },
+          onHorizontalDragEnd: _endDrag,
+          child: AnimatedContainer(
+            duration: _dragging
+                ? Duration.zero
+                : const Duration(milliseconds: 160),
+            curve: Curves.easeOut,
+            transform: Matrix4.translationValues(_dx, 0, 0),
+            child: Container(color: widget.background, child: widget.child),
+          ),
+        ),
+      ],
+    );
+  }
 }
