@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/reader_style.dart';
+import '../models/reader_bg_assets.dart';
 import '../models/reader_title_style.dart';
 
 /// 单套「阅读样式」编辑器。
@@ -47,6 +48,8 @@ class _ReaderStyleEditPageState extends State<ReaderStyleEditPage> {
   late int? _bgNight;
   late int? _fgDay;
   late int? _fgNight;
+  late String? _bgAssetDay;
+  late String? _bgAssetNight;
   late ReaderTitleStyle _titleStyle;
   late bool _titleBold;
 
@@ -105,6 +108,8 @@ class _ReaderStyleEditPageState extends State<ReaderStyleEditPage> {
     _bgNight = s.bgColorNight;
     _fgDay = s.fgColor;
     _fgNight = s.fgColorNight;
+    _bgAssetDay = s.bgImageAsset;
+    _bgAssetNight = s.bgImageAssetNight;
     _titleStyle = ReaderTitleStyle.fromId(s.chapterTitleStyle);
     _titleBold = s.titleBold;
   }
@@ -136,6 +141,8 @@ class _ReaderStyleEditPageState extends State<ReaderStyleEditPage> {
       'bgColorNight': _bgNight,
       'fgColor': _fgDay,
       'fgColorNight': _fgNight,
+      'bgImageAsset': _bgAssetDay,
+      'bgImageAssetNight': _bgAssetNight,
       'chapterTitleStyle': _titleStyle.id,
       'titleBold': _titleBold,
       'footerC': _footerC.text.trim(),
@@ -211,6 +218,18 @@ class _ReaderStyleEditPageState extends State<ReaderStyleEditPage> {
           _slider('下', _padBottom, 0, 120, _padBottom.round().toString(), (v) {
             setState(() => _padBottom = v);
           }, step: 1),
+          _section('背景图（日 / 夜）'),
+          _wallpapers('日间', _bgAssetDay, (v) {
+            setState(() {
+              _bgAssetDay = v;
+              // 选到黑白成对的图（古风/泼墨/皮卡丘）时顺手补上夜间那张
+              final pair = ReaderBgAssets.pairOf(v);
+              if (pair != null && _bgAssetNight == null) _bgAssetNight = pair;
+            });
+          }),
+          _wallpapers('夜间', _bgAssetNight, (v) {
+            setState(() => _bgAssetNight = v);
+          }),
           _section('配色'),
           _swatches('背景（日间）', _bgDay, _bgPresets, (v) {
             setState(() => _bgDay = v);
@@ -352,6 +371,68 @@ class _ReaderStyleEditPageState extends State<ReaderStyleEditPage> {
           ),
         ),
       ],
+    );
+  }
+
+  /// 日间 / 夜间壁纸选择（横向缩略图，第一格是「无」）
+  Widget _wallpapers(
+    String label,
+    String? current,
+    ValueChanged<String?> onChanged,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$label壁纸',
+            style: TextStyle(fontSize: 12, color: _fg.withValues(alpha: 0.55)),
+          ),
+          const SizedBox(height: 6),
+          SizedBox(
+            height: 54,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: ReaderBgAssets.all.length + 1,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (c, i) {
+                if (i == 0) return _wallTile(null, current == null, onChanged);
+                final asset = ReaderBgAssets.all[i - 1];
+                return _wallTile(asset, current == asset, onChanged);
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _wallTile(
+    String? asset,
+    bool selected,
+    ValueChanged<String?> onChanged,
+  ) {
+    return GestureDetector(
+      onTap: () => onChanged(asset),
+      child: Container(
+        width: 40,
+        height: 54,
+        decoration: BoxDecoration(
+          color: _fg.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected ? _fg : _fg.withValues(alpha: 0.2),
+            width: selected ? 2 : 1,
+          ),
+          image: asset == null
+              ? null
+              : DecorationImage(image: AssetImage(asset), fit: BoxFit.cover),
+        ),
+        child: asset == null
+            ? Icon(Icons.block, size: 14, color: _fg.withValues(alpha: 0.6))
+            : null,
+      ),
     );
   }
 

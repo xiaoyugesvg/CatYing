@@ -20,6 +20,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/book_source.dart';
 import '../models/book_content.dart';
 import '../models/reader_style.dart';
+import '../models/reader_bg_assets.dart';
 import '../models/reader_title_style.dart';
 import '../models/reading_settings.dart';
 import '../novel_source/novel_chinese_converter.dart';
@@ -161,48 +162,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 非空时优先于颜色作为正文背景）
   String? _customBgPath;
 
-  /// 内置阅读背景壁纸（34 张；资源在 `assets/images/reader_bg/`）。
-  /// ⚠️ 以后加壁纸：把图放进那个目录 + 这里加一行即可（pubspec 已声明该目录 ✓）。
-  static const List<String> _builtinBgImages = [
-    'assets/images/reader_bg/annie-spratt-6a3nqQ1YwBw-unsplash.jpg',
-    'assets/images/reader_bg/augustine-wong-oebTM5wHTfw-unsplash.jpg',
-    'assets/images/reader_bg/danielle-suijkerbuijk-66ydMRXW-b8-unsplash.jpg',
-    'assets/images/reader_bg/h-co-mjPs0heWsek-unsplash.jpg',
-    'assets/images/reader_bg/heather-green-1ITG8U0udqM-unsplash.jpg',
-    'assets/images/reader_bg/jacob-dyer-rtA0U8QJHSg-unsplash.jpg',
-    'assets/images/reader_bg/janke-laskowski-jz-ayLjk2nk-unsplash.jpg',
-    'assets/images/reader_bg/marjan-blan-794QUz5-cso-unsplash.jpg',
-    'assets/images/reader_bg/noita-digital-zcx5ztIjQAM-unsplash.jpg',
-    'assets/images/reader_bg/p0074_m.jpg',
-    'assets/images/reader_bg/p0087_m.jpg',
-    'assets/images/reader_bg/resource-boy-t5-DgEcAUUg-unsplash.jpg',
-    'assets/images/reader_bg/the-new-york-public-library-atDr7NECc_k-unsplash.jpg',
-    'assets/images/reader_bg/tina-dawson-Kim9COAIEGc-unsplash.jpg',
-    // 微信读书背景包（朔望 / 碧落 / 荒沙 × 白 / 绿 / 黄 / 暗）
-    'assets/images/reader_bg/reading_bg_moon_white.jpg',
-    'assets/images/reader_bg/reading_bg_moon_green.jpg',
-    'assets/images/reader_bg/reading_bg_moon_yellow.jpg',
-    'assets/images/reader_bg/reading_bg_moon_dark.jpg',
-    'assets/images/reader_bg/reading_bg_sky_white.jpg',
-    'assets/images/reader_bg/reading_bg_sky_green.jpg',
-    'assets/images/reader_bg/reading_bg_sky_yellow.jpg',
-    'assets/images/reader_bg/reading_bg_sky_dark.jpg',
-    'assets/images/reader_bg/reading_bg_sand_white.jpg',
-    'assets/images/reader_bg/reading_bg_sand_green.jpg',
-    'assets/images/reader_bg/reading_bg_sand_yellow.jpg',
-    'assets/images/reader_bg/reading_bg_sand_dark.jpg',
-    // 夜间竹林（刘海屏，顶部有画面、下方深色）
-    'assets/images/reader_bg/reading_bg_night_forest.png',
-    // 古风·完美版 / 泼墨山水（Legado 原背景，日间 + 夜间两版）
-    'assets/images/reader_bg/reading_bg_gufeng_day.webp',
-    'assets/images/reader_bg/reading_bg_gufeng_night.webp',
-    'assets/images/reader_bg/reading_bg_pomo_day.webp',
-    'assets/images/reader_bg/reading_bg_pomo_night.webp',
-    // 皮卡丘主题（Legado theme「皮卡丘-白天 / 黑夜」+ 粉色插画）
-    'assets/images/reader_bg/reading_bg_pika_day.webp',
-    'assets/images/reader_bg/reading_bg_pika_night.webp',
-    'assets/images/reader_bg/reading_bg_pika_pink.webp',
-  ];
+  /// 内置阅读背景壁纸（清单集中在 [ReaderBgAssets]，与样式编辑器共用）
+  static const List<String> _builtinBgImages = ReaderBgAssets.all;
 
   /// 当前选中的内置壁纸（null = 不用壁纸，走 `_bgIndex` 的纯色底 ✓）
   String? _bgImageAsset;
