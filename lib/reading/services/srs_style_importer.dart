@@ -164,10 +164,13 @@ class SrsStyleImporter {
     final bgStr = (night ? cfg['bgStrNight'] : cfg['bgStr']) as String?;
     final bgColor = bgType == 2 ? null : (bgStr == null ? null : _hex(bgStr));
 
-    final titleHtml = (night
-            ? (cfg['titleStyleHtmlNight'] ?? cfg['titleStyleHtml'])
-            : cfg['titleStyleHtml']) as String?;
-    final cleanHtml = _stripComment(titleHtml);
+    // 标题 HTML 存日 / 夜两份（db 的 titleStyleHtml / titleStyleHtmlNight）：
+    //   只存导入时的那一份，白天导入的古风到了夜里标题还是白天的深色，看不见 ✗
+    final cleanDay = _stripComment(cfg['titleStyleHtml'] as String?);
+    final cleanNight = _stripComment(
+      (cfg['titleStyleHtmlNight'] ?? cfg['titleStyleHtml']) as String?,
+    );
+    final cleanHtml = cleanDay.isEmpty ? cleanNight : cleanDay;
 
     final header = _componentFormats(cfg['topComponent']);
     final footer = _componentFormats(cfg['bottomComponent']);
@@ -204,6 +207,7 @@ class SrsStyleImporter {
       footerR: footer.$3,
       chapterTitleStyle: cleanHtml.isEmpty ? '' : 'custom',
       chapterTitleHtml: cleanHtml,
+      chapterTitleHtmlNight: cleanNight,
       titleFontSize: (cfg['titleSize'] as num?)?.toDouble(),
       titleBold: ((cfg['titleBold'] as num?)?.toDouble() ?? 0) >= 0,
       pageMode: 'slide',

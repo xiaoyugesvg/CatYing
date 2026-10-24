@@ -66,6 +66,7 @@ class ReaderStyle {
     // ── 章标题版式（默认 / 仙鹤日间 / 仙鹤夜间 / 微信读书 / 自定义）──
     this.chapterTitleStyle = '',
     this.chapterTitleHtml = '',
+    this.chapterTitleHtmlNight = '',
     // ── 底线（信纸行线）──
     this.underlineColor,
     this.underlineStyle = 0,
@@ -172,6 +173,11 @@ class ReaderStyle {
   /// 自定义标题样式的 HTML（`chapterTitleStyle == 'custom'` 时生效）
   final String chapterTitleHtml;
 
+  /// 夜间标题 HTML（db 的 `titleStyleHtmlNight`；空 = 夜间沿用 [chapterTitleHtml]）。
+  /// 源阅读/阅读的夜间标题常配另一套颜色（深底上的浅字），
+  /// 只存一份会让夜里标题仍是白天的深色，几乎看不见。
+  final String chapterTitleHtmlNight;
+
   final int? underlineColor;
   final int underlineStyle;
   final double underlineAlpha;
@@ -227,6 +233,7 @@ class ReaderStyle {
     dualPage: dualPage,
     chapterTitleStyle: chapterTitleStyle,
     chapterTitleHtml: chapterTitleHtml,
+    chapterTitleHtmlNight: chapterTitleHtmlNight,
     underlineColor: underlineColor,
     underlineStyle: underlineStyle,
     underlineAlpha: underlineAlpha,
@@ -283,6 +290,7 @@ class ReaderStyle {
     'dualPage': dualPage,
     'chapterTitleStyle': chapterTitleStyle,
     'chapterTitleHtml': chapterTitleHtml,
+    'chapterTitleHtmlNight': chapterTitleHtmlNight,
     'underlineColor': underlineColor,
     'underlineStyle': underlineStyle,
     'underlineAlpha': underlineAlpha,
@@ -346,6 +354,7 @@ class ReaderStyle {
     dualPage: j['dualPage'] as bool? ?? false,
     chapterTitleStyle: (j['chapterTitleStyle'] as String?) ?? '',
     chapterTitleHtml: (j['chapterTitleHtml'] as String?) ?? '',
+    chapterTitleHtmlNight: (j['chapterTitleHtmlNight'] as String?) ?? '',
     underlineColor: _i(j['underlineColor']),
     underlineStyle: _i(j['underlineStyle']) ?? 0,
     underlineAlpha: _d(j['underlineAlpha'], 0.35),

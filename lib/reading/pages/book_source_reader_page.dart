@@ -268,6 +268,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 自定义标题样式的 HTML 源码（`_chapterTitleStyle == custom` 时生效）
   String _chapterTitleHtml = '';
 
+  /// 夜间标题 HTML（样式自带；空 = 夜间沿用 [_chapterTitleHtml]）
+  String _chapterTitleHtmlNight = '';
+
   /// 我保存的标题样式（HTML + 名字），来自 [ReaderStyleStore]
   List<TitleStylePreset> _myTitleStyles = [];
 
@@ -1180,6 +1183,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           p.getString('reading.chapterTitleStyle'),
         );
         _chapterTitleHtml = p.getString('reading.chapterTitleHtml') ?? '';
+        _chapterTitleHtmlNight =
+            p.getString('reading.chapterTitleHtmlNight') ?? '';
         // 页眉 / 页脚自定义格式（空 = 用「信息栏项目」开关）
         _headerL = p.getString('reading.headerL') ?? '';
         _headerC = p.getString('reading.headerC') ?? '';
@@ -1355,6 +1360,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       await p.setBool('reading.hideRepeatTitle', _hideRepeatTitle);
       await p.setString('reading.chapterTitleStyle', _chapterTitleStyle.id);
       await p.setString('reading.chapterTitleHtml', _chapterTitleHtml);
+      await p.setString(
+        'reading.chapterTitleHtmlNight',
+        _chapterTitleHtmlNight,
+      );
       await p.setString('reading.fontId', _fontId ?? '');
       // 样式带来的日/夜底色与夜间字色（切日夜、重进都按这套来）
       if (_styleBgDay != null) {
@@ -5191,8 +5200,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   // ── 标题样式（章标题版式）──────────────────────────────────
 
   /// 当前标题样式的 HTML 源（默认样式 = 空串；自定义 = 用户粘贴的那份）
+  ///
+  /// 夜间且有夜间专属 HTML（db 的 `titleStyleHtmlNight`）时用夜间那份：
+  /// 白天的深色标题在深底上几乎看不见。
   String get _chapterTitleSource {
     if (_chapterTitleStyle == ReaderTitleStyle.custom) {
+      if (_bgIndex == 5 && _chapterTitleHtmlNight.trim().isNotEmpty) {
+        return _chapterTitleHtmlNight;
+      }
       return _chapterTitleHtml;
     }
     return _chapterTitleStyle.html;
@@ -8519,6 +8534,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     if (text == null) return;
     setState(() {
       _chapterTitleHtml = text;
+      // 手动改的 HTML 日夜通用（否则夜里还在用样式自带的夜间标题）
+      _chapterTitleHtmlNight = '';
       _chapterTitleStyle = ReaderTitleStyle.custom;
     });
     _scheduleSavePrefs();
@@ -8650,6 +8667,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     setState(() {
       _chapterTitleStyle = ReaderTitleStyle.custom;
       _chapterTitleHtml = t.html;
+      // 手动套用的标题样式日夜通用
+      _chapterTitleHtmlNight = '';
     });
     _scheduleSavePrefs();
     _scheduleRepaginate();
@@ -8924,13 +8943,23 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   /// 当前阅读外观 → [ReaderStyle] 快照（「保存当前为样式」用）
   ReaderStyle _styleSnapshot(String id, String name, {bool builtin = false}) {
+    // 日夜底色要分开存：夜间保存时 `_customBgColor` 是**夜间**底色，
+    // 直接当 bgColor 会把日间也存成深色（反之夜里没 bgColorNight ⇒ 浅底浅字）
+    final dayBg = _bgIndex == 5
+        ? (_styleBgDay ??
+              _bgs[_dayBgIndex.clamp(0, _bgs.length - 1)][0].toARGB32())
+        : _customBgColor?.toARGB32();
+    final nightBg = _bgIndex == 5
+        ? (_customBgColor?.toARGB32() ?? _bgs[5][0].toARGB32())
+        : (_styleBgNight ?? _bgs[5][0].toARGB32());
     return ReaderStyle(
       id: id,
       name: name,
       builtin: builtin,
       bgIndex: _bgIndex,
       dayBgIndex: _dayBgIndex,
-      bgColor: _customBgColor?.toARGB32(),
+      bgColor: dayBg,
+      bgColorNight: nightBg,
       fgColor: _fgOverride?.toARGB32(),
       fgColorNight: _fgNightOverride?.toARGB32(),
       bgImageAsset: _bgImageAsset,
@@ -8971,6 +9000,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       dualPage: _rs.dualPage,
       chapterTitleStyle: _chapterTitleStyle.id,
       chapterTitleHtml: _chapterTitleHtml,
+      chapterTitleHtmlNight: _chapterTitleHtmlNight,
       underlineColor: _underlineColor?.toARGB32(),
       underlineStyle: _underlineStyle,
       underlineAlpha: _underlineAlpha,
@@ -8993,7 +9023,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           onApply: (style, html) {
             setState(() {
               _chapterTitleStyle = style;
-              if (html.trim().isNotEmpty) _chapterTitleHtml = html;
+              if (html.trim().isNotEmpty) {
+                _chapterTitleHtml = html;
+                // 手动选的标题样式日夜通用
+                _chapterTitleHtmlNight = '';
+              }
             });
             _scheduleSavePrefs();
             _scheduleRepaginate();
@@ -9077,6 +9111,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       _titleStyle = s.titleStyle;
       _chapterTitleStyle = ReaderTitleStyle.fromId(s.chapterTitleStyle);
       if (s.chapterTitleHtml.isNotEmpty) _chapterTitleHtml = s.chapterTitleHtml;
+      // 夜间标题（db 的 titleStyleHtmlNight）；样式没带就清空，避免沿用上一套
+      _chapterTitleHtmlNight = s.chapterTitleHtmlNight;
       _headerL = s.headerL;
       _headerC = s.headerC;
       _headerR = s.headerR;
