@@ -7,6 +7,11 @@
       "version": "1.9.18"
     },
     {
+      "name": "咪咕音乐（Cookie 版）",
+      "url": "https://gcore.jsdelivr.net/gh/hebijunge/musicfree-plugins@master/plugins/migu-cookie-source.plugin.v1.0.0.js",
+      "version": "1.0.0"
+    },
+    {
       "name": "QQ音乐",
       "url": "https://gcore.jsdelivr.net/gh/hebijunge/musicfree-plugins@master/plugins/qq-source.plugin.v1.9.23.js",
       "version": "1.9.23"
