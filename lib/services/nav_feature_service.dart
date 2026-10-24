@@ -238,6 +238,9 @@ class NavFeatureService extends GetxService {
 
     enabled.assignAll(on);
     disabled.assignAll(off);
+    // 首页永远第一、设置永远最后（用户 2026-10-24：「不要我每次移」）：
+    // 老用户存的乱序在这里一次性纠正，之后也不会再被拖动打乱。
+    _normalize();
     // 🔴 2026-10-14：**没有持久化记录时不要回写**。
     //   原来无条件 _persist()：一旦 `_enabledKey` 因为没落盘而丢失，
     //   `enabledSet == null` 会被当成"全部启用"，紧接着把这份"全部启用"
@@ -277,11 +280,46 @@ class NavFeatureService extends GetxService {
     PrefsMirror.snapshotSoon();
   }
 
-  Future<void> setEnabled(NavFeature f, bool v) async {    if (f.required) return;
+  /// 规范化已启用列表：首页永远在最前、设置永远在最后。
+  ///
+  /// 用户 2026-10-24：「已启用里永远将首页和设置固定头尾，其余启用的加在设置前面，
+  /// 不要我每次移。」
+  /// 中间各项的相对顺序保持不变。
+  void _normalize() {
+    if (enabled.isEmpty) return;
+    final middle = enabled
+        .where((f) => f != NavFeature.home && f != NavFeature.settings)
+        .toList();
+    final next = <NavFeature>[
+      NavFeature.home,
+      ...middle,
+      if (enabled.contains(NavFeature.settings)) NavFeature.settings,
+    ];
+    if (next.length == enabled.length) {
+      var same = true;
+      for (var i = 0; i < next.length; i++) {
+        if (next[i] != enabled[i]) {
+          same = false;
+          break;
+        }
+      }
+      if (same) return;
+    }
+    enabled.assignAll(next);
+  }
+
+  Future<void> setEnabled(NavFeature f, bool v) async {
+    if (f.required) return;
     if (v) {
       if (enabled.contains(f)) return;
       disabled.remove(f);
-      enabled.add(f);
+      // 插到「设置」前面（设置永远是最后一项），而不是追加到末尾
+      final settingsIdx = enabled.indexOf(NavFeature.settings);
+      if (settingsIdx >= 0) {
+        enabled.insert(settingsIdx, f);
+      } else {
+        enabled.add(f);
+      }
     } else {
       enabled.remove(f);
       if (!disabled.contains(f)) disabled.add(f);
@@ -290,12 +328,20 @@ class NavFeatureService extends GetxService {
   }
 
   /// 已启用段内部重排（拖动排序）
+  ///
+  /// 首页（下标 0）与设置（最后一项）位置固定，不可拖动；
+  /// 其余项也只能在两者之间的位置落位。
   Future<void> reorderEnabled(int oldIndex, int newIndex) async {
     if (oldIndex < 0 || oldIndex >= enabled.length) return;
+    // 首页和设置不可拖动
+    if (oldIndex == 0 || oldIndex == enabled.length - 1) return;
     var target = newIndex;
     if (target > oldIndex) target -= 1;
-    if (target < 0) target = 0;
-    if (target >= enabled.length) target = enabled.length - 1;
+    // 落位夹在首页（1）与设置（末尾前一位）之间
+    const minPos = 1;
+    final maxPos = enabled.length - 2;
+    if (target < minPos) target = minPos;
+    if (target > maxPos) target = maxPos;
     final item = enabled.removeAt(oldIndex);
     enabled.insert(target, item);
     await _persist();

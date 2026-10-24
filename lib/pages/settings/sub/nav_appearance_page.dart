@@ -320,37 +320,75 @@ class _NavAppearancePageState extends State<NavAppearancePage> {
       deco,
       SettingsService().navBarOpacity,
     );
+    // 选中指示器的**形态**也要在预览里体现，否则六个风格看着只差颜色
+    final ind = FloatingNavSpec.styleIndicator(style);
     return Container(
       decoration: preview,
       child: Center(
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _previewDot(dot, active: true),
-            const SizedBox(width: 6),
-            _previewDot(dot.withValues(alpha: 0.55)),
-            const SizedBox(width: 6),
-            _previewDot(dot.withValues(alpha: 0.55)),
+            _previewItem(dot, ind, active: true),
+            const SizedBox(width: 8),
+            _previewItem(dot, ind),
+            const SizedBox(width: 8),
+            _previewItem(dot, ind),
           ],
         ),
       ),
     );
   }
 
-  Widget _previewDot(Color color, {bool active = false}) {
-    return Container(
-      width: 16,
-      height: 16,
-      decoration: BoxDecoration(
-        color: active ? color.withValues(alpha: 0.30) : Colors.transparent,
-        shape: BoxShape.circle,
-      ),
-      child: Center(
-        child: Container(
-          width: 7,
-          height: 7,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
+  /// 预览里的一个"导航项"：圆点 + 该风格的选中指示器形态
+  Widget _previewItem(Color c, NavIndicator ind, {bool active = false}) {
+    final isPill = ind == NavIndicator.pill;
+    final w = isPill ? 24.0 : 16.0;
+    return SizedBox(
+      width: w,
+      height: 18,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // 圆形块 / 圆角矩形块
+          if (active && (ind == NavIndicator.blob || isPill))
+            Container(
+              width: w,
+              height: isPill ? 13 : 16,
+              decoration: BoxDecoration(
+                color: c.withValues(alpha: 0.30),
+                borderRadius:
+                    BorderRadius.circular(isPill ? 4.5 : 999),
+              ),
+            ),
+          // 底部短线
+          if (active && ind == NavIndicator.underline)
+            Positioned(
+              bottom: 0,
+              child: Container(
+                width: 12,
+                height: 2.5,
+                decoration: BoxDecoration(
+                  color: c,
+                  borderRadius: BorderRadius.circular(1.5),
+                ),
+              ),
+            ),
+          // 底部小圆点
+          if (active && ind == NavIndicator.dot)
+            Positioned(
+              bottom: 0,
+              child: Container(
+                width: 4,
+                height: 4,
+                decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+              ),
+            ),
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+          ),
+        ],
       ),
     );
   }

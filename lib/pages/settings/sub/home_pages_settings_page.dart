@@ -573,8 +573,8 @@ class HomePagesSettingsPage extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // 拖动把手（仅已启用段，未启用段按参考图不显示把手）
-            if (isEnabled)
+            // 拖动把手（仅已启用段、且非必需页面——首页/设置位置固定，不给拖）
+            if (isEnabled && !f.required)
               ReorderableDragStartListener(
                 index: index,
                 child: Padding(

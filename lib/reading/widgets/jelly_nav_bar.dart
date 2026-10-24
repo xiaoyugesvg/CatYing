@@ -106,7 +106,8 @@ class _JellyNavBarState extends State<JellyNavBar>
   // 选中指示器为圆形（宽=高），宽度由 itemWidth 与 bandHeight 反算，无固定内边距常量
 
   // 悬浮模式尺寸（高度/边距在 Widget 类中公开定义，供外部避让使用）
-  static const _floatingRadius = FloatingNavSpec.radius; // 悬浮胶囊圆角
+  /// 悬浮胶囊圆角（按风格变：磨砂更方、反色满胶囊、实心方润）
+  double get _floatingRadius => FloatingNavSpec.styleRadius(_style);
   static const _floatingTopPad = FloatingNavSpec.innerPadV; // 悬浮时上下内边距
   static const _floatingIconSize = FloatingNavSpec.iconSize; // 与影视/音乐统一
   // 悬浮每项宽度随屏宽自适应（宽屏适当加宽），见 _buildFloatingNavBar
@@ -465,13 +466,34 @@ class _JellyNavBarState extends State<JellyNavBar>
       builder: (context, constraints) {
         final itemWidth = constraints.maxWidth / widget.items.length;
         final bandHeight = height;
-        // 选中指示器 = 圆形（用户要求"图标和文字的背景太大，改成圆形"）：
-        // 宽 = 高 = bandHeight，圆角 = 半径。不再用 1.25 倍宽的圆角矩形。
-        final indicatorWidth = bandHeight;
-        final pillPad = (itemWidth - indicatorWidth) / 2;
+        // 选中指示器：**形态**跟着风格走（圆形块 / 圆角矩形 / 底部圆点 / 底部短线）。
+        // 用户 2026-10-24：「你就是换个颜色吗？」—— 所以形状也必须有区别。
+        final ind = FloatingNavSpec.styleIndicator(_style);
+        final indWidth = switch (ind) {
+          NavIndicator.blob => bandHeight,
+          NavIndicator.pill => itemWidth * 0.74,
+          NavIndicator.dot => 5.0,
+          NavIndicator.underline => 18.0,
+        };
+        final indHeight = switch (ind) {
+          NavIndicator.blob => bandHeight,
+          NavIndicator.pill => bandHeight * 0.78,
+          NavIndicator.dot => 5.0,
+          NavIndicator.underline => 3.0,
+        };
+        final indPad = (itemWidth - indWidth) / 2;
+        final bool indAtBottom =
+            ind == NavIndicator.dot || ind == NavIndicator.underline;
+        final indBottom = ind == NavIndicator.dot ? 6.0 : 4.0;
+        final indRadius = switch (ind) {
+          NavIndicator.blob => bandHeight / 2,
+          NavIndicator.pill => 10.0,
+          NavIndicator.dot => 3.0,
+          NavIndicator.underline => 2.0,
+        };
         return Stack(
           children: [
-            // 果冻背景指示器（弹性滑动 + 弹性缩放）
+            // 选中指示器（弹性滑动 + 弹性缩放）
             AnimatedBuilder(
               animation: _controller,
               builder: (context, _) {
@@ -484,10 +506,11 @@ class _JellyNavBarState extends State<JellyNavBar>
                 final scale = 0.88 + 0.12 * progress;
                 final isDark = Theme.of(context).brightness == Brightness.dark;
                 return Positioned(
-                  top: 0,
-                  left: left + pillPad,
-                  width: indicatorWidth,
-                  height: bandHeight,
+                  top: indAtBottom ? null : (bandHeight - indHeight) / 2,
+                  bottom: indAtBottom ? indBottom : null,
+                  left: left + indPad,
+                  width: indWidth,
+                  height: indHeight,
                   child: Transform.scale(
                     scale: scale,
                     child: Container(
@@ -497,7 +520,17 @@ class _JellyNavBarState extends State<JellyNavBar>
                           isDark: isDark,
                           palette: _pal,
                         ),
-                        borderRadius: BorderRadius.circular(bandHeight / 2),
+                        borderRadius: BorderRadius.circular(indRadius),
+                        // 霓虹的底部短线带一点发光，和"纯色条"区分开
+                        boxShadow: ind == NavIndicator.underline
+                            ? [
+                                BoxShadow(
+                                  color: FloatingNavSpec.neonColor
+                                      .withValues(alpha: 0.65),
+                                  blurRadius: 8,
+                                ),
+                              ]
+                            : null,
                       ),
                     ),
                   ),

@@ -12,6 +12,7 @@ import '../../../services/api_config.dart';
 import '../../../services/app_log.dart';
 import '../../../services/local_python_sources.dart';
 import '../../../services/python_manager.dart';
+import '../../../services/source_service.dart';
 import '../../../widgets/app_toast.dart';
 import '../../../widgets/card_action_sheet.dart';
 import '../../../widgets/common_widgets.dart';
@@ -78,6 +79,16 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
   /// 搜索关键词（用户 2026-10-20：「py 本地源设置里面加个搜索功能」）
   final TextEditingController _searchCtrl = TextEditingController();
   String _keyword = '';
+
+  // ── 检测（2026-10-24：本地 py 源加检测功能）──────────────────
+  /// 每个源的检测结果（key → 结果）。没跑过的源不在表里。
+  final Map<String, _ProbeResult> _probe = {};
+
+  /// 正在检测的源
+  final Set<String> _probing = {};
+
+  /// 全部检测时的进度文案（空 = 没有在批量跑）
+  String _probeHint = '';
 
   @override
   void initState() {
@@ -359,6 +370,123 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
   }
 
   // ============================================================
+  // 检测（2026-10-24：本地 py 源加检测）
+  // ============================================================
+
+  /// 检测一个本地源：真跑一遍 `getSort`（= 首页会走的路径）。
+  ///
+  /// 这样脚本语法错、依赖缺失、站点挂了、超时，都能在这一步暴露，
+  /// 并顺带拿到「分类数 / 首页推荐条数 / 耗时」。
+  ///
+  /// ⚠️ 必须**串行**：Python 引擎只有单实例，且 `setCurrentSpider` 是全局状态，
+  ///    并发检测会互相覆盖，结果全乱。
+  Future<void> _probeOne(LocalPythonSource src) async {
+    if (_probing.contains(src.key)) return;
+    if (!_ensureEngine()) return;
+    setState(() {
+      _probing.add(src.key);
+      _probe.remove(src.key);
+    });
+    final bean = src.toSourceBean();
+    final sw = Stopwatch()..start();
+    _ProbeResult result;
+    try {
+      final r = await SourceService.instance
+          .getSort(bean)
+          .timeout(const Duration(seconds: 25));
+      result = _ProbeResult(
+        ok: true,
+        sorts: r.$1.length,
+        home: r.$2.length,
+        ms: sw.elapsedMilliseconds,
+      );
+    } catch (e) {
+      result = _ProbeResult(
+        ok: false,
+        sorts: 0,
+        home: 0,
+        ms: sw.elapsedMilliseconds,
+        error: _shortError(e),
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _probing.remove(src.key);
+      _probe[src.key] = result;
+    });
+  }
+
+  /// 检测当前可见的全部源（串行 + 进度）
+  Future<void> _probeAll() async {
+    if (_probing.isNotEmpty) return;
+    if (!_ensureEngine()) return;
+    final list = _visible;
+    if (list.isEmpty) return;
+    var i = 0;
+    for (final src in list) {
+      i++;
+      if (!mounted) return;
+      setState(() => _probeHint = '检测中 $i/${list.length}');
+      await _probeOne(src);
+    }
+    if (!mounted) return;
+    setState(() => _probeHint = '');
+    final ok = list.where((s) => _probe[s.key]?.ok == true).length;
+    AppToast.message('检测完成：$ok/${list.length} 正常');
+  }
+
+  String _shortError(Object e) {
+    var s = e.toString().replaceFirst('Exception: ', '');
+    final i = s.indexOf('\n');
+    if (i > 0) s = s.substring(0, i);
+    return s.length > 60 ? '${s.substring(0, 60)}…' : s;
+  }
+
+  /// 检测结论（列表/网格共用）：正常显示「分类 · 推荐 · 耗时」，失败显示原因
+  Widget? _probeLine(String key, {double size = AppTheme.fontFootnote}) {
+    if (_probing.contains(key)) {
+      return Text(
+        '检测中…',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: size, color: const Color(0xFFF0A020)),
+      );
+    }
+    final r = _probe[key];
+    if (r == null) return null;
+    final text = r.ok
+        ? '正常 · ${r.sorts} 分类 · ${r.home} 推荐 · '
+            '${(r.ms / 1000).toStringAsFixed(1)}s'
+        : '失败 · ${r.error}';
+    return Text(
+      text,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        fontSize: size,
+        color: r.ok ? const Color(0xFF34C759) : Colors.redAccent,
+      ),
+    );
+  }
+
+  /// 状态点：灰=未检测 / 橙=检测中 / 绿=正常 / 红=失败
+  Widget _stateDot(String key) {
+    Color c = AppTheme.textTertiary;
+    if (_probing.contains(key)) {
+      c = const Color(0xFFF0A020);
+    } else if (_probe[key]?.ok == true) {
+      c = const Color(0xFF34C759);
+    } else if (_probe[key] != null) {
+      c = Colors.redAccent;
+    }
+    return Container(
+      width: 7,
+      height: 7,
+      decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+    );
+  }
+
+  // ============================================================
   // 单条操作
   // ============================================================
 
@@ -576,6 +704,14 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
               title: '重新加载到引擎',
               value: _busy ? '处理中…' : '注册全部本地源',
               onTap: _busy ? () {} : _reloadEngine,
+            ),
+            SettingsRow(
+              icon: Icons.network_check_rounded,
+              title: '检测全部源',
+              value: _probeHint.isNotEmpty
+                  ? _probeHint
+                  : '跑一遍首页接口，看能不能用',
+              onTap: _probeHint.isNotEmpty || _busy ? () {} : _probeAll,
             ),
           ],
         ),
@@ -1034,9 +1170,16 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
                                 : AppTheme.textTertiary,
                           ),
                         ),
+                        // 检测结论（没检测过就不占行）
+                        if (_probeLine(src.key) != null) ...[
+                          const SizedBox(height: 2),
+                          _probeLine(src.key)!,
+                        ],
                       ],
                     ),
                   ),
+                  _stateDot(src.key),
+                  const SizedBox(width: 6),
                   Icon(
                     Icons.chevron_right_rounded,
                     size: 20,
@@ -1114,12 +1257,15 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
                       : AppTheme.accentColor,
                 ),
                 const Spacer(),
-                if (isCurrent)
+                _stateDot(src.key),
+                if (isCurrent) ...[
+                  const SizedBox(width: 6),
                   Icon(
                     Icons.check_circle_rounded,
                     size: 16,
                     color: AppTheme.accentColor,
                   ),
+                ],
               ],
             ),
             const Spacer(),
@@ -1134,15 +1280,20 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
               ),
             ),
             const SizedBox(height: 2),
-            Text(
-              isCurrent ? '当前主页源' : '${src.key}.py',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: AppTheme.fontFootnote,
-                color: isCurrent ? AppTheme.accentColor : AppTheme.textTertiary,
+            // 有检测结果就顶掉文件名那行（卡片高度固定，不能多一行）
+            if (_probing.contains(src.key) || _probe[src.key] != null)
+              _probeLine(src.key)!
+            else
+              Text(
+                isCurrent ? '当前主页源' : '${src.key}.py',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: AppTheme.fontFootnote,
+                  color:
+                      isCurrent ? AppTheme.accentColor : AppTheme.textTertiary,
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -1159,6 +1310,11 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
       title: src.name,
       subtitle: '本地 Python · ${src.key}.py',
       actions: [
+        CardAction(
+          icon: Icons.network_check_rounded,
+          label: '检测',
+          onTap: () => _probeOne(src),
+        ),
         CardAction(
           icon: Icons.drive_file_rename_outline,
           label: '编辑',
@@ -1183,4 +1339,29 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
       ],
     );
   }
+}
+
+/// 一次检测的结果
+class _ProbeResult {
+  const _ProbeResult({
+    required this.ok,
+    required this.sorts,
+    required this.home,
+    required this.ms,
+    this.error,
+  });
+
+  final bool ok;
+
+  /// 分类数量
+  final int sorts;
+
+  /// 首页推荐条数
+  final int home;
+
+  /// 耗时（毫秒）
+  final int ms;
+
+  /// 失败原因（ok=false 时才有）
+  final String? error;
 }

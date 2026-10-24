@@ -6,6 +6,7 @@ import 'dart:ui';
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'peer_transfer_page.dart';
@@ -4545,7 +4546,10 @@ class _BookShelfTab extends StatelessWidget {
     if (!context.mounted) return;
     Navigator.push(
       context,
-      MaterialPageRoute(
+      // 用 CupertinoPageRoute：只有它带 iOS 的「左边缘右滑返回」手势。
+      // 全局 pageTransitionsTheme 是自定义的位移转场，不带这个手势
+      //（用户 2026-10-24：阅读器里贴着左边缘滑不出来）。
+      CupertinoPageRoute(
         builder: (_) => BookSourceReaderPage(
           source: src,
           bookName: book.title,

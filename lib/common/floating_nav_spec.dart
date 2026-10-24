@@ -74,6 +74,21 @@ enum FloatingNavStyle {
   }
 }
 
+/// 选中指示器的**形态**（不只是颜色，形状也按风格变）。
+enum NavIndicator {
+  /// 圆形色块（水墨 / 炫彩）
+  blob,
+
+  /// 圆角矩形块（磨砂 / 反色，像 iOS 分段控件）
+  pill,
+
+  /// 只有选中项下方一个小圆点（实心，最极简）
+  dot,
+
+  /// 选中项下方一条短横线（霓虹）
+  underline,
+}
+
 /// 底栏统一视觉规格（几何 / 取色 / 阴影）。
 class FloatingNavSpec {
   FloatingNavSpec._();
@@ -275,6 +290,49 @@ class FloatingNavSpec {
   static const double defaultOpacity = 0.95;
 
   static double clampOpacity(double v) => v.clamp(minOpacity, maxOpacity);
+
+  // ── 形态（2026-10-24：用户「你就是换个颜色吗？」）──────────────
+  //
+  // 六种风格必须在**形状**上也能一眼区分，不能只有底色不同：
+  //   ink    水墨：标准胶囊 32 + 圆形指示块
+  //   frost  磨砂：更方的 22 + 圆角矩形指示块（iOS 分段感）
+  //   aurora 炫彩：胶囊 32 + 圆形指示块
+  //   neon   霓虹：小圆角 14 + 底部短横线
+  //   reverse反色：满胶囊 999 + 圆角矩形指示块
+  //   solid  实心：方润 16 + 底部小圆点
+
+  /// 该风格的胶囊圆角
+  static double styleRadius(FloatingNavStyle style) {
+    switch (style) {
+      case FloatingNavStyle.ink:
+      case FloatingNavStyle.aurora:
+        return radius; // 32
+      case FloatingNavStyle.frost:
+        return 22;
+      case FloatingNavStyle.neon:
+        return 14;
+      case FloatingNavStyle.reverse:
+        return 999; // 完全胶囊
+      case FloatingNavStyle.solid:
+        return 16;
+    }
+  }
+
+  /// 该风格的选中指示器形态
+  static NavIndicator styleIndicator(FloatingNavStyle style) {
+    switch (style) {
+      case FloatingNavStyle.ink:
+      case FloatingNavStyle.aurora:
+        return NavIndicator.blob;
+      case FloatingNavStyle.frost:
+      case FloatingNavStyle.reverse:
+        return NavIndicator.pill;
+      case FloatingNavStyle.neon:
+        return NavIndicator.underline;
+      case FloatingNavStyle.solid:
+        return NavIndicator.dot;
+    }
+  }
 
   /// 把整条底栏的底色/渐变按 [opacity] 整体压暗透明度。
   ///

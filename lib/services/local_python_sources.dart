@@ -11,6 +11,43 @@ import 'app_log.dart';
 import 'python_manager.dart';
 import 'python_sources_service.dart';
 
+/// 判断一段脚本**不像**影视源时返回原因；像源则返回 null。
+///
+/// 影视源只有三种合法形态（与 `spider_runner` 的路由一致）：
+///   1. 模块级 `def home(...)` / `def search(...)`；
+///   2. drpy 风格 `class Spider`（同名实例方法）；
+///   3. catvod 风格 `class Spider`（homeContent / categoryContent / …）。
+///
+/// 判断刻意**放宽**：出现任一入口函数、`class Spider`、或 `vod_name` 这类
+/// 数据字段就放行 —— 宁可漏判，也不要把写法特殊的正常源误杀掉。
+String? whyNotVideoSource(String code) {
+  if (_reSpiderClass.hasMatch(code) || _reEntry.hasMatch(code)) return null;
+  if (_reVodField.hasMatch(code)) return null;
+  if (_reStandaloneServer.hasMatch(code)) {
+    return '这不是影视源脚本，而是「独立服务型」脚本'
+        '（自己起本地端口 / HTTP 服务，例如 cam4.py）。'
+        '它需要后台常驻运行，不能作为本地 py 源导入。';
+  }
+  return '这不是影视源脚本：既没有 class Spider，'
+      '也没有 home / homeContent 入口函数。';
+}
+
+final RegExp _reSpiderClass = RegExp(r'^\s*class\s+Spider\b', multiLine: true);
+final RegExp _reEntry = RegExp(
+  r'^\s*(?:async\s+)?def\s+'
+  r'(home|homeContent|categoryContent|searchContent|detailContent|playerContent|'
+  r'category|search|detail|play)\s*\(',
+  multiLine: true,
+);
+
+/// 源数据里常见的字段名（有些源用 exec/字典拼装，入口函数不在源码字面量里）
+final RegExp _reVodField = RegExp(r'vod_play_url|type_name|vod_name');
+
+/// 独立服务型脚本的特征：自己起 HTTP 服务
+final RegExp _reStandaloneServer = RegExp(
+  r'BaseHTTPRequestHandler|HTTPServer|socketserver|uvicorn|Flask\s*\(|FastAPI\s*\(',
+);
+
 /// 「本地 Python 源」的落盘与注册。
 ///
 /// 目录（用户 2026-10-18：本地源单独放一个可自己拷贝脚本的文件夹）：
@@ -241,6 +278,15 @@ class LocalPythonSources {
     try {
       if (code.trim().isEmpty) {
         return (ok: false, message: '脚本内容为空', source: null);
+      }
+      // 导入前先认一下"这到底是不是影视源脚本"。
+      //
+      // 用户 2026-10-24 反馈：把 `cam4.py`（一个自己起本地 HTTP 服务、吐 m3u 的
+      // **独立服务脚本**）导进来，首页报 `没有可调用的 home` —— 报错点离原因太远。
+      // 这类脚本注册进引擎只会白占一个模块，不如在导入这一步就说清楚。
+      final why = whyNotVideoSource(code);
+      if (why != null) {
+        return (ok: false, message: why, source: null);
       }
       if (!PythonManager.instance.isIOS) {
         return (ok: false, message: 'Python 引擎仅支持 iOS', source: null);

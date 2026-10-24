@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -1222,7 +1223,8 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
   void _openReader(int index) {
     Navigator.push(
       context,
-      MaterialPageRoute(
+      // CupertinoPageRoute ⇒ 带 iOS 左边缘右滑返回（详见书架页同处注释）
+      CupertinoPageRoute(
         builder: (_) => BookSourceReaderPage(
           source: _result.source,
           bookName: _name,
