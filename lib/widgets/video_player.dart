@@ -303,8 +303,27 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   ///
   /// 这里把真实位置当**锚点**，帧间用单调时钟 + 当前倍速外推，
   /// 收到新位置时只做小幅校正（不回退），暂停/缓冲时冻结。
+  ///
+  /// 校正策略参考 weizhenye/Danmaku 与 bilibili/DanmakuFlameMaster 的做法：
+  /// 动画由真实时钟驱动，媒体位置只在"生成/恢复"时参与锚定。
+  /// 我们额外把残差**分摊到 400ms 内吃掉**（而不是只能向前跳），
+  /// 既保持单调平滑，又不会长时间累积漂移。
   Duration _danmuClockBase = Duration.zero;
   DateTime? _danmuClockAt;
+
+  /// 待消化的残差（毫秒）：真实位置 − 内部时钟。
+  ///
+  /// 正数 = 真实位置更靠前（我们在后面追），负数 = 我们跑快了要放慢。
+  /// 在 [_kDanmuCorrectionMs] 内线性生效，避免一帧内跳变。
+  double _danmuClockErrMs = 0;
+  DateTime? _danmuClockErrAt;
+
+  /// 残差修正窗口：这段时间内把残差全部吃掉。
+  static const int _kDanmuCorrectionMs = 400;
+
+  /// 弹幕**提前量**：位置事件本身有 0~250ms 的延迟，整体提前一点
+  /// 看起来才跟得上口型/画面（B站一类的观感）。
+  static const int _kDanmuLeadMs = 120;
   bool _danmuOn = true;
   bool _danmuLoaded = false;
   /// 正在加载的弹幕地址（去重锁）。
@@ -899,8 +918,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         if (!mounted) return;
         _position = position;
         _positionVN.value = position;
-        // 弹幕时钟锚点：真实位置只用来校正，帧间由 _danmuSmoothPosition 外推
-        _danmuSyncClock(position);
 
         // ── 🟡 清缓冲标志必须进 setState（修"靠巧合消失"）────────────
         //
@@ -915,6 +932,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         if (_isBuffering && position > Duration.zero) {
           setState(() => _isBuffering = false);
         }
+
+        // 弹幕时钟锚点：真实位置只用来校正，帧间由 _danmuSmoothPosition 外推。
+        // ⚠️ 必须放在上面清缓冲之后 —— 否则缓冲刚结束的那一次仍按"冻结"处理，
+        //   又要多等一个位置事件（最多 250ms）才续上。
+        _danmuSyncClock(position);
 
         // 告诉卡死检测"位置有前进"（内部会按整秒去重）
         _stall.markProgress(position.inSeconds);
@@ -1132,6 +1154,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       // 直到第一个位置事件到达（最多 250ms）才纠正。
       _danmuClockBase = Duration.zero;
       _danmuClockAt = null;
+      _danmuClockErrMs = 0;
+      _danmuClockErrAt = null;
       _danmuLastFailAt = null; // 新集是新目标，上一集的失败节流不该挡它
       // 「切集提示」：换到新的一集时在顶部轻提示（默认关闭）
       if (_switchEpisodeHint) {
@@ -3282,24 +3306,42 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     );
   }
 
-  /// 弹幕用的**平滑播放位置**：帧间按单调时钟外推，不再直接吃 4Hz 的真实位置。
+  /// 弹幕**内部时钟**（不含提前量）：锚点 + 外推 + 残差平滑修正。
   ///
-  /// 外推上限 600ms：主线程被卡住时不会一次跳太远（宁可短暂落后，也不"瞬移"）。
-  Duration _danmuSmoothPosition() {
+  /// 残差按 [_kDanmuCorrectionMs] 线性生效：调用时刻距残差产生已过 e 毫秒，
+  /// 则吃掉 `err × e / 窗口`。因此单帧最多只挪一点点，不会"瞬移"。
+  Duration _danmuClockPosition() {
     final at = _danmuClockAt;
     // 暂停 / 缓冲中 → 冻结在最后一个真实位置（画面不动，弹幕也不动）
     if (!_isPlaying || _isBuffering || at == null) return _danmuClockBase;
-    final elapsedMs = DateTime.now().difference(at).inMilliseconds;
-    final advanced = (elapsedMs * _playbackSpeed).clamp(0.0, 600.0);
-    return _danmuClockBase + Duration(milliseconds: advanced.round());
+    final now = DateTime.now();
+    final elapsedMs = now.difference(at).inMilliseconds;
+    var ms = (elapsedMs * _playbackSpeed).clamp(0.0, 600.0);
+
+    final errAt = _danmuClockErrAt;
+    if (errAt != null && _danmuClockErrMs.abs() >= 1) {
+      final e = now.difference(errAt).inMilliseconds;
+      if (e >= _kDanmuCorrectionMs) {
+        ms += _danmuClockErrMs; // 窗口走完 → 残差全额生效
+      } else if (e > 0) {
+        ms += _danmuClockErrMs * (e / _kDanmuCorrectionMs);
+      }
+    }
+    return _danmuClockBase + Duration(milliseconds: ms.round());
   }
 
-  /// 收到真实播放位置时校正弹幕时钟（**单调、不回退**）。
+  /// 弹幕用的**平滑播放位置**（含提前量）。
   ///
-  /// · 偏差 >400ms：认为用户 seek / 换集 → 硬对齐；
-  /// · 真实位置超前：直接追上去；
-  /// · 真实位置略落后（位置事件本身有延迟，常见）：保持当前平滑值，
-  ///   只重新锚定 —— 否则每 250ms 会出现一次 10~50ms 的倒退抖动。
+  /// 外推上限 600ms：主线程被卡住时不会一次跳太远（宁可短暂落后，也不"瞬移"）。
+  Duration _danmuSmoothPosition() => _danmuClockPosition() +
+      const Duration(milliseconds: _kDanmuLeadMs);
+
+  /// 收到真实播放位置时校正弹幕时钟。
+  ///
+  /// 关键：**以当前平滑值为新锚点**，把 `真实位置 − 平滑位置` 作为残差
+  /// 记录下来慢慢吃掉 —— 这样既连续（不会每 250ms 抖一下），
+  /// 又不会像"只许向前"那样长期累积漂移。
+  /// 偏差 >400ms 视为 seek / 换集 → 直接硬对齐并清空残差。
   void _danmuSyncClock(Duration real) {
     if (!mounted) return;
     final now = DateTime.now();
@@ -3307,16 +3349,20 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (!_isPlaying || _isBuffering || at == null) {
       _danmuClockBase = real;
       _danmuClockAt = now;
+      _danmuClockErrMs = 0;
+      _danmuClockErrAt = null;
       return;
     }
-    final smooth = _danmuSmoothPosition();
-    final diff = (real - smooth).inMilliseconds;
-    if (diff.abs() > 400) {
+    final smooth = _danmuClockPosition(); // 不含提前量，避免提前量被当成误差抵消
+    final err = (real - smooth).inMilliseconds.toDouble();
+    if (err.abs() > 400) {
       _danmuClockBase = real; // seek / 换集：硬对齐
-    } else if (diff > 0) {
-      _danmuClockBase = real; // 略超前：追上
+      _danmuClockErrMs = 0;
+      _danmuClockErrAt = null;
     } else {
-      _danmuClockBase = smooth; // 略落后：不回退
+      _danmuClockBase = smooth; // 新锚点 = 当前平滑值（保证连续）
+      _danmuClockErrMs = err;
+      _danmuClockErrAt = now;
     }
     _danmuClockAt = now;
   }
