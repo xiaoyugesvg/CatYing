@@ -279,6 +279,17 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 自定义字色（null = 跟随主题）
   Color? _fgOverride;
 
+  /// 夜间字色（样式里 db 的 `textColorNight`）。夜间时优先于 [_fgOverride]
+  Color? _fgNightOverride;
+
+  /// 样式带来的日 / 夜底色（切日夜时恢复，避免"一套样式只有一种底色"）
+  int? _styleBgDay;
+  int? _styleBgNight;
+
+  /// 章标题字号（null = 正文 +3）与字重（db `titleBold < 0` → 不加粗）
+  double? _titleFontSize;
+  bool _titleBold = true;
+
   /// 已保存的排版预设名
   final List<String> _savedPresets = [];
 
@@ -552,7 +563,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 「主题」tab 选了自定义字色就以它为准；
   /// 自定义/内置背景为深色时自动换浅色文字，避免深底黑字。
   Color get _fg {
-    if (_fgOverride != null) return _fgOverride!;
+    // 夜间优先用样式的 textColorNight，其次才是用户手选的字色
+    final over = _bgIndex == 5 ? (_fgNightOverride ?? _fgOverride) : _fgOverride;
+    if (over != null) return over;
     // A3：选了壁纸 → 按壁纸明暗决定文字色（深图浅字 / 浅图深字）✓
     if (_bgImageAsset != null && _bgImageDark != null) {
       return _bgImageDark! ? const Color(0xFFE2E2E2) : const Color(0xFF1A1A1A);
@@ -1136,9 +1149,26 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         final fw = num2('fontWeight');
         if (fw != null && fw >= 300 && fw <= 900) _fontWeight = fw;
         final ls = num2('letterSpacing');
-        if (ls != null && ls >= 0 && ls <= 5) _letterSpacing = ls;
+        if (ls != null && ls >= 0 && ls <= 8) _letterSpacing = ls;
         final ps = num2('paraSpacing');
         if (ps != null && ps >= 0 && ps <= 3) _paraSpacing = ps;
+        final tfs = num2('titleFontSize');
+        if (tfs != null && tfs >= 8 && tfs <= 60) _titleFontSize = tfs;
+        final tb =
+            (ov?['titleBold'] as bool?) ?? p.getBool('reading.titleBold');
+        if (tb != null) _titleBold = tb;
+        final sbgD =
+            (ov?['styleBgDay'] as num?)?.toInt() ??
+            p.getInt('reading.styleBgDay');
+        if (sbgD != null) _styleBgDay = sbgD;
+        final sbgN =
+            (ov?['styleBgNight'] as num?)?.toInt() ??
+            p.getInt('reading.styleBgNight');
+        if (sbgN != null) _styleBgNight = sbgN;
+        final fgn =
+            (ov?['fgNightOverride'] as num?)?.toInt() ??
+            p.getInt('reading.fgNightOverride');
+        if (fgn != null && fgn != 0) _fgNightOverride = Color(fgn);
         final pl = num2('padLeft');
         if (pl != null && pl >= 0 && pl <= 60) _padLeft = pl;
         final pr = num2('padRight');
@@ -1292,6 +1322,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         await p.setBool('reading.focusBold', _focusBold);
         await p.setInt('reading.titleAlign', _titleAlign);
         await p.setInt('reading.titleStyle', _titleStyle);
+        if (_titleFontSize != null) {
+          await p.setDouble('reading.titleFontSize', _titleFontSize!);
+        } else {
+          await p.remove('reading.titleFontSize');
+        }
+        await p.setBool('reading.titleBold', _titleBold);
         // ✅ 段距 / 字距 / 字重 / 边距 / 缩进也要**落全局**：
         //   原来只写进「独立排版」快照，全局一个键都没有 ⇒ 调完退出再进
         //   又回到默认值（用户视角："怎么调都不舒服/调了没用"）。
@@ -1320,6 +1356,25 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       await p.setString('reading.chapterTitleStyle', _chapterTitleStyle.id);
       await p.setString('reading.chapterTitleHtml', _chapterTitleHtml);
       await p.setString('reading.fontId', _fontId ?? '');
+      // 样式带来的日/夜底色与夜间字色（切日夜、重进都按这套来）
+      if (_styleBgDay != null) {
+        await p.setInt('reading.styleBgDay', _styleBgDay!);
+      } else {
+        await p.remove('reading.styleBgDay');
+      }
+      if (_styleBgNight != null) {
+        await p.setInt('reading.styleBgNight', _styleBgNight!);
+      } else {
+        await p.remove('reading.styleBgNight');
+      }
+      if (_fgNightOverride != null) {
+        await p.setInt(
+          'reading.fgNightOverride',
+          _fgNightOverride!.toARGB32(),
+        );
+      } else {
+        await p.remove('reading.fgNightOverride');
+      }
       await p.setString('reading.headerL', _headerL);
       await p.setString('reading.headerC', _headerC);
       await p.setString('reading.headerR', _headerR);
@@ -3609,6 +3664,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       'p': scrollMode ? '-' : '$_localPageNo',
       't': TimeOfDay.now().format(context),
       'b': _batteryValue(),
+      // `n` = 纯数字电量（不带 %）—— db 的 `format` 里 % 是字面量，
+      // 如 `#%` / `#个想法`，需要能单独拿到数字
+      'n': _batteryPct == null ? '--' : '$_batteryPct',
     });
   }
 
@@ -3844,8 +3902,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                           ? TextAlign.center
                           : TextAlign.left,
                       style: TextStyle(
-                        fontSize: _fontSize + 3,
-                        fontWeight: FontWeight.w700,
+                        fontSize: _titleFontSize ?? _fontSize + 3,
+                        fontWeight: _titleBold
+                            ? FontWeight.w700
+                            : FontWeight.w400,
                         color: fg,
                         height: 1.5,
                         // 标题不带正文字距（与分页器 headingStyle 一致）
@@ -4230,17 +4290,16 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 顶栏日夜切换：浅色背景 ↔ 夜间背景（记住切走前的浅色索引）
   void _toggleDayNight() {
     setState(() {
-      if (_customBgColor != null || _customBgPath != null) {
-        // 自定义背景（色/图）时：清除并进入夜间，浅色索引记回默认白
-        _customBgColor = null;
-        _customBgPath = null;
-        _dayBgIndex = 0;
-        _bgIndex = 5;
-      } else if (_bgIndex == 5) {
+      if (_bgIndex == 5) {
+        // 夜间 → 日间：优先恢复样式的日间底色，否则回到记下的浅色索引
         _bgIndex = _dayBgIndex;
+        _customBgColor = _styleBgDay == null ? null : Color(_styleBgDay!);
       } else {
+        // 日间 → 夜间：优先用样式的夜间底色（db 的 bgStrNight）
         _dayBgIndex = _bgIndex;
+        _customBgPath = null;
         _bgIndex = 5;
+        _customBgColor = _styleBgNight == null ? null : Color(_styleBgNight!);
       }
       _scheduleSavePrefs();
     });
@@ -5178,8 +5237,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         letterSpacing: _letterSpacing,
         fontWeight: _fontWeightToW(_fontWeight),
       ),
-      // 章标题在渲染端是「正文 +3 / 行高 1.5」，与分页器默认公式（+12）不同
-      headingFontSizeOverride: _fontSize + 3,
+      // 章标题在渲染端是「正文 +3 / 行高 1.5」，与分页器默认公式（+12）不同；
+      // 配了样式的 db titleSize / titleBold 就以样式为准（两边必须同参）
+      headingFontSizeOverride: _titleFontSize ?? _fontSize + 3,
+      headingFontWeight: _titleBold ? FontWeight.w700 : FontWeight.w400,
       headingHeightOverride: 1.5,
       paragraphSpacingFactor: _paraSpacing,
       textScaler: MediaQuery.textScalerOf(context),
@@ -6811,6 +6872,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             GestureDetector(
               onTap: () => upd(() {
                 _customBgColor = null;
+                // 手选底色 ⇒ 不再跟随样式的日/夜配色
+                _styleBgDay = null;
+                _styleBgNight = null;
                 _bgIndex = i;
               }),
               child: Row(
@@ -6973,7 +7037,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         children: [
           // 无：清掉内置背景（回到 _bgs 底色）
           GestureDetector(
-            onTap: () => upd(() => _customBgColor = null),
+            onTap: () => upd(() {
+              _customBgColor = null;
+              _styleBgDay = null;
+              _styleBgNight = null;
+            }),
             child: Container(
               margin: const EdgeInsets.only(right: 10),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
@@ -7182,6 +7250,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       upd(() {
         _customBgPath = dest;
         _customBgColor = null; // 图片背景优先于颜色
+        _styleBgDay = null;
+        _styleBgNight = null;
       });
       if (old != null && old != dest) {
         try {
@@ -7555,7 +7625,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         '上边距',
         _headerPadTop,
         -20,
-        40,
+        80,
         '${_headerPadTop.round()}',
         (v) => upd(() => _headerPadTop = v),
         step: 1,
@@ -8805,6 +8875,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       dayBgIndex: _dayBgIndex,
       bgColor: _customBgColor?.toARGB32(),
       fgColor: _fgOverride?.toARGB32(),
+      fgColorNight: _fgNightOverride?.toARGB32(),
       bgImageAsset: _bgImageAsset,
       bgImagePath: _customBgPath,
       bgImageDark: _bgImageDark ?? false,
@@ -8817,6 +8888,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       indent: _indent,
       titleAlign: _titleAlign,
       titleStyle: _titleStyle,
+      titleFontSize: _titleFontSize,
+      titleBold: _titleBold,
       hideRepeatTitle: _hideRepeatTitle,
       focusBold: _focusBold,
       padLeft: _padLeft,
@@ -8858,21 +8931,32 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       (m) => m.name == s.pageMode,
       orElse: () => PageMode.slide,
     );
-    // 夜间底（索引 5）时优先用样式的夜间底色
+    // 保持当前昼夜模式（夜间套样式仍是夜间），只换成这套样式的对应配色
     final night = _bgIndex == 5;
-    final custom = night ? (s.bgColorNight ?? s.bgColor) : s.bgColor;
+    final dayColor = s.bgColor;
+    final nightColor = s.bgColorNight ?? s.bgColor;
+    final custom = night ? nightColor : dayColor;
     final path = s.bgImagePath;
     setState(() {
-      _bgIndex = s.bgIndex.clamp(0, _bgs.length - 1);
+      _styleBgDay = dayColor;
+      _styleBgNight = nightColor;
+      _bgIndex = night
+          ? 5
+          : s.bgIndex.clamp(0, _bgs.length - 1);
       _dayBgIndex = s.dayBgIndex.clamp(0, _bgs.length - 1);
       _customBgColor = custom == null ? null : Color(custom);
       _fgOverride = s.fgColor == null ? null : Color(s.fgColor!);
+      _fgNightOverride = s.fgColorNight == null
+          ? null
+          : Color(s.fgColorNight!);
+      _titleFontSize = s.titleFontSize;
+      _titleBold = s.titleBold;
       _bgImageAsset = s.bgImageAsset;
       _bgImageDark = s.bgImageAsset == null ? null : s.bgImageDark;
       _customBgPath = (path != null && File(path).existsSync()) ? path : null;
       _fontSize = s.fontSize.clamp(12.0, 30.0);
       _lineHeight = s.lineHeight.clamp(1.05, 3.0);
-      _letterSpacing = s.letterSpacing.clamp(-2.0, 4.0);
+      _letterSpacing = s.letterSpacing.clamp(-2.0, 8.0);
       _fontWeight = s.fontWeight.clamp(100.0, 900.0);
       _paraSpacing = s.paraSpacing.clamp(0.0, 2.0);
       _indent = s.indent.clamp(0.0, 4.0);
@@ -9349,7 +9433,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                           '字距',
                           draft.letterSpacing,
                           -1,
-                          3,
+                          6,
                           draft.letterSpacing.toStringAsFixed(1),
                           (v) => upd({'letterSpacing': v}),
                           step: 0.1,

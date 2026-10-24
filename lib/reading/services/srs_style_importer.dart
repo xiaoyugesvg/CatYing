@@ -148,8 +148,8 @@ class SrsStyleImporter {
     final fs = d('textSize', 19).clamp(12.0, 30.0);
     // 行高：源阅读是"在字号之外额外加多少 px"，这里折成倍数
     final lh = (1 + d('lineSpacingExtra', 0) / fs).clamp(1.05, 3.0);
-    // 字距：源阅读的数值很小（0.2），按像素用（当 em 会宽得离谱）
-    final ls = d('letterSpacing', 0).clamp(-2.0, 4.0);
+    // 字距：源阅读是 em（Android Paint.letterSpacing 也是 em）⇒ × 字号
+    final ls = (d('letterSpacing', 0) * fs).clamp(-2.0, 8.0);
     // 段距：源阅读是 px，我们的是"字号倍数"
     final ps = (d('paragraphSpacing', 0) / fs).clamp(0.0, 2.0);
     final indentStr = (cfg['paragraphIndent'] as String?) ?? '';
@@ -178,7 +178,9 @@ class SrsStyleImporter {
       bgIndex: night ? 5 : 3,
       dayBgIndex: 3,
       bgColor: bgColor,
+      bgColorNight: night ? null : _hexOf(cfg['bgStrNight']),
       fgColor: (night ? colorOf('textColorNight') : colorOf('textColor')),
+      fgColorNight: colorOf('textColorNight'),
       bgImagePath: bgImagePath,
       fontSize: fs,
       lineHeight: lh,
@@ -201,6 +203,8 @@ class SrsStyleImporter {
       footerR: footer.$3,
       chapterTitleStyle: cleanHtml.isEmpty ? '' : 'custom',
       chapterTitleHtml: cleanHtml,
+      titleFontSize: (cfg['titleSize'] as num?)?.toDouble(),
+      titleBold: ((cfg['titleBold'] as num?)?.toDouble() ?? 0) >= 0,
       pageMode: 'slide',
     );
   }
@@ -228,6 +232,8 @@ class SrsStyleImporter {
     return v == null ? null : (0xFF000000 | v);
   }
 
+  static int? _hexOf(Object? v) => v is String ? _hex(v) : null;
+
   /// 组件列表 → 左 / 中 / 右 三条格式串
   ///
   /// `alignment`：0 左 / 1 中 / 2 右；同位置的多个组件用空格拼接。
@@ -245,32 +251,35 @@ class SrsStyleImporter {
         }
       }
     }
-    String join(int i) => slots[i]!.join(' ');
+    String join(int i) => slots[i]!.join('');
     return (join(0), join(1), join(2));
   }
 
-  /// 单个组件 → 我们的格式串变量
+  /// 单个组件 → 我们的格式串变量（保留 db 里的 `format` 字面文字）
   static String _tokenFor(Map item) {
     final type = (item['type'] as String?) ?? '';
     final format = (item['format'] as String?) ?? '#';
-    switch (type) {
-      case 'chapterTitle':
-        return '#';
-      case 'pageNO':
-        return 'p';
-      case 'readProgress':
-        return '%';
-      case 'time':
-        return 't';
-      case 'batteryRate':
-        return 'b';
-      case 'chapterCount':
-        return 'C';
-      case 'batteryIcon':
-        return ''; // 图形组件，格式串表达不了
-      default:
-        // author / 自定义文案：format 是字面文本（不是占位符）就直接用
-        return format == '#' ? '' : format;
+    final token = switch (type) {
+      'chapterTitle' => '#',
+      'pageNO' => 'p',
+      'readProgress' => '%',
+      'time' => 't',
+      'batteryRate' => 'n',
+      'chapterNO' => 'c',
+      'chapterCount' => 'C',
+      'totalChapterCount' => 'C',
+      'bookName' => 'B',
+      _ => null,
+    };
+    if (token == null) {
+      // author / 自定义文案：format 本身就是字面文本
+      return format == '#' ? '' : format;
     }
+    var s = format.replaceAll('#', token);
+    // `%` 本身已带百分号（`72%`），db 里 `#%` 的 `%` 是字面量 ⇒ 去掉重复
+    if (type == 'readProgress' && s.endsWith('%')) {
+      s = s.substring(0, s.length - 1);
+    }
+    return s;
   }
 }

@@ -25,6 +25,9 @@ class BookTypography {
   /// 度量会按大标题量（正文 +12）而渲染只有 +3 ⇒ 标题页凭空多留一行空白。
   final double? headingFontSizeOverride;
 
+  /// 标题字重（默认加粗；db 里 `titleBold < 0` 的样式用 w400）
+  final FontWeight headingFontWeight;
+
   /// 标题行高覆盖（null = 用 lineHeight）。
   final double? headingHeightOverride;
 
@@ -59,6 +62,7 @@ class BookTypography {
     this.fontFamily,
     this.inheritedStyle = const TextStyle(),
     this.headingFontSizeOverride,
+    this.headingFontWeight = FontWeight.w700,
     this.headingHeightOverride,
     this.paragraphSpacingFactor = 0.55,
     this.textScaler = TextScaler.noScaling,
@@ -88,7 +92,7 @@ class BookTypography {
       TextStyle(
         fontSize: headingFontSize(level),
         height: headingHeightOverride ?? lineHeight,
-        fontWeight: FontWeight.w700,
+        fontWeight: headingFontWeight,
         fontFamily: fontFamily,
         // 标题不带正文字距（渲染端标题同样不设 letterSpacing），
         // 否则度量比渲染宽 ⇒ 标题可能多折一行。
