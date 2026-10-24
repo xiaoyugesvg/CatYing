@@ -295,6 +295,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 当前生效的样式 id（只用于卡片上打「当前」标；null = 手调过、无样式）
   String? _activeStyleId;
 
+  /// 日夜自动切换：白天 / 夜间各绑定一套样式（null = 只切底色，不换样式）
+  String? _dayStyleId;
+  String? _nightStyleId;
+
   final ReaderStyleStore _styleStore = ReaderStyleStore();
 
   /// 专注加粗：长段开头加粗描述（参考图 IMG_8494/8495）
@@ -555,8 +559,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   ///
   /// 样式自带的壁纸都是日间纸色；夜间如果只把字换成浅色、底图不动，
   /// 就成了"浅底浅字"，正文几乎看不见（用户截图里的古风/泼墨就是这个问题）。
-  Widget _nightDim(Widget child) {
-    if (_bgIndex != 5 || _bgImageAssetNight != null) return child;
+  ///
+  /// [nightVersionInUse] 为真 = 这层图**本身就是夜间版**，不要再压暗
+  /// （自选图片没有夜间版，切夜间时永远压暗）。
+  Widget _nightDim(Widget child, {bool nightVersionInUse = false}) {
+    if (_bgIndex != 5 || nightVersionInUse) return child;
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -1038,6 +1045,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       // 「阅读样式」：用户样式列表 + 当前选中的样式 id
       final myStyles = await _styleStore.loadCustom();
       final activeStyle = await _styleStore.loadActiveId();
+      _dayStyleId = await _styleStore.loadDayStyleId();
+      _nightStyleId = await _styleStore.loadNightStyleId();
       final myTitles = await _styleStore.loadTitleStyles();
       // 自定义字体：把 family 注册到引擎（分页度量必须用同一个 family）
       await ReaderFontService.instance.load();
@@ -2144,6 +2153,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 gaplessPlayback: true,
                 errorBuilder: (_, __, ___) => Container(color: bg[0]),
               ),
+              // 夜间版壁纸本身已经压暗过，不再叠遮罩（自选图片没有夜间版 ⇒ 仍压暗）
+              nightVersionInUse: _bgImageAssetNight != null,
             )
           else
             Container(color: bg[0]),
@@ -4332,21 +4343,43 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   }
 
   /// 顶栏日夜切换：浅色背景 ↔ 夜间背景（记住切走前的浅色索引）
+  ///
+  /// 若在「阅读样式」里给白天 / 夜间各绑了一套样式，切换后自动套用那一套
+  /// （先切明暗，再套用 —— `_applyReaderStyle` 按当前模式取对应配色）。
   void _toggleDayNight() {
+    final toNight = _bgIndex != 5;
     setState(() {
-      if (_bgIndex == 5) {
+      if (!toNight) {
         // 夜间 → 日间：优先恢复样式的日间底色，否则回到记下的浅色索引
         _bgIndex = _dayBgIndex;
         _customBgColor = _styleBgDay == null ? null : Color(_styleBgDay!);
       } else {
         // 日间 → 夜间：优先用样式的夜间底色（db 的 bgStrNight）
         _dayBgIndex = _bgIndex;
-        _customBgPath = null;
         _bgIndex = 5;
         _customBgColor = _styleBgNight == null ? null : Color(_styleBgNight!);
       }
-      _scheduleSavePrefs();
     });
+    // 自选图片不再在切夜间时被清掉（原来清一次就永久丢了，切回白天也回不来）；
+    // 夜里照常显示，没有夜间专属壁纸时由 `_nightDim` 压暗。
+    final bound = _styleById(toNight ? _nightStyleId : _dayStyleId);
+    if (bound != null) {
+      _applyReaderStyle(bound);
+      _toast('已切换到「${bound.name}」');
+    }
+    _scheduleSavePrefs();
+  }
+
+  /// 按 id 找样式（内置 + 我的）
+  ReaderStyle? _styleById(String? id) {
+    if (id == null || id.isEmpty) return null;
+    for (final s in ReaderStyle.builtins) {
+      if (s.id == id) return s;
+    }
+    for (final s in _myStyles) {
+      if (s.id == id) return s;
+    }
+    return null;
   }
 
   /// ⚠️ 原来这里有个 `_showBrightnessSheet()`（点右侧「亮度」按钮 → 底部弹层里拖滑杆）。
@@ -9066,6 +9099,17 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         ),
       ),
     );
+    if (!mounted) return;
+    // 页里可能改了「白天 / 夜间绑定样式」，回来后同步（下次切日夜立即生效）
+    final d = await _styleStore.loadDayStyleId();
+    final n = await _styleStore.loadNightStyleId();
+    if (!mounted) return;
+    if (d != _dayStyleId || n != _nightStyleId) {
+      setState(() {
+        _dayStyleId = d;
+        _nightStyleId = n;
+      });
+    }
   }
 
   /// 一键套用一套样式：配色 / 背景 / 排版 / 边距 / 信息栏 / 翻页动画一次改完。

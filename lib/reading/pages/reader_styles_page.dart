@@ -57,6 +57,26 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
 
   final _store = ReaderStyleStore();
 
+  /// 日夜自动切换：白天 / 夜间各绑定的样式 id（null = 不自动套用）
+  String? _dayStyleId;
+  String? _nightStyleId;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAutoStyles();
+  }
+
+  Future<void> _loadAutoStyles() async {
+    final d = await _store.loadDayStyleId();
+    final n = await _store.loadNightStyleId();
+    if (!mounted) return;
+    setState(() {
+      _dayStyleId = d;
+      _nightStyleId = n;
+    });
+  }
+
   Color get _fg => widget.foreground;
   Color get _bg => widget.background;
 
@@ -304,6 +324,8 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
         children: [
+          _label('日夜自动切换 · 切日夜时套用对应的样式'),
+          _autoSwitchCard(),
           _label('内置样式 ${widget.builtins.length} 套 · 长按管理'),
           Wrap(
             spacing: 10,
@@ -354,6 +376,164 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
         ],
       ),
     );
+  }
+
+  /// 日夜自动切换卡片：白天 / 夜间各绑一套样式
+  Widget _autoSwitchCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: _fg.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _fg.withValues(alpha: 0.08)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          _autoRow(
+            Icons.light_mode_rounded,
+            '白天样式',
+            _dayStyleId,
+            () => _pickAutoStyle(night: false),
+          ),
+          Divider(height: 0.6, thickness: 0.6, color: _fg.withValues(alpha: 0.08)),
+          _autoRow(
+            Icons.dark_mode_rounded,
+            '夜间样式',
+            _nightStyleId,
+            () => _pickAutoStyle(night: true),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _autoRow(
+    IconData icon,
+    String title,
+    String? id,
+    VoidCallback onTap,
+  ) {
+    final name = _styleName(id);
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: _fg.withValues(alpha: 0.75)),
+            const SizedBox(width: 10),
+            Text(title, style: TextStyle(fontSize: 14, color: _fg)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                name ?? '不自动切换',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: _fg.withValues(alpha: name == null ? 0.4 : 0.65),
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 18,
+              color: _fg.withValues(alpha: 0.35),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 样式 id → 名字（找不到 = 已被删除，按「不自动切换」显示）
+  String? _styleName(String? id) {
+    if (id == null || id.isEmpty) return null;
+    for (final s in [...widget.builtins, ..._mine]) {
+      if (s.id == id) return s.name;
+    }
+    return null;
+  }
+
+  /// 选白天 / 夜间要套用的样式（空串 = 不自动切换）
+  Future<void> _pickAutoStyle({required bool night}) async {
+    final all = [...widget.builtins, ..._mine];
+    final current = night ? _nightStyleId : _dayStyleId;
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: _bg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (c) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+              child: Text(
+                night ? '夜间使用的样式' : '白天使用的样式',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: _fg,
+                ),
+              ),
+            ),
+            ListTile(
+              leading: Icon(
+                Icons.block_rounded,
+                color: _fg.withValues(alpha: 0.55),
+              ),
+              title: Text('不自动切换', style: TextStyle(color: _fg)),
+              trailing: current == null
+                  ? Icon(Icons.check_rounded, size: 18, color: _fg)
+                  : null,
+              onTap: () => Navigator.pop(c, ''),
+            ),
+            for (final s in all)
+              ListTile(
+                leading: Icon(
+                  Icons.palette_outlined,
+                  color: _fg.withValues(alpha: 0.55),
+                ),
+                title: Text(s.name, style: TextStyle(color: _fg)),
+                subtitle: s.builtin
+                    ? Text(
+                        '内置',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: _fg.withValues(alpha: 0.45),
+                        ),
+                      )
+                    : null,
+                trailing: current == s.id
+                    ? Icon(Icons.check_rounded, size: 18, color: _fg)
+                    : null,
+                onTap: () => Navigator.pop(c, s.id),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (picked == null) return;
+    final id = picked.isEmpty ? null : picked;
+    if (night) {
+      await _store.saveNightStyleId(id);
+    } else {
+      await _store.saveDayStyleId(id);
+    }
+    if (!mounted) return;
+    setState(() {
+      if (night) {
+        _nightStyleId = id;
+      } else {
+        _dayStyleId = id;
+      }
+    });
   }
 
   Widget _label(String text) => Padding(

@@ -40,6 +40,10 @@ class ReaderStyleStore {
   static const _kActive = 'reading.styles.active';
   static const _kTitles = 'reading.titleStyles';
 
+  /// 日夜自动切换：白天 / 夜间各自绑定的样式 id（空 = 只切底色，不换样式）
+  static const _kDayStyle = 'reading.styles.dayStyle';
+  static const _kNightStyle = 'reading.styles.nightStyle';
+
   Future<List<ReaderStyle>> loadCustom() async {
     try {
       final p = await SharedPreferences.getInstance();
@@ -78,6 +82,50 @@ class ReaderStyleStore {
     try {
       final p = await SharedPreferences.getInstance();
       await p.setString(_kActive, id);
+    } catch (_) {}
+  }
+
+  /// 白天样式 id（null = 不自动套用）
+  Future<String?> loadDayStyleId() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final v = p.getString(_kDayStyle);
+      return (v == null || v.isEmpty) ? null : v;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 夜间样式 id（null = 不自动套用）
+  Future<String?> loadNightStyleId() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final v = p.getString(_kNightStyle);
+      return (v == null || v.isEmpty) ? null : v;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> saveDayStyleId(String? id) async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      if (id == null || id.isEmpty) {
+        await p.remove(_kDayStyle);
+      } else {
+        await p.setString(_kDayStyle, id);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> saveNightStyleId(String? id) async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      if (id == null || id.isEmpty) {
+        await p.remove(_kNightStyle);
+      } else {
+        await p.setString(_kNightStyle, id);
+      }
     } catch (_) {}
   }
 
