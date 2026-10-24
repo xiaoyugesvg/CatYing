@@ -33,6 +33,7 @@ import '../services/tts_service.dart';
 import '../services/ai_service.dart';
 import '../services/reading_time_service.dart';
 import '../services/bsr_independent_layout.dart';
+import '../utils/header_footer_format.dart';
 import '../widgets/book_page_cover.dart';
 import '../widgets/book_page_curl.dart';
 import '../widgets/jelly_filter_sheet.dart';
@@ -263,6 +264,23 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   /// 自定义标题样式的 HTML 源码（`_chapterTitleStyle == custom` 时生效）
   String _chapterTitleHtml = '';
+
+  /// 我保存的标题样式（HTML + 名字），来自 [ReaderStyleStore]
+  List<TitleStylePreset> _myTitleStyles = [];
+
+  /// 页眉 / 页脚自定义格式串（左 / 中 / 右）。
+  /// 只要有一个非空就走"格式串"渲染，否则退回「信息栏项目」开关的老逻辑。
+  String _headerL = '';
+  String _headerC = '';
+  String _headerR = '';
+  String _footerL = '';
+  String _footerC = '';
+  String _footerR = '';
+
+  /// 电量缓存（格式串里的 `b` 用它；60 秒有效，避免每页都去问一次原生）
+  int? _batteryPct;
+  DateTime? _batteryAt;
+  bool _batteryFetching = false;
 
   /// 当前生效的样式 id（只用于卡片上打「当前」标；null = 手调过、无样式）
   String? _activeStyleId;
@@ -986,9 +1004,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       // 「阅读样式」：用户样式列表 + 当前选中的样式 id
       final myStyles = await _styleStore.loadCustom();
       final activeStyle = await _styleStore.loadActiveId();
+      final myTitles = await _styleStore.loadTitleStyles();
       if (!mounted) return;
       _myStyles = myStyles;
       _activeStyleId = activeStyle;
+      _myTitleStyles = myTitles;
       setState(() {
         // ✅ **覆盖值优先，逐项回退全局**（本会话第 2 轮 ✓）
         final fsV = (ov?['fontSize'] as num?)?.toDouble() ?? fs;
@@ -1099,6 +1119,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           p.getString('reading.chapterTitleStyle'),
         );
         _chapterTitleHtml = p.getString('reading.chapterTitleHtml') ?? '';
+        // 页眉 / 页脚自定义格式（空 = 用「信息栏项目」开关）
+        _headerL = p.getString('reading.headerL') ?? '';
+        _headerC = p.getString('reading.headerC') ?? '';
+        _headerR = p.getString('reading.headerR') ?? '';
+        _footerL = p.getString('reading.footerL') ?? '';
+        _footerC = p.getString('reading.footerC') ?? '';
+        _footerR = p.getString('reading.footerR') ?? '';
         if (rsRaw != null && rsRaw.isNotEmpty) {
           try {
             _rs = ReadingSettings.fromJson(
@@ -1254,6 +1281,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       await p.setBool('reading.hideRepeatTitle', _hideRepeatTitle);
       await p.setString('reading.chapterTitleStyle', _chapterTitleStyle.id);
       await p.setString('reading.chapterTitleHtml', _chapterTitleHtml);
+      await p.setString('reading.headerL', _headerL);
+      await p.setString('reading.headerC', _headerC);
+      await p.setString('reading.headerR', _headerR);
+      await p.setString('reading.footerL', _footerL);
+      await p.setString('reading.footerC', _footerC);
+      await p.setString('reading.footerR', _footerR);
       await p.setString('reading.settings', jsonEncode(_rs.toJson()));
       await p.setString('reading.presetNames', jsonEncode(_savedPresets));
       await p.setInt('bsr.tts.color', _ttsColor);
@@ -2670,18 +2703,21 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     //   "信息栏开了也不显示"）—— 原来页眉页脚只做在分页的 `_pageBody` 里，
     //   滚动模式完全没渲染 ✗。这里用 Column **预留**上下两条的位置，
     //   而不是盖在正文上 ⇒ 不遮挡任何文字 ✓
-    if (_rs.statusItems.isEmpty) return scroll;
+    final showHeader = _rs.statusItems.isNotEmpty || _hasHeaderFormat;
+    final showFooter = _rs.statusItems.isNotEmpty || _hasFooterFormat;
+    if (!showHeader && !showFooter) return scroll;
     return Column(
       children: [
-        _statusHeader(
-          fg,
-          // 滚动模式没有页码，进度用"读到第几章"，至少是个真实数值
-          progressOverride: widget.chapters.isEmpty
-              ? 0
-              : (_index + 1) / widget.chapters.length,
-        ),
+        if (showHeader)
+          _statusHeader(
+            fg,
+            // 滚动模式没有页码，进度用"读到第几章"，至少是个真实数值
+            progressOverride: widget.chapters.isEmpty
+                ? 0
+                : (_index + 1) / widget.chapters.length,
+          ),
         Expanded(child: scroll),
-        _statusFooter(fg, showPage: false),
+        if (showFooter) _statusFooter(fg, showPage: false),
       ],
     );
   }
@@ -3431,6 +3467,15 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// ⚠️ 状态文字没有显式 `height`，行高随字体（约 1.17~1.3 倍字号）——
   ///   这里按 **1.3** 估：宁可多留一点（页底略空），也不能少留（会把末行裁掉 ✗）。
   double _headerFooterHeight() {
+    // 格式串模式：只为**实际有内容**的那一条留位置（与渲染条件一致）
+    if (_hasHeaderFormat || _hasFooterFormat) {
+      final line = AppTheme.fontCaption * 1.3;
+      final header = _hasHeaderFormat ? _headerPadTop + 6 + line + 4 : 0.0;
+      final footer = _hasFooterFormat
+          ? 4 + line + _footerPadBottom + 6
+          : 0.0;
+      return header + footer;
+    }
     if (_rs.statusItems.isEmpty) return 0;
     final line = AppTheme.fontCaption * 1.3;
     final header = _headerPadTop + 6 + line + 4;
@@ -3493,6 +3538,108 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     );
   }
 
+  // ── 页眉 / 页脚「格式串」（对齐源阅读的"编辑小组件"）───────────
+  //
+  // 变量：# 章节名 · c 章节序号 · C 总章数 · p 本章页码 · P 本章总页数
+  //       % 进度百分比 · t 时间 · b 电量 · B 书名
+  // 三个位置（左 / 中 / 右）各一条；为空则退回到「信息栏项目」开关的老逻辑。
+
+  bool get _hasHeaderFormat =>
+      _headerL.trim().isNotEmpty ||
+      _headerC.trim().isNotEmpty ||
+      _headerR.trim().isNotEmpty;
+
+  bool get _hasFooterFormat =>
+      _footerL.trim().isNotEmpty ||
+      _footerC.trim().isNotEmpty ||
+      _footerR.trim().isNotEmpty;
+
+  /// 一次扫描替换（避免替换出来的内容里再被二次替换）
+  String _resolveFormat(String tpl, double progress) {
+    if (tpl.trim().isEmpty) return '';
+    final scrollMode = _rs.pageMode == PageMode.scroll;
+    return resolveHeaderFooterTemplate(tpl, {
+      '%': '${(progress * 100).round()}%',
+      '#': widget.chapters[_index].name,
+      'C': '${widget.chapters.length}',
+      'P': scrollMode ? '-' : '$_localPageCount',
+      'B': widget.bookName,
+      'c': '${_index + 1}',
+      'p': scrollMode ? '-' : '$_localPageNo',
+      't': TimeOfDay.now().format(context),
+      'b': _batteryValue(),
+    });
+  }
+
+  /// 电量（带 60 秒缓存；首次拿不到显示 `--`，拿到后自动刷新）
+  String _batteryValue() {
+    final now = DateTime.now();
+    final at = _batteryAt;
+    final stale = at == null || now.difference(at) > const Duration(minutes: 1);
+    if (!_batteryFetching && (_batteryPct == null || stale)) {
+      _batteryFetching = true;
+      _batteryAt = now;
+      unawaited(
+        _tts.batteryLevel().then((v) {
+          _batteryFetching = false;
+          if (!mounted || v == null) return;
+          _batteryPct = v;
+          setState(() {});
+        }),
+      );
+    }
+    return _batteryPct == null ? '--' : '$_batteryPct%';
+  }
+
+  /// 左 / 中 / 右 三等分的格式行
+  Widget _formatRow(
+    Color fg,
+    String left,
+    String center,
+    String right,
+    double progress,
+  ) {
+    Widget slot(String tpl, TextAlign align) {
+      final t = _resolveFormat(tpl, progress);
+      return Text(
+        t,
+        textAlign: align,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: _statusStyle(fg),
+      );
+    }
+
+    final templates = [left, center, right];
+    final used = templates.where((t) => t.trim().isNotEmpty).toList();
+    // 只填了一个位置 ⇒ 直接按它自己的对齐占满整行（长章节名不会被挤成 1/3）
+    if (used.length <= 1) {
+      final idx = templates.indexWhere((t) => t.trim().isNotEmpty);
+      if (idx < 0) return const SizedBox.shrink();
+      const aligns = [
+        TextAlign.left,
+        TextAlign.center,
+        TextAlign.right,
+      ];
+      const boxes = [
+        Alignment.centerLeft,
+        Alignment.center,
+        Alignment.centerRight,
+      ];
+      return Align(
+        alignment: boxes[idx],
+        child: slot(templates[idx], aligns[idx]),
+      );
+    }
+    return Row(
+      children: [
+        Expanded(child: slot(left, TextAlign.left)),
+        Expanded(child: slot(center, TextAlign.center)),
+        Expanded(child: slot(right, TextAlign.right)),
+      ],
+    );
+  }
+
   /// 页眉（信息栏上排）：时间 · 书名 · 进度
   ///
   /// 分页 / 上下滚动两种模式共用（滚动模式没有页码，进度按章节位置算）。
@@ -3501,6 +3648,17 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     final progress =
         progressOverride ??
         (_pages.isEmpty ? 0.0 : _localPageNo / _localPageCount);
+    if (_hasHeaderFormat) {
+      return Padding(
+        padding: EdgeInsets.fromLTRB(
+          _headerPadH,
+          _headerPadTop + 6,
+          _headerPadH,
+          4,
+        ),
+        child: _formatRow(fg, _headerL, _headerC, _headerR, progress),
+      );
+    }
     return Padding(
       padding: EdgeInsets.fromLTRB(
         _headerPadH,
@@ -3532,6 +3690,23 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 页脚（信息栏下排）：章节 · 电量 · 页码
   Widget _statusFooter(Color fg, {bool showPage = true}) {
     final items = _rs.statusItems;
+    // 滚动模式没有页码 ⇒ 用"读到第几章"当进度
+    final progress = _pages.isEmpty
+        ? (widget.chapters.isEmpty
+              ? 0.0
+              : (_index + 1) / widget.chapters.length)
+        : _localPageNo / _localPageCount;
+    if (_hasFooterFormat) {
+      return Padding(
+        padding: EdgeInsets.fromLTRB(
+          _footerPadH,
+          4,
+          _footerPadH,
+          _footerPadBottom + 6,
+        ),
+        child: _formatRow(fg, _footerL, _footerC, _footerR, progress),
+      );
+    }
     return Padding(
       padding: EdgeInsets.fromLTRB(
         _footerPadH,
@@ -3565,12 +3740,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     // 这一页属于哪一章（无缝拼接后可能不是 `_index`；章标题/页脚都用它）
     final pageChapter = chapter ?? _index;
     final items = _rs.statusItems;
+    final showHeader = items.isNotEmpty || _hasHeaderFormat;
+    final showFooter = items.isNotEmpty || _hasFooterFormat;
     // 点击判定统一由正文区 GestureDetector（_onTapUp）负责，这里不再注册
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // ── 页眉 ────────────────────────────────────────────
-        if (items.isNotEmpty) _statusHeader(fg),
+        if (showHeader) _statusHeader(fg),
         // ── 正文 ────────────────────────────────────────────
         Expanded(
           child: Padding(
@@ -3717,7 +3894,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           ),
         ),
         // ── 页脚 ────────────────────────────────────────────
-        if (items.isNotEmpty) _statusFooter(fg),
+        if (showFooter) _statusFooter(fg),
       ],
     );
   }
@@ -6071,6 +6248,61 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             ),
           ),
         ),
+      if (_myTitleStyles.isNotEmpty) ...[
+        Padding(
+          padding: const EdgeInsets.only(top: 10, bottom: 4),
+          child: Text(
+            '我的标题样式（长按删除）',
+            style: TextStyle(
+              fontSize: AppTheme.fontFootnote,
+              color: _fgMuted,
+            ),
+          ),
+        ),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final t in _myTitleStyles) _titleStyleChip(t, setSheet),
+          ],
+        ),
+      ],
+      Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _chip(
+              '存为我的标题样式',
+              false,
+              () async {
+                await _saveCurrentTitleStyle();
+                setSheet(() {});
+              },
+              compact: true,
+            ),
+            _chip(
+              '页眉页脚格式',
+              false,
+              () async {
+                await _editHeaderFooter();
+                setSheet(() {});
+              },
+              compact: true,
+            ),
+            _chip(
+              '样式分享',
+              false,
+              () async {
+                await _showStyleShare();
+                setSheet(() {});
+              },
+              compact: true,
+            ),
+          ],
+        ),
+      ),
       _sectionLabel('内置样式（左滑可复制成我的样式）'),
       Wrap(
         spacing: 10,
@@ -6171,6 +6403,28 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 「我的标题样式」的一个 chip：点=套用，长按=删除
+  Widget _titleStyleChip(TitleStylePreset t, StateSetter setSheet) {
+    final active =
+        _chapterTitleStyle == ReaderTitleStyle.custom &&
+        _chapterTitleHtml.trim() == t.html.trim();
+    return GestureDetector(
+      onLongPress: () async {
+        await _deleteTitleStyle(t);
+        setSheet(() {});
+      },
+      child: _chip(
+        t.name,
+        active,
+        () {
+          _applyTitleStyle(t);
+          setSheet(() {});
+        },
+        compact: true,
       ),
     );
   }
@@ -8020,6 +8274,331 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     _toast('标题样式已更新');
   }
 
+  /// 通用「输入一个名字」对话框
+  Future<String?> _promptName(
+    String title,
+    String label,
+    String initial,
+  ) async {
+    final ctrl = TextEditingController(text: initial);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: _bgTop,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          title,
+          style: TextStyle(fontSize: AppTheme.fontTitle3, color: _fg),
+        ),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          style: TextStyle(color: _fg),
+          decoration: InputDecoration(
+            labelText: label,
+            labelStyle: TextStyle(
+              fontSize: AppTheme.fontSubhead,
+              color: _fgMuted,
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: Text('取消', style: TextStyle(color: _fgMuted)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: _fg.withValues(alpha: 0.9),
+              foregroundColor: _bgTop,
+            ),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    final text = ctrl.text.trim();
+    ctrl.dispose();
+    if (ok != true || text.isEmpty) return null;
+    return text;
+  }
+
+  /// 把**当前标题样式**（内置或自定义的 HTML）存进「我的标题样式」
+  Future<void> _saveCurrentTitleStyle() async {
+    final src = _chapterTitleSource.trim();
+    if (src.isEmpty) {
+      _toast('当前是「默认」标题，没有可保存的 HTML');
+      return;
+    }
+    final name = await _promptName(
+      '保存标题样式',
+      '标题样式名',
+      _chapterTitleStyle == ReaderTitleStyle.custom
+          ? '我的标题样式'
+          : _chapterTitleStyle.label,
+    );
+    if (name == null) return;
+    final preset = TitleStylePreset(
+      id: 'title:${DateTime.now().millisecondsSinceEpoch}',
+      name: name,
+      html: src,
+    );
+    setState(() {
+      // 同名 = 覆盖
+      _myTitleStyles = [
+        ..._myTitleStyles.where((e) => e.name != name),
+        preset,
+      ];
+    });
+    await _styleStore.saveTitleStyles(_myTitleStyles);
+    _toast('已保存标题样式「$name」');
+  }
+
+  Future<void> _deleteTitleStyle(TitleStylePreset t) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: _bgTop,
+        title: Text(
+          '删除标题样式',
+          style: TextStyle(fontSize: AppTheme.fontTitle3, color: _fg),
+        ),
+        content: Text(
+          '确定删除「${t.name}」？',
+          style: TextStyle(fontSize: AppTheme.fontBody, color: _fgMuted),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: Text('取消', style: TextStyle(color: _fgMuted)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: _fg.withValues(alpha: 0.9),
+              foregroundColor: _bgTop,
+            ),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() {
+      _myTitleStyles = [..._myTitleStyles.where((e) => e.id != t.id)];
+    });
+    await _styleStore.saveTitleStyles(_myTitleStyles);
+    _toast('已删除「${t.name}」');
+  }
+
+  /// 套用一个「我的标题样式」
+  void _applyTitleStyle(TitleStylePreset t) {
+    setState(() {
+      _chapterTitleStyle = ReaderTitleStyle.custom;
+      _chapterTitleHtml = t.html;
+    });
+    _scheduleSavePrefs();
+    _scheduleRepaginate();
+    _toast('已应用标题样式「${t.name}」');
+  }
+
+  /// 页眉 / 页脚格式串编辑对话框（返回 6 个值；null = 取消）
+  Future<({String hL, String hC, String hR, String fL, String fC, String fR})?>
+  _promptHeaderFooter({
+    required String hL,
+    required String hC,
+    required String hR,
+    required String fL,
+    required String fC,
+    required String fR,
+  }) async {
+    final ctrls = {
+      'HL': TextEditingController(text: hL),
+      'HC': TextEditingController(text: hC),
+      'HR': TextEditingController(text: hR),
+      'FL': TextEditingController(text: fL),
+      'FC': TextEditingController(text: fC),
+      'FR': TextEditingController(text: fR),
+    };
+    Widget field(String key, String label, String hint) => Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: TextField(
+        controller: ctrls[key],
+        style: TextStyle(fontSize: 13, color: _fg),
+        decoration: InputDecoration(
+          labelText: label,
+          hintText: hint,
+          hintStyle: TextStyle(fontSize: 11, color: _fgMuted),
+          isDense: true,
+          filled: true,
+          fillColor: _fg.withValues(alpha: 0.05),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide.none,
+          ),
+        ),
+      ),
+    );
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: _bgTop,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          '页眉 / 页脚格式',
+          style: TextStyle(fontSize: AppTheme.fontTitle3, color: _fg),
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '变量：# 章节名 · c 章节序号 · C 总章数 · p 本章页码\n'
+                  'P 本章总页数 · % 进度 · t 时间 · b 电量 · B 书名\n'
+                  '留空 = 该位置不显示；三条都空 = 回到「信息栏项目」开关。',
+                  style: TextStyle(
+                    fontSize: AppTheme.fontFootnote,
+                    color: _fgMuted,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                field('HL', '页眉 · 左', '例如：#'),
+                field('HC', '页眉 · 中', '留空'),
+                field('HR', '页眉 · 右', '例如：t'),
+                field('FL', '页脚 · 左', '例如：B'),
+                field('FC', '页脚 · 中', '留空'),
+                field('FR', '页脚 · 右', '例如：p/P'),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: Text('取消', style: TextStyle(color: _fgMuted)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: _fg.withValues(alpha: 0.9),
+              foregroundColor: _bgTop,
+            ),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    final result = ok == true
+        ? (
+            hL: ctrls['HL']!.text.trim(),
+            hC: ctrls['HC']!.text.trim(),
+            hR: ctrls['HR']!.text.trim(),
+            fL: ctrls['FL']!.text.trim(),
+            fC: ctrls['FC']!.text.trim(),
+            fR: ctrls['FR']!.text.trim(),
+          )
+        : null;
+    for (final c in ctrls.values) {
+      c.dispose();
+    }
+    return result;
+  }
+
+  /// 页眉 / 页脚格式串编辑（作用到阅读器当前状态）
+  Future<void> _editHeaderFooter() async {
+    final r = await _promptHeaderFooter(
+      hL: _headerL,
+      hC: _headerC,
+      hR: _headerR,
+      fL: _footerL,
+      fC: _footerC,
+      fR: _footerR,
+    );
+    if (r == null) return;
+    setState(() {
+      _headerL = r.hL;
+      _headerC = r.hC;
+      _headerR = r.hR;
+      _footerL = r.fL;
+      _footerC = r.fC;
+      _footerR = r.fR;
+    });
+    _scheduleSavePrefs();
+    // 页眉页脚显隐变了 ⇒ 可排版区域高度变了
+    _scheduleRepaginate();
+    _toast('页眉页脚已更新');
+  }
+
+  /// 样式分享：导出到剪贴板 / 从剪贴板导入
+  Future<void> _showStyleShare() async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: _sheetBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (c) => SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(Icons.ios_share_rounded, color: _fg),
+              title: Text('导出当前样式（复制 JSON）', style: TextStyle(color: _fg)),
+              subtitle: Text(
+                '发给别人，粘到下面的「导入」即可',
+                style: TextStyle(fontSize: 12, color: _fgMuted),
+              ),
+              onTap: () => Navigator.pop(c, 'export'),
+            ),
+            ListTile(
+              leading: Icon(Icons.download_rounded, color: _fg),
+              title: Text('从剪贴板导入样式', style: TextStyle(color: _fg)),
+              onTap: () => Navigator.pop(c, 'import'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == 'export') {
+      final s = _styleSnapshot(
+        'user:${DateTime.now().millisecondsSinceEpoch}',
+        '分享的样式',
+      );
+      await Clipboard.setData(ClipboardData(text: jsonEncode(s.toJson())));
+      _toast('样式已复制到剪贴板');
+    } else if (action == 'import') {
+      final data = await Clipboard.getData('text/plain');
+      final text = data?.text?.trim() ?? '';
+      if (text.isEmpty) {
+        _toast('剪贴板是空的');
+        return;
+      }
+      try {
+        final map = jsonDecode(text);
+        if (map is! Map) {
+          _toast('剪贴板内容不是样式 JSON');
+          return;
+        }
+        final style = ReaderStyle.fromJson(Map<String, dynamic>.from(map));
+        final copy = _patched(style, {
+          'id': 'user:${DateTime.now().millisecondsSinceEpoch}',
+          'builtin': false,
+          'name': '${style.name} 导入',
+        });
+        setState(() => _myStyles = [..._myStyles, copy]);
+        await _styleStore.saveCustom(_myStyles);
+        _toast('已导入样式「${copy.name}」');
+      } catch (_) {
+        _toast('解析失败：不是样式 JSON');
+      }
+    }
+  }
+
   /// 当前阅读外观 → [ReaderStyle] 快照（「保存当前为样式」用）
   ReaderStyle _styleSnapshot(String id, String name, {bool builtin = false}) {
     return ReaderStyle(
@@ -8054,6 +8633,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       statusItems: _rs.statusItems.toList(),
       hideStatusBar: _rs.hideStatusBar,
       statusTextScale: _rs.statusTextScale,
+      headerL: _headerL,
+      headerC: _headerC,
+      headerR: _headerR,
+      footerL: _footerL,
+      footerC: _footerC,
+      footerR: _footerR,
       pageMode: _rs.pageMode.name,
       dualPage: _rs.dualPage,
       chapterTitleStyle: _chapterTitleStyle.id,
@@ -8098,6 +8683,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       _titleStyle = s.titleStyle;
       _chapterTitleStyle = ReaderTitleStyle.fromId(s.chapterTitleStyle);
       if (s.chapterTitleHtml.isNotEmpty) _chapterTitleHtml = s.chapterTitleHtml;
+      _headerL = s.headerL;
+      _headerC = s.headerC;
+      _headerR = s.headerR;
+      _footerL = s.footerL;
+      _footerC = s.footerC;
+      _footerR = s.footerR;
       _hideRepeatTitle = s.hideRepeatTitle;
       _focusBold = s.focusBold;
       _padLeft = s.padLeft.clamp(0.0, 80.0);
@@ -8580,6 +9171,40 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                 compact: true,
                               ),
                           ],
+                        ),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: _chip(
+                            '页眉页脚格式',
+                            draft.headerL.isNotEmpty ||
+                                draft.headerC.isNotEmpty ||
+                                draft.headerR.isNotEmpty ||
+                                draft.footerL.isNotEmpty ||
+                                draft.footerC.isNotEmpty ||
+                                draft.footerR.isNotEmpty,
+                            () async {
+                              final r = await _promptHeaderFooter(
+                                hL: draft.headerL,
+                                hC: draft.headerC,
+                                hR: draft.headerR,
+                                fL: draft.footerL,
+                                fC: draft.footerC,
+                                fR: draft.footerR,
+                              );
+                              if (r != null) {
+                                upd({
+                                  'headerL': r.hL,
+                                  'headerC': r.hC,
+                                  'headerR': r.hR,
+                                  'footerL': r.fL,
+                                  'footerC': r.fC,
+                                  'footerR': r.fR,
+                                });
+                              }
+                            },
+                            compact: true,
+                          ),
                         ),
                         _sectionLabel('翻页'),
                         Wrap(

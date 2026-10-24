@@ -7,12 +7,38 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/reader_style.dart';
 
+/// 用户保存的一套「标题样式」（HTML 源码 + 名字）。
+class TitleStylePreset {
+  const TitleStylePreset({
+    required this.id,
+    required this.name,
+    required this.html,
+  });
+
+  final String id;
+  final String name;
+  final String html;
+
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'html': html};
+
+  static TitleStylePreset? fromJson(Map<String, dynamic> j) {
+    final html = (j['html'] as String?) ?? '';
+    if (html.trim().isEmpty) return null;
+    return TitleStylePreset(
+      id: (j['id'] as String?) ?? 'title:${DateTime.now().millisecondsSinceEpoch}',
+      name: (j['name'] as String?) ?? '未命名',
+      html: html,
+    );
+  }
+}
+
 /// 「阅读样式」的持久化：用户样式列表 + 当前选中的样式 id。
 ///
 /// 内置样式不落盘（代码里就有），只在 `active` 里记 id，方便卡片上打「当前」标。
 class ReaderStyleStore {
   static const _kCustom = 'reading.styles.custom';
   static const _kActive = 'reading.styles.active';
+  static const _kTitles = 'reading.titleStyles';
 
   Future<List<ReaderStyle>> loadCustom() async {
     try {
@@ -52,6 +78,33 @@ class ReaderStyleStore {
     try {
       final p = await SharedPreferences.getInstance();
       await p.setString(_kActive, id);
+    } catch (_) {}
+  }
+
+  /// 我保存的「标题样式」列表
+  Future<List<TitleStylePreset>> loadTitleStyles() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString(_kTitles);
+      if (raw == null || raw.isEmpty) return [];
+      final list = jsonDecode(raw) as List;
+      return [
+        for (final e in list)
+          if (e is Map)
+            ?TitleStylePreset.fromJson(Map<String, dynamic>.from(e)),
+      ];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveTitleStyles(List<TitleStylePreset> list) async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setString(
+        _kTitles,
+        jsonEncode([for (final e in list) e.toJson()]),
+      );
     } catch (_) {}
   }
 }

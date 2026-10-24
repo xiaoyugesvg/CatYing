@@ -48,6 +48,13 @@ class ReaderStyle {
     this.statusItems = const ['章节', '页码', '进度'],
     this.hideStatusBar = false,
     this.statusTextScale = 1.0,
+    // ── 页眉页脚格式串（左/中/右；空串 = 用 statusItems 开关）──
+    this.headerL = '',
+    this.headerC = '',
+    this.headerR = '',
+    this.footerL = '',
+    this.footerC = '',
+    this.footerR = '',
     // ── ④ 翻页 ──
     this.pageMode = 'slide',
     this.dualPage = false,
@@ -125,6 +132,14 @@ class ReaderStyle {
   final bool hideStatusBar;
   final double statusTextScale;
 
+  /// 页眉 / 页脚格式串（左 / 中 / 右）。都为空时用 [statusItems] 的开关式渲染。
+  final String headerL;
+  final String headerC;
+  final String headerR;
+  final String footerL;
+  final String footerC;
+  final String footerR;
+
   /// 翻页动画：slide / scroll / curl / cover / none（= PageMode.name）
   final String pageMode;
 
@@ -176,6 +191,12 @@ class ReaderStyle {
     statusItems: statusItems,
     hideStatusBar: hideStatusBar,
     statusTextScale: statusTextScale,
+    headerL: headerL,
+    headerC: headerC,
+    headerR: headerR,
+    footerL: footerL,
+    footerC: footerC,
+    footerR: footerR,
     pageMode: pageMode,
     dualPage: dualPage,
     chapterTitleStyle: chapterTitleStyle,
@@ -221,6 +242,12 @@ class ReaderStyle {
     'statusItems': statusItems,
     'hideStatusBar': hideStatusBar,
     'statusTextScale': statusTextScale,
+    'headerL': headerL,
+    'headerC': headerC,
+    'headerR': headerR,
+    'footerL': footerL,
+    'footerC': footerC,
+    'footerR': footerR,
     'pageMode': pageMode,
     'dualPage': dualPage,
     'chapterTitleStyle': chapterTitleStyle,
@@ -273,6 +300,12 @@ class ReaderStyle {
         const ['章节', '页码', '进度'],
     hideStatusBar: j['hideStatusBar'] as bool? ?? false,
     statusTextScale: _d(j['statusTextScale'], 1.0),
+    headerL: (j['headerL'] as String?) ?? '',
+    headerC: (j['headerC'] as String?) ?? '',
+    headerR: (j['headerR'] as String?) ?? '',
+    footerL: (j['footerL'] as String?) ?? '',
+    footerC: (j['footerC'] as String?) ?? '',
+    footerR: (j['footerR'] as String?) ?? '',
     pageMode: (j['pageMode'] as String?) ?? 'slide',
     dualPage: j['dualPage'] as bool? ?? false,
     chapterTitleStyle: (j['chapterTitleStyle'] as String?) ?? '',
