@@ -112,8 +112,24 @@ class TitleCss {
   BoxFit backgroundFit = BoxFit.contain;
   Alignment backgroundAlign = Alignment.centerLeft;
   double borderRadius = 0;
-  double borderWidth = 0;
+
+  /// 四边边框宽度（px）。`border` 简写会一次设满四边；
+  /// `border-bottom: 1px solid` 这种只设一边。
+  double borderTop = 0;
+  double borderRight = 0;
+  double borderBottom = 0;
+  double borderLeft = 0;
+
+  /// 边框颜色（CSS 省略时按 currentColor = 文字颜色）
   Color? borderColor;
+
+  /// `display:inline-block` / `float` ⇒ 盒子宽度收缩到内容；
+  /// 其余（div/p/h1~h6 默认 block）⇒ 占满整行（对齐靠 text-align）。
+  bool inlineBox = false;
+
+  /// 0 = 不浮动；-1 = float:left（靠左）；1 = float:right（靠右）
+  int floatSide = 0;
+
   TitleInsets margin = TitleInsets.zero;
   TitleInsets padding = TitleInsets.zero;
   List<BoxShadow> boxShadows = const [];
@@ -141,7 +157,10 @@ class TitleCss {
   bool get hasDecoration =>
       background != null ||
       backgroundImage != null ||
-      borderWidth > 0 ||
+      borderTop > 0 ||
+      borderRight > 0 ||
+      borderBottom > 0 ||
+      borderLeft > 0 ||
       borderRadius > 0 ||
       boxShadows.isNotEmpty ||
       !padding.isZero;
@@ -150,13 +169,12 @@ class TitleCss {
   /// 不折进去的话文字会压在边框上；度量与渲染共用这一个值）。
   EdgeInsets resolvedPadding(double fontSizePx) {
     final p = padding.resolve(fontSizePx);
-    if (borderWidth <= 0) return p;
-    final b = borderWidth;
+    if (borderTop + borderRight + borderBottom + borderLeft <= 0) return p;
     return EdgeInsets.fromLTRB(
-      p.left + b,
-      p.top + b,
-      p.right + b,
-      p.bottom + b,
+      p.left + borderLeft,
+      p.top + borderTop,
+      p.right + borderRight,
+      p.bottom + borderBottom,
     );
   }
 }
@@ -368,10 +386,44 @@ class TitleHtml {
           final m = _numUnit(e.value);
           if (m != null) css.borderRadius = m.$1;
         case 'border':
-          final w = RegExp(r'(-?[\d.]+)px').firstMatch(v);
-          if (w != null) css.borderWidth = double.tryParse(w.group(1)!) ?? 0;
+          final w = _borderWidth(e.value);
+          if (w != null) {
+            css.borderTop = w;
+            css.borderRight = w;
+            css.borderBottom = w;
+            css.borderLeft = w;
+          }
           final c = _color(e.value);
           if (c != null) css.borderColor = c;
+        case 'border-top':
+        case 'border-bottom':
+        case 'border-left':
+        case 'border-right':
+          final w = _borderWidth(e.value) ?? 0;
+          switch (k) {
+            case 'border-top':
+              css.borderTop = w;
+            case 'border-right':
+              css.borderRight = w;
+            case 'border-bottom':
+              css.borderBottom = w;
+            case 'border-left':
+              css.borderLeft = w;
+          }
+          final c = _color(e.value);
+          if (c != null) css.borderColor = c;
+        case 'float':
+          if (v.contains('left')) {
+            css.inlineBox = true;
+            css.floatSide = -1;
+          } else if (v.contains('right')) {
+            css.inlineBox = true;
+            css.floatSide = 1;
+          }
+        case 'display':
+          // inline / inline-block 都按"宽度收缩到内容"处理；
+          // block / flex 等仍按块级（占满整行）
+          css.inlineBox = v.contains('inline');
         case 'box-shadow':
           final bs = _boxShadows(e.value);
           if (bs.isNotEmpty) css.boxShadows = bs;
@@ -394,10 +446,25 @@ class TitleHtml {
     return (n, unit);
   }
 
+  /// 边框宽度（`2px` / `thin` / `medium` / `thick`）
+  static double? _borderWidth(String raw) {
+    final v = raw.trim().toLowerCase();
+    final m = RegExp(r'(-?[\d.]+)\s*px').firstMatch(v);
+    if (m != null) return double.tryParse(m.group(1)!);
+    if (v.contains('thin')) return 1;
+    if (v.contains('medium')) return 3;
+    if (v.contains('thick')) return 5;
+    // 只写了 `1px` 以外的单位（em）时按 px 估
+    final em = RegExp(r'(-?[\d.]+)\s*em').firstMatch(v);
+    if (em != null) return (double.tryParse(em.group(1)!) ?? 0) * 16;
+    return null;
+  }
+
   static FontWeight? _weight(String v) {
     if (v.contains('bold')) return FontWeight.w700;
-    if (v.contains('lighter')) return FontWeight.w300;
+    if (v.contains('lighter') || v.contains('light')) return FontWeight.w300;
     if (v.contains('normal')) return FontWeight.w400;
+    if (v.contains('bolder')) return FontWeight.w800;
     final n = int.tryParse(RegExp(r'\d{3}').firstMatch(v)?.group(0) ?? '');
     if (n == null) return null;
     return FontWeight.values[((n ~/ 100) - 1).clamp(0, 8)];
@@ -595,7 +662,9 @@ class TitleHtml {
     required Color fallbackColor,
   }) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+      // ⚠️ 不能用 stretch：`display:inline-block` 的药丸会被拉满整行。
+      // 块级子节点在 [_buildBlock] 里自己撑满宽度（SizedBox infinity）。
+      crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         for (final b in doc.root.children)
@@ -634,30 +703,59 @@ class TitleHtml {
         ],
       );
     }
-    if (b.style.hasDecoration) {
+    final st = b.style;
+    final border = _border(st, fallback: st.color ?? fallbackColor);
+    if (st.hasDecoration) {
       child = Container(
         padding: pad,
         decoration: BoxDecoration(
-          color: b.style.background,
-          borderRadius: b.style.borderRadius > 0
-              ? BorderRadius.circular(b.style.borderRadius)
+          color: st.background,
+          borderRadius: st.borderRadius > 0
+              ? BorderRadius.circular(st.borderRadius)
               : null,
-          border: b.style.borderWidth > 0
-              ? Border.all(
-                  color: b.style.borderColor ?? const Color(0xFF888888),
-                  width: b.style.borderWidth,
-                )
-              : null,
-          boxShadow: b.style.boxShadows.isEmpty ? null : b.style.boxShadows,
-          image: _bgImage(b.style),
+          border: border,
+          boxShadow: st.boxShadows.isEmpty ? null : st.boxShadows,
+          image: _bgImage(st),
         ),
         child: child,
       );
     } else if (pad != EdgeInsets.zero) {
       child = Padding(padding: pad, child: child);
     }
+    // 浮动的盒子：自己决定靠左/靠右（父级的 text-align 管不到它）
+    if (st.floatSide != 0) {
+      child = Align(
+        alignment: st.floatSide < 0
+            ? Alignment.centerLeft
+            : Alignment.centerRight,
+        child: child,
+      );
+    } else if (!st.inlineBox && b is TitleBoxBlock) {
+      // 块级元素（div / p / h1~h6 默认值）占满整行 ⇒ 底部边框、居中对齐才正确；
+      // inline-block / float 才收缩到文字宽度。
+      child = SizedBox(width: double.infinity, child: child);
+    }
     if (mar != EdgeInsets.zero) child = Padding(padding: mar, child: child);
     return child;
+  }
+
+  /// 按边生成边框；颜色缺省 = currentColor（文字颜色）
+  static Border? _border(TitleCss st, {required Color fallback}) {
+    BorderSide side(double w) => w > 0
+        ? BorderSide(color: st.borderColor ?? fallback, width: w)
+        : BorderSide.none;
+    if (st.borderTop <= 0 &&
+        st.borderRight <= 0 &&
+        st.borderBottom <= 0 &&
+        st.borderLeft <= 0) {
+      return null;
+    }
+    return Border(
+      top: side(st.borderTop),
+      right: side(st.borderRight),
+      bottom: side(st.borderBottom),
+      left: side(st.borderLeft),
+    );
   }
 
   static CrossAxisAlignment _cross(TextAlign align) => switch (align) {
