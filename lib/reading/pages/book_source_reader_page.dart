@@ -8921,7 +8921,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 点卡片 → 页面 pop 回选中的样式 → 这里套用；保存/编辑/删除在页面内完成，
   /// 每次操作后把最新的「我的样式」列表回传给页面刷新。
   Future<void> _openStylesPage() async {
-    final picked = await Navigator.of(context).push<ReaderStyle>(
+    await Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (_) => ReaderStylesPage(
           builtins: ReaderStyle.builtins,
@@ -8929,23 +8929,18 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           activeId: _activeStyleId,
           background: _sheetBg,
           foreground: _fg,
+          onApply: _applyReaderStyle,
+          onChanged: (list) {
+            if (!mounted) return;
+            setState(() => _myStyles = list);
+          },
           onSaveCurrent: () async {
             await _saveCurrentAsStyle();
-            return List.of(_myStyles);
-          },
-          onEdit: (s) async {
-            await _editStyle(s);
-            return List.of(_myStyles);
-          },
-          onDelete: (s) async {
-            await _deleteStyle(s);
             return List.of(_myStyles);
           },
         ),
       ),
     );
-    if (!mounted || picked == null) return;
-    _applyReaderStyle(picked);
   }
 
   /// 一键套用一套样式：配色 / 背景 / 排版 / 边距 / 信息栏 / 翻页动画一次改完。

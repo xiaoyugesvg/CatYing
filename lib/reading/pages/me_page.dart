@@ -25,6 +25,9 @@ import 'favorites_page.dart';
 import 'book_notes_page.dart';
 import 'reading_plan_page.dart';
 import 'reading_stats_page.dart';
+import 'reader_styles_page.dart';
+import '../models/reader_style.dart';
+import '../services/reader_style_store.dart';
 import '../pet/pet_models.dart';
 import '../pet/pet_view.dart';
 import 'reading_settings_page.dart';
@@ -373,6 +376,22 @@ class _MePageState extends State<MePage> {
                                     builder: (_) => const ReadingStatsPage(),
                                   ),
                                 ),
+                              ),
+                            ),
+                          ),
+                          // 10.1 阅读样式（独立样式库：内置 + 我的 + 编辑/复制/排序）
+                          StaggeredEntrance(
+                            key: ValueKey('${_session}_reader_styles'),
+                            index: 10,
+                            child: SizedBox(
+                              width: itemWidth,
+                              child: _buildMenuItem(
+                                isDark,
+                                icon: Icons.style_rounded,
+                                iconBg: JellyTheme.primary,
+                                title: '阅读样式',
+                                subtitle: '内置 ${ReaderStyle.builtins.length} 套 · 可编辑',
+                                onTap: () => _openReaderStyles(context, isDark),
                               ),
                             ),
                           ),
@@ -1335,6 +1354,31 @@ class _MePageState extends State<MePage> {
   // -------------------- 通用 --------------------
 
   /// 打开 QQ 群名片（带加入按钮）；未安装 QQ 则复制群号
+
+  /// 「我的」→ 阅读样式：打开独立样式库（独立模式，点卡片设为默认阅读样式）
+  Future<void> _openReaderStyles(BuildContext context, bool isDark) async {
+    final store = ReaderStyleStore();
+    final mine = await store.loadCustom();
+    final active = await store.loadActiveId();
+    if (!context.mounted) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ReaderStylesPage(
+          builtins: ReaderStyle.builtins,
+          mine: mine,
+          activeId: active,
+          background: isDark
+              ? const Color(0xFF14161A)
+              : const Color(0xFFF6F7F9),
+          foreground: isDark
+              ? const Color(0xFFE7EAF0)
+              : const Color(0xFF1B1F27),
+          standalone: true,
+        ),
+      ),
+    );
+  }
 
   Widget _buildMenuItem(
     bool isDark, {

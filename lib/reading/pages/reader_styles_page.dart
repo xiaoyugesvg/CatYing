@@ -1,17 +1,17 @@
 import 'package:flutter/material.dart';
 
 import '../models/reader_style.dart';
+import '../services/reader_style_store.dart';
+import 'reader_style_edit_page.dart';
 
-/// 独立的「阅读样式」库页面。
+/// 「阅读样式」库：内置样式 + 我的样式 + 管理（复制/编辑/删除/排序）。
 ///
-/// 为什么单独一页：内置样式 + 我的样式原来都塞在阅读设置面板的「样式」tab 里，
-/// 面板本身只有屏幕 80% 高、还要滚动，样式一多就找不到。这里给它们一个完整页面：
-///   · 内置样式网格（点一下直接套用并返回阅读器）
-///   · 我的样式列表（可编辑 / 删除）
-///   · 底部「保存当前外观为样式」
+/// 两个入口共用：
+///   · 阅读器 → 排版 → 样式 → 打开样式库（[onApply] 非空：点卡片直接套用并返回）
+///   · 阅读模块「我的」→ 阅读样式（[onApply] 为空：点卡片只记成默认样式）
 ///
-/// 页面只负责**浏览和选择**，真正的套用/保存/编辑仍由阅读器页实现，
-/// 通过回调把结果回传（保存/编辑返回最新的「我的样式」列表）。
+/// 编辑/复制/删除在本页完成并直接写 [ReaderStyleStore]，
+/// 有阅读器时通过 [onChanged] 把最新的「我的样式」回传，避免两处状态不一致。
 class ReaderStylesPage extends StatefulWidget {
   const ReaderStylesPage({
     super.key,
@@ -20,27 +20,29 @@ class ReaderStylesPage extends StatefulWidget {
     required this.activeId,
     required this.background,
     required this.foreground,
-    required this.onSaveCurrent,
-    required this.onEdit,
-    required this.onDelete,
+    this.onApply,
+    this.onChanged,
+    this.onSaveCurrent,
+    this.standalone = false,
   });
 
   final List<ReaderStyle> builtins;
   final List<ReaderStyle> mine;
   final String? activeId;
-
-  /// 页面底色 / 前景色（跟随阅读器当前配色，避免深色阅读器里弹出一张白页）
   final Color background;
   final Color foreground;
 
-  /// 保存当前外观为样式；返回最新的「我的样式」列表
-  final Future<List<ReaderStyle>> Function() onSaveCurrent;
+  /// 阅读器模式：选中后回调（由调用方套用并关闭页面）
+  final void Function(ReaderStyle)? onApply;
 
-  /// 编辑某个我的样式；返回最新列表
-  final Future<List<ReaderStyle>> Function(ReaderStyle) onEdit;
+  /// 「我的样式」变化（编辑/复制/删除/排序后）
+  final void Function(List<ReaderStyle>)? onChanged;
 
-  /// 删除某个我的样式；返回最新列表
-  final Future<List<ReaderStyle>> Function(ReaderStyle) onDelete;
+  /// 阅读器模式：把当前阅读外观存成一条样式（返回最新列表）
+  final Future<List<ReaderStyle>> Function()? onSaveCurrent;
+
+  /// 独立模式（从「我的」进入）：点卡片 = 记为默认阅读样式
+  final bool standalone;
 
   @override
   State<ReaderStylesPage> createState() => _ReaderStylesPageState();
@@ -48,21 +50,208 @@ class ReaderStylesPage extends StatefulWidget {
 
 class _ReaderStylesPageState extends State<ReaderStylesPage> {
   late List<ReaderStyle> _mine = List.of(widget.mine);
-  bool _busy = false;
+  late String? _activeId = widget.activeId;
+
+  final _store = ReaderStyleStore();
 
   Color get _fg => widget.foreground;
   Color get _bg => widget.background;
 
-  Future<void> _run(Future<List<ReaderStyle>> Function() action) async {
-    if (_busy) return;
-    setState(() => _busy = true);
-    try {
-      final list = await action();
-      if (!mounted) return;
-      setState(() => _mine = List.of(list));
-    } finally {
-      if (mounted) setState(() => _busy = false);
+  Future<void> _setMine(List<ReaderStyle> list) async {
+    setState(() => _mine = List.of(list));
+    await _store.saveCustom(_mine);
+    widget.onChanged?.call(List.of(_mine));
+  }
+
+  void _toast(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(text, style: TextStyle(fontSize: 13, color: _fg)),
+        backgroundColor: _fg.withValues(alpha: 0.14),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(milliseconds: 1600),
+      ),
+    );
+  }
+
+  Future<void> _apply(ReaderStyle s) async {
+    if (widget.onApply != null) {
+      widget.onApply!(s);
+      if (mounted) Navigator.of(context).pop();
+      return;
     }
+    await _store.saveActiveId(s.id);
+    if (!mounted) return;
+    setState(() => _activeId = s.id);
+    _toast('已设为阅读默认样式：${s.name}');
+  }
+
+  /// 编辑：内置样式先复制一份（内置不可直接改）
+  Future<void> _edit(ReaderStyle s, {required bool builtin}) async {
+    final id = 'user:${DateTime.now().millisecondsSinceEpoch}';
+    final base = builtin
+        ? ReaderStyle.fromJson({
+            ...s.toJson(),
+            'id': id,
+            'name': '${s.name} 副本',
+            'builtin': false,
+          })
+        : s;
+    final edited = await Navigator.of(context).push<ReaderStyle>(
+      MaterialPageRoute(
+        builder: (_) => ReaderStyleEditPage(
+          style: base,
+          background: _bg,
+          foreground: _fg,
+          title: builtin ? '编辑（会复制成我的样式）' : '编辑样式',
+        ),
+      ),
+    );
+    if (edited == null || !mounted) return;
+    final list = List.of(_mine);
+    final idx = list.indexWhere((e) => e.id == edited.id);
+    if (idx >= 0) {
+      list[idx] = edited;
+    } else {
+      list.add(edited);
+    }
+    await _setMine(list);
+    if (builtin) _toast('已复制并保存为「${edited.name}」');
+  }
+
+  /// 复制一份（不打开编辑器）
+  Future<void> _duplicate(ReaderStyle s) async {
+    final copy = ReaderStyle.fromJson({
+      ...s.toJson(),
+      'id': 'user:${DateTime.now().millisecondsSinceEpoch}',
+      'name': '${s.name} 副本',
+      'builtin': false,
+    });
+    await _setMine([..._mine, copy]);
+    _toast('已复制「${s.name}」');
+  }
+
+  Future<void> _delete(ReaderStyle s) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: _bg,
+        title: Text('删除样式', style: TextStyle(fontSize: 16, color: _fg)),
+        content: Text(
+          '确定删除「${s.name}」？',
+          style: TextStyle(fontSize: 14, color: _fg.withValues(alpha: 0.7)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: Text('取消', style: TextStyle(color: _fg.withValues(alpha: 0.6))),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: _fg,
+              foregroundColor: _bg,
+            ),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await _setMine(_mine.where((e) => e.id != s.id).toList());
+  }
+
+  Future<void> _move(int index, int delta) async {
+    final target = index + delta;
+    if (target < 0 || target >= _mine.length) return;
+    final list = List.of(_mine);
+    final item = list.removeAt(index);
+    list.insert(target, item);
+    await _setMine(list);
+  }
+
+  Future<void> _saveCurrentAsCopy() async {
+    if (widget.onSaveCurrent != null) {
+      final list = await widget.onSaveCurrent!();
+      if (!mounted) return;
+      await _setMine(list);
+      _toast('已保存当前外观');
+      return;
+    }
+    // 独立模式下没有"当前阅读外观"，只能新建一套默认样式再编辑
+    final base = ReaderStyle(
+      id: 'user:${DateTime.now().millisecondsSinceEpoch}',
+      name: '我的样式 ${_mine.length + 1}',
+    );
+    await _edit(base, builtin: true);
+  }
+
+  Future<void> _showActions(ReaderStyle s, {required bool builtin}) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: _bg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (c) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  s.name,
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: _fg),
+                ),
+              ),
+            ),
+            ListTile(
+              leading: Icon(Icons.check_circle_outline, color: _fg),
+              title: Text('套用', style: TextStyle(color: _fg)),
+              onTap: () {
+                Navigator.pop(c);
+                _apply(s);
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.edit_outlined, color: _fg),
+              title: Text(
+                builtin ? '编辑（复制成我的样式）' : '编辑',
+                style: TextStyle(color: _fg),
+              ),
+              onTap: () {
+                Navigator.pop(c);
+                _edit(s, builtin: builtin);
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.copy_rounded, color: _fg),
+              title: Text('复制一份', style: TextStyle(color: _fg)),
+              onTap: () {
+                Navigator.pop(c);
+                _duplicate(s);
+              },
+            ),
+            if (!builtin)
+              ListTile(
+                leading: Icon(
+                  Icons.delete_outline,
+                  color: _fg.withValues(alpha: 0.8),
+                ),
+                title: Text('删除', style: TextStyle(color: _fg)),
+                onTap: () {
+                  Navigator.pop(c);
+                  _delete(s);
+                },
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -76,40 +265,48 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
         foregroundColor: _fg,
         title: Text(
           '阅读样式',
-          style: TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w600,
-            color: _fg,
-          ),
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: _fg),
         ),
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
         children: [
-          _label('内置样式（点一下立即套用）'),
+          _label('内置样式 ${widget.builtins.length} 套 · 长按管理'),
           Wrap(
             spacing: 10,
-            runSpacing: 12,
+            runSpacing: 14,
             children: [
               for (final s in widget.builtins)
-                _card(s, onTap: () => Navigator.of(context).pop(s)),
+                _card(
+                  s,
+                  onTap: () => _apply(s),
+                  onMore: () => _showActions(s, builtin: true),
+                ),
             ],
           ),
-          if (_mine.isNotEmpty) ...[
-            const SizedBox(height: 18),
-            _label('我的样式'),
-            for (final s in _mine) _row(s),
-          ],
-          const SizedBox(height: 22),
+          const SizedBox(height: 20),
+          _label('我的样式 ${_mine.length} 套 · 可编辑 / 排序'),
+          if (_mine.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              child: Text(
+                widget.standalone
+                    ? '还没有我的样式。点下方「新建一套样式」开始。'
+                    : '还没有我的样式。在阅读器里调好外观后，点「把当前外观存为样式」。',
+                style: TextStyle(fontSize: 12, color: _fg.withValues(alpha: 0.45)),
+              ),
+            )
+          else
+            for (var i = 0; i < _mine.length; i++)
+              _row(_mine[i], i, onTap: () => _apply(_mine[i])),
+          const SizedBox(height: 18),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
-              onPressed: _busy
-                  ? null
-                  : () => _run(widget.onSaveCurrent),
+              onPressed: _saveCurrentAsCopy,
               icon: Icon(Icons.add_rounded, size: 18, color: _fg),
               label: Text(
-                '把当前外观存为样式',
+                widget.standalone ? '新建一套样式' : '把当前外观存为样式',
                 style: TextStyle(color: _fg, fontSize: 14),
               ),
               style: OutlinedButton.styleFrom(
@@ -138,12 +335,16 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
     ),
   );
 
-  /// 一张样式卡：迷你书页 + 名字
-  Widget _card(ReaderStyle s, {required VoidCallback onTap}) {
-    final selected = widget.activeId == s.id;
+  Widget _card(
+    ReaderStyle s, {
+    required VoidCallback onTap,
+    VoidCallback? onMore,
+  }) {
+    final selected = _activeId == s.id;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
+      onLongPress: onMore,
       child: SizedBox(
         width: 104,
         child: Column(
@@ -166,16 +367,37 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
                       ],
                     ),
                   ),
+                if (onMore != null)
+                  Positioned(
+                    right: -2,
+                    bottom: -2,
+                    child: GestureDetector(
+                      onTap: onMore,
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: BoxDecoration(
+                          color: _fg.withValues(alpha: 0.12),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.more_horiz_rounded,
+                          size: 13,
+                          color: _fg.withValues(alpha: 0.8),
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ),
             const SizedBox(height: 5),
             Text(
               s.name,
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 12,
+                fontSize: 11,
+                height: 1.25,
                 fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
                 color: _fg.withValues(alpha: selected ? 1 : 0.72),
               ),
@@ -186,8 +408,8 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
     );
   }
 
-  Widget _row(ReaderStyle s) {
-    final selected = widget.activeId == s.id;
+  Widget _row(ReaderStyle s, int index, {required VoidCallback onTap}) {
+    final selected = _activeId == s.id;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Material(
@@ -195,7 +417,8 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
-          onTap: () => Navigator.of(context).pop(s),
+          onTap: onTap,
+          onLongPress: () => _showActions(s, builtin: false),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             child: Row(
@@ -212,15 +435,13 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 14,
-                          fontWeight: selected
-                              ? FontWeight.w600
-                              : FontWeight.w500,
+                          fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                           color: _fg,
                         ),
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '${s.fontSize.round()} 号 · 行高 ${s.lineHeight.toStringAsFixed(2)}',
+                        '${s.fontSize.round()} 号 · 行高 ${s.lineHeight.toStringAsFixed(2)} · 段距 ${s.paraSpacing.toStringAsFixed(2)}',
                         style: TextStyle(
                           fontSize: 11,
                           color: _fg.withValues(alpha: 0.5),
@@ -229,27 +450,26 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
                     ],
                   ),
                 ),
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  icon: Icon(Icons.edit_outlined, size: 18, color: _fg),
-                  onPressed: _busy ? null : () => _run(() => widget.onEdit(s)),
-                ),
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  icon: Icon(
-                    Icons.delete_outline,
-                    size: 18,
-                    color: _fg.withValues(alpha: 0.72),
-                  ),
-                  onPressed: _busy
-                      ? null
-                      : () => _run(() => widget.onDelete(s)),
-                ),
+                _miniBtn(Icons.arrow_upward_rounded, '上移', () => _move(index, -1)),
+                _miniBtn(Icons.arrow_downward_rounded, '下移', () => _move(index, 1)),
+                _miniBtn(Icons.edit_outlined, '编辑', () => _edit(s, builtin: false)),
+                _miniBtn(Icons.delete_outline, '删除', () => _delete(s)),
               ],
             ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _miniBtn(IconData icon, String tip, VoidCallback onTap) {
+    return IconButton(
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+      tooltip: tip,
+      icon: Icon(icon, size: 16, color: _fg.withValues(alpha: 0.72)),
+      onPressed: onTap,
     );
   }
 
