@@ -20,6 +20,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/book_source.dart';
 import '../models/book_content.dart';
 import '../models/reader_style.dart';
+import '../models/reader_title_style.dart';
 import '../models/reading_settings.dart';
 import '../novel_source/novel_chinese_converter.dart';
 import '../services/book_paginator.dart';
@@ -256,6 +257,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 「阅读样式」：用户自己存的样式（内置样式在 [ReaderStyle.builtins]）
   List<ReaderStyle> _myStyles = [];
 
+  /// 章标题版式（默认 / 仙鹤·日间 / 仙鹤·夜间 / 微信读书）
+  ReaderTitleStyle _chapterTitleStyle = ReaderTitleStyle.none;
+
   /// 当前生效的样式 id（只用于卡片上打「当前」标；null = 手调过、无样式）
   String? _activeStyleId;
 
@@ -273,11 +277,17 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 隐藏重复标题：章首正文与章名相同时不再显示一遍（默认开）
   bool _hideRepeatTitle = true;
 
+  /// 是否生成章标题块。
+  ///
+  /// 默认隐藏（正文里已经有章名）；但选了自定义「标题样式」时必须画 ——
+  /// 那套版式（仙鹤插画 / 药丸）本身就是靠标题块呈现的。
+  bool get _showChapterTitle => !_hideRepeatTitle || _chapterTitleStyle.custom;
+
   /// 分页块列表里「段落 pi」与「块下标」的偏移：
   /// 有章标题块时是 1，隐藏标题（`_hideRepeatTitle`）时不生成标题块 ⇒ 0。
   /// 两处（`_pageBody` / `_pageOfParagraph`）与 `_paginate` 必须用同一个偏移，
   /// 否则书签 / 划线会落到上一段。
-  int get _blockOffset => _hideRepeatTitle ? 0 : 1;
+  int get _blockOffset => _showChapterTitle ? 1 : 0;
 
   // ── 阅读设置（截图 IMG_71a10）────────────────────────────────
   ReadingSettings _rs = ReadingSettings();
@@ -1079,6 +1089,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         final idt = num2('indent');
         if (idt != null && idt >= 0 && idt <= 4) _indent = idt;
         if (hr != null) _hideRepeatTitle = hr;
+        // 章标题版式（默认 / 仙鹤日间 / 仙鹤夜间 / 微信读书）
+        _chapterTitleStyle = ReaderTitleStyle.fromId(
+          p.getString('reading.chapterTitleStyle'),
+        );
         if (rsRaw != null && rsRaw.isNotEmpty) {
           try {
             _rs = ReadingSettings.fromJson(
@@ -1232,6 +1246,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         );
       }
       await p.setBool('reading.hideRepeatTitle', _hideRepeatTitle);
+      await p.setString('reading.chapterTitleStyle', _chapterTitleStyle.id);
       await p.setString('reading.settings', jsonEncode(_rs.toJson()));
       await p.setString('reading.presetNames', jsonEncode(_savedPresets));
       await p.setInt('bsr.tts.color', _ttsColor);
@@ -2304,11 +2319,17 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           //   统一走 [_safePageIndex]：越界就夹回合法范围 + 记一条日志 ✓，**不 throw** ✓
           final pi = _safePageIndex();
           return BookPageCurl(
-            page: _pageContent(fg, _pages[pi]),
+            page: _pageContent(fg, _pages[pi], chapter: _chapterOfPage(pi)),
             nextPage: pi + 1 < _pages.length
-                ? _pageContent(fg, _pages[pi + 1])
+                ? _pageContent(
+                    fg,
+                    _pages[pi + 1],
+                    chapter: _chapterOfPage(pi + 1),
+                  )
                 : null,
-            prevPage: pi > 0 ? _pageContent(fg, _pages[pi - 1]) : null,
+            prevPage: pi > 0
+                ? _pageContent(fg, _pages[pi - 1], chapter: _chapterOfPage(pi - 1))
+                : null,
             background: Container(color: _bgTop),
             canNext: pi + 1 < _pages.length,
             canPrev: pi > 0,
@@ -2358,7 +2379,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               itemBuilder: (c, i) => Row(
                 children: [
                   for (final pi in spreads[i])
-                    Expanded(child: _pageContent(fg, _pages[pi])),
+                    Expanded(
+                      child: _pageContent(
+                        fg,
+                        _pages[pi],
+                        chapter: _chapterOfPage(pi),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -2374,11 +2401,21 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           return withPressDownBookmark(
             BookPageCover(
               backgroundColor: _customBgColor ?? _bgs[_bgIndex][0],
-              page: _pageContent(fg, _pages[pi]),
+              page: _pageContent(fg, _pages[pi], chapter: _chapterOfPage(pi)),
               nextPage: pi + 1 < _pages.length
-                  ? _pageContent(fg, _pages[pi + 1])
+                  ? _pageContent(
+                      fg,
+                      _pages[pi + 1],
+                      chapter: _chapterOfPage(pi + 1),
+                    )
                   : null,
-              prevPage: pi > 0 ? _pageContent(fg, _pages[pi - 1]) : null,
+              prevPage: pi > 0
+                  ? _pageContent(
+                      fg,
+                      _pages[pi - 1],
+                      chapter: _chapterOfPage(pi - 1),
+                    )
+                  : null,
               canNext: pi + 1 < _pages.length,
               canPrev: pi > 0,
               onTurnNext: () {
@@ -2421,7 +2458,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     _maybeAppendAhead();
                     _saveProgress();
                   },
-                  itemBuilder: (context, i) => _pageContent(fg, _pages[i]),
+                  itemBuilder: (context, i) =>
+                      _pageContent(fg, _pages[i], chapter: _chapterOfPage(i)),
                 ),
               ),
             ),
@@ -2677,15 +2715,25 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (!first) const SizedBox(height: 26),
-        Text(
-          widget.chapters[ch].name,
-          style: TextStyle(
-            fontSize: _fontSize + 3,
-            fontWeight: FontWeight.w700,
-            color: fg,
-            height: 1.5,
+        if (_chapterTitleStyle.custom && _chapterTitleHeight != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _chapterTitleWidget(
+              widget.chapters[ch].name,
+              chapterIndex: ch,
+              height: _chapterTitleHeight!,
+            ),
+          )
+        else
+          Text(
+            widget.chapters[ch].name,
+            style: TextStyle(
+              fontSize: _fontSize + 3,
+              fontWeight: FontWeight.w700,
+              color: fg,
+              height: 1.5,
+            ),
           ),
-        ),
         const SizedBox(height: 18),
         for (var pi = 0; pi < paras.length; pi++)
           current
@@ -3383,8 +3431,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     return header + footer;
   }
 
+  /// 某一页属于哪一章（无缝拼接后 `_pages` 里混有多章）
+  int _chapterOfPage(int i) =>
+      (i >= 0 && i < _pageChapterOf.length) ? _pageChapterOf[i] : _index;
+
   /// 一页的内容（含页眉 / 页脚信息栏）
-  Widget _pageContent(Color fg, BookPage page) {
+  Widget _pageContent(Color fg, BookPage page, {int? chapter}) {
     // ✅ 每页铺**不透明底色**（+ 页缘软投影，见下）——
     //    原来每一页都是透明的 ✗ ⇒ 前后两页的文字叠在**同一块背景**上，
     //    用户实测："左右滑动是切片的形式"、"感觉重叠" ✗
@@ -3395,10 +3447,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         (_customBgPath != null && File(_customBgPath!).existsSync()) ||
         _bgImageAsset != null;
     final body = imgBg
-        ? _pageBody(fg, page)
+        ? _pageBody(fg, page, chapter: chapter)
         : ColoredBox(
             color: _customBgColor ?? _bgs[_bgIndex][0],
-            child: _pageBody(fg, page),
+            child: _pageBody(fg, page, chapter: chapter),
           );
     // 页缘投影：只在"两页并排平移"的模式（左右 / 无动画）画 —— 给两页之间
     // 一个可见的软边界；覆盖 / 仿真各有自己的投影，不重复画 ✓
@@ -3502,7 +3554,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   /// 一页的**内容本体**（页眉 / 正文 / 页脚）。
   /// 由 [_pageContent] 包上底色（+ 页缘投影）后使用 ✓。
-  Widget _pageBody(Color fg, BookPage page) {
+  Widget _pageBody(Color fg, BookPage page, {int? chapter}) {
+    // 这一页属于哪一章（无缝拼接后可能不是 `_index`；章标题/页脚都用它）
+    final pageChapter = chapter ?? _index;
     final items = _rs.statusItems;
     // 点击判定统一由正文区 GestureDetector（_onTapUp）负责，这里不再注册
     return Column(
@@ -3529,11 +3583,26 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 final e = page.entries[i];
                 final b = e.block;
                 if (b is HeadingBlock) {
-                  // 隐藏重复标题：章首标题与章节名相同时不再显示（IMG_8495）
                   final headingText = e.partialText ?? b.text;
+                  // 自定义「标题样式」：仙鹤 / 微信读书那套复合版式
+                  // （固定高度已由分页器计入，这里必须用同一个高度占位）
+                  final titleH = _chapterTitleHeight;
+                  if (_chapterTitleStyle.custom && titleH != null) {
+                    return Padding(
+                      padding: EdgeInsets.only(
+                        bottom: _fontSize * _paraSpacing,
+                      ),
+                      child: _chapterTitleWidget(
+                        headingText,
+                        chapterIndex: pageChapter,
+                        height: titleH,
+                      ),
+                    );
+                  }
+                  // 隐藏重复标题：章首标题与章节名相同时不再显示（IMG_8495）
                   if (_hideRepeatTitle &&
                       headingText.trim() ==
-                          widget.chapters[_index].name.trim()) {
+                          widget.chapters[pageChapter].name.trim()) {
                     return const SizedBox.shrink();
                   }
                   // 上下留白与分页器一致（top 4 + 段距）——分页器按
@@ -4797,6 +4866,182 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     return (end - start).clamp(1, 1 << 30);
   }
 
+  // ── 标题样式（章标题版式）──────────────────────────────────
+
+  /// 标题里某行文字的**真实行高**（含系统字号缩放）。
+  /// 与渲染端 `Text` 用同一个 `height: 1.25` + strut ⇒ 度量=渲染。
+  /// [size] 传**未缩放**的字号（`Text` 会自己套 textScaler）。
+  double _titleLineH(double size) =>
+      MediaQuery.textScalerOf(context).scale(size) * 1.25;
+
+  /// 缩放后的正文字号（em 换算的外边距用）
+  double get _scaledFontSize =>
+      MediaQuery.textScalerOf(context).scale(_fontSize);
+
+  /// 自定义标题块的固定高度（null = 用默认标题，按文本度量）。
+  ///
+  /// 数值与 [_chapterTitleWidget] 里的**同一套 em 常量**一一对应：
+  /// 分页高度和真实渲染必须完全一样，否则章首那页会溢出/留白。
+  double? get _chapterTitleHeight {
+    if (!_chapterTitleStyle.custom) return null;
+    final base = _scaledFontSize; // em 的基准（已含系统字号缩放）
+    double h;
+    switch (_chapterTitleStyle) {
+      case ReaderTitleStyle.xianheDay:
+      case ReaderTitleStyle.xianheNight:
+        // 0.5em 顶 + 章节数 + 3em 间距 + 药丸(1em 内衬) + 5em 底
+        h = base * 0.5 +
+            _titleLineH(_fontSize * 1.5) +
+            base * 3 +
+            (_titleLineH(_fontSize) + base) +
+            base * 5;
+      case ReaderTitleStyle.weRead:
+        // 2em 顶 + 章节数 + 1.5em + 章节名 + 4em 底
+        h = base * 2 +
+            _titleLineH(_fontSize * 1.5) +
+            base * 1.5 +
+            _titleLineH(_fontSize * 2) +
+            base * 4;
+      case ReaderTitleStyle.none:
+        return null;
+    }
+    // 标题再大也不能吃掉半页（否则正文没地方放；分页器会把它挤到下一页）
+    return h.clamp(0.0, _textAreaHeight * 0.55);
+  }
+
+  /// 章标题的复合版式（对齐用户提供的三套「源阅读」标题样式）。
+  ///
+  /// [height] 与 [_chapterTitleHeight] 是同一个值 ⇒ 占位与分页一致。
+  Widget _chapterTitleWidget(
+    String name, {
+    required int chapterIndex,
+    required double height,
+  }) {
+    final s = _chapterTitleStyle;
+    // em 的外边距用"缩放后"的字号；Text 的 fontSize 传**未缩放**值（Text 自己缩放）
+    final base = _scaledFontSize;
+    final number = '${chapterIndex + 1}';
+    TextStyle numberStyle(double size) => TextStyle(
+      fontSize: size,
+      height: 1.25,
+      fontWeight: FontWeight.w200,
+      color: s.numberColor,
+    );
+    if (s.hasArt) {
+      return SizedBox(
+        height: height,
+        width: double.infinity,
+        child: Stack(
+          children: [
+            // 左侧插画：背景图 `background-size: auto 100%; left` 的原样还原
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              child: Image.asset(
+                s.artAsset,
+                fit: BoxFit.fitHeight,
+                alignment: Alignment.centerLeft,
+                gaplessPlayback: true,
+              ),
+            ),
+            Positioned.fill(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  SizedBox(height: base * 0.5),
+                  Text(
+                    number,
+                    maxLines: 1,
+                    style: numberStyle(_fontSize * 1.5),
+                    strutStyle: StrutStyle(
+                      fontSize: _fontSize * 1.5,
+                      height: 1.25,
+                      forceStrutHeight: true,
+                    ),
+                  ),
+                  SizedBox(height: base * 3),
+                  Container(
+                    padding: EdgeInsets.symmetric(
+                      vertical: base * 0.5,
+                      horizontal: base * 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: s.pillColor,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.28),
+                          blurRadius: 15,
+                          offset: const Offset(0, 8),
+                        ),
+                      ],
+                    ),
+                    child: Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                        fontSize: _fontSize,
+                        height: 1.25,
+                        fontWeight: FontWeight.w200,
+                        color: s.nameColor,
+                      ),
+                      strutStyle: StrutStyle(
+                        fontSize: _fontSize,
+                        height: 1.25,
+                        forceStrutHeight: true,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    // 微信读书：小号章节数 + 大号加粗章节名，其余是留白
+    return SizedBox(
+      height: height,
+      width: double.infinity,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(height: base * 2),
+          Text(
+            number,
+            maxLines: 1,
+            style: numberStyle(_fontSize * 1.5),
+            strutStyle: StrutStyle(
+              fontSize: _fontSize * 1.5,
+              height: 1.25,
+              forceStrutHeight: true,
+            ),
+          ),
+          SizedBox(height: base * 1.5),
+          Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: _fontSize * 2,
+              height: 1.25,
+              fontWeight: FontWeight.w700,
+              color: s.nameColor,
+            ),
+            strutStyle: StrutStyle(
+              fontSize: _fontSize * 2,
+              height: 1.25,
+              forceStrutHeight: true,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// 分页用的排版参数（`_paginate` 与「拼下一章」共用，避免两处漂移）
   BookTypography _layoutTypography() {
     return BookTypography(
@@ -4814,6 +5059,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       headingHeightOverride: 1.5,
       paragraphSpacingFactor: _paraSpacing,
       textScaler: MediaQuery.textScalerOf(context),
+      // 自定义标题样式是复合版式 ⇒ 用固定高度，度量与渲染一致
+      headingFixedHeight: _chapterTitleHeight,
     );
   }
 
@@ -5876,6 +6123,27 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         ],
       ),
       const SizedBox(height: 4),
+      _sectionLabel('标题样式'),
+      // 章标题版式（参考用户提供的源阅读标题样式：仙鹤日间/夜间、微信读书）
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final t in ReaderTitleStyle.values)
+            _chip(
+              t.label,
+              _chapterTitleStyle == t,
+              () {
+                setState(() => _chapterTitleStyle = t);
+                _scheduleSavePrefs();
+                // 标题高度变了 ⇒ 章首那页要重排
+                _scheduleRepaginate();
+                setSheet(() {});
+              },
+              compact: true,
+            ),
+        ],
+      ),
       _sectionLabel('内置样式'),
       Wrap(
         spacing: 10,
@@ -7612,6 +7880,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       statusTextScale: _rs.statusTextScale,
       pageMode: _rs.pageMode.name,
       dualPage: _rs.dualPage,
+      chapterTitleStyle: _chapterTitleStyle.id,
       underlineColor: _underlineColor?.toARGB32(),
       underlineStyle: _underlineStyle,
       underlineAlpha: _underlineAlpha,
@@ -7650,6 +7919,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       _indent = s.indent.clamp(0.0, 4.0);
       _titleAlign = s.titleAlign;
       _titleStyle = s.titleStyle;
+      _chapterTitleStyle = ReaderTitleStyle.fromId(s.chapterTitleStyle);
       _hideRepeatTitle = s.hideRepeatTitle;
       _focusBold = s.focusBold;
       _padLeft = s.padLeft.clamp(0.0, 80.0);

@@ -173,6 +173,8 @@ flutter:
     # 内置阅读背景壁纸（14 张，来自 cmbok ✓）
     #   ⚠️ 目录式声明**不递归**，所以要单独声明这个子目录 ✓
     - assets/images/reader_bg/
+    # 「标题样式」（章标题）用的素材：仙鹤插画（透明 PNG，来自用户提供的源阅读样式）
+    - assets/images/reader_title/
     # ── 内置源已全部移除（用户 2026-10-13）──────────────────────────
     #   漫画源（sources.json 16 个）与书源（book_sources.json 20 个 +
     #   legado_sources.json 673 个）不再随包内置，改为由用户通过

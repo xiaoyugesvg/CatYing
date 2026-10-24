@@ -44,6 +44,13 @@ class BookTypography {
   /// 两端不一致 -> 行高偏差 -> 页底横切/留白。此处显式固定，两端共用。
   final TextHeightBehavior textHeightBehavior;
 
+  /// 章标题块的**固定高度**（null = 按标题文本度量）。
+  ///
+  /// 「标题样式」是复合版式（插画 + 章节数 + 圆角药丸），文本度量和渲染高度对不上；
+  /// 这里直接给一个两边共用的固定高度 ⇒ 分页结果与真实渲染完全一致。
+  /// 只有阅读器里选了自定义标题样式时才会传。
+  final double? headingFixedHeight;
+
   const BookTypography({
     required this.fontSize,
     required this.lineHeight,
@@ -56,6 +63,7 @@ class BookTypography {
     this.paragraphSpacingFactor = 0.55,
     this.textScaler = TextScaler.noScaling,
     this.textHeightBehavior = const TextHeightBehavior(),
+    this.headingFixedHeight,
   });
 
   /// 段落 / 块之间的纵向间距
@@ -331,7 +339,10 @@ class BookPaginator {
       textDirection: TextDirection.ltr,
     )..layout(maxWidth: measureWidth);
     // 标题渲染带 Padding(top:4)（见 _buildEntry），度量须计入，否则标题页累积溢出。
-    final totalH = tp.height + (isHeading ? 4.0 : 0.0) + extraV;
+    // 自定义「标题样式」是复合版式（插画/药丸）⇒ 用两边共用的固定高度。
+    final totalH = (isHeading && typo.headingFixedHeight != null)
+        ? typo.headingFixedHeight!
+        : tp.height + (isHeading ? 4.0 : 0.0) + extraV;
 
     if (totalH + _kEps <= _remaining) {
       // 整块放得下

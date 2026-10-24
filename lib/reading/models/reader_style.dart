@@ -51,6 +51,8 @@ class ReaderStyle {
     // ── ④ 翻页 ──
     this.pageMode = 'slide',
     this.dualPage = false,
+    // ── 章标题版式（默认 / 仙鹤日间 / 仙鹤夜间 / 微信读书）──
+    this.chapterTitleStyle = '',
     // ── 底线（信纸行线）──
     this.underlineColor,
     this.underlineStyle = 0,
@@ -127,6 +129,9 @@ class ReaderStyle {
 
   final bool dualPage;
 
+  /// 章标题版式 id（'' = 默认；见 ReaderTitleStyle 的 id）
+  final String chapterTitleStyle;
+
   final int? underlineColor;
   final int underlineStyle;
   final double underlineAlpha;
@@ -169,6 +174,7 @@ class ReaderStyle {
     statusTextScale: statusTextScale,
     pageMode: pageMode,
     dualPage: dualPage,
+    chapterTitleStyle: chapterTitleStyle,
     underlineColor: underlineColor,
     underlineStyle: underlineStyle,
     underlineAlpha: underlineAlpha,
@@ -212,6 +218,7 @@ class ReaderStyle {
     'statusTextScale': statusTextScale,
     'pageMode': pageMode,
     'dualPage': dualPage,
+    'chapterTitleStyle': chapterTitleStyle,
     'underlineColor': underlineColor,
     'underlineStyle': underlineStyle,
     'underlineAlpha': underlineAlpha,
@@ -262,6 +269,7 @@ class ReaderStyle {
     statusTextScale: _d(j['statusTextScale'], 1.0),
     pageMode: (j['pageMode'] as String?) ?? 'slide',
     dualPage: j['dualPage'] as bool? ?? false,
+    chapterTitleStyle: (j['chapterTitleStyle'] as String?) ?? '',
     underlineColor: _i(j['underlineColor']),
     underlineStyle: _i(j['underlineStyle']) ?? 0,
     underlineAlpha: _d(j['underlineAlpha'], 0.35),
