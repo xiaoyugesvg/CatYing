@@ -20,7 +20,13 @@ enum _PomodoroPhase { idle, working, resting, paused }
 /// 长按打开配置弹层（循环次数 1~5、每轮休息 1~15 分钟）。休息只在两轮工作之间
 /// 发生，最后一轮工作结束后直接结束。计时用墙钟法，App 后台/息屏恢复后自动补齐。
 class PomodoroButton extends StatefulWidget {
-  const PomodoroButton({super.key});
+  /// [dark] = 强制用深/浅色玻璃面板；null = 跟随 App 主题。
+  ///
+  /// 阅读器的纸色由**样式**决定（米黄 / 夜间纸），和 App 主题可能不一致
+  /// —— 只看 App 主题会出现"深色纸上配浅色玻璃文案/反过来"。
+  const PomodoroButton({super.key, this.dark});
+
+  final bool? dark;
 
   @override
   State<PomodoroButton> createState() => _PomodoroButtonState();
@@ -169,7 +175,8 @@ class _PomodoroButtonState extends State<PomodoroButton>
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
-        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        final isDark =
+            widget.dark ?? (Theme.of(ctx).brightness == Brightness.dark);
         return SafeArea(
           top: false,
           child: StatefulBuilder(

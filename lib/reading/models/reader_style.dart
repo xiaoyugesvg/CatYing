@@ -823,5 +823,54 @@ class ReaderStyle {
       titleFontSize: 20,
       titleBold: false,
     ),
+    // ── 源阅读主题「雲和·無青」（用户 2026-10 提供 .srs，日/夜各一张纸）──
+    // 数值全部照搬 .srs 的 config：
+    //   行高 = 1 + lineSpacingExtra(15) / textSize(19)；段距 = 19/19；
+    //   边距 L25 R30 T14 B7；页眉距顶 54；页脚底 32；
+    //   页眉居中显示章节名；页脚左「电量 + 怪盗キッド♥」、中页码。
+    ReaderStyle(
+      id: 'builtin:wuqing',
+      name: '雲和·無青',
+      builtin: true,
+      bgIndex: 3,
+      dayBgIndex: 3,
+      fgColor: 0xFF000000,
+      fgColorNight: 0xFF355C59,
+      bgImageAsset: 'assets/images/reader_bg/reading_bg_wuqing_day.webp',
+      bgImageAssetNight: 'assets/images/reader_bg/reading_bg_wuqing_night.webp',
+      bgImageDark: false,
+      fontSize: 19,
+      lineHeight: 1.789,
+      letterSpacing: 0.1,
+      paraSpacing: 1.0,
+      indent: 0,
+      padLeft: 25,
+      padRight: 30,
+      padTop: 14,
+      padBottom: 7,
+      headerPadH: 30,
+      headerPadTop: 54,
+      footerPadH: 20,
+      footerPadBottom: 32,
+      headerC: '#',
+      footerL: 'n怪盗キッド♥',
+      footerC: 'p',
+      statusItems: [],
+      titleFontSize: 19,
+      titleBold: false,
+      titleAlign: 0,
+      chapterTitleStyle: 'custom',
+      chapterTitleHtml:
+          '<p style="text-align:left; color:#385353; font-size:1.5em; '
+          'margin-top:0.5em; margin-bottom:0em; padding-bottom:1.5em;">章节数</p>'
+          '<p style="text-align:left; font-weight:bold; color:#524E49; '
+          'font-size:2.0em; padding-bottom:4.1em; margin-bottom:1em;">章节名</p>',
+      chapterTitleHtmlNight:
+          '<p style="text-align:left; color:#B4B4B6; font-size:1.5em; '
+          'margin-top:0.5em; margin-bottom:0em; padding-bottom:1.5em;">章节数</p>'
+          '<p style="text-align:left; font-weight:bold; color:#7DDCE2; '
+          'text-shadow:0 0 5px #00a67c; font-size:2.0em; padding-bottom:4.1em; '
+          'margin-bottom:1em;">章节名</p>',
+    ),
   ];
 }

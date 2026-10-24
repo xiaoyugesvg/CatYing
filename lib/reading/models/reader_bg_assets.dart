@@ -54,6 +54,12 @@ class ReaderBgAssets {
       'assets/images/reader_bg/reading_bg_pika_night.webp';
   static const pikaPink = 'assets/images/reader_bg/reading_bg_pika_pink.webp';
 
+  /// 雲和·無青（源阅读主题，日 / 夜成对）
+  static const wuqingDay =
+      'assets/images/reader_bg/reading_bg_wuqing_day.webp';
+  static const wuqingNight =
+      'assets/images/reader_bg/reading_bg_wuqing_night.webp';
+
   /// 夜间竹林（刘海屏）
   static const nightForest =
       'assets/images/reader_bg/reading_bg_night_forest.png';
@@ -63,6 +69,7 @@ class ReaderBgAssets {
     gufengDay: gufengNight,
     pomoDay: pomoNight,
     pikaDay: pikaNight,
+    wuqingDay: wuqingNight,
   };
 
   /// 与某张壁纸成对的另一张（没有则返回 null）
@@ -81,6 +88,8 @@ class ReaderBgAssets {
     pikaDay,
     pikaNight,
     pikaPink,
+    wuqingDay,
+    wuqingNight,
   ];
 
   /// 选「日间壁纸」时用的清单：成对的夜间版不再重复占格
@@ -93,5 +102,6 @@ class ReaderBgAssets {
     pomoDay,
     pikaDay,
     pikaPink,
+    wuqingDay,
   ];
 }

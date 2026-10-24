@@ -336,13 +336,15 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
           _label('日夜自动切换 · 切日夜时套用对应的样式'),
           _autoSwitchCard(),
           _label('内置样式 ${widget.builtins.length} 套 · 长按管理'),
+          // 三列卡片：宽度按屏宽算，卡片本身带描边/投影，像一排小书
           Wrap(
             spacing: 10,
-            runSpacing: 14,
+            runSpacing: 12,
             children: [
               for (final s in widget.builtins)
                 _card(
                   s,
+                  width: _cardWidth(context),
                   onTap: () => _apply(s),
                   onMore: () => _showActions(s, builtin: true),
                 ),
@@ -587,6 +589,12 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
     });
   }
 
+  /// 三列卡片宽度：屏宽 - 页面左右内边距(32) - 两个列间距(10×2)，再三等分
+  double _cardWidth(BuildContext context) {
+    final w = MediaQuery.of(context).size.width;
+    return ((w - 32 - 20) / 3).clamp(88.0, 132.0);
+  }
+
   Widget _label(String text) => Padding(
     padding: const EdgeInsets.only(top: 10, bottom: 10),
     child: Text(
@@ -603,14 +611,34 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
     ReaderStyle s, {
     required VoidCallback onTap,
     VoidCallback? onMore,
+    required double width,
   }) {
     final selected = _activeId == s.id;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       onLongPress: onMore,
-      child: SizedBox(
-        width: 104,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        width: width,
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: _fg.withValues(alpha: selected ? 0.10 : 0.04),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: selected
+                ? _fg.withValues(alpha: 0.9)
+                : _fg.withValues(alpha: 0.07),
+            width: selected ? 1.6 : 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.10),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -620,52 +648,59 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
                 _preview(s, selected: selected),
                 if (selected)
                   Positioned(
-                    right: 4,
-                    top: 4,
-                    child: Icon(
-                      Icons.check_circle_rounded,
-                      size: 16,
-                      color: _fg,
-                      shadows: const [
-                        Shadow(color: Colors.black45, blurRadius: 4),
-                      ],
+                    right: -2,
+                    top: -2,
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        color: _fg,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.check_rounded, size: 12, color: _bg),
                     ),
                   ),
                 if (onMore != null)
                   Positioned(
-                    right: -2,
-                    bottom: -2,
+                    right: -4,
+                    bottom: -4,
                     child: GestureDetector(
                       onTap: onMore,
                       child: Container(
                         padding: const EdgeInsets.all(3),
                         decoration: BoxDecoration(
-                          color: _fg.withValues(alpha: 0.12),
+                          color: _bg,
                           shape: BoxShape.circle,
+                          border: Border.all(
+                            color: _fg.withValues(alpha: 0.12),
+                          ),
                         ),
                         child: Icon(
                           Icons.more_horiz_rounded,
                           size: 13,
-                          color: _fg.withValues(alpha: 0.8),
+                          color: _fg.withValues(alpha: 0.75),
                         ),
                       ),
                     ),
                   ),
               ],
             ),
-            const SizedBox(height: 5),
-            Text(
-              s.name,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 11,
-                height: 1.25,
-                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                color: _fg.withValues(alpha: selected ? 1 : 0.72),
+            const SizedBox(height: 7),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: Text(
+                s.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  height: 1.25,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                  color: _fg.withValues(alpha: selected ? 1 : 0.70),
+                ),
               ),
             ),
+            const SizedBox(height: 2),
           ],
         ),
       ),
@@ -737,7 +772,7 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
     );
   }
 
-  /// 迷你书页：样式自己的底色 / 壁纸 / 字色 / 行距
+  /// 迷你书页：样式自己的底色 / 壁纸 / 字色 / 行距 / 页眉页脚
   ///
   /// 按当前日夜取对应那套（[ReaderStylesPage.night]）：夜间打开时看到的是
   /// 夜间配色 + 夜间壁纸，而不是一排亮纸片。
@@ -747,6 +782,8 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
     final asset = night
         ? (s.bgImageAssetNight ?? s.bgImageAsset)
         : s.bgImageAsset;
+    // 夜间没有夜版壁纸 ⇒ 与阅读器一样压暗，避免小样"夜里是亮纸"
+    final dim = night && s.bgImageAssetNight == null;
     final bg = bgColor != null
         ? Color(bgColor)
         : (night ? const Color(0xFF2B2B2B) : const Color(0xFFFFFFFF));
@@ -755,40 +792,96 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
     final fg = fgColor != null
         ? Color(fgColor)
         : (dark ? const Color(0xFFE2E2E2) : const Color(0xFF1A1A1A));
-    final gap = (s.lineHeight - 1).clamp(0.15, 1.2) * 4;
-    return Container(
-      height: 66,
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: selected ? _fg : _fg.withValues(alpha: 0.16),
-          width: selected ? 2 : 1,
-        ),
-        image: asset == null
-            ? null
-            : DecorationImage(image: AssetImage(asset), fit: BoxFit.cover),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            height: 4,
-            width: 26,
-            margin: const EdgeInsets.only(bottom: 5),
-            color: fg.withValues(alpha: 0.85),
+    final gap = (s.lineHeight - 1).clamp(0.12, 1.0) * 4.5;
+    final showHeader =
+        s.headerL.isNotEmpty ||
+        s.headerC.isNotEmpty ||
+        s.headerR.isNotEmpty ||
+        s.statusItems.contains('时间') ||
+        s.statusItems.contains('书名');
+    final showFooter =
+        s.footerL.isNotEmpty ||
+        s.footerC.isNotEmpty ||
+        s.footerR.isNotEmpty ||
+        s.statusItems.contains('页码') ||
+        s.statusItems.contains('进度');
+    return AspectRatio(
+      // 小页比例接近单页纸张（宽:高 ≈ 0.70），比原来的横条更像"书"
+      aspectRatio: 0.70,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(10, 9, 10, 9),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(11),
+          border: Border.all(
+            color: selected
+                ? _fg.withValues(alpha: 0.25)
+                : _fg.withValues(alpha: 0.10),
           ),
-          for (var i = 0; i < 3; i++) ...[
-            Container(
-              height: 2.5,
-              width: i == 2 ? 26 : double.infinity,
-              color: fg.withValues(alpha: 0.5),
-            ),
-            SizedBox(height: 2 + gap),
+          image: asset == null
+              ? null
+              : DecorationImage(
+                  image: AssetImage(asset),
+                  fit: BoxFit.cover,
+                  colorFilter: dim
+                      ? ColorFilter.mode(
+                          Colors.black.withValues(alpha: 0.45),
+                          BlendMode.darken,
+                        )
+                      : null,
+                ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (showHeader) ...[
+              Row(
+                children: [
+                  _miniBar(18, 2, fg, 0.30),
+                  const Spacer(),
+                  _miniBar(12, 2, fg, 0.30),
+                ],
+              ),
+              const SizedBox(height: 7),
+            ],
+            // 章节数（小字）+ 章节名（粗标题）：与真实版式的层次一致
+            _miniBar(22, 2.5, fg, 0.45),
+            const SizedBox(height: 4),
+            _miniBar(38, 5, fg, 0.90, radius: 2),
+            SizedBox(height: 7 + gap * 0.5),
+            for (var i = 0; i < 5; i++) ...[
+              _miniBar(i == 4 ? 30 : double.infinity, 2.6, fg, 0.55),
+              SizedBox(height: 3 + gap),
+            ],
+            const Spacer(),
+            if (showFooter)
+              Row(
+                children: [
+                  _miniBar(14, 2, fg, 0.28),
+                  const Spacer(),
+                  _miniBar(10, 2, fg, 0.28),
+                ],
+              ),
           ],
-        ],
+        ),
+      ),
+    );
+  }
+
+  /// 迷你书页里的一条"文字行"
+  Widget _miniBar(
+    double width,
+    double height,
+    Color color,
+    double alpha, {
+    double radius = 1.5,
+  }) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: alpha),
+        borderRadius: BorderRadius.circular(radius),
       ),
     );
   }

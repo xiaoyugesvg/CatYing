@@ -40,6 +40,12 @@ class BookPageCurl extends StatefulWidget {
   /// 纸背是否绘制纸张纹理
   final bool paperTexture;
 
+  /// 纸背明暗（true = 深色纸）。null = 用 App 主题明暗。
+  ///
+  /// 阅读器的纸色由**样式**决定（米黄 / 古风 / 夜间纸），和 App 主题不一定一致
+  /// —— 只看 `Theme.brightness` 会出现"米黄纸配近黑纸背"。
+  final bool? dark;
+
   const BookPageCurl({
     super.key,
     required this.page,
@@ -54,6 +60,7 @@ class BookPageCurl extends StatefulWidget {
     this.shadowStrength = 1.0,
     this.quality = 1,
     this.paperTexture = true,
+    this.dark,
   });
 
   @override
@@ -259,7 +266,8 @@ class _BookPageCurlState extends State<BookPageCurl>
     }
     // 动画中：下方露出目标页，上层 CustomPaint 画卷曲的翻起页
     final target = _direction == 1 ? widget.nextPage : widget.prevPage;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isDark =
+        widget.dark ?? (Theme.of(context).brightness == Brightness.dark);
     return [
       Positioned.fill(child: widget.background),
       Positioned.fill(

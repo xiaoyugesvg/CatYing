@@ -568,6 +568,34 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         : _bgs[_bgIndex][1];
   }
 
+  /// 当前模式下真正生效的自选背景图（夜间优先夜图）
+  String? get _activeFileBgPath =>
+      _bgIndex == 5 ? (_customBgPathNight ?? _customBgPath) : _customBgPath;
+
+  /// 当前模式下真正生效的壁纸 asset（夜间优先夜版）
+  String? get _activeBgAsset =>
+      _bgIndex == 5 ? (_bgImageAssetNight ?? _bgImageAsset) : _bgImageAsset;
+
+  /// 当前模式是否有图片背景（自选图或内置壁纸，含夜间版）
+  bool get _hasImageBg {
+    final path = _activeFileBgPath;
+    return (path != null && File(path).existsSync()) || _activeBgAsset != null;
+  }
+
+  /// 翻页动画（覆盖 / 仿真）用的"纸色"：动画中的滑动页必须不透明，
+  /// 否则会透出前一页的文字。优先用样式底色/自定义色，图片背景用近似纸色。
+  Color get _turnPaperColor {
+    final solid = _customBgColor;
+    if (solid != null) return solid;
+    final styleBg = _bgIndex == 5 ? _styleBgNight : _styleBgDay;
+    if (styleBg != null) return Color(styleBg);
+    if (_hasImageBg) {
+      final dark = _bgIndex == 5 || (_bgImageDark ?? false);
+      return dark ? const Color(0xFF17191B) : const Color(0xFFF4F2EA);
+    }
+    return _bgTop;
+  }
+
   /// 夜间模式：把壁纸压暗一层。
   ///
   /// 样式自带的壁纸都是日间纸色；夜间如果只把字换成浅色、底图不动，
@@ -2136,7 +2164,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          content: Text(m),
+          // 跟随当前纸色（默认黑底在米黄/古风纸上一块突兀的黑）
+          content: Text(m, style: TextStyle(color: _fg, fontSize: 13)),
+          backgroundColor: _sheetBg,
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 1),
         ),
@@ -2160,19 +2190,19 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     final extraBottom = mq.padding.bottom > 0 ? 0.0 : mq.viewPadding.bottom;
     // 自选图片（`_customBgPath`）：优先级最高 ✓
     //   夜间优先用夜间那张（.srs 自带日/夜两套），没有再沿用日间图并压暗
-    final fileBgPath = _bgIndex == 5
-        ? (_customBgPathNight ?? _customBgPath)
-        : _customBgPath;
+    final fileBgPath = _activeFileBgPath;
     final useFileBg = fileBgPath != null && File(fileBgPath).existsSync();
     // 有任何图片背景（自选图 / 内置壁纸）⇒ Scaffold 底色透明，露出图片 ✓
     // 夜间优先用样式自带的夜间壁纸（古风/泼墨都有单独的黑白两版）
-    final bgAsset =
-        _bgIndex == 5 ? (_bgImageAssetNight ?? _bgImageAsset) : _bgImageAsset;
+    final bgAsset = _activeBgAsset;
     final useImgBg = useFileBg || bgAsset != null;
     // 状态栏 / Home 指示条图标明暗（db 的 darkStatusIcon）：深底换浅色图标，
     // 否则夜间是一排看不见的黑色图标。用背景实际明暗判断，不看昼夜按钮 ——
-    // 白天选了深色壁纸同样要浅色图标。
-    final darkSurface = _bgIndex == 5 || (_bgImageDark ?? false);
+    // 白天选了深色壁纸/深色自定义底同样要浅色图标。
+    final darkSurface =
+        _bgIndex == 5 ||
+        (_bgImageDark ?? false) ||
+        (!useImgBg && _bgTop.computeLuminance() < 0.45);
     final overlayStyle =
         (darkSurface ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark)
             .copyWith(
@@ -2318,7 +2348,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     () => Positioned(
                       right: 12,
                       bottom: _pomodoroBottomOffset,
-                      child: const PomodoroButton(),
+                      // 番茄钟玻璃面板按**当前纸色**取明暗（不跟 App 主题）
+                      child: PomodoroButton(
+                        dark: _turnPaperColor.computeLuminance() < 0.45,
+                      ),
                     ),
                   ),
                 // 听书光碟（Cmbok 同款）：迷你条左滑收起后悬浮，点按展开回迷你条、
@@ -2544,7 +2577,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           //   （触发路径都是日常操作：仿真模式读到大页号点「下一章」/ 旋屏 ✓）。
           //   统一走 [_safePageIndex]：越界就夹回合法范围 + 记一条日志 ✓，**不 throw** ✓
           final pi = _safePageIndex();
-          return BookPageCurl(
+          // 与覆盖模式一致：按住下滑一键书签（原来仿真模式漏了这层包装）
+          return withPressDownBookmark(
+            BookPageCurl(
             page: _pageContent(fg, _pages[pi], chapter: _chapterOfPage(pi)),
             nextPage: pi + 1 < _pages.length
                 ? _pageContent(
@@ -2556,7 +2591,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             prevPage: pi > 0
                 ? _pageContent(fg, _pages[pi - 1], chapter: _chapterOfPage(pi - 1))
                 : null,
-            background: Container(color: _bgTop),
+            // 有壁纸时不要铺纯色底（否则翻页秒变"一块米黄"）：让最外层
+            // 那张全屏壁纸透出来，静止与翻页中的底完全一致
+            background: _hasImageBg
+                ? const SizedBox.shrink()
+                : Container(color: _bgTop),
+            // 纸面明暗按**样式底色**判断，不看 App 主题：米黄/古风纸在深色主题下
+            // 若按 App 主题算，卷起的纸背会被画成近黑色（明显的"翻页发黑"）
+            dark: _bgIndex == 5 || (_bgImageDark ?? false),
             canNext: pi + 1 < _pages.length,
             canPrev: pi > 0,
             onTurnNext: () {
@@ -2574,6 +2616,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               }
             },
             onTapCenter: _toggleBar,
+            ),
           );
         }
 
@@ -2626,7 +2669,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           final pi = _safePageIndex();
           return withPressDownBookmark(
             BookPageCover(
-              backgroundColor: _bgTop,
+              // 滑动页必须不透明（否则透出前一页文字），但颜色要贴近当前纸色：
+              // 有壁纸时用近似纸色，避免动画中闪一块米黄/白
+              backgroundColor: _turnPaperColor,
               page: _pageContent(fg, _pages[pi], chapter: _chapterOfPage(pi)),
               nextPage: pi + 1 < _pages.length
                   ? _pageContent(
@@ -3582,7 +3627,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     Color labelColor,
     bool isDark,
   ) {
-    final selected = asset == _bgImageAsset;
+    final selected = asset == _activeBgAsset;
     final isNone = asset == null;
     return GestureDetector(
       onTap: () => Navigator.pop(ctx, asset ?? ''),
@@ -3704,11 +3749,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     //    铺底后滑动时看到的是"两张纸在平移" ✓
     // ⚠️ 自定义背景图时不铺（否则会把图片盖掉 ✗）
     // 有**任何图片背景**（自选图 / 内置壁纸）时不铺页底色 ✓（否则会把图盖住 ✗）
-    final imgBg =
-        (_customBgPath != null && File(_customBgPath!).existsSync()) ||
-        _bgImageAsset != null ||
-        // 只有夜间壁纸的样式（日间无图）：夜间也不铺底色，否则会把壁纸盖住
-        (_bgIndex == 5 && _bgImageAssetNight != null);
+    // 有任何图片背景（自选图日/夜任一 / 内置壁纸任一日夜版）时不铺页底色，
+    // 否则会把壁纸盖住。用**当前模式实际生效**的那张判断（只配了夜间图的
+    // 样式，日间也要正确判断，不能用日间字段一刀切）
+    final imgBg = _hasImageBg;
     final body = imgBg
         ? _pageBody(fg, page, chapter: chapter)
         : ColoredBox(
@@ -3766,16 +3810,20 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       _footerR.trim().isNotEmpty;
 
   /// 一次扫描替换（避免替换出来的内容里再被二次替换）
-  String _resolveFormat(String tpl, double progress) {
+  ///
+  /// [chapter] 是**这一页所属**的章（无缝连读时 `_index` 可能还没跟上，
+  /// 页眉页脚会短暂显示上一章的章名/章号）。
+  String _resolveFormat(String tpl, double progress, [int? chapter]) {
     if (tpl.trim().isEmpty) return '';
     final scrollMode = _rs.pageMode == PageMode.scroll;
+    final ch = (chapter ?? _index).clamp(0, widget.chapters.length - 1);
     return resolveHeaderFooterTemplate(tpl, {
       '%': '${(progress * 100).round()}%',
-      '#': widget.chapters[_index].name,
+      '#': widget.chapters[ch].name,
       'C': '${widget.chapters.length}',
       'P': scrollMode ? '-' : '$_localPageCount',
       'B': widget.bookName,
-      'c': '${_index + 1}',
+      'c': '${ch + 1}',
       'p': scrollMode ? '-' : '$_localPageNo',
       't': TimeOfDay.now().format(context),
       'b': _batteryValue(),
@@ -3811,10 +3859,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     String left,
     String center,
     String right,
-    double progress,
-  ) {
+    double progress, {
+    int? chapter,
+  }) {
     Widget slot(String tpl, TextAlign align) {
-      final t = _resolveFormat(tpl, progress);
+      final t = _resolveFormat(tpl, progress, chapter);
       return Text(
         t,
         textAlign: align,
@@ -3857,7 +3906,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 页眉（信息栏上排）：时间 · 书名 · 进度
   ///
   /// 分页 / 上下滚动两种模式共用（滚动模式没有页码，进度按章节位置算）。
-  Widget _statusHeader(Color fg, {double? progressOverride}) {
+  Widget _statusHeader(Color fg, {double? progressOverride, int? chapter}) {
     final items = _rs.statusItems;
     final progress =
         progressOverride ??
@@ -3870,7 +3919,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           _headerPadH,
           4,
         ),
-        child: _formatRow(fg, _headerL, _headerC, _headerR, progress),
+        child: _formatRow(
+          fg,
+          _headerL,
+          _headerC,
+          _headerR,
+          progress,
+          chapter: chapter,
+        ),
       );
     }
     return Padding(
@@ -3902,7 +3958,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   }
 
   /// 页脚（信息栏下排）：章节 · 电量 · 页码
-  Widget _statusFooter(Color fg, {bool showPage = true}) {
+  Widget _statusFooter(Color fg, {bool showPage = true, int? chapter}) {
     final items = _rs.statusItems;
     // 滚动模式没有页码 ⇒ 用"读到第几章"当进度
     final progress = _pages.isEmpty
@@ -3918,7 +3974,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           _footerPadH,
           _footerPadBottom + 6,
         ),
-        child: _formatRow(fg, _footerL, _footerC, _footerR, progress),
+        child: _formatRow(
+          fg,
+          _footerL,
+          _footerC,
+          _footerR,
+          progress,
+          chapter: chapter,
+        ),
       );
     }
     return Padding(
@@ -3933,7 +3996,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           if (items.contains('章节'))
             Expanded(
               child: Text(
-                widget.chapters[_index].name,
+                widget.chapters[(chapter ?? _index).clamp(
+                  0,
+                  widget.chapters.length - 1,
+                )].name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: _statusStyle(fg),
@@ -3961,7 +4027,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // ── 页眉 ────────────────────────────────────────────
-        if (showHeader) _statusHeader(fg),
+        if (showHeader) _statusHeader(fg, chapter: pageChapter),
         // ── 正文 ────────────────────────────────────────────
         Expanded(
           child: Padding(
@@ -4110,7 +4176,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           ),
         ),
         // ── 页脚 ────────────────────────────────────────────
-        if (showFooter) _statusFooter(fg),
+        if (showFooter) _statusFooter(fg, chapter: pageChapter),
       ],
     );
   }
