@@ -273,6 +273,28 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 分页结果（上下模式为空 —— 那个模式不分页）
   List<BookPage> _pages = const [];
 
+  /// `_pages` 里**每一页所属的章号**（与 `_pages` 等长）。
+  ///
+  /// 为什么需要：无缝翻页会把**下一章的页**直接拼到 `_pages` 末尾
+  /// （内容级无缝，参考 Legado：滑到章末继续滑就是下一章），
+  /// 于是 `_pages` 不再"只属于一章" ⇒ 页码、进度、书签、标题都必须按
+  /// **每页自己的章号**来判，而不是统用 `_index`。
+  List<int> _pageChapterOf = const [];
+
+  /// 已经拼到 `_pages` 末尾的章节号（-1 = 尚未拼）
+  int _appendedChapter = -1;
+
+  /// 正在后台排版的"下一章"（防重复拼接：分页要跨多帧，期间可能被再次触发）
+  int _appendingChapter = -1;
+
+  /// 无缝拼接的页数上限：防止一次读几十章后 `_pages` 无限增长。
+  /// 超过后停止"提前拼下一章"，退化成原来的点击/按钮翻章（功能不受影响）。
+  static const int _kSeamlessPageCap = 400;
+
+  /// 章末/章首"越界滑动"切章的节流时间戳 —— 一次拖动会连续派发多帧
+  /// `OverscrollNotification`，不节流会被切到后面好几章去。
+  DateTime? _lastEdgeTurnAt;
+
   // ── 漫画（Legado bookSourceType=2）───────────────────────────
   //
   // 漫画源的正文规则返回的是**图片 URL 列表**，不是文字。
@@ -1353,6 +1375,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             _paragraphs = const [];
             _invalidateTtsSegs();
             _pages = const [];
+            _pageChapterOf = const [];
+            _appendedChapter = -1;
             _loading = false;
             _error = null;
           });
@@ -1367,6 +1391,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       final paras = _splitParagraphs(_applyPurify(r.content));
       _cache[i] = paras; // 缓存**净化后原文**（A2 繁简切换时从原文重转 ✓）
       _evictIfNeeded();
+      // 预取晚到 ⇒ 补一次"拼下一章"（用户可能已经停在章末等无缝连读了）
+      if (prefetchOnly) _maybeAppendAhead();
       if (!prefetchOnly) {
         setState(() {
           _paragraphs = _applyConvert(paras);
@@ -2276,7 +2302,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             physics: const _TapFriendlyPagePhysics(),
             itemCount: spreads.length,
             onPageChanged: (i) {
-              setState(() => _pageIndex = spreads[i].first);
+              final page = spreads[i].first;
+              setState(() => _pageIndex = page);
+              _syncChapterWithPage(page);
               _saveProgress();
             },
             itemBuilder: (c, i) => Row(
@@ -2327,18 +2355,25 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         return Stack(
           children: [
             withPressDownBookmark(
-              PageView.builder(
-                controller: _pageCtrl,
-                physics: _rs.pageMode == PageMode.none
-                    // 无动画：**不滑动**，点点击区/翻页按钮瞬切（Duration.zero）
-                    ? const NeverScrollableScrollPhysics()
-                    : const _TapFriendlyPagePhysics(),
-                itemCount: _pages.length,
-                onPageChanged: (i) {
-                  setState(() => _pageIndex = i);
-                  _saveProgress();
-                },
-                itemBuilder: (context, i) => _pageContent(fg, _pages[i]),
+              NotificationListener<ScrollNotification>(
+                // 章末再滑一次 → 下一章（无缝拼接接不上时的兜底）
+                onNotification: _onPageScrollNotification,
+                child: PageView.builder(
+                  controller: _pageCtrl,
+                  physics: _rs.pageMode == PageMode.none
+                      // 无动画：**不滑动**，点点击区/翻页按钮瞬切（Duration.zero）
+                      ? const NeverScrollableScrollPhysics()
+                      : const _TapFriendlyPagePhysics(),
+                  itemCount: _pages.length,
+                  onPageChanged: (i) {
+                    setState(() => _pageIndex = i);
+                    // 无缝翻页：翻到的页若属于下一章，立刻把"当前章"切过去
+                    _syncChapterWithPage(i);
+                    _maybeAppendAhead();
+                    _saveProgress();
+                  },
+                  itemBuilder: (context, i) => _pageContent(fg, _pages[i]),
+                ),
               ),
             ),
             if (_paginating)
@@ -3282,9 +3317,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     final items = _rs.statusItems;
     final progress =
         progressOverride ??
-        (_pages.isEmpty
-            ? 0.0
-            : (_pageIndex.clamp(0, _pages.length - 1) + 1) / _pages.length);
+        (_pages.isEmpty ? 0.0 : _localPageNo / _localPageCount);
     return Padding(
       padding: EdgeInsets.fromLTRB(
         _headerPadH,
@@ -3337,7 +3370,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           const Spacer(),
           if (items.contains('电量')) _batteryText(fg),
           if (showPage && items.contains('页码'))
-            _statusText('${_pageIndex + 1}/${_pages.length}', fg),
+            _statusText('$_localPageNo/$_localPageCount', fg),
         ],
       ),
     );
@@ -4357,7 +4390,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 Padding(
                   padding: const EdgeInsets.only(right: 6),
                   child: Text(
-                    '${_pageIndex + 1}',
+                    '$_localPageNo',
                     style: TextStyle(
                       fontSize: AppTheme.fontSubhead,
                       fontWeight: FontWeight.w600,
@@ -4381,14 +4414,17 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   ),
                   child: pageMode
                       ? Slider(
-                          value: (_pageIndex + 1).toDouble().clamp(
+                          // 滑块按**本章**的页范围走（拼进来的下一章不算在内），
+                          // 否则会出现"第 3/12 页"的页码配 58 页的滑块。
+                          value: _localPageNo.toDouble().clamp(
                             1.0,
-                            _pages.length.toDouble(),
+                            _localPageCount.toDouble(),
                           ),
                           min: 1,
-                          max: _pages.length.toDouble().clamp(1.0, 1e9),
+                          max: _localPageCount.toDouble(),
                           onChanged: (v) {
-                            final i = v.round() - 1;
+                            final (start, _) = _chapterPageRange(_index);
+                            final i = start + v.round() - 1;
                             if (i != _pageIndex) {
                               if (_pageCtrl.hasClients) _pageCtrl.jumpToPage(i);
                             }
@@ -4415,7 +4451,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 Padding(
                   padding: const EdgeInsets.only(left: 6),
                   child: Text(
-                    '${_pages.length}',
+                    '$_localPageCount',
                     style: TextStyle(
                       fontSize: AppTheme.fontSubhead,
                       fontWeight: FontWeight.w600,
@@ -4603,6 +4639,215 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     return 0;
   }
 
+  /// 当前是否走「内容级无缝翻页」：把下一章的页直接拼到 `_pages` 末尾。
+  ///
+  /// 只对**单页**的「左右 / 无动画」开启：
+  ///   · 双页（横屏 spread）页码/切片语义不同，先不动；
+  ///   · 仿真 / 覆盖本来就会在章末 `_go(1)`，且不挂 PageView；
+  ///   · 上下滚动模式不分页。
+  bool get _seamlessPaging {
+    if (_rs.pageMode != PageMode.slide && _rs.pageMode != PageMode.none) {
+      return false;
+    }
+    // 双页（横屏 + dualPage）先不拼：它的"页"是两页并排的 spread，
+    // 页码/切片语义都不同，拼进来容易把页码算错。
+    final landscape =
+        MediaQuery.of(context).orientation == Orientation.landscape;
+    if (_rs.dualPage && landscape) return false;
+    return true;
+  }
+
+  /// 某章在 `_pages` 里的页范围 `[start, end)`（无缝拼接后一章可能有多段）。
+  /// 找不到时返回整段（退化成旧行为）。
+  (int, int) _chapterPageRange(int chapter) {
+    var start = -1;
+    var end = -1;
+    for (var i = 0; i < _pageChapterOf.length; i++) {
+      if (_pageChapterOf[i] != chapter) continue;
+      if (start < 0) start = i;
+      end = i + 1;
+    }
+    if (start < 0) return (0, _pages.length);
+    return (start, end);
+  }
+
+  /// 当前**章内**页码（1 起）与本章总页数 —— 页眉页码、进度、滑块都用它，
+  /// 这样拼了下一章之后也不会显示成 "12/58"（58 里含下一章的页）。
+  int get _localPageNo {
+    final (start, end) = _chapterPageRange(_index);
+    final n = _pageIndex - start + 1;
+    return n.clamp(1, (end - start).clamp(1, 1 << 30));
+  }
+
+  int get _localPageCount {
+    final (start, end) = _chapterPageRange(_index);
+    return (end - start).clamp(1, 1 << 30);
+  }
+
+  /// 分页用的排版参数（`_paginate` 与「拼下一章」共用，避免两处漂移）
+  BookTypography _layoutTypography() {
+    return BookTypography(
+      fontSize: _fontSize,
+      lineHeight: _lineHeight,
+      padding: (_padLeft + _padRight) / 2,
+      verticalPadding: _padTop,
+      fontFamily: null,
+      inheritedStyle: TextStyle(
+        letterSpacing: _letterSpacing,
+        fontWeight: _fontWeightToW(_fontWeight),
+      ),
+      // 章标题在渲染端是「正文 +3 / 行高 1.5」，与分页器默认公式（+12）不同
+      headingFontSizeOverride: _fontSize + 3,
+      headingHeightOverride: 1.5,
+      paragraphSpacingFactor: _paraSpacing,
+      textScaler: MediaQuery.textScalerOf(context),
+    );
+  }
+
+  /// 某章的 blocks：章标题（可选）+ 正文段落（含首行缩进）。
+  ///
+  /// · 「隐藏重复标题」打开时**连标题块都不生成**（`_blockOffset == 0`）：
+  ///   否则度量按标题算（约 30px 字号 + 行高 ≈ 65px）、渲染却被
+  ///   `SizedBox.shrink()` 吃掉 ⇒ 每章第一页顶上凭空空一大块；
+  /// · 首行缩进**一并交给分页度量**（渲染侧不再重复加），否则渲染比量出来
+  ///   多占宽、多折行 ⇒ 页面底部溢出被裁。
+  List<BookBlock> _blocksForChapter(int chapter, List<String> paras) {
+    return <BookBlock>[
+      if (_blockOffset == 1) BookBlock.heading(widget.chapters[chapter].name, 1),
+      ...paras.map(
+        (p) => BookBlock.paragraph(
+          _indent > 0 ? '\u3000' * _indent.round() + p : p,
+        ),
+      ),
+    ];
+  }
+
+  /// 实际可排文字的高度（扣掉页眉 + 页脚）
+  double get _textAreaHeight =>
+      (_viewport.height - _headerFooterHeight()).clamp(1.0, _viewport.height);
+
+  /// 把**下一章**的页拼到 `_pages` 末尾（内容级无缝）。
+  ///
+  /// 时机：本章分页完成后；以及翻页接近已拼区域末尾时（链式补）。
+  /// 只拼**已缓存**的章节 —— 没预取到就不拼，用户滑到章末仍可点/按钮进下一章。
+  Future<void> _appendNextChapter(int gen, int cur) async {
+    if (!_seamlessPaging) return;
+    final next = cur + 1;
+    if (next >= widget.chapters.length) return;
+    if (_appendedChapter == next) return;
+    // 已经在排同一章 → 不重复开一份（分页跨多帧，翻页期间会被反复触发）
+    if (_appendingChapter == next) return;
+    if (_pages.length >= _kSeamlessPageCap) return;
+    final paras = _cache[next];
+    if (paras == null || paras.isEmpty) return;
+    // 视口还没量出来（首帧）→ 拼出来的页高不对，等下次翻页再补
+    if (_viewport.width <= 0 || _viewport.height <= 0) return;
+
+    _appendingChapter = next;
+    try {
+      final BookPaginator pg;
+      try {
+        pg = BookPaginator(
+          blocks: _blocksForChapter(next, paras),
+          viewportWidth: _viewport.width,
+          viewportHeight: _textAreaHeight,
+          typo: _layoutTypography(),
+          chapterStarts: const {0},
+          bubbleInnerWidth:
+              _rs.bubbleMode == BubbleMode.none ? 0 : _bubbleTextWidth,
+          bubbleExtraV: _bubbleExtraV,
+        );
+      } catch (_) {
+        return; // 度量失败就放弃拼接（不影响本章阅读）
+      }
+      final out = <BookPage>[];
+      while (!pg.finished) {
+        pg.stepInto(out, chunk: 60);
+        if (!mounted || gen != _paginateGen) return; // 期间换章/重排 → 丢弃
+        WidgetsBinding.instance.scheduleFrame();
+        await WidgetsBinding.instance.endOfFrame;
+      }
+      if (!mounted || gen != _paginateGen || out.isEmpty) return;
+      setState(() {
+        _pages = [..._pages, ...out];
+        _pageChapterOf = [
+          ..._pageChapterOf,
+          ...List<int>.filled(out.length, next),
+        ];
+        _appendedChapter = next;
+      });
+    } finally {
+      if (_appendingChapter == next) _appendingChapter = -1;
+    }
+  }
+
+  /// 翻页时检查：快到已拼区域末尾就继续拼下一章（保证连读不断档）。
+  void _maybeAppendAhead() {
+    if (!_seamlessPaging) return;
+    if (_pages.isEmpty) return;
+    if (_pages.length - _pageIndex > 12) return; // 还有得翻，不用提前拼
+    // 基准章：已经拼过就用拼到的那一章，没拼过（下一章当时还没预取到）就用本章
+    // —— 这样预取晚到也能在下次翻页时补上拼接，不会一直停在"没拼"状态。
+    final base = _appendedChapter >= 0 ? _appendedChapter : _pagesChapter;
+    if (base < 0) return;
+    _appendNextChapter(_paginateGen, base);
+  }
+
+  /// PageView 越界滑动的兜底：无缝拼接接不上时，章末再滑一次就进下一章。
+  ///
+  /// 接不上的情况有三种：
+  ///   · 下一章还没预取到（网络慢 / 用户把「预取章节数」设成 0）；
+  ///   · `_pages` 已经到无缝拼接的页数上限；
+  ///   · 这本书就剩这一章了（此时 `_go` 会提示"已经是最后一章"）。
+  bool _onPageScrollNotification(ScrollNotification n) {
+    if (n is! OverscrollNotification) return false;
+    if (n.depth != 0) return false; // 只认 PageView 自身的越界
+    if (!_rs.pageMode.paginates) return false;
+    if (n.overscroll > 4 && _pageIndex >= _pages.length - 1) {
+      _edgeTurn(1);
+    } else if (n.overscroll < -4 && _pageIndex <= 0) {
+      _edgeTurn(-1);
+    }
+    return false;
+  }
+
+  void _edgeTurn(int delta) {
+    final now = DateTime.now();
+    final last = _lastEdgeTurnAt;
+    if (last != null && now.difference(last) < const Duration(milliseconds: 700)) {
+      return;
+    }
+    _lastEdgeTurnAt = now;
+    _go(delta);
+  }
+
+  /// 页号落在别的章上 → 把"当前章"切过去（无缝翻页的核心）。
+  ///
+  /// 只改章节状态，**不重新分页**（目标页已经在 `_pages` 里了）。
+  /// 书签、TTS 分段、阅读进度都跟着章节走。
+  void _syncChapterWithPage(int pageIndex) {
+    if (pageIndex < 0 || pageIndex >= _pageChapterOf.length) return;
+    final ch = _pageChapterOf[pageIndex];
+    if (ch == _index || ch < 0) return;
+    // 正文段落也换成新章（拼进来的页自带文本，渲染不受影响；
+    // 但 TTS、书签按段落定位、全书搜索都要用 `_paragraphs`，不换会读到上一章）
+    final paras = _cache[ch];
+    setState(() {
+      _index = ch;
+      _pagesChapter = ch;
+      if (paras != null) _paragraphs = _applyConvert(paras);
+      // 上一章的插图列表对本章无意义（图片模式面板会展示错章）
+      _chapterImages = const [];
+    });
+    _invalidateTtsSegs();
+    unawaited(_switchBookmarksTo(ch));
+    unawaited(_saveProgress());
+    // 走的是"无缝切章"，没经过 `_loadChapter` ⇒ 预取要在这里补一次，
+    // 否则下一章永远不会被抓到缓存，拼接链断在一章之后。
+    _prefetchAhead(ch);
+    _maybeAppendAhead();
+  }
+
   /// 调参重排（改字号 / 行距 / 边距 ✓）：**不换章** ✓，只是按新排版重量一遍 ✓。
   /// 与 [_paginate] 的区别：先把旧页清掉（旧页是按**旧**字号度量的 ✗，
   /// 而渲染已经用新字号 ✓ → 正文被 `NeverScrollableScrollPhysics` 的
@@ -4614,6 +4859,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     final anchor = _currentPageAnchor();
     setState(() {
       _pages = const [];
+      _pageChapterOf = const [];
+      _appendedChapter = -1;
       _pageIndex = 0;
       _pagesChapter = -1; // 强制走"清干净"分支 ✓
     });
@@ -4660,26 +4907,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       _paginating = true;
       if (!sameChapter) {
         _pages = const [];
+        _pageChapterOf = const [];
+        _appendedChapter = -1;
+        _appendingChapter = -1; // 上一轮拼接作废（代次已变，它的 setState 会被丢弃）
         _pageIndex = 0;
       }
       _pagesChapter = chapter;
     });
-    // ✅ 「隐藏重复标题」打开时**连标题块都不生成**：
-    //   原来照样生成、渲染时 `SizedBox.shrink()` 吃掉 ⇒ 度量按标题算（约 30px
-    //   字号 + 行高 ≈ 65px）、渲染却是 0 ⇒ 每章第一页顶上凭空空一大块，
-    //   看着就是"间距不对劲"。
-    final hasHeading = _blockOffset == 1;
-    final blocks = <BookBlock>[
-      // 章标题当 heading 块，保证它自己起一页
-      if (hasHeading) BookBlock.heading(widget.chapters[_index].name, 1),
-      // ✅ 首行缩进**一并交给分页度量**（渲染侧不再重复加 ✓）
-      //   否则渲染比量出来的多占宽、多折行 ⇒ 页面底部溢出被裁 ✗
-      ..._paragraphs.map(
-        (p) => BookBlock.paragraph(
-          _indent > 0 ? '\u3000' * _indent.round() + p : p,
-        ),
-      ),
-    ];
     // 🔴 分页的"可用区域"必须与**实际渲染**一致 ✗（原来两处对不上 ✓）：
     //   · 横向：渲染侧给正文 ListView 加了 `_padLeft/_padRight`（本轮补上 ✓）
     //   · 纵向：渲染侧上 / 下还有**页眉 + 页脚**占位 ✓
@@ -4688,27 +4922,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     //   · 字距 / 字重 / 系统字号缩放：渲染端 `_bodyStyle` 带 letterSpacing，
     //     且 `Text` 自动套 MediaQuery.textScaler ✓ —— 度量不带这些 ✗ ⇒
     //     渲染比量出来更宽 ⇒ 每段多折行 ⇒ 页底被裁（"字间距怎么看都别扭"）
-    final typo = BookTypography(
-      fontSize: _fontSize,
-      lineHeight: _lineHeight,
-      padding: (_padLeft + _padRight) / 2,
-      verticalPadding: _padTop,
-      fontFamily: null,
-      inheritedStyle: TextStyle(
-        letterSpacing: _letterSpacing,
-        fontWeight: _fontWeightToW(_fontWeight),
-      ),
-      // 章标题在渲染端是「正文 +3 / 行高 1.5」，与分页器默认公式（+12）不同，
-      // 不覆盖就会多留一行空白
-      headingFontSizeOverride: _fontSize + 3,
-      headingHeightOverride: 1.5,
-      paragraphSpacingFactor: _paraSpacing,
-      textScaler: MediaQuery.textScalerOf(context),
-    );
-    final textAreaH = (_viewport.height - _headerFooterHeight()).clamp(
-      1.0,
-      _viewport.height,
-    );
+    //
+    // ⚠️ blocks / 排版参数 / 可用高度都抽到 `_blocksForChapter` /
+    //   `_layoutTypography` / `_textAreaHeight` —— 「拼下一章」必须用**同一套**，
+    //   否则拼进来的页会和本章的页度量不一致（页底被裁/留白）。
+    final blocks = _blocksForChapter(_index, _paragraphs);
+    final typo = _layoutTypography();
+    final textAreaH = _textAreaHeight;
     try {
       final pg = BookPaginator(
         blocks: blocks,
@@ -4747,6 +4967,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         if (!mounted || gen != _paginateGen) return;
         setState(() {
           _pages = List<BookPage>.of(out);
+          // 边分边显示时每页都属于本章（下一章要等全部排完再拼）
+          _pageChapterOf = List<int>.filled(out.length, chapter);
           // ✅ 每批都夹一次页号（blocker 修复 ✓）：`out` 在循环里从 0 页长到 N 页 ✓，
           //    旧页号（切章前 / 上一份排版 ✓）随时可能超出当前长度 ✗ → 不夹就是 RangeError ✓
           if (_pages.isNotEmpty) _pageIndex = _safePageIndex();
@@ -4758,16 +4980,24 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       final anchor = _pageAnchor;
       setState(() {
         _pages = out;
+        _pageChapterOf = List<int>.filled(out.length, chapter);
+        _appendedChapter = -1;
         _pageIndex = anchor == null ? 0 : _pageIndexForAnchor(anchor, out);
         _pagesChapter = chapter;
         _paginating = false;
       });
       _pageAnchor = null;
+      // 内容级无缝：本章排完就把**下一章**的页接在后面，
+      // 用户滑到章末继续滑 = 直接进下一章（不用点「下一章」）。
+      unawaited(_appendNextChapter(gen, chapter));
     } catch (_) {
       // 分页失败就退回整章滚动 —— 能读比"分页正确"重要
       if (mounted && gen == _paginateGen) {
         setState(() {
           _pages = const [];
+          _pageChapterOf = const [];
+          _appendedChapter = -1;
+          _appendingChapter = -1;
           _pageIndex = 0;
           _pageAnchor = null;
           _paginating = false;
@@ -10725,6 +10955,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     // 会命中第一处 ⇒ 书签跳到错误页。
     final offset = _blockOffset;
     for (var i = 0; i < _pages.length; i++) {
+      // ⚠️ 只看**本章**的页：无缝拼接后 `_pages` 末尾混有下一章的页，
+      //   而下一章的 blockIndex 是从 0 重新数的 ⇒ 不筛章会跳到别的章里。
+      if (i < _pageChapterOf.length && _pageChapterOf[i] != _index) continue;
       for (final e in _pages[i].entries) {
         if (e.blockIndex >= 0 && e.blockIndex - offset == pi) return i;
       }
@@ -10732,6 +10965,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     // 兜底：极少数旧分页数据没有 blockIndex，仍按文本匹配
     final text = _paragraphs[pi];
     for (var i = 0; i < _pages.length; i++) {
+      if (i < _pageChapterOf.length && _pageChapterOf[i] != _index) continue;
       for (final e in _pages[i].entries) {
         final b = e.block;
         if (b is ParagraphBlock && b.text == text) return i;
