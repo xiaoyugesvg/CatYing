@@ -117,7 +117,8 @@ class ReaderStyle {
   final double fontSize;
   final double lineHeight;
 
-  /// 字距（逻辑像素）。Legado 里是 em，导入时按 `em × 字号` 换算
+  /// 字距（逻辑像素）。Legado / 源阅读里存的就是很小的数值（0.1 / 0.2），
+  /// 直接按像素用，不再乘字号（乘了会宽 20 倍）。
   final double letterSpacing;
 
   final double fontWeight;
@@ -365,7 +366,7 @@ class ReaderStyle {
   ///   · 页眉页脚按 Legado 的 `headerMode/footerMode` 近似映射：
   ///     0=无、1=时间/页码、2=书名/进度、3=两者都要；
   ///   · `lineSpacingExtra` 是"在字号之外额外加多少 px"，这里折算成行高倍数
-  ///     `1 + extra / 字号`；`letterSpacing` 是 em，按 `em × 字号` 折成 px。
+  ///     `1 + extra / 字号`；`letterSpacing` 直接按逻辑像素用。
   static ReaderStyle fromLegado(
     Map<String, dynamic> cfg, {
     required String id,
@@ -375,7 +376,8 @@ class ReaderStyle {
     final extra = _d(cfg['lineSpacingExtra'], 14);
     final lh = (1 + extra / fs).clamp(1.05, 3.0);
     final lsEm = _d(cfg['letterSpacing'], 0);
-    final ls = (lsEm * fs).clamp(-2.0, 4.0);
+    // 与 srs 导入一致：按逻辑像素处理（0.1 / 0.2）
+    final ls = lsEm.clamp(-2.0, 4.0);
     final indentStr = (cfg['paragraphIndent'] as String?) ?? '';
     final indent = indentStr.length.clamp(0, 4).toDouble();
 
@@ -477,7 +479,7 @@ class ReaderStyle {
   static const List<ReaderStyle> builtins = [
     // ── 全部照搬 Legado 数据库 `readerStyle` 表（2026-10）──────────────
     // 换算：行高 = 1 + lineSpacingExtra / textSize；
-    // 字距 = letterSpacing(em) × 正文字号；段距 = paragraphSpacing(px) / 字号；
+    // 字距 = letterSpacing 原值（逻辑像素）；段距 = paragraphSpacing(px) / 字号；
     // 页眉页脚 = topComponent / bottomComponent 的 alignment(0/1/2) + format 字面
     // （`n` = 电量数字，不带 %）。标题用 db 的 titleSize / titleBold / titleStyleHtml。
     ReaderStyle(
@@ -492,7 +494,7 @@ class ReaderStyle {
       fgColorNight: 0xFF616B7A,
       fontSize: 20,
       lineHeight: 1.6,
-      letterSpacing: 2.0,
+      letterSpacing: 0.1,
       paraSpacing: 0.2,
       indent: 2,
       padLeft: 25,
@@ -523,7 +525,7 @@ class ReaderStyle {
       fgColorNight: 0xFF616B7A,
       fontSize: 20,
       lineHeight: 1.6,
-      letterSpacing: 2.0,
+      letterSpacing: 0.1,
       paraSpacing: 0.2,
       indent: 2,
       padLeft: 25,
@@ -557,7 +559,7 @@ class ReaderStyle {
       bgImageDark: false,
       fontSize: 24,
       lineHeight: 1.625,
-      letterSpacing: 4.8,
+      letterSpacing: 0.2,
       paraSpacing: 0.333,
       indent: 2,
       padLeft: 25,
@@ -591,7 +593,7 @@ class ReaderStyle {
       bgImageDark: false,
       fontSize: 24,
       lineHeight: 1.625,
-      letterSpacing: 4.8,
+      letterSpacing: 0.2,
       paraSpacing: 0.333,
       indent: 2,
       padLeft: 25,
@@ -623,7 +625,7 @@ class ReaderStyle {
       fgColorNight: 0xFFDCDFE1,
       fontSize: 20,
       lineHeight: 1.6,
-      letterSpacing: 2.0,
+      letterSpacing: 0.1,
       paraSpacing: 0.2,
       indent: 2,
       padLeft: 16,
@@ -650,7 +652,7 @@ class ReaderStyle {
       fgColorNight: 0xFFDCDFE1,
       fontSize: 20,
       lineHeight: 1.6,
-      letterSpacing: 2.0,
+      letterSpacing: 0.1,
       paraSpacing: 0.2,
       indent: 2,
       padLeft: 16,
@@ -677,7 +679,7 @@ class ReaderStyle {
       fgColorNight: 0xFF88C16F,
       fontSize: 20,
       lineHeight: 1.6,
-      letterSpacing: 2.0,
+      letterSpacing: 0.1,
       paraSpacing: 0.2,
       indent: 2,
       padLeft: 16,
@@ -704,7 +706,7 @@ class ReaderStyle {
       fgColorNight: 0xFFF6AEAE,
       fontSize: 20,
       lineHeight: 1.6,
-      letterSpacing: 2.0,
+      letterSpacing: 0.1,
       paraSpacing: 0.2,
       indent: 2,
       padLeft: 16,
@@ -731,7 +733,7 @@ class ReaderStyle {
       fgColorNight: 0xFF90BFF5,
       fontSize: 20,
       lineHeight: 1.6,
-      letterSpacing: 2.0,
+      letterSpacing: 0.1,
       paraSpacing: 0.2,
       indent: 2,
       padLeft: 16,
@@ -758,7 +760,7 @@ class ReaderStyle {
       fgColorNight: 0xFFFFFFFF,
       fontSize: 20,
       lineHeight: 1.6,
-      letterSpacing: 2.0,
+      letterSpacing: 0.1,
       paraSpacing: 0.2,
       indent: 2,
       padLeft: 16,
@@ -785,7 +787,7 @@ class ReaderStyle {
       fgColorNight: 0xFFADADAD,
       fontSize: 20,
       lineHeight: 1.6,
-      letterSpacing: 2.0,
+      letterSpacing: 0.1,
       paraSpacing: 0.2,
       indent: 2,
       padLeft: 16,

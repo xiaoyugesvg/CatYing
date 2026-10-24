@@ -644,7 +644,7 @@ class TitleHtml {
     TextScaler textScaler,
     String? fontFamily,
   ) {
-    final fs = b.style.fontSize(base).clamp(base * 0.5, base * 1.7);
+    final fs = b.style.fontSize(base).clamp(base * 0.5, base * 1.4);
     final pad = b.style.resolvedPadding(fs);
     final mar = b.style.margin.resolve(fs);
     final innerW = (width - pad.horizontal - mar.horizontal)
@@ -703,7 +703,7 @@ class TitleHtml {
     Color fallbackColor,
     String? fontFamily,
   ) {
-    final fs = b.style.fontSize(base).clamp(base * 0.5, base * 1.7);
+    final fs = b.style.fontSize(base).clamp(base * 0.5, base * 1.4);
     final pad = b.style.resolvedPadding(fs);
     final mar = b.style.margin.resolve(fs);
     Widget child;

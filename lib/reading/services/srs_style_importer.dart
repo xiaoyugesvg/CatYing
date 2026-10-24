@@ -148,8 +148,9 @@ class SrsStyleImporter {
     final fs = d('textSize', 19).clamp(12.0, 30.0);
     // 行高：源阅读是"在字号之外额外加多少 px"，这里折成倍数
     final lh = (1 + d('lineSpacingExtra', 0) / fs).clamp(1.05, 3.0);
-    // 字距：源阅读是 em（Android Paint.letterSpacing 也是 em）⇒ × 字号
-    final ls = (d('letterSpacing', 0) * fs).clamp(-2.0, 8.0);
+    // 字距：源阅读存的是很小的数值（0.1 / 0.2），按**逻辑像素**用
+    // （当 em 会宽 20 倍，正文看起来像"字被拆开"）
+    final ls = d('letterSpacing', 0).clamp(-2.0, 4.0);
     // 段距：源阅读是 px，我们的是"字号倍数"
     final ps = (d('paragraphSpacing', 0) / fs).clamp(0.0, 2.0);
     final indentStr = (cfg['paragraphIndent'] as String?) ?? '';

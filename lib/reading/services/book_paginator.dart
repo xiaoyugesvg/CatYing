@@ -8,7 +8,12 @@ class BookTypography {
   final double fontSize;
   final double lineHeight;
   final double padding; // 水平边距
-  final double verticalPadding; // 垂直边距（含 HUD 上下留白）
+  final double verticalPadding;
+
+  /// 下边距（null = 与 [verticalPadding] 相同）。
+  /// 阅读样式里上下边距是分开的（db 的 paddingTop / paddingBottom），
+  /// 原来只扣 `verticalPadding * 2`，`paddingBottom` 永远不生效。
+  final double? verticalPaddingBottom; // 垂直边距（含 HUD 上下留白）
   final String? fontFamily; // 字体；null = 系统默认。度量与渲染共用，确保分页一致
 
   /// 祖先 DefaultTextStyle.style（取自渲染上下文）。SelectableText/Text 的最终
@@ -59,6 +64,7 @@ class BookTypography {
     required this.lineHeight,
     required this.padding,
     required this.verticalPadding,
+    this.verticalPaddingBottom,
     this.fontFamily,
     this.inheritedStyle = const TextStyle(),
     this.headingFontSizeOverride,
@@ -234,7 +240,10 @@ class BookPaginator {
   // ---- 增量状态 ----
   late final double _contentWidth = viewportWidth - typo.padding * 2;
   late final double _pageHeight =
-      viewportHeight - typo.verticalPadding * 2 - _kSafety;
+      viewportHeight -
+      typo.verticalPadding -
+      (typo.verticalPaddingBottom ?? typo.verticalPadding) -
+      _kSafety;
   final List<PageEntry> _cur = []; // 当前未满页
   final List<BookPage> _donePages = []; // 已 commit 的完整页（待调用方取走）
   int _curFirst = 0;

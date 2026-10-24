@@ -1076,9 +1076,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         // 内置壁纸（与 `_savePrefs` 的 `reading.bgImage` 配对 ✓）
         final bgImg =
             (ov?['bgImage'] as String?) ?? p.getString('reading.bgImage');
+        // 夜间壁纸要**独立读取**：只配了夜间图的样式（跨日/夜成对但日间为空）
+        // 一旦被挂在 `if (bgImg != null)` 里就会丢
+        _bgImageAssetNight = p.getString('reading.bgImageNight');
         if (bgImg != null && bgImg.isNotEmpty) {
           _bgImageAsset = bgImg;
-          _bgImageAssetNight = p.getString('reading.bgImageNight');
           _bgImageDark = p.getBool('reading.bgImageDark');
         }
         // ✅ 书签**按章**读回 ✓ —— 只读"即将显示的那一章"的键 ✓，
@@ -1158,6 +1160,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             (ov?['fgNightOverride'] as num?)?.toInt() ??
             p.getInt('reading.fgNightOverride');
         if (fgn != null && fgn != 0) _fgNightOverride = Color(fgn);
+        final fgd =
+            (ov?['fgOverride'] as num?)?.toInt() ??
+            p.getInt('reading.fgOverride');
+        if (fgd != null && fgd != 0) _fgOverride = Color(fgd);
         final pl = num2('padLeft');
         if (pl != null && pl >= 0 && pl <= 60) _padLeft = pl;
         final pr = num2('padRight');
@@ -1368,6 +1374,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         );
       } else {
         await p.remove('reading.fgNightOverride');
+      }
+      // 日间字色也要落盘：原来只存了夜间，重启后样式 textColor 丢失、
+      // 回退成"按背景自动取色"（白底上的 #1A1A1A / 米黄上的深棕）
+      if (_fgOverride != null) {
+        await p.setInt('reading.fgOverride', _fgOverride!.toARGB32());
+      } else {
+        await p.remove('reading.fgOverride');
       }
       await p.setString('reading.headerL', _headerL);
       await p.setString('reading.headerC', _headerC);
@@ -3569,11 +3582,23 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   ///
   /// ⚠️ 状态文字没有显式 `height`，行高随字体（约 1.17~1.3 倍字号）——
   ///   这里按 **1.3** 估：宁可多留一点（页底略空），也不能少留（会把末行裁掉 ✗）。
+  /// 页眉上边距的**实际值**。
+  ///
+  /// db 的 `headerPaddingTop` 是"距屏幕顶部"的距离（包含状态栏），
+  /// 而阅读器外层已经套了 SafeArea —— 直接照用会让页眉整体下移一整条状态栏
+  /// （微信读书那套 58 尤其明显：正文区凭空少 40~50px）。这里先减掉状态栏。
+  double get _effectiveHeaderPadTop {
+    final inset = MediaQuery.of(context).viewPadding.top;
+    return (_headerPadTop - inset).clamp(0.0, 120.0);
+  }
+
   double _headerFooterHeight() {
     // 格式串模式：只为**实际有内容**的那一条留位置（与渲染条件一致）
     if (_hasHeaderFormat || _hasFooterFormat) {
       final line = AppTheme.fontCaption * 1.3;
-      final header = _hasHeaderFormat ? _headerPadTop + 6 + line + 4 : 0.0;
+      final header = _hasHeaderFormat
+          ? _effectiveHeaderPadTop + 6 + line + 4
+          : 0.0;
       final footer = _hasFooterFormat
           ? 4 + line + _footerPadBottom + 6
           : 0.0;
@@ -3581,7 +3606,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     }
     if (_rs.statusItems.isEmpty) return 0;
     final line = AppTheme.fontCaption * 1.3;
-    final header = _headerPadTop + 6 + line + 4;
+    final header = _effectiveHeaderPadTop + 6 + line + 4;
     final footer = 4 + line + _footerPadBottom + 6;
     return header + footer;
   }
@@ -3760,7 +3785,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       return Padding(
         padding: EdgeInsets.fromLTRB(
           _headerPadH,
-          _headerPadTop + 6,
+          _effectiveHeaderPadTop + 6,
           _headerPadH,
           4,
         ),
@@ -3770,7 +3795,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     return Padding(
       padding: EdgeInsets.fromLTRB(
         _headerPadH,
-        _headerPadTop + 6,
+        _effectiveHeaderPadTop + 6,
         _headerPadH,
         4,
       ),
@@ -3868,7 +3893,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 _padLeft,
                 _padTop + 2,
                 _padRight,
-                _padTop + 2,
+                _padBottom + 2,
               ),
               itemCount: page.entries.length,
               itemBuilder: (c, i) {
@@ -5246,6 +5271,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       lineHeight: _lineHeight,
       padding: (_padLeft + _padRight) / 2,
       verticalPadding: _padTop,
+      // 上下边距分开（db 的 paddingTop / paddingBottom）：原来只传上边距、
+      // 分页器扣 `*2`，导致 paddingBottom 永远不生效
+      verticalPaddingBottom: _padBottom,
       fontFamily: _fontFamily,
       inheritedStyle: TextStyle(
         letterSpacing: _letterSpacing,
@@ -6985,7 +7013,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         children: [
           for (var i = 0; i < fgNames.length; i++)
             GestureDetector(
-              onTap: () => upd(() => _fgOverride = fgColors[i]),
+              onTap: () => upd(() {
+                _fgOverride = fgColors[i];
+                // 手动选的字色是"通用色"：夜间也用它（否则夜间会被
+                // 自动浅色盖掉，用户会觉得"选了没用"）
+                _fgNightOverride = fgColors[i];
+              }),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -7022,7 +7055,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 initial: _fg,
                 title: '自定义文字颜色',
               );
-              if (picked != null) upd(() => _fgOverride = picked);
+              if (picked != null)
+                upd(() {
+                  _fgOverride = picked;
+                  _fgNightOverride = picked;
+                });
             },
             child: Row(
               mainAxisSize: MainAxisSize.min,
