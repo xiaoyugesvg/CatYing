@@ -29,6 +29,7 @@ import '../services/chapter_alignment.dart';
 import '../services/reader_font_service.dart';
 import '../services/reader_notes_service.dart';
 import '../services/reader_style_store.dart';
+import 'reader_styles_page.dart';
 import '../services/srs_style_importer.dart';
 import '../services/title_html_parser.dart';
 import '../services/tts_service.dart';
@@ -563,8 +564,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 「主题」tab 选了自定义字色就以它为准；
   /// 自定义/内置背景为深色时自动换浅色文字，避免深底黑字。
   Color get _fg {
-    // 夜间优先用样式的 textColorNight，其次才是用户手选的字色
-    final over = _bgIndex == 5 ? (_fgNightOverride ?? _fgOverride) : _fgOverride;
+    // 壁纸是样式自带的那一张（日间图）时，始终用它对应的日间字色：
+    // 否则切到夜间会用 textColorNight（浅色）去配日间浅底 ⇒ 正文几乎看不见。
+    final over = (_bgImageAsset != null || _bgIndex != 5)
+        ? _fgOverride
+        : (_fgNightOverride ?? _fgOverride);
     if (over != null) return over;
     // A3：选了壁纸 → 按壁纸明暗决定文字色（深图浅字 / 浅图深字）✓
     if (_bgImageAsset != null && _bgImageDark != null) {
@@ -4265,9 +4269,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         ? ReadingSettings.defaultZones()
         : _rs.tapZones;
     var action = _rs.oneHand
-        ? (zone == 4 ? TapAction.none : TapAction.next)
+        ? (zone == 4 ? TapAction.menu : TapAction.next)
         : (zones[zone] ?? TapAction.none);
-    if (action == TapAction.menu) action = TapAction.none;
     // 翻页反转：左点下一页 / 右点上一页 对调
     if (_rs.flipReverse) {
       if (action == TapAction.prev) {
@@ -4282,6 +4285,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       case TapAction.next:
         _nextPageOrChapter();
       case TapAction.menu:
+        // 单击中间区域直接呼出功能栏/设置面板（原来被改成 none，必须双击才出）
+        _toggleBar();
       case TapAction.none:
         break;
     }
@@ -5167,7 +5172,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     if (chapter < 0 || chapter >= widget.chapters.length) return null;
     final doc = TitleHtml.compile(
       src,
-      chapterNumber: '${chapter + 1}',
+      // 「章节数」占位符传空 ⇒ 那一段（含盒子）不会渲染，右上角不再有孤立的 1、2
+      chapterNumber: '',
       chapterName: widget.chapters[chapter].name,
     );
     return doc.isEmpty ? null : doc;
@@ -6416,33 +6422,19 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           ],
         ),
       ),
-      _sectionLabel('内置样式（左滑可复制成我的样式）'),
-      Wrap(
-        spacing: 10,
-        runSpacing: 10,
-        children: [
-          for (final s in ReaderStyle.builtins)
-            _SwipeActions(
-              background: _sheetBg,
-              actions: [
-                (
-                  label: '复制',
-                  icon: Icons.copy_rounded,
-                  tint: const Color(0xFF4C9A6A),
-                  onTap: () async {
-                    await _duplicateStyle(s);
-                    setSheet(() {});
-                  },
-                ),
-              ],
-              child: _styleCard(s, setSheet),
-            ),
-        ],
+      _sectionLabel('样式库'),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: _chip(
+          '打开样式库（内置 ${ReaderStyle.builtins.length} · 我的 ${_myStyles.length}）',
+          false,
+          () async {
+            await _openStylesPage();
+            setSheet(() {});
+          },
+          compact: true,
+        ),
       ),
-      if (_myStyles.isNotEmpty) ...[
-        _sectionLabel('我的样式（左滑可编辑 / 删除）'),
-        for (final s in _myStyles) _myStyleRow(s, setSheet),
-      ],
       if (_savedPresets.isNotEmpty) ...[
         _sectionLabel('排版预设'),
         for (final name in _savedPresets)
@@ -6465,6 +6457,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   }
 
   /// 一张样式卡片：小样 + 名字；当前生效的打勾。
+  // ignore: unused_element
   Widget _styleCard(ReaderStyle s, StateSetter setSheet) {
     final selected = _activeStyleId == s.id;
     return GestureDetector(
@@ -6543,6 +6536,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   }
 
   /// 「我的样式」的一行：小缩略图 + 名字 + 关键参数；**左滑**露出「编辑 / 删除」。
+  // ignore: unused_element
   Widget _myStyleRow(ReaderStyle s, StateSetter setSheet) {
     final selected = _activeStyleId == s.id;
     final titleLabel = ReaderTitleStyle.fromId(s.chapterTitleStyle).label;
@@ -8922,6 +8916,38 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     );
   }
 
+  /// 打开独立的「阅读样式」库页面（内置 + 我的）。
+  ///
+  /// 点卡片 → 页面 pop 回选中的样式 → 这里套用；保存/编辑/删除在页面内完成，
+  /// 每次操作后把最新的「我的样式」列表回传给页面刷新。
+  Future<void> _openStylesPage() async {
+    final picked = await Navigator.of(context).push<ReaderStyle>(
+      MaterialPageRoute(
+        builder: (_) => ReaderStylesPage(
+          builtins: ReaderStyle.builtins,
+          mine: _myStyles,
+          activeId: _activeStyleId,
+          background: _sheetBg,
+          foreground: _fg,
+          onSaveCurrent: () async {
+            await _saveCurrentAsStyle();
+            return List.of(_myStyles);
+          },
+          onEdit: (s) async {
+            await _editStyle(s);
+            return List.of(_myStyles);
+          },
+          onDelete: (s) async {
+            await _deleteStyle(s);
+            return List.of(_myStyles);
+          },
+        ),
+      ),
+    );
+    if (!mounted || picked == null) return;
+    _applyReaderStyle(picked);
+  }
+
   /// 一键套用一套样式：配色 / 背景 / 排版 / 边距 / 信息栏 / 翻页动画一次改完。
   ///
   /// 改完必须**重排**（字号行距边距全变了，旧 `_pages` 是按旧度量切的），
@@ -9268,6 +9294,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       ReaderStyle.fromJson({...s.toJson(), ...patch});
 
   /// 「复制成我的样式」：内置样式不能直接改，先复制一份再打开编辑器。
+  // ignore: unused_element
   Future<void> _duplicateStyle(ReaderStyle s) async {
     final id = 'user:${DateTime.now().millisecondsSinceEpoch}';
     final copy = ReaderStyle.fromJson({

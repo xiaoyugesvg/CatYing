@@ -258,6 +258,15 @@ class TitleHtml {
         out.addAll(kids);
         continue;
       }
+      // 占位符被替换成空串后（例如隐藏「章节数」），盒子里没有任何文字：
+      // 直接丢掉，否则 margin / padding 会留下一段空白（右上角那种孤立数字消失后
+      // 还会剩一个空行）。有背景/边框的装饰盒保留。
+      if (kids.isEmpty &&
+          css.background == null &&
+          css.backgroundImage == null &&
+          !css.hasDecoration) {
+        continue;
+      }
       out.add(TitleBoxBlock(css, kids));
     }
     return out;
@@ -635,7 +644,7 @@ class TitleHtml {
     TextScaler textScaler,
     String? fontFamily,
   ) {
-    final fs = b.style.fontSize(base);
+    final fs = b.style.fontSize(base).clamp(base * 0.5, base * 1.7);
     final pad = b.style.resolvedPadding(fs);
     final mar = b.style.margin.resolve(fs);
     final innerW = (width - pad.horizontal - mar.horizontal)
@@ -694,7 +703,7 @@ class TitleHtml {
     Color fallbackColor,
     String? fontFamily,
   ) {
-    final fs = b.style.fontSize(base);
+    final fs = b.style.fontSize(base).clamp(base * 0.5, base * 1.7);
     final pad = b.style.resolvedPadding(fs);
     final mar = b.style.margin.resolve(fs);
     Widget child;

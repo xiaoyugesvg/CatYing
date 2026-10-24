@@ -84,8 +84,11 @@ class BuiltinSourcesService {
     //   （新装时按 _lxCandidates 顺序就在最前；老设备是追加的，这里挪一次）
     await store.moveToSameKindFront('builtin_lx_five');
     // ✅ 2026-10：咪咕音乐固定为**整个音源列表第一位**（用户要求）。
+    //   Cookie 版优先排在最前（用户登录态走它），官方版紧随其后。
     //   老设备上内置源是追加的 ⇒ 显式挪一次；按名字找，版本升级后 id 变了也不受影响。
+    // 先移官方版、再移 Cookie 版 ⇒ 最终 Cookie 版第一、官方版第二
     await store.moveToFrontByName('咪咕音乐');
+    await store.moveToFrontByName('咪咕音乐（Cookie 版）');
     // ✅ 2026-10-19：把**实测失效**的内置源关掉。
     //   init 只补"缺失"的、从不改"已存在"的 ⇒ 老设备里那些死源仍是启用状态，
     //   每次播放都先撞一次死源（试播超时 + 最后失败）。这里显式关一遍 ✓
