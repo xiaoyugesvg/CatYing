@@ -159,7 +159,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 非空时优先于颜色作为正文背景）
   String? _customBgPath;
 
-  /// 内置阅读背景壁纸（14 张，来自 cmbok ✓；资源在 `assets/images/reader_bg/`）。
+  /// 内置阅读背景壁纸（27 张；资源在 `assets/images/reader_bg/`）。
   /// ⚠️ 以后加壁纸：把图放进那个目录 + 这里加一行即可（pubspec 已声明该目录 ✓）。
   static const List<String> _builtinBgImages = [
     'assets/images/reader_bg/annie-spratt-6a3nqQ1YwBw-unsplash.jpg',
@@ -176,6 +176,21 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     'assets/images/reader_bg/resource-boy-t5-DgEcAUUg-unsplash.jpg',
     'assets/images/reader_bg/the-new-york-public-library-atDr7NECc_k-unsplash.jpg',
     'assets/images/reader_bg/tina-dawson-Kim9COAIEGc-unsplash.jpg',
+    // 微信读书背景包（朔望 / 碧落 / 荒沙 × 白 / 绿 / 黄 / 暗）
+    'assets/images/reader_bg/reading_bg_moon_white.jpg',
+    'assets/images/reader_bg/reading_bg_moon_green.jpg',
+    'assets/images/reader_bg/reading_bg_moon_yellow.jpg',
+    'assets/images/reader_bg/reading_bg_moon_dark.jpg',
+    'assets/images/reader_bg/reading_bg_sky_white.jpg',
+    'assets/images/reader_bg/reading_bg_sky_green.jpg',
+    'assets/images/reader_bg/reading_bg_sky_yellow.jpg',
+    'assets/images/reader_bg/reading_bg_sky_dark.jpg',
+    'assets/images/reader_bg/reading_bg_sand_white.jpg',
+    'assets/images/reader_bg/reading_bg_sand_green.jpg',
+    'assets/images/reader_bg/reading_bg_sand_yellow.jpg',
+    'assets/images/reader_bg/reading_bg_sand_dark.jpg',
+    // 夜间竹林（刘海屏，顶部有画面、下方深色）
+    'assets/images/reader_bg/reading_bg_night_forest.png',
   ];
 
   /// 当前选中的内置壁纸（null = 不用壁纸，走 `_bgIndex` 的纯色底 ✓）

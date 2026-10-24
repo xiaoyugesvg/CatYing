@@ -860,22 +860,9 @@ class ReaderStyle {
       footerL: '#',
       footerR: 'B',
       statusItems: [],
-      chapterTitleStyle: 'custom',
-      chapterTitleHtml: _pomoTitleHtml,
+      // 你贴的泼墨标题 HTML 与内置「青蓝·光晕」是同一套参数，
+      // 背景图已内置（qinglan.png），直接用模板，网络图也能离线显示
+      chapterTitleStyle: 'qinglan',
     ),
   ];
-
-  /// 「泼墨山水」的标题版式（源阅读 HTML 原文有断行/引号损坏，这里按原参数重排；
-  /// 原图是网络水墨图，未内置，只保留文字部分 —— 拿到图后可在 HTML 里加
-  /// `background-image`）
-  static const _pomoTitleHtml = '''
-<div style="text-align:left;">
-  <h3 style="color:#236178; text-shadow:0 0 10px #236178; margin:0 0.5em 3em 0;
-             font-weight:200; font-size:1.5em;">章节数</h3>
-  <h4 style="box-shadow:0px 15px 10px -15px #000; display:inline-block;
-             background-color:rgba(35,97,120,0.5); border-radius:16px;
-             margin:3em 0 2em 0; padding:0.5em 2em; text-align:left;
-             color:#f3f7fa; text-shadow:0 0 10px #f3f7fa;
-             font-weight:200; font-size:1em;">章节名</h4>
-</div>''';
 }

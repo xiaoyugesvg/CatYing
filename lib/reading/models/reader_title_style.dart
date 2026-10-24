@@ -8,6 +8,7 @@ enum ReaderTitleStyle {
   none('默认', ''),
   xianheDay('仙鹤·日间', 'xianhe_day'),
   xianheNight('仙鹤·夜间', 'xianhe_night'),
+  xianhePad('仙鹤·平板', 'xianhe_pad'),
   weRead('微信读书', 'weread'),
   guFeng('古风·蓝章', 'gufeng'),
   qingLan('青蓝·光晕', 'qinglan'),
@@ -27,6 +28,7 @@ enum ReaderTitleStyle {
   String get html => switch (this) {
     ReaderTitleStyle.xianheDay => _xianheDay,
     ReaderTitleStyle.xianheNight => _xianheNight,
+    ReaderTitleStyle.xianhePad => _xianhePad,
     ReaderTitleStyle.weRead => _weRead,
     ReaderTitleStyle.guFeng => _guFeng,
     ReaderTitleStyle.qingLan => _qingLan,
@@ -67,6 +69,20 @@ enum ReaderTitleStyle {
                background-color:rgba(151,137,122,0.8); border-radius:16px;
                margin:0 0 5em 0; padding:0.5em 2em; text-align:right;
                color:#2d3b6c; font-weight:200; font-size:1em;">章节名</h4>
+  </div>
+</div>''';
+
+  /// 用户 2026 提供的「仙鹤·平板」：与手机版同图，但章节数下方留白更大
+  /// （10em）、药丸用实色 #3a4654 且左侧内衬 5em（平板宽度下更好看）。
+  static const _xianhePad = '''
+<div style="background-image:url('asset:assets/images/reader_title/xianhe.png');
+            background-repeat:no-repeat; background-position:left; background-size:auto 100%;">
+  <div style="text-align:right;">
+    <h3 style="color:#3a4654; margin:0.5em 0.5em 10em 0; font-weight:Light; font-size:1.5em;">章节数</h3>
+    <h4 style="box-shadow:0px 15px 10px -15px #000; display:inline-block;
+               background-color:#3a4654; border-radius:16px;
+               margin:0 0 5em 0; padding:0.5em 0.5em 0.5em 5em; text-align:right;
+               color:#cbba75; font-weight:Light; font-size:1.5em;">章节名</h4>
   </div>
 </div>''';
 
