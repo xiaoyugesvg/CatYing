@@ -1847,9 +1847,18 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   ///
   /// 返回：`null` = 请求失败（可重试）；空列表 = 服务在线但没匹配到。
   Future<List<int>?> _danmuMatchEpisodes(String base, String title) async {
-    // 集号：该服务按「剧名 S01E01」格式解析最稳（实测中文「第N集」不稳）
-    final epNo = widget.selectedEpisodeIndex + 1;
-    final fileName = '$title S01E${epNo.toString().padLeft(2, '0')}';
+    // 集号：该服务按「文件名」解析，剧集**必须**带 SxxExx ——
+    //   实测：`仙逆` → 恒返回第 1 集；`仙逆 S01E28` → 第 28 集；
+    //   而中文「第28集」它不认（isMatched=false）。
+    //
+    // 单集（电影 / 单片）则**不要**加后缀：实测 `功夫女足` 与
+    //   `功夫女足 S01E01` 返回同一条目，纯片名更干净，
+    //   也避免把电影备注成「第 1 集」。
+    final isSingle = widget.episodeNames.length <= 1 &&
+        widget.selectedEpisodeIndex == 0;
+    final fileName = isSingle
+        ? title
+        : '$title S01E${(widget.selectedEpisodeIndex + 1).toString().padLeft(2, '0')}';
     final body = await _danmuPostJson(
       '$base/api/v2/match',
       {'fileName': fileName},
