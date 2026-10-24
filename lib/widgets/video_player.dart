@@ -286,12 +286,25 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   List<DanmuItem> _danmus = [];
 
   /// 弹幕条数（播放设置面板标题用）。
-  ///
   /// ⚠️ 不能直接读 `_danmus.length`：设置面板是 `showModalBottomSheet` +
   ///   `StatefulBuilder`，它挂在**独立路由**里，父级 `setState` 重建不到它。
   ///   若面板在弹幕还在加载时打开，标题会永远停在「弹幕」不动；
   ///   用 ValueNotifier 才能在数据到达时自己刷新。
   final ValueNotifier<int> _danmuCountVN = ValueNotifier<int>(0);
+
+  /// 弹幕**平滑时钟**的锚点：最近一次真实播放位置 + 收到它的时刻。
+  ///
+  /// ── 为什么需要 ──────────────────────────────────────────────
+  /// 弹幕动画的推进量取自"播放位置的前进量"，而位置事件在 iOS 上只有
+  /// **4Hz**（AvEngine `addPeriodicTimeObserver(0.25)`、KSEngine 显式节流
+  /// 到 0.25s）。直接拿它当动画时钟 ⇒ 每 250ms 只有 1 帧会动、一次跳
+  /// `speed×0.25`（默认 90px/s → 22.5px），其余 14 帧原地不动 ——
+  /// 观感就是"一蹦一蹦"，也就是用户反馈的不流畅。
+  ///
+  /// 这里把真实位置当**锚点**，帧间用单调时钟 + 当前倍速外推，
+  /// 收到新位置时只做小幅校正（不回退），暂停/缓冲时冻结。
+  Duration _danmuClockBase = Duration.zero;
+  DateTime? _danmuClockAt;
   bool _danmuOn = true;
   bool _danmuLoaded = false;
   /// 正在加载的弹幕地址（去重锁）。
@@ -886,6 +899,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         if (!mounted) return;
         _position = position;
         _positionVN.value = position;
+        // 弹幕时钟锚点：真实位置只用来校正，帧间由 _danmuSmoothPosition 外推
+        _danmuSyncClock(position);
 
         // ── 🟡 清缓冲标志必须进 setState（修"靠巧合消失"）────────────
         //
@@ -1113,6 +1128,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       _danmuLoaded = false;
       _danmuLoadGen++;
       _setDanmus(const []);
+      // 弹幕时钟一起归零：否则新集开头会先用上一集的锚点外推，
+      // 直到第一个位置事件到达（最多 250ms）才纠正。
+      _danmuClockBase = Duration.zero;
+      _danmuClockAt = null;
       _danmuLastFailAt = null; // 新集是新目标，上一集的失败节流不该挡它
       // 「切集提示」：换到新的一集时在顶部轻提示（默认关闭）
       if (_switchEpisodeHint) {
@@ -3263,6 +3282,45 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     );
   }
 
+  /// 弹幕用的**平滑播放位置**：帧间按单调时钟外推，不再直接吃 4Hz 的真实位置。
+  ///
+  /// 外推上限 600ms：主线程被卡住时不会一次跳太远（宁可短暂落后，也不"瞬移"）。
+  Duration _danmuSmoothPosition() {
+    final at = _danmuClockAt;
+    // 暂停 / 缓冲中 → 冻结在最后一个真实位置（画面不动，弹幕也不动）
+    if (!_isPlaying || _isBuffering || at == null) return _danmuClockBase;
+    final elapsedMs = DateTime.now().difference(at).inMilliseconds;
+    final advanced = (elapsedMs * _playbackSpeed).clamp(0.0, 600.0);
+    return _danmuClockBase + Duration(milliseconds: advanced.round());
+  }
+
+  /// 收到真实播放位置时校正弹幕时钟（**单调、不回退**）。
+  ///
+  /// · 偏差 >400ms：认为用户 seek / 换集 → 硬对齐；
+  /// · 真实位置超前：直接追上去；
+  /// · 真实位置略落后（位置事件本身有延迟，常见）：保持当前平滑值，
+  ///   只重新锚定 —— 否则每 250ms 会出现一次 10~50ms 的倒退抖动。
+  void _danmuSyncClock(Duration real) {
+    if (!mounted) return;
+    final now = DateTime.now();
+    final at = _danmuClockAt;
+    if (!_isPlaying || _isBuffering || at == null) {
+      _danmuClockBase = real;
+      _danmuClockAt = now;
+      return;
+    }
+    final smooth = _danmuSmoothPosition();
+    final diff = (real - smooth).inMilliseconds;
+    if (diff.abs() > 400) {
+      _danmuClockBase = real; // seek / 换集：硬对齐
+    } else if (diff > 0) {
+      _danmuClockBase = real; // 略超前：追上
+    } else {
+      _danmuClockBase = smooth; // 略落后：不回退
+    }
+    _danmuClockAt = now;
+  }
+
   Widget _buildDanmuLayer() {
     // 同步视频速度：倍速播放时弹幕滚动同比缩放，保持与画面节奏一致
     final speed = _danmuSyncSpeed
@@ -3273,7 +3331,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       // 弹幕延迟：正数表示"晚出现"，等价于把查询位置往回拨，
       // 这样同一时刻会取到更早的那批弹幕，视觉上就整体延后了。
       positionOf: () =>
-          _player.state.position -
+          _danmuSmoothPosition() -
           Duration(milliseconds: (_danmuDelaySeconds * 1000).round()),
       fontSize: _danmuFontSize,
       opacity: _danmuOpacity,
