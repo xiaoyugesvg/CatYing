@@ -582,18 +582,72 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     return (path != null && File(path).existsSync()) || _activeBgAsset != null;
   }
 
-  /// 翻页动画（覆盖 / 仿真）用的"纸色"：动画中的滑动页必须不透明，
-  /// 否则会透出前一页的文字。优先用样式底色/自定义色，图片背景用近似纸色。
-  Color get _turnPaperColor {
-    final solid = _customBgColor;
-    if (solid != null) return solid;
-    final styleBg = _bgIndex == 5 ? _styleBgNight : _styleBgDay;
-    if (styleBg != null) return Color(styleBg);
-    if (_hasImageBg) {
-      final dark = _bgIndex == 5 || (_bgImageDark ?? false);
-      return dark ? const Color(0xFF17191B) : const Color(0xFFF4F2EA);
+  /// 屏幕顶部安全区（正文层现在是整屏，文字内衬要用它）
+  double get _safeTop {
+    final mq = MediaQuery.of(context);
+    return mq.padding.top > 0 ? mq.padding.top : mq.viewPadding.top;
+  }
+
+  /// 屏幕底部安全区（Home 指示条）
+  double get _safeBottom {
+    final mq = MediaQuery.of(context);
+    return mq.padding.bottom > 0 ? mq.padding.bottom : mq.viewPadding.bottom;
+  }
+
+  /// 当前纸面是否偏深（翻页纸背 / 番茄钟玻璃面板 / 状态栏图标用）
+  bool get _paperIsDark =>
+      _bgIndex == 5 ||
+      (_bgImageDark ?? false) ||
+      (!_hasImageBg && _bgTop.computeLuminance() < 0.45);
+
+  /// 单页的"纸"：壁纸（日/夜版）或纯色底。
+  ///
+  /// 翻页动画要"纸跟着页走"就必须画在页里（Android 阅读器的位图方案同理），
+  /// 外层背景层只负责滚动模式与兜底。
+  Widget _pagePaper() {
+    final path = _activeFileBgPath;
+    if (path != null && File(path).existsSync()) {
+      return _nightDim(
+        Image.file(
+          File(path),
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          errorBuilder: (_, __, ___) => ColoredBox(color: _bgTop),
+        ),
+        nightVersionInUse: _bgIndex == 5 && _customBgPathNight != null,
+      );
     }
-    return _bgTop;
+    final asset = _activeBgAsset;
+    if (asset != null) {
+      return _nightDim(
+        Image.asset(
+          asset,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          errorBuilder: (_, __, ___) => ColoredBox(color: _bgTop),
+        ),
+        nightVersionInUse: _bgImageAssetNight != null,
+      );
+    }
+    return ColoredBox(color: _bgTop);
+  }
+
+  /// 预解码当前纸面图。
+  ///
+  /// 仿真翻页会把整页栅格化：图还没解码完时第一下会翻出"白纸"。
+  /// 换样式 / 切日夜 / 选壁纸后先预热一下（已在缓存里时几乎零成本）。
+  void _precachePaper() {
+    if (!mounted) return;
+    void err(Object _, StackTrace? __) {}
+    final path = _activeFileBgPath;
+    if (path != null && File(path).existsSync()) {
+      unawaited(precacheImage(FileImage(File(path)), context, onError: err));
+      return;
+    }
+    final asset = _activeBgAsset;
+    if (asset != null) {
+      unawaited(precacheImage(AssetImage(asset), context, onError: err));
+    }
   }
 
   /// 夜间模式：把壁纸压暗一层。
@@ -1305,6 +1359,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       // 跟随系统：偏好就绪后按当前全局明暗对齐一次（含绑定样式的自动套用）
       _prefsReady = true;
       _onAppAppearanceChanged();
+      _precachePaper();
     } catch (_) {
       // 偏好读不到就用默认值，不影响阅读
     }
@@ -2197,12 +2252,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     final bgAsset = _activeBgAsset;
     final useImgBg = useFileBg || bgAsset != null;
     // 状态栏 / Home 指示条图标明暗（db 的 darkStatusIcon）：深底换浅色图标，
-    // 否则夜间是一排看不见的黑色图标。用背景实际明暗判断，不看昼夜按钮 ——
-    // 白天选了深色壁纸/深色自定义底同样要浅色图标。
-    final darkSurface =
-        _bgIndex == 5 ||
-        (_bgImageDark ?? false) ||
-        (!useImgBg && _bgTop.computeLuminance() < 0.45);
+    // 否则夜间是一排看不见的黑色图标。按**实际纸面**判断（夜间纸 / 深色壁纸 /
+    // 深色自定义底），不看昼夜按钮。
+    final darkSurface = _paperIsDark;
     final overlayStyle =
         (darkSurface ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark)
             .copyWith(
@@ -2242,30 +2294,26 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             )
           else
             Container(color: bg[0]),
-          // ✅ 点击判定与**漫画阅读器同款**：正文区 GestureDetector.onTapUp（_onTapUp）。
-          //   手势竞技场单通道 —— 一次 tap 只触发一次，双指先后/快速连点也不会
-          //   出现"呼出后立刻又被收起"（65273fa 之前的 Listener 方案每根手指的
-          //   up 都独立处理 ⇒ 双指"第一指呼出、第二指收起"闪一下 ✗）。
-          //   仿真/覆盖模式由组件内部 onTapCenter 自行处理（外层 return 不抢）✓。
+          // ✅ 正文层：**整屏**（含状态栏 / Home 条）——
+          //   翻页时"页自带纸"（见 [_pagePaper]），覆盖 / 仿真 / 左右滑动时
+          //   纸面跟着页一起移动，和静止时像素一致；文字的安全区内衬改由
+          //   [_pageBody] 负责（原来正文被 SafeArea 缩小，页里再画壁纸必然错位）。
+          //   点击判定与漫画阅读器同款：Listener 原始指针流（双指/连点都稳）。
+          Positioned.fill(
+            child: Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerDown: _onPtrDown,
+              onPointerUp: _onPtrUp,
+              onPointerCancel: _onPtrCancel,
+              child: _contentArea(bg[1]),
+            ),
+          ),
+          // 悬浮 UI（顶栏 / 底栏 / 侧栏 / 番茄钟）仍留在安全区内
           SafeArea(
             child: Padding(
               padding: EdgeInsets.only(top: extraTop, bottom: extraBottom),
               child: Stack(
               children: [
-                // 正文始终占满整块区域：顶栏 / 底部功能栏都是**悬浮覆盖层**，
-                // 呼出/收起菜单时正文不重排、不跳动（用户 2026-10-21 要求：
-                // 「面板是悬浮在正文上面，不是挤压正文」）。
-                Positioned.fill(
-                  // Panel toggle = double tap / two-finger tap, raw pointer stream (Listener).
-                  // Not in gesture arena => content recognizers cannot steal it.
-                  child: Listener(
-                    behavior: HitTestBehavior.translucent,
-                    onPointerDown: _onPtrDown,
-                    onPointerUp: _onPtrUp,
-                    onPointerCancel: _onPtrCancel,
-                    child: _contentArea(bg[1]),
-                  ),
-                ),
                 // 顶栏：悬浮在正文之上（不占布局高度）
                 if (_showBar)
                   Positioned(
@@ -2349,9 +2397,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                       right: 12,
                       bottom: _pomodoroBottomOffset,
                       // 番茄钟玻璃面板按**当前纸色**取明暗（不跟 App 主题）
-                      child: PomodoroButton(
-                        dark: _turnPaperColor.computeLuminance() < 0.45,
-                      ),
+                      child: PomodoroButton(dark: _paperIsDark),
                     ),
                   ),
                 // 听书光碟（Cmbok 同款）：迷你条左滑收起后悬浮，点按展开回迷你条、
@@ -2591,14 +2637,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             prevPage: pi > 0
                 ? _pageContent(fg, _pages[pi - 1], chapter: _chapterOfPage(pi - 1))
                 : null,
-            // 有壁纸时不要铺纯色底（否则翻页秒变"一块米黄"）：让最外层
-            // 那张全屏壁纸透出来，静止与翻页中的底完全一致
-            background: _hasImageBg
-                ? const SizedBox.shrink()
-                : Container(color: _bgTop),
+            // 页自己已经铺了纸（含壁纸）⇒ 这里不需要再垫一层纯色
+            background: const SizedBox.shrink(),
             // 纸面明暗按**样式底色**判断，不看 App 主题：米黄/古风纸在深色主题下
             // 若按 App 主题算，卷起的纸背会被画成近黑色（明显的"翻页发黑"）
-            dark: _bgIndex == 5 || (_bgImageDark ?? false),
+            dark: _paperIsDark,
             canNext: pi + 1 < _pages.length,
             canPrev: pi > 0,
             onTurnNext: () {
@@ -2653,6 +2696,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                         fg,
                         _pages[pi],
                         chapter: _chapterOfPage(pi),
+                        // 两个半页不各铺一次纸（会被裁成两张不同的图）
+                        paper: false,
                       ),
                     ),
                 ],
@@ -2669,9 +2714,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           final pi = _safePageIndex();
           return withPressDownBookmark(
             BookPageCover(
-              // 滑动页必须不透明（否则透出前一页文字），但颜色要贴近当前纸色：
-              // 有壁纸时用近似纸色，避免动画中闪一块米黄/白
-              backgroundColor: _turnPaperColor,
+              // 页自己已经铺了纸（含壁纸）⇒ 滑动页不再需要垫色
+              backgroundColor: Colors.transparent,
               page: _pageContent(fg, _pages[pi], chapter: _chapterOfPage(pi)),
               nextPage: pi + 1 < _pages.length
                   ? _pageContent(
@@ -2812,7 +2856,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     // 点击判定统一由正文区 GestureDetector（_onTapUp）负责：
     // 左/右 1/3 翻章、中间 1/3 呼出、面板开时点空白收起（逻辑在 _onTapUp）。
     return ListView.builder(
-      padding: EdgeInsets.only(top: _padTop, bottom: _padBottom + 40),
+      // 正文层是整屏（页自带纸）⇒ 漫画也要让开刘海底部的 Home 条
+      padding: EdgeInsets.only(
+        top: _safeTop + _padTop,
+        bottom: _safeBottom + _padBottom + 40,
+      ),
       // 图片数量 + 1（末尾放"下一章"）
       itemCount: _images.length + 1,
       itemBuilder: (c, i) {
@@ -2936,20 +2984,26 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     //   而不是盖在正文上 ⇒ 不遮挡任何文字 ✓
     final showHeader = _rs.statusItems.isNotEmpty || _hasHeaderFormat;
     final showFooter = _rs.statusItems.isNotEmpty || _hasFooterFormat;
-    if (!showHeader && !showFooter) return scroll;
-    return Column(
-      children: [
-        if (showHeader)
-          _statusHeader(
-            fg,
-            // 滚动模式没有页码，进度用"读到第几章"，至少是个真实数值
-            progressOverride: widget.chapters.isEmpty
-                ? 0
-                : (_index + 1) / widget.chapters.length,
-          ),
-        Expanded(child: scroll),
-        if (showFooter) _statusFooter(fg, showPage: false),
-      ],
+    final content = (!showHeader && !showFooter)
+        ? scroll
+        : Column(
+            children: [
+              if (showHeader)
+                _statusHeader(
+                  fg,
+                  // 滚动模式没有页码，进度用"读到第几章"，至少是个真实数值
+                  progressOverride: widget.chapters.isEmpty
+                      ? 0
+                      : (_index + 1) / widget.chapters.length,
+                ),
+              Expanded(child: scroll),
+              if (showFooter) _statusFooter(fg, showPage: false),
+            ],
+          );
+    // 正文层现在是整屏（含刘海/Home 条）⇒ 文字让开安全区；壁纸仍由外层铺满
+    return Padding(
+      padding: EdgeInsets.only(top: _safeTop, bottom: _safeBottom),
+      child: content,
     );
   }
 
@@ -3617,6 +3671,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       _bgImageAssetNight = ReaderBgAssets.pairOf(picked);
       _bgImageDark = dark;
     });
+    _precachePaper();
     _scheduleSavePrefs();
   }
 
@@ -3708,11 +3763,15 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 而阅读器外层已经套了 SafeArea —— 直接照用会让页眉整体下移一整条状态栏
   /// （微信读书那套 58 尤其明显：正文区凭空少 40~50px）。这里先减掉状态栏。
   double get _effectiveHeaderPadTop {
-    final inset = MediaQuery.of(context).viewPadding.top;
+    final inset = _safeTop;
     return (_headerPadTop - inset).clamp(0.0, 120.0);
   }
 
   double _headerFooterHeight() {
+    // 正文层现在是**整屏**（页自带纸）⇒ 安全区要算进"页眉页脚占位"里：
+    // 页内布局是 Padding(safeTop) → 页眉 → 正文 → 页脚 → Padding(safeBottom)。
+    final safeTop = _safeTop;
+    final safeBottom = _safeBottom;
     // 行高必须包含**信息栏字号**（`_rs.statusTextScale`）和系统字体缩放：
     // 页眉页脚的字号是 `fontCaption * statusTextScale`，Text 还会再乘
     // MediaQuery.textScaler。原来只算 `fontCaption * 1.3` ⇒ 选「超大」或
@@ -3722,53 +3781,44 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         MediaQuery.textScalerOf(context).scale(1.0);
     final line = AppTheme.fontCaption * 1.3 * scale;
     // 格式串模式：只为**实际有内容**的那一条留位置（与渲染条件一致）
-    if (_hasHeaderFormat || _hasFooterFormat) {
-      final header = _hasHeaderFormat
-          ? _effectiveHeaderPadTop + 6 + line + 4
-          : 0.0;
-      final footer = _hasFooterFormat
-          ? 4 + line + _footerPadBottom + 6
-          : 0.0;
-      return header + footer;
-    }
-    if (_rs.statusItems.isEmpty) return 0;
-    final header = _effectiveHeaderPadTop + 6 + line + 4;
-    final footer = 4 + line + _footerPadBottom + 6;
-    return header + footer;
+    final hasHeader = _hasHeaderFormat || _rs.statusItems.isNotEmpty;
+    final hasFooter = _hasFooterFormat || _rs.statusItems.isNotEmpty;
+    final header = hasHeader ? _effectiveHeaderPadTop + 6 + line + 4 : 0.0;
+    final footer = hasFooter ? 4 + line + _footerPadBottom + 6 : 0.0;
+    return safeTop + header + footer + safeBottom;
   }
 
   /// 某一页属于哪一章（无缝拼接后 `_pages` 里混有多章）
   int _chapterOfPage(int i) =>
       (i >= 0 && i < _pageChapterOf.length) ? _pageChapterOf[i] : _index;
 
-  /// 一页的内容（含页眉 / 页脚信息栏）
-  Widget _pageContent(Color fg, BookPage page, {int? chapter}) {
-    // ✅ 每页铺**不透明底色**（+ 页缘软投影，见下）——
-    //    原来每一页都是透明的 ✗ ⇒ 前后两页的文字叠在**同一块背景**上，
-    //    用户实测："左右滑动是切片的形式"、"感觉重叠" ✗
-    //    铺底后滑动时看到的是"两张纸在平移" ✓
-    // ⚠️ 自定义背景图时不铺（否则会把图片盖掉 ✗）
-    // 有**任何图片背景**（自选图 / 内置壁纸）时不铺页底色 ✓（否则会把图盖住 ✗）
-    // 有任何图片背景（自选图日/夜任一 / 内置壁纸任一日夜版）时不铺页底色，
-    // 否则会把壁纸盖住。用**当前模式实际生效**的那张判断（只配了夜间图的
-    // 样式，日间也要正确判断，不能用日间字段一刀切）
-    final imgBg = _hasImageBg;
-    final body = imgBg
-        ? _pageBody(fg, page, chapter: chapter)
-        : ColoredBox(
-            color: _bgTop,
-            child: _pageBody(fg, page, chapter: chapter),
-          );
-    // 页缘投影：只在"两页并排平移"的模式（左右 / 无动画）画 —— 给两页之间
-    // 一个可见的软边界；覆盖 / 仿真各有自己的投影，不重复画 ✓
-    if (imgBg ||
+  /// 一页的内容（含页眉 / 页脚信息栏 + 页自己的"纸"）
+  ///
+  /// [paper] 为真时这一页自己铺壁纸/底色（翻页动画里纸跟着页走，
+  /// 与静止时像素一致）；双页模式传 false —— 两个半页各铺一次壁纸会被
+  /// 各自裁切成"两张不同的图"，此时沿用外层整屏壁纸。
+  Widget _pageContent(
+    Color fg,
+    BookPage page, {
+    int? chapter,
+    bool paper = true,
+  }) {
+    final body = _pageBody(fg, page, chapter: chapter);
+    if (!paper) return body;
+    final content = Stack(
+      fit: StackFit.expand,
+      children: [_pagePaper(), body],
+    );
+    // 页缘投影：只在"两页并排平移"的模式（左右 / 无动画）+ 纯色纸时画 ——
+    // 给两页之间一个可见软边界；壁纸纸面画阴影会像"两张一样的图拼在一起"。
+    if (_hasImageBg ||
         (_rs.pageMode != PageMode.slide && _rs.pageMode != PageMode.none)) {
-      return body;
+      return content;
     }
     return Stack(
       fit: StackFit.expand,
       children: [
-        body,
+        content,
         Positioned(
           top: 0,
           bottom: 0,
@@ -4015,7 +4065,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   }
 
   /// 一页的**内容本体**（页眉 / 正文 / 页脚）。
-  /// 由 [_pageContent] 包上底色（+ 页缘投影）后使用 ✓。
+  /// 由 [_pageContent] 铺上"纸"（壁纸/底色）后使用 ✓。
   Widget _pageBody(Color fg, BookPage page, {int? chapter}) {
     // 这一页属于哪一章（无缝拼接后可能不是 `_index`；章标题/页脚都用它）
     final pageChapter = chapter ?? _index;
@@ -4023,7 +4073,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     final showHeader = items.isNotEmpty || _hasHeaderFormat;
     final showFooter = items.isNotEmpty || _hasFooterFormat;
     // 点击判定统一由正文区 GestureDetector（_onTapUp）负责，这里不再注册
-    return Column(
+    return Padding(
+      // 页是整屏的（纸铺到刘海里）⇒ 文字自己让开安全区
+      padding: EdgeInsets.only(top: _safeTop, bottom: _safeBottom),
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // ── 页眉 ────────────────────────────────────────────
@@ -4178,6 +4231,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         // ── 页脚 ────────────────────────────────────────────
         if (showFooter) _statusFooter(fg, chapter: pageChapter),
       ],
+      ),
     );
   }
 
@@ -4504,6 +4558,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     // 夜间标题 HTML 的高度通常与日间不同（headingFixedHeight），
     // 不重排会让已分好的页按旧高度渲染（标题页底部被裁/留白）
     _scheduleRepaginate();
+    _precachePaper();
     _scheduleSavePrefs();
   }
 
@@ -7080,11 +7135,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   Widget _bgImageChip(String? asset, void Function(VoidCallback) upd) {
     final selected = _bgImageAsset == asset;
     return GestureDetector(
-      onTap: () => upd(() {
-        _bgImageAsset = asset;
-        // 成对的图自动带出夜间版（古风/泼墨/皮卡）
-        _bgImageAssetNight = ReaderBgAssets.pairOf(asset);
-      }),
+      onTap: () {
+        upd(() {
+          _bgImageAsset = asset;
+          // 成对的图自动带出夜间版（古风/泼墨/皮卡）
+          _bgImageAssetNight = ReaderBgAssets.pairOf(asset);
+        });
+        _precachePaper();
+      },
       child: Container(
         width: 44,
         height: 52,
@@ -9352,6 +9410,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       _activeStyleId = s.id;
     });
     _styleStore.saveActiveId(s.id);
+    _precachePaper();
     _scheduleSavePrefs();
     _scheduleRepaginate();
     // 字体是异步注册的 → 单独处理（同步能拿到就直接切，省一次重排）
