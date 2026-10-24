@@ -181,6 +181,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// null = 未分析（尚未选壁纸）。
   bool? _bgImageDark;
 
+  /// **自选文件**背景图是否深色（与 `_bgImageDark` 同语义，用于自选图片）。
+  /// null = 未分析（尚无自选图）。选图 / 恢复 / 套样式后异步采样。
+  bool? _fileBgDark;
+
   /// 日夜切换时记住的浅色背景索引（从夜间切回时还原）
   int _dayBgIndex = 0;
 
@@ -597,7 +601,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 当前纸面是否偏深（翻页纸背 / 番茄钟玻璃面板 / 状态栏图标用）
   bool get _paperIsDark =>
       _bgIndex == 5 ||
-      (_bgImageDark ?? false) ||
+      // 有图片背景时看**图片实测亮度**（内置壁纸分析过 `_bgImageDark`，
+      // 自选文件分析过 `_fileBgDark`）：日间选深色自选图也要换浅字/浅图标，
+      // 不能因为"不是夜间"就一律当浅色纸。
+      (_bgImageDark ?? _fileBgDark ?? false) ||
       (!_hasImageBg && _bgTop.computeLuminance() < 0.45);
 
   /// 单页的"纸"：壁纸（日/夜版）或纯色底。
@@ -1184,7 +1191,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         final bgPath =
             (ov?['bgCustomPath'] as String?) ??
             p.getString('reading.bgCustomPath');
-        if (bgPath != null && File(bgPath).existsSync()) _customBgPath = bgPath;
+        if (bgPath != null && File(bgPath).existsSync()) {
+          _customBgPath = bgPath;
+          // _fileBgDark 不持久化，重启后重采自选图明暗（_paperIsDark 用）
+          unawaited(_analyzeFileBg(bgPath));
+        }
         // 夜间那张也是独立存的（.srs 有日/夜两张图）
         final bgPathNight =
             (ov?['bgCustomPathNight'] as String?) ??
@@ -2612,6 +2623,94 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         if (!_rs.pageMode.paginates || _pages.isEmpty) {
           return _scrollView(fg);
         }
+        // 双页模式：横屏左右并排（截图里的「双页模式」）。
+        // 放到仿真/覆盖之前 —— 双页是**布局约束**（左右并排 + 平移），
+        // 与翻页动画互斥；原来双页只在「左右/无动画」下生效，而仿真/覆盖下
+        // 被各自的分支抢走（仿真 → 单页卷曲、覆盖 → 双页平移），表现不一致。
+        // 统一规则：开了双页就是 spread 平移，动画样式不叠加。
+        if (_dualPageActive && _pages.length > 1) {
+          // 把页成对合并：第 0 页单独，之后 (1,2) (3,4) …
+          final spreads = <List<int>>[];
+          for (var i = 0; i < _pages.length; i += 2) {
+            if (i == 0) {
+              spreads.add([0]);
+            } else {
+              spreads.add([i, if (i + 1 < _pages.length) i + 1]);
+            }
+          }
+          return NotificationListener<ScrollNotification>(
+            // 章末再滑一次 → 下一章（无缝拼接接不上时的兜底）
+            onNotification: _onPageScrollNotification,
+            child: PageView.builder(
+              controller: _pageCtrl,
+              physics: const _TapFriendlyPagePhysics(),
+              itemCount: spreads.length,
+              onPageChanged: (i) {
+                final page = spreads[i].first;
+                setState(() => _pageIndex = page);
+                _syncChapterWithPage(page);
+                _maybeAppendAhead();
+                _saveProgress();
+              },
+              itemBuilder: (c, i) {
+                final pair = spreads[i];
+                // 纯色底 + 双页并排时，两半页之间加一条软分隔投影（与单页
+                // 页缘投影同款），避免"无缝得看不出是两页"；有壁纸时壁纸是
+                // 连续一整幅，不需要分隔。
+                final sep = !_hasImageBg && pair.length == 2;
+                final shadowColor = _paperIsDark ? Colors.white : Colors.black;
+                return Row(
+                  children: [
+                    for (var k = 0; k < pair.length; k++)
+                      Expanded(
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            _pageContent(
+                              fg,
+                              _pages[pair[k]],
+                              chapter: _chapterOfPage(pair[k]),
+                              // 两个半页不各铺一次纸（会被裁成两张不同的图）
+                              paper: false,
+                            ),
+                            if (sep)
+                              Positioned(
+                                left: k == 0 ? null : 0,
+                                right: k == 0 ? 0 : null,
+                                top: 0,
+                                bottom: 0,
+                                width: 8,
+                                child: IgnorePointer(
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        begin: Alignment.centerLeft,
+                                        end: Alignment.centerRight,
+                                        colors: k == 0
+                                            ? [
+                                                Colors.transparent,
+                                                shadowColor
+                                                    .withValues(alpha: 0.10),
+                                              ]
+                                            : [
+                                                shadowColor
+                                                    .withValues(alpha: 0.10),
+                                                Colors.transparent,
+                                              ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+          );
+        }
         // 仿真翻页：用 2.0.3 原有的 BookPageCurl（真卷曲，自绘）
         //
         // 它不是 PageView —— 自己处理拖动/点击与卷曲光栅化，
@@ -2642,6 +2741,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             // 纸面明暗按**样式底色**判断，不看 App 主题：米黄/古风纸在深色主题下
             // 若按 App 主题算，卷起的纸背会被画成近黑色（明显的"翻页发黑"）
             dark: _paperIsDark,
+            // 纸背颜色从当前样式底色同一色调推导（米黄纸卷出米黄纸背）
+            paperTint: _bgTop,
             canNext: pi + 1 < _pages.length,
             canPrev: pi > 0,
             onTurnNext: () {
@@ -2663,49 +2764,6 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           );
         }
 
-        // 双页模式：横屏左右并排（截图里的「双页模式」）
-        if (_dualPageActive && _pages.length > 1) {
-          // 把页成对合并：第 0 页单独，之后 (1,2) (3,4) …
-          final spreads = <List<int>>[];
-          for (var i = 0; i < _pages.length; i += 2) {
-            if (i == 0) {
-              spreads.add([0]);
-            } else {
-              spreads.add([i, if (i + 1 < _pages.length) i + 1]);
-            }
-          }
-          return NotificationListener<ScrollNotification>(
-            // 章末再滑一次 → 下一章（无缝拼接接不上时的兜底）
-            onNotification: _onPageScrollNotification,
-            child: PageView.builder(
-              controller: _pageCtrl,
-              physics: const _TapFriendlyPagePhysics(),
-              itemCount: spreads.length,
-              onPageChanged: (i) {
-                final page = spreads[i].first;
-                setState(() => _pageIndex = page);
-                _syncChapterWithPage(page);
-                _maybeAppendAhead();
-                _saveProgress();
-              },
-              itemBuilder: (c, i) => Row(
-                children: [
-                  for (final pi in spreads[i])
-                    Expanded(
-                      child: _pageContent(
-                        fg,
-                        _pages[pi],
-                        chapter: _chapterOfPage(pi),
-                        // 两个半页不各铺一次纸（会被裁成两张不同的图）
-                        paper: false,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          );
-        }
-
         // ✅ 覆盖翻页：复用图书阅读器的 `BookPageCover` —— 新页从侧边滑入**覆盖**，
         //    滑入页自带不透明底色 ⇒ 不会与当前页文字**重叠** ✓。
         //    原来「覆盖」只是把 PageView 换成 Clamping 物理 ✗ → 实际效果与「左右」
@@ -2716,6 +2774,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             BookPageCover(
               // 页自己已经铺了纸（含壁纸）⇒ 滑动页不再需要垫色
               backgroundColor: Colors.transparent,
+              // 前沿投影随纸面明暗（深色纸用浅投影，否则黑投影隐形）
+              dark: _paperIsDark,
               page: _pageContent(fg, _pages[pi], chapter: _chapterOfPage(pi)),
               nextPage: pi + 1 < _pages.length
                   ? _pageContent(
@@ -3589,6 +3649,30 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     } catch (_) {
       return false;
     }
+  }
+
+  /// 自选**文件**背景图是否为深色（与 [_assetIsDark] 同款抽样，用于
+  /// [_fileBgDark]）。结果异步回填并 setState，状态栏/纸背/番茄钟随之明暗。
+  Future<void> _analyzeFileBg(String path) async {
+    bool dark;
+    try {
+      final data = await File(path).readAsBytes();
+      final codec = await ui.instantiateImageCodec(data);
+      final frame = await codec.getNextFrame();
+      final img = frame.image;
+      final bytes = (await img.toByteData(format: ui.ImageByteFormat.rawRgba))!;
+      final px = bytes.buffer.asUint8List();
+      var sum = 0, n = 0;
+      for (var i = 0; i + 4 <= px.length; i += 64) {
+        sum += (px[i] * 299 + px[i + 1] * 587 + px[i + 2] * 114) ~/ 1000;
+        n++;
+      }
+      dark = n > 0 && sum / n < 128;
+    } catch (_) {
+      dark = false;
+    }
+    if (!mounted || _fileBgDark == dark) return;
+    setState(() => _fileBgDark = dark);
   }
 
   /// A3：背景壁纸选择弹窗（14 张内置 + 无壁纸），深色图自动换浅字。
@@ -7583,6 +7667,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         _styleBgDay = null;
         _styleBgNight = null;
       });
+      // 异步分析新图明暗：深色自选图要换浅字/浅图标（_paperIsDark 用）
+      unawaited(_analyzeFileBg(dest));
       if (old != null && old != dest) {
         try {
           final f = File(old);
@@ -9411,6 +9497,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     });
     _styleStore.saveActiveId(s.id);
     _precachePaper();
+    // 套样式后重采自选图明暗（_fileBgDark 用，_paperIsDark 依赖它）
+    if (path != null && File(path).existsSync()) {
+      unawaited(_analyzeFileBg(path));
+    }
     _scheduleSavePrefs();
     _scheduleRepaginate();
     // 字体是异步注册的 → 单独处理（同步能拿到就直接切，省一次重排）

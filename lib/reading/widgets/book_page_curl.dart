@@ -46,6 +46,12 @@ class BookPageCurl extends StatefulWidget {
   /// —— 只看 `Theme.brightness` 会出现"米黄纸配近黑纸背"。
   final bool? dark;
 
+  /// 当前纸面的**底色**（样式背景色）。null = 纸背用写死的米白/炭黑两档。
+  ///
+  /// 传了它，纸背颜色就从底色同一色调推导（米黄纸卷出米黄纸背、灰蓝纸卷出
+  /// 灰蓝纸背），比固定两档更贴合当前样式；夜间再往黑里压。
+  final Color? paperTint;
+
   const BookPageCurl({
     super.key,
     required this.page,
@@ -61,6 +67,7 @@ class BookPageCurl extends StatefulWidget {
     this.quality = 1,
     this.paperTexture = true,
     this.dark,
+    this.paperTint,
   });
 
   @override
@@ -286,6 +293,7 @@ class _BookPageCurlState extends State<BookPageCurl>
               shadowStrength: widget.shadowStrength,
               quality: widget.quality,
               paperTexture: widget.paperTexture,
+              paperTint: widget.paperTint,
             ),
           ),
         ),
@@ -369,6 +377,7 @@ class _CurlPainter extends CustomPainter {
   final double width;
   final double height;
   final bool isDark;
+  final Color? paperTint;
   final double shadowStrength;
   final int quality;
   final bool paperTexture;
@@ -380,6 +389,7 @@ class _CurlPainter extends CustomPainter {
     required this.width,
     required this.height,
     required this.isDark,
+    this.paperTint,
     this.shadowStrength = 1.0,
     this.quality = 1,
     this.paperTexture = true,
@@ -422,8 +432,17 @@ class _CurlPainter extends CustomPainter {
     double px(double x3d, double z) => x3d * f(z);
     double py(double y, double z) => y * f(z);
 
-    final backBase = isDark ? const Color(0xFF1E1E22) : const Color(0xFFFBF6EC);
-    final backDark = isDark ? const Color(0xFF131316) : const Color(0xFFEFE7D6);
+    // 纸背颜色：优先从样式底色（paperTint）同一色调推导 —— 米黄纸卷出米黄纸背、
+    // 灰蓝纸卷出灰蓝纸背，比固定两档更贴合样式；没传 tint 才回退写死的两档。
+    final tint = paperTint;
+    final backBase = tint == null
+        ? (isDark ? const Color(0xFF1E1E22) : const Color(0xFFFBF6EC))
+        : (isDark
+            ? Color.lerp(tint, Colors.black, 0.55)!
+            : Color.lerp(tint, Colors.white, 0.35)!);
+    final backDark = tint == null
+        ? (isDark ? const Color(0xFF131316) : const Color(0xFFEFE7D6))
+        : Color.lerp(backBase, Colors.black, 0.12)!;
 
     Offset top(double x3d, double z) => Offset(px(x3d, z), py(0, z));
     Offset bot(double x3d, double z) => Offset(px(x3d, z), py(h, z));
@@ -603,5 +622,6 @@ class _CurlPainter extends CustomPainter {
       old.height != height ||
       old.shadowStrength != shadowStrength ||
       old.quality != quality ||
-      old.paperTexture != paperTexture;
+      old.paperTexture != paperTexture ||
+      old.paperTint != paperTint;
 }

@@ -19,6 +19,12 @@ class BookPageCover extends StatefulWidget {
   final VoidCallback onTurnPrev;
   final VoidCallback onTapCenter;
 
+  /// 纸面是否偏深（true = 深色纸）。null = 用 App 主题明暗。
+  ///
+  /// 滑入页前沿的投影用它选颜色：浅色纸上黑投影清晰、深色纸上黑投影隐形
+  /// （反过来换浅色投影）。阅读器的纸色由**样式**决定，不能只看 App 主题。
+  final bool? dark;
+
   const BookPageCover({
     super.key,
     required this.page,
@@ -30,6 +36,7 @@ class BookPageCover extends StatefulWidget {
     required this.onTurnNext,
     required this.onTurnPrev,
     required this.onTapCenter,
+    this.dark,
   });
 
   @override
@@ -179,6 +186,10 @@ class _BookPageCoverState extends State<BookPageCover>
     final content = dir == 1 ? widget.nextPage : widget.prevPage;
     // 滑动页前沿 x（dir=1: 左沿=slide；dir=-1: 右沿=w+slide）
     final leadingEdge = dir == 1 ? slide : (w + slide);
+    // 投影颜色随纸面明暗：浅色纸用黑、深色纸用白（黑投影在深色纸上隐形）
+    final isDark =
+        widget.dark ?? (Theme.of(context).brightness == Brightness.dark);
+    final shadow = isDark ? Colors.white : Colors.black;
     return [
       Positioned.fill(child: widget.page),
       if (content != null)
@@ -204,8 +215,14 @@ class _BookPageCoverState extends State<BookPageCover>
                 begin: Alignment.centerLeft,
                 end: Alignment.centerRight,
                 colors: dir == 1
-                    ? [Colors.transparent, Colors.black.withValues(alpha: 0.28)]
-                    : [Colors.black.withValues(alpha: 0.28), Colors.transparent],
+                    ? [
+                        Colors.transparent,
+                        shadow.withValues(alpha: 0.28),
+                      ]
+                    : [
+                        shadow.withValues(alpha: 0.28),
+                        Colors.transparent,
+                      ],
               ),
             ),
           ),
