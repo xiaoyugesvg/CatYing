@@ -159,7 +159,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 非空时优先于颜色作为正文背景）
   String? _customBgPath;
 
-  /// 内置阅读背景壁纸（27 张；资源在 `assets/images/reader_bg/`）。
+  /// 内置阅读背景壁纸（34 张；资源在 `assets/images/reader_bg/`）。
   /// ⚠️ 以后加壁纸：把图放进那个目录 + 这里加一行即可（pubspec 已声明该目录 ✓）。
   static const List<String> _builtinBgImages = [
     'assets/images/reader_bg/annie-spratt-6a3nqQ1YwBw-unsplash.jpg',
@@ -196,6 +196,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     'assets/images/reader_bg/reading_bg_gufeng_night.webp',
     'assets/images/reader_bg/reading_bg_pomo_day.webp',
     'assets/images/reader_bg/reading_bg_pomo_night.webp',
+    // 皮卡丘主题（Legado theme「皮卡丘-白天 / 黑夜」+ 粉色插画）
+    'assets/images/reader_bg/reading_bg_pika_day.webp',
+    'assets/images/reader_bg/reading_bg_pika_night.webp',
+    'assets/images/reader_bg/reading_bg_pika_pink.webp',
   ];
 
   /// 当前选中的内置壁纸（null = 不用壁纸，走 `_bgIndex` 的纯色底 ✓）
