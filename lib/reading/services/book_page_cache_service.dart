@@ -46,6 +46,10 @@ class BookPageCacheService {
 
   /// 完整缓存键：视口 + 排版参数 + bookId + 内容指纹。
   /// 阅读器 _buildPaged 与过渡页共用同一格式，确保两者判等一致。
+  ///
+  /// ⚠️ **凡是影响排版的字段都必须进 key**：漏一个 → 改了它却命中旧分页
+  /// （页底溢出 / 留白 / 页数不对）。所以除了字号行高边距，还要带上
+  /// 下边距、段距系数、标题字号/字重/行高/固定高度（自定义标题版式用）。
   static String keyOf({
     required double vpW,
     required double vpH,
@@ -55,7 +59,12 @@ class BookPageCacheService {
     bool doublePage = false,
   }) {
     return '${vpW.toInt()}x${vpH.toInt()}'
-        ':${typo.fontSize}:${typo.lineHeight}:${typo.padding}:${typo.verticalPadding}:${typo.fontFamily}:${typo.textScaler.scale(1.0)}'
+        ':${typo.fontSize}:${typo.lineHeight}:${typo.padding}'
+        ':${typo.verticalPadding}:${typo.verticalPaddingBottom ?? typo.verticalPadding}'
+        ':${typo.paragraphSpacingFactor}'
+        ':${typo.headingFontSizeOverride}:${typo.headingHeightOverride}'
+        ':${typo.headingFontWeight.index}:${typo.headingFixedHeight}'
+        ':${typo.fontFamily}:${typo.textScaler.scale(1.0)}'
         ':${typo.inheritedStyle.hashCode}'
         ':$bookId:$fingerprint:dp${doublePage ? 1 : 0}';
   }

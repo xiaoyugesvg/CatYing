@@ -26,6 +26,7 @@ class ReaderStyle {
     this.bgImageAsset,
     this.bgImageAssetNight,
     this.bgImagePath,
+    this.bgImagePathNight,
     this.bgImageDark = false,
     // ── ② 排版 ──
     this.fontSize = 18,
@@ -111,6 +112,10 @@ class ReaderStyle {
 
   /// 自定义壁纸的本地文件路径（另一台设备上不存在时自动忽略）
   final String? bgImagePath;
+
+  /// 夜间自定义壁纸的本地路径（.srs 会带日/夜两张；
+  /// null = 夜间沿用 [bgImagePath] 并压暗）
+  final String? bgImagePathNight;
 
   /// 壁纸是否做暗色处理（夜间）
   final bool bgImageDark;
@@ -198,6 +203,7 @@ class ReaderStyle {
     bgImageAsset: bgImageAsset,
     bgImageAssetNight: bgImageAssetNight,
     bgImagePath: bgImagePath,
+    bgImagePathNight: bgImagePathNight,
     bgImageDark: bgImageDark,
     fontSize: fontSize,
     lineHeight: lineHeight,
@@ -255,6 +261,7 @@ class ReaderStyle {
     'bgImageAsset': bgImageAsset,
     'bgImageAssetNight': bgImageAssetNight,
     'bgImagePath': bgImagePath,
+    'bgImagePathNight': bgImagePathNight,
     'bgImageDark': bgImageDark,
     'fontSize': fontSize,
     'lineHeight': lineHeight,
@@ -317,6 +324,7 @@ class ReaderStyle {
     bgImageAsset: j['bgImageAsset'] as String?,
     bgImageAssetNight: j['bgImageAssetNight'] as String?,
     bgImagePath: j['bgImagePath'] as String?,
+    bgImagePathNight: j['bgImagePathNight'] as String?,
     bgImageDark: j['bgImageDark'] as bool? ?? false,
     fontSize: _d(j['fontSize'], 18),
     lineHeight: _d(j['lineHeight'], 1.72),
@@ -429,6 +437,8 @@ class ReaderStyle {
       bgColor: bgColor,
       bgColorNight: bgNight,
       fgColor: textColor,
+      // 夜间字色（db 的 textColorNight）：不映射就只能吃 B8B8B8 兜底
+      fgColorNight: _parseColor(cfg['textColorNight']),
       fontSize: fs,
       lineHeight: lh,
       letterSpacing: ls,
@@ -453,6 +463,8 @@ class ReaderStyle {
       ),
       footerPadBottom: px(cfg['footerPaddingBottom'], 6),
       statusItems: items,
+      // 信息栏字号（db 的 statusTextScale）
+      statusTextScale: _d(cfg['statusTextScale'], 1.0).clamp(0.8, 1.5),
       pageMode: pageMode,
     );
   }

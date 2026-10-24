@@ -162,6 +162,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 非空时优先于颜色作为正文背景）
   String? _customBgPath;
 
+  /// 夜间自定义背景图（.srs 自带日/夜两张；null = 夜间用 [_customBgPath] 并压暗）
+  String? _customBgPathNight;
+
   /// 内置阅读背景壁纸（清单集中在 [ReaderBgAssets]，与样式编辑器共用）
   ///
   /// 用 [ReaderBgAssets.picker]（不含成对夜间版）：古风/泼墨/皮卡的夜版
@@ -997,6 +1000,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     // ⚠️ `Color` 不能直接进 JSON ✗ → 存 `toARGB32()` 整数 ✓（读回时 `Color(...)` ✓ 与全局键同款 ✓）
     'bgCustom': _customBgColor?.toARGB32(),
     'bgCustomPath': _customBgPath,
+    'bgCustomPathNight': _customBgPathNight,
     'bgImage': _bgImageAsset,
     'underlineColor': _underlineColor?.toARGB32(),
     'underlineStyle': _underlineStyle,
@@ -1099,6 +1103,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             (ov?['bgCustomPath'] as String?) ??
             p.getString('reading.bgCustomPath');
         if (bgPath != null && File(bgPath).existsSync()) _customBgPath = bgPath;
+        // 夜间那张也是独立存的（.srs 有日/夜两张图）
+        final bgPathNight =
+            (ov?['bgCustomPathNight'] as String?) ??
+            p.getString('reading.bgCustomPathNight');
+        if (bgPathNight != null && File(bgPathNight).existsSync()) {
+          _customBgPathNight = bgPathNight;
+        }
         // 内置壁纸（与 `_savePrefs` 的 `reading.bgImage` 配对 ✓）
         final bgImg =
             (ov?['bgImage'] as String?) ?? p.getString('reading.bgImage');
@@ -1166,9 +1177,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         final fw = num2('fontWeight');
         if (fw != null && fw >= 300 && fw <= 900) _fontWeight = fw;
         final ls = num2('letterSpacing');
-        if (ls != null && ls >= 0 && ls <= 8) _letterSpacing = ls;
+        // 字距允许负值（db 里有负字距，套用样式时也是 -2~8）——
+        // 原来只收 >= 0，重启后负字距被打回旧值
+        if (ls != null && ls >= -2 && ls <= 8) _letterSpacing = ls;
         final ps = num2('paraSpacing');
-        if (ps != null && ps >= 0 && ps <= 3) _paraSpacing = ps;
+        // 与套用样式时的 clamp（0~2）一致：原来这里收 0~3，重启后会出现
+        // 阅读器 UI 显示 2、实际渲染 3 的错位
+        if (ps != null && ps >= 0 && ps <= 2) _paraSpacing = ps;
         final tfs = num2('titleFontSize');
         if (tfs != null && tfs >= 8 && tfs <= 60) _titleFontSize = tfs;
         final tb =
@@ -1328,6 +1343,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           await p.setString('reading.bgCustomPath', _customBgPath!);
         } else {
           await p.remove('reading.bgCustomPath');
+        }
+        if (_customBgPathNight != null) {
+          await p.setString('reading.bgCustomPathNight', _customBgPathNight!);
+        } else {
+          await p.remove('reading.bgCustomPathNight');
         }
         if (_bgImageAsset != null) {
           await p.setString('reading.bgImage', _bgImageAsset!);
@@ -2139,8 +2159,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     final extraTop = mq.padding.top > 0 ? 0.0 : mq.viewPadding.top;
     final extraBottom = mq.padding.bottom > 0 ? 0.0 : mq.viewPadding.bottom;
     // 自选图片（`_customBgPath`）：优先级最高 ✓
-    final useFileBg =
-        _customBgPath != null && File(_customBgPath!).existsSync();
+    //   夜间优先用夜间那张（.srs 自带日/夜两套），没有再沿用日间图并压暗
+    final fileBgPath = _bgIndex == 5
+        ? (_customBgPathNight ?? _customBgPath)
+        : _customBgPath;
+    final useFileBg = fileBgPath != null && File(fileBgPath).existsSync();
     // 有任何图片背景（自选图 / 内置壁纸）⇒ Scaffold 底色透明，露出图片 ✓
     // 夜间优先用样式自带的夜间壁纸（古风/泼墨都有单独的黑白两版）
     final bgAsset =
@@ -2167,11 +2190,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           if (useFileBg)
             _nightDim(
               Image.file(
-                File(_customBgPath!),
+                File(fileBgPath),
                 fit: BoxFit.cover,
                 gaplessPlayback: true,
                 errorBuilder: (_, __, ___) => Container(color: bg[0]),
               ),
+              // 用的就是夜间那张 ⇒ 不再叠遮罩
+              nightVersionInUse: _bgIndex == 5 && _customBgPathNight != null,
             )
           else if (bgAsset != null)
             // 内置壁纸（14 张里选的一张 ✓）
@@ -3643,9 +3668,16 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   }
 
   double _headerFooterHeight() {
+    // 行高必须包含**信息栏字号**（`_rs.statusTextScale`）和系统字体缩放：
+    // 页眉页脚的字号是 `fontCaption * statusTextScale`，Text 还会再乘
+    // MediaQuery.textScaler。原来只算 `fontCaption * 1.3` ⇒ 选「超大」或
+    // 系统大字号时预留高度偏小 ⇒ 正文可用高度偏大 ⇒ 页底最后一行被裁。
+    final scale =
+        _rs.statusTextScale *
+        MediaQuery.textScalerOf(context).scale(1.0);
+    final line = AppTheme.fontCaption * 1.3 * scale;
     // 格式串模式：只为**实际有内容**的那一条留位置（与渲染条件一致）
     if (_hasHeaderFormat || _hasFooterFormat) {
-      final line = AppTheme.fontCaption * 1.3;
       final header = _hasHeaderFormat
           ? _effectiveHeaderPadTop + 6 + line + 4
           : 0.0;
@@ -3655,7 +3687,6 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       return header + footer;
     }
     if (_rs.statusItems.isEmpty) return 0;
-    final line = AppTheme.fontCaption * 1.3;
     final header = _effectiveHeaderPadTop + 6 + line + 4;
     final footer = 4 + line + _footerPadBottom + 6;
     return header + footer;
@@ -4404,6 +4435,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       _applyReaderStyle(bound);
       _toast('已切换到「${bound.name}」');
     }
+    // 夜间标题 HTML 的高度通常与日间不同（headingFixedHeight），
+    // 不重排会让已分好的页按旧高度渲染（标题页底部被裁/留白）
+    _scheduleRepaginate();
     _scheduleSavePrefs();
   }
 
@@ -5290,7 +5324,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       }
       return _chapterTitleHtml;
     }
-    return _chapterTitleStyle.html;
+    // 内置模板也有夜版（颜色写死的模板必须换一套，否则深底深字）
+    final t = _chapterTitleStyle;
+    if (_bgIndex == 5 && t.nightHtml.isNotEmpty) return t.nightHtml;
+    return t.html;
   }
 
   /// 编译某一章的标题文档（章节数 / 章节名已代入）；空模板返回 null
@@ -6765,14 +6802,19 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   /// 列表里的小缩略图（比卡片小样简单，保证 44×54 不溢出）
   Widget _styleThumb(ReaderStyle s, {bool selected = false}) {
-    final bg = s.bgColor != null
-        ? Color(s.bgColor!)
-        : _bgs[s.bgIndex.clamp(0, _bgs.length - 1)][0];
+    final night = _bgIndex == 5;
+    final bgc = night ? (s.bgColorNight ?? s.bgColor) : s.bgColor;
+    final bg = bgc != null
+        ? Color(bgc)
+        : _bgs[(night ? 5 : s.bgIndex).clamp(0, _bgs.length - 1)][0];
     final dark = ThemeData.estimateBrightnessForColor(bg) == Brightness.dark;
-    final fg = s.fgColor != null
-        ? Color(s.fgColor!)
+    final fgc = night ? (s.fgColorNight ?? s.fgColor) : s.fgColor;
+    final fg = fgc != null
+        ? Color(fgc)
         : (dark ? const Color(0xFFE2E2E2) : const Color(0xFF1A1A1A));
-    final asset = s.bgImageAsset;
+    final asset = night
+        ? (s.bgImageAssetNight ?? s.bgImageAsset)
+        : s.bgImageAsset;
     return Container(
       width: 44,
       height: 54,
@@ -6820,15 +6862,24 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   /// 样式小样：按样式自己的底色 / 壁纸 / 文字色 / 行距画一张"迷你书页"，
   /// 让用户在**点之前**就大致看出观感（不是纯色块）。
+  ///
+  /// 跟随阅读器当前日夜：夜间时预览样式的**夜间**配色与夜版壁纸。
   Widget _stylePreview(ReaderStyle s, {bool selected = false}) {
-    final bg = s.bgColor != null
-        ? Color(s.bgColor!)
-        : _bgs[s.bgIndex.clamp(0, _bgs.length - 1)][0];
+    final night = _bgIndex == 5;
+    final bgc = night ? (s.bgColorNight ?? s.bgColor) : s.bgColor;
+    final bg = bgc != null
+        ? Color(bgc)
+        : _bgs[(night ? 5 : s.bgIndex).clamp(0, _bgs.length - 1)][0];
     final dark = ThemeData.estimateBrightnessForColor(bg) == Brightness.dark;
-    final fg = s.fgColor != null
-        ? Color(s.fgColor!)
+    final fgc = night ? (s.fgColorNight ?? s.fgColor) : s.fgColor;
+    final fg = fgc != null
+        ? Color(fgc)
         : (dark ? const Color(0xFFE2E2E2) : const Color(0xFF1A1A1A));
-    final asset = s.bgImageAsset;
+    final asset = night
+        ? (s.bgImageAssetNight ?? s.bgImageAsset)
+        : s.bgImageAsset;
+    // 夜版壁纸本身已经压暗，不再叠遮罩
+    final dimAsset = s.bgImageDark && !(night && s.bgImageAssetNight != null);
     // 迷你行距：把真实行高（相对字号）压到 2~5px，看得出松紧即可
     final gap = (s.lineHeight - 1).clamp(0.15, 1.2) * 4;
     final showHeader = s.statusItems.contains('时间') ||
@@ -6851,7 +6902,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             : DecorationImage(
                 image: AssetImage(asset),
                 fit: BoxFit.cover,
-                colorFilter: s.bgImageDark
+                colorFilter: dimAsset
                     ? ColorFilter.mode(
                         Colors.black.withValues(alpha: 0.45),
                         BlendMode.darken,
@@ -7402,6 +7453,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       final old = _customBgPath;
       upd(() {
         _customBgPath = dest;
+        // 手动选的新图没有夜间版 ⇒ 清掉旧样式带的夜间图（否则夜里还是旧图）
+        _customBgPathNight = null;
         _customBgColor = null; // 图片背景优先于颜色
         _styleBgDay = null;
         _styleBgNight = null;
@@ -7641,30 +7694,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         (v) => upd(() => _focusBold = v),
       ),
       const SizedBox(height: 12),
-      _layoutLabel('标题样式'),
-      Row(
-        children: [
-          for (final n in ['朴素'])
-            Container(
-              margin: const EdgeInsets.only(right: 10),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
-              decoration: BoxDecoration(
-                color: _titleStyle == 0
-                    ? _fg.withValues(alpha: 0.85)
-                    : _fg.withValues(alpha: 0.07),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                n,
-                style: TextStyle(
-                  fontSize: AppTheme.fontSubhead,
-                  color: _titleStyle == 0 ? _bgTop : _fg,
-                ),
-              ),
-            ),
-        ],
-      ),
-      const SizedBox(height: 6),
+      // 「标题样式 · 朴素」原本是死 UI：只有一个选项、也没有 onTap，
+      // 渲染端从未读过 `_titleStyle` ⇒ 已删除。章标题版式请用上面的
+      // 「章标题版式」chip（ReaderTitleStyle）或标题样式库。
       _layoutToggleRow(
         '隐藏重复标题',
         '章首正文与章名相同时不再显示一遍（默认开）',
@@ -8980,22 +9012,28 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       return;
     }
 
-    // 按当前日夜模式取对应那张背景图
-    final night = _bgIndex == 5;
-    String? imagePath;
-    final img = SrsStyleImporter.backgroundBytes(json, night: night);
-    if (img != null) {
+    // 日 / 夜两张背景图**都落盘**：.srs 里是两套图，
+    // 只在导入时按当前模式取一张 ⇒ 切到另一个模式就图不匹配（夜里导入的
+    // 白天也显示夜景）。
+    Future<String?> saveBg(int kind) async {
+      final img = SrsStyleImporter.backgroundBytes(json!, night: kind == 1);
+      if (img == null) return null;
       try {
         final dir = await getApplicationDocumentsDirectory();
         final d = Directory('${dir.path}/reader_styles');
         if (!d.existsSync()) d.createSync(recursive: true);
         final f = File(
-          '${d.path}/srs_${DateTime.now().millisecondsSinceEpoch}_${night ? 'n' : 'd'}.png',
+          '${d.path}/srs_${DateTime.now().millisecondsSinceEpoch}_${kind == 1 ? 'n' : 'd'}.png',
         );
         await f.writeAsBytes(img, flush: true);
-        imagePath = f.path;
-      } catch (_) {}
+        return f.path;
+      } catch (_) {
+        return null;
+      }
     }
+
+    final imagePath = await saveBg(0);
+    final imagePathNight = await saveBg(1);
 
     final id = 'srs:${DateTime.now().millisecondsSinceEpoch}';
     // 内嵌字体（fontData）：注册到引擎并落盘（4~5MB 的 ttf 很常见）
@@ -9012,8 +9050,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     final style = SrsStyleImporter.toReaderStyle(
       json,
       id: id,
-      night: night,
       bgImagePath: imagePath,
+      bgImagePathNight: imagePathNight,
       fontId: fontId,
     );
     setState(() => _myStyles = [..._myStyles, style]);
@@ -9046,6 +9084,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       bgImageAsset: _bgImageAsset,
       bgImageAssetNight: _bgImageAssetNight,
       bgImagePath: _customBgPath,
+      bgImagePathNight: _customBgPathNight,
       bgImageDark: _bgImageDark ?? false,
       fontSize: _fontSize,
       lineHeight: _lineHeight,
@@ -9135,6 +9174,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           activeId: _activeStyleId,
           background: _sheetBg,
           foreground: _fg,
+          night: _bgIndex == 5,
           onApply: _applyReaderStyle,
           onChanged: (list) {
             if (!mounted) return;
@@ -9177,6 +9217,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     final nightColor = s.bgColorNight ?? s.bgColor;
     final custom = night ? nightColor : dayColor;
     final path = s.bgImagePath;
+    final pathNight = s.bgImagePathNight;
     setState(() {
       _styleBgDay = dayColor;
       _styleBgNight = nightColor;
@@ -9195,6 +9236,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       _bgImageAssetNight = s.bgImageAssetNight;
       _bgImageDark = s.bgImageAsset == null ? null : s.bgImageDark;
       _customBgPath = (path != null && File(path).existsSync()) ? path : null;
+      _customBgPathNight =
+          (pathNight != null && File(pathNight).existsSync()) ? pathNight : null;
       _fontSize = s.fontSize.clamp(12.0, 30.0);
       _lineHeight = s.lineHeight.clamp(1.05, 3.0);
       _letterSpacing = s.letterSpacing.clamp(-2.0, 8.0);

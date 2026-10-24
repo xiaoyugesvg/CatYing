@@ -193,10 +193,12 @@ class _ReaderStyleEditPageState extends State<ReaderStyleEditPage> {
           _slider('字号', _fontSize, 12, 30, _fontSize.round().toString(), (v) {
             setState(() => _fontSize = v);
           }, step: 1),
-          _slider('行高', _lineHeight, 1.2, 2.6, _lineHeight.toStringAsFixed(2), (v) {
+          // 取值范围与阅读器套用时的 clamp 对齐（1.05~3.0 / -2~8 / 左右 0~80），
+          // 否则导入的高行高样式一进编辑器就被"看不见地夹住"
+          _slider('行高', _lineHeight, 1.05, 3.0, _lineHeight.toStringAsFixed(2), (v) {
             setState(() => _lineHeight = v);
           }, step: 0.05),
-          _slider('字距', _letterSpacing, 0, 8, _letterSpacing.toStringAsFixed(1), (v) {
+          _slider('字距', _letterSpacing, -2, 8, _letterSpacing.toStringAsFixed(1), (v) {
             setState(() => _letterSpacing = v);
           }, step: 0.1),
           _slider('段距', _paraSpacing, 0, 2, '${_paraSpacing.toStringAsFixed(2)}x', (v) {
@@ -206,10 +208,10 @@ class _ReaderStyleEditPageState extends State<ReaderStyleEditPage> {
             setState(() => _indent = v);
           }, step: 1),
           _section('边距'),
-          _slider('左', _padLeft, 0, 60, _padLeft.round().toString(), (v) {
+          _slider('左', _padLeft, 0, 80, _padLeft.round().toString(), (v) {
             setState(() => _padLeft = v);
           }, step: 1),
-          _slider('右', _padRight, 0, 60, _padRight.round().toString(), (v) {
+          _slider('右', _padRight, 0, 80, _padRight.round().toString(), (v) {
             setState(() => _padRight = v);
           }, step: 1),
           _slider('上', _padTop, 0, 120, _padTop.round().toString(), (v) {

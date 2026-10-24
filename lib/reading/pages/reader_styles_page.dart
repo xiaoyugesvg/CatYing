@@ -23,6 +23,7 @@ class ReaderStylesPage extends StatefulWidget {
     required this.activeId,
     required this.background,
     required this.foreground,
+    this.night = false,
     this.onApply,
     this.onChanged,
     this.onSaveCurrent,
@@ -34,6 +35,9 @@ class ReaderStylesPage extends StatefulWidget {
   final String? activeId;
   final Color background;
   final Color foreground;
+
+  /// 当前是否夜间（卡片小样按对应那套配色预览，不再永远显示日间亮色）
+  final bool night;
 
   /// 阅读器模式：选中后回调（由调用方套用并关闭页面）
   final void Function(ReaderStyle)? onApply;
@@ -734,11 +738,22 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
   }
 
   /// 迷你书页：样式自己的底色 / 壁纸 / 字色 / 行距
+  ///
+  /// 按当前日夜取对应那套（[ReaderStylesPage.night]）：夜间打开时看到的是
+  /// 夜间配色 + 夜间壁纸，而不是一排亮纸片。
   Widget _preview(ReaderStyle s, {required bool selected}) {
-    final bg = s.bgColor != null ? Color(s.bgColor!) : const Color(0xFFFFFFFF);
+    final night = widget.night;
+    final bgColor = night ? (s.bgColorNight ?? s.bgColor) : s.bgColor;
+    final asset = night
+        ? (s.bgImageAssetNight ?? s.bgImageAsset)
+        : s.bgImageAsset;
+    final bg = bgColor != null
+        ? Color(bgColor)
+        : (night ? const Color(0xFF2B2B2B) : const Color(0xFFFFFFFF));
     final dark = ThemeData.estimateBrightnessForColor(bg) == Brightness.dark;
-    final fg = s.fgColor != null
-        ? Color(s.fgColor!)
+    final fgColor = night ? (s.fgColorNight ?? s.fgColor) : s.fgColor;
+    final fg = fgColor != null
+        ? Color(fgColor)
         : (dark ? const Color(0xFFE2E2E2) : const Color(0xFF1A1A1A));
     final gap = (s.lineHeight - 1).clamp(0.15, 1.2) * 4;
     return Container(
@@ -751,12 +766,9 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
           color: selected ? _fg : _fg.withValues(alpha: 0.16),
           width: selected ? 2 : 1,
         ),
-        image: s.bgImageAsset == null
+        image: asset == null
             ? null
-            : DecorationImage(
-                image: AssetImage(s.bgImageAsset!),
-                fit: BoxFit.cover,
-              ),
+            : DecorationImage(image: AssetImage(asset), fit: BoxFit.cover),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

@@ -35,6 +35,19 @@ enum ReaderTitleStyle {
     _ => '',
   };
 
+  /// 夜间版 HTML（空串 = 该模板没有夜版，沿用 [html]）。
+  ///
+  /// 内置模板的颜色是写死的：不换一套，夜间深底上就是深色标题（几乎看不见）。
+  String get nightHtml => switch (this) {
+    ReaderTitleStyle.xianheDay => _xianheNight,
+    ReaderTitleStyle.xianheNight => _xianheNight,
+    ReaderTitleStyle.xianhePad => _xianhePadNight,
+    ReaderTitleStyle.weRead => _weReadNight,
+    ReaderTitleStyle.guFeng => _guFengNight,
+    ReaderTitleStyle.qingLan => _qingLanNight,
+    _ => '',
+  };
+
   static ReaderTitleStyle fromId(String? id) {
     final v = id ?? '';
     for (final e in values) {
@@ -86,10 +99,30 @@ enum ReaderTitleStyle {
   </div>
 </div>''';
 
+  /// 仙鹤·平板的夜间版（版式不变，配色换成夜间那套）
+  static const _xianhePadNight = '''
+<div style="background-image:url('asset:assets/images/reader_title/xianhe.png');
+            background-repeat:no-repeat; background-position:left; background-size:auto 100%;">
+  <div style="text-align:right;">
+    <h3 style="color:#97897a; margin:0.5em 0.5em 10em 0; font-weight:Light; font-size:1.5em;">章节数</h3>
+    <h4 style="box-shadow:0px 15px 10px -15px #000; display:inline-block;
+               background-color:rgba(151,137,122,0.8); border-radius:16px;
+               margin:0 0 5em 0; padding:0.5em 0.5em 0.5em 5em; text-align:right;
+               color:#2d3b6c; font-weight:Light; font-size:1.5em;">章节名</h4>
+  </div>
+</div>''';
+
   static const _weRead = '''
 <p style="text-align:left; color:#386068; font-size:1.5em; margin-top:2em;
           margin-bottom:0; padding-bottom:1.5em;">章节数</p>
 <p style="text-align:left; font-weight:bold; color:#386068; font-size:2em;
+          padding-bottom:4em;">章节名</p>''';
+
+  /// 微信读书·夜间版（深底浅字）
+  static const _weReadNight = '''
+<p style="text-align:left; color:#9BA6B2; font-size:1.5em; margin-top:2em;
+          margin-bottom:0; padding-bottom:1.5em;">章节数</p>
+<p style="text-align:left; font-weight:bold; color:#C9D2DB; font-size:2em;
           padding-bottom:4em;">章节名</p>''';
 
   /// 用户 2026 提供的「古风·完美版」（蓝底白字章节数 + 蓝色大标题）
@@ -105,6 +138,16 @@ enum ReaderTitleStyle {
            font-weight:Light; font-size:2.3em; margin:0.3em 0 0.5em 0;
            padding-bottom:0.15em;">章节名</h3>''';
 
+  /// 古风·蓝章·夜间版：药丸换成深蓝灰、文字换米白，边框换暗金
+  static const _guFengNight = '''
+<h3 style="border-bottom:2px solid #5A5346; text-align:center; color:#E8E3D6;
+           float:left; display:inline-block; background-color:#3B4658;
+           border-radius:5px; font-weight:Light; font-size:2.6em;
+           margin:0; padding:0.1em 0.5em;">章节数</h3>
+<h3 style="border-bottom:1px solid #5A5346; text-align:center; color:#D8C48A;
+           font-weight:Light; font-size:2.3em; margin:0.3em 0 0.5em 0;
+           padding-bottom:0.15em;">章节名</h3>''';
+
   /// 用户 2026 提供的「青蓝·光晕」（山峦插画 + 文字发光 + 半透明药丸）。
   /// 原样式的背景图是网络地址，这里换成随包 asset（离线也能用）。
   static const _qingLan = '''
@@ -117,6 +160,21 @@ enum ReaderTitleStyle {
                background-color:rgba(35,97,120,0.5); border-radius:16px;
                margin:3em 0 2em 0; padding:0.5em 2em; text-align:left;
                color:#f3f7fa; text-shadow:0 0 10px #f3f7fa;
+               font-weight:200; font-size:1em;">章节名</h4>
+  </div>
+</div>''';
+
+  /// 青蓝·光晕·夜间版（浅青字 + 更淡的药丸，夜间也有"光晕"感）
+  static const _qingLanNight = '''
+<div style="background-image:url('asset:assets/images/reader_title/qinglan.png');
+            background-repeat:no-repeat; background-position:left; background-size:auto 100%;">
+  <div style="text-align:left;">
+    <h3 style="color:#8FB6C6; text-shadow:0 0 10px #8FB6C6; margin:0 0.5em 3em 0;
+               font-weight:200; font-size:1.5em;">章节数</h3>
+    <h4 style="box-shadow:0px 15px 10px -15px #000; display:inline-block;
+               background-color:rgba(143,182,198,0.35); border-radius:16px;
+               margin:3em 0 2em 0; padding:0.5em 2em; text-align:left;
+               color:#EAF3F7; text-shadow:0 0 10px #EAF3F7;
                font-weight:200; font-size:1em;">章节名</h4>
   </div>
 </div>''';

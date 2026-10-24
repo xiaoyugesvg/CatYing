@@ -116,12 +116,13 @@ class SrsStyleImporter {
 
   /// 转成我们的 [ReaderStyle]。
   ///
-  /// [bgImagePath] 是调用方已经把背景图落盘后的本地路径（没有就传 null）。
+  /// [bgImagePath] / [bgImagePathNight] 是调用方已经把日 / 夜背景图落盘后的
+  /// 本地路径（没有就传 null）。
   static ReaderStyle toReaderStyle(
     Map<String, dynamic> json, {
     required String id,
-    required bool night,
     String? bgImagePath,
+    String? bgImagePathNight,
     String? fontId,
   }) {
     final styleMap = json['style'];
@@ -156,13 +157,22 @@ class SrsStyleImporter {
     final indentStr = (cfg['paragraphIndent'] as String?) ?? '';
     final indent = indentStr.length.clamp(0, 4).toDouble();
 
-    final bgType = night
-        ? ((cfg['bgTypeNight'] as num?)?.toInt() ??
-              (cfg['bgType'] as num?)?.toInt() ??
-              0)
-        : ((cfg['bgType'] as num?)?.toInt() ?? 0);
-    final bgStr = (night ? cfg['bgStrNight'] : cfg['bgStr']) as String?;
-    final bgColor = bgType == 2 ? null : (bgStr == null ? null : _hex(bgStr));
+    // 日 / 夜的底色、字色**各自独立取**。
+    //   原来按"导入时的模式"二选一 ⇒ 夜里导入的样式，白天打开是深底浅字
+    //   （两组颜色被对调），且 bgColorNight 还被置成 null。
+    int iOf(String k, int fallback) => (cfg[k] as num?)?.toInt() ?? fallback;
+    final bgTypeDay = iOf('bgType', 0);
+    final bgTypeNight = iOf('bgTypeNight', bgTypeDay);
+    final bgStrDay = cfg['bgStr'] as String?;
+    final bgStrNight = (cfg['bgStrNight'] as String?) ?? bgStrDay;
+    final dayBgColor = bgTypeDay == 2
+        ? null
+        : (bgStrDay == null ? null : _hex(bgStrDay));
+    final nightBgColor = bgTypeNight == 2
+        ? null
+        : (bgStrNight == null ? null : _hex(bgStrNight));
+    // 纯色兜底索引：浅色字 ⇒ 夜间深底，深色字 ⇒ 米黄
+    final fallbackBg = _isLightColor(colorOf('textColor')) ? 5 : 3;
 
     // 标题 HTML 存日 / 夜两份（db 的 titleStyleHtml / titleStyleHtmlNight）：
     //   只存导入时的那一份，白天导入的古风到了夜里标题还是白天的深色，看不见 ✗
@@ -179,13 +189,14 @@ class SrsStyleImporter {
       id: id,
       name: name,
       builtin: false,
-      bgIndex: night ? 5 : 3,
-      dayBgIndex: 3,
-      bgColor: bgColor,
-      bgColorNight: night ? null : _hexOf(cfg['bgStrNight']),
-      fgColor: (night ? colorOf('textColorNight') : colorOf('textColor')),
+      bgIndex: fallbackBg,
+      dayBgIndex: fallbackBg,
+      bgColor: dayBgColor,
+      bgColorNight: nightBgColor,
+      fgColor: colorOf('textColor'),
       fgColorNight: colorOf('textColorNight'),
       bgImagePath: bgImagePath,
+      bgImagePathNight: bgImagePathNight,
       fontSize: fs,
       lineHeight: lh,
       letterSpacing: ls,
@@ -210,6 +221,8 @@ class SrsStyleImporter {
       chapterTitleHtmlNight: cleanNight,
       titleFontSize: (cfg['titleSize'] as num?)?.toDouble(),
       titleBold: ((cfg['titleBold'] as num?)?.toDouble() ?? 0) >= 0,
+      // 信息栏字号（db 的 statusTextScale）：不映射的话 db 调过的那套会被拉回 1.0
+      statusTextScale: d('statusTextScale', 1.0).clamp(0.8, 1.5),
       pageMode: 'slide',
     );
   }
@@ -237,7 +250,14 @@ class SrsStyleImporter {
     return v == null ? null : (0xFF000000 | v);
   }
 
-  static int? _hexOf(Object? v) => v is String ? _hex(v) : null;
+  /// 颜色偏亮（浅色字 ⇒ 需要深底兜底）
+  static bool _isLightColor(int? argb) {
+    if (argb == null) return false;
+    final r = (argb >> 16) & 0xFF;
+    final g = (argb >> 8) & 0xFF;
+    final b = argb & 0xFF;
+    return (0.299 * r + 0.587 * g + 0.114 * b) > 160;
+  }
 
   /// 组件列表 → 左 / 中 / 右 三条格式串
   ///

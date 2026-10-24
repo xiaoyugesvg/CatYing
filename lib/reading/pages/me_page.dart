@@ -1374,6 +1374,7 @@ class _MePageState extends State<MePage> {
           foreground: isDark
               ? const Color(0xFFE7EAF0)
               : const Color(0xFF1B1F27),
+          night: isDark,
           standalone: true,
         ),
       ),
