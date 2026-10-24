@@ -67,6 +67,14 @@ class VideoPlayerWidget extends StatefulWidget {
   final double? resumeSeconds;
   final String? videoTitle;
   final String? currentEpisodeName;
+
+  /// 弹幕匹配专用的**标准片名**（详情页传 TMDB 刮削名 `VodInfo.tmdbName`）。
+  ///
+  /// 为什么单独一个字段而不直接改 [videoTitle]：
+  ///   · [videoTitle] 是 CMS 原名，标题栏/历史/缓存都用它，不能动；
+  ///   · TMDB 名更接近弹幕库（爱优腾/B站）的索引标题，用来 match 命中率更高。
+  /// 为空时回落到 [videoTitle]；两者不同时按「TMDB 名 → CMS 名」顺序各试一次。
+  final String? danmuTitle;
   final List<String> episodeNames;
   final int selectedEpisodeIndex;
   final bool canPlayNext;
@@ -158,6 +166,7 @@ class VideoPlayerWidget extends StatefulWidget {
     this.resumeSeconds,
     this.videoTitle,
     this.currentEpisodeName,
+    this.danmuTitle,
     this.episodeNames = const [],
     this.selectedEpisodeIndex = 0,
     this.canPlayNext = false,
@@ -1533,20 +1542,29 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   /// 实际发请求 + 兜底链路。抽出来是因为上面那层只负责"要不要加载"的闸门。
   Future<void> _doLoadDanmu(String url, int loadGen) async {
     // 片名 / 集数：url 匹配失败时用于「按片名兜底匹配」
-    final title = (widget.videoTitle ?? '').trim();
+    final cmsTitle = (widget.videoTitle ?? '').trim();
     final epName = (widget.currentEpisodeName ?? '').trim();
+    // 片名候选：TMDB 刮削名优先，再回落 CMS 原名（去重）。
+    // 弹幕库索引的是爱优腾/B站标题，TMDB 中文名一般更接近；但个别剧
+    // TMDB 给的是台译/副标题，CMS 原名反而能中 ⇒ 两个都试。
+    final titles = <String>[];
+    for (final raw in [(widget.danmuTitle ?? '').trim(), cmsTitle]) {
+      if (raw.isEmpty) continue;
+      final cleaned = TmdbService.cleanTitle(raw);
+      final c = cleaned.isEmpty ? raw : cleaned;
+      if (c.isNotEmpty && !titles.contains(c)) titles.add(c);
+    }
     // url 命中不到时是否还值得用片名兜底（仅 http(s) 播放地址）
-    final titleFallbackUsable = title.isNotEmpty && url.startsWith('http');
+    final titleFallbackUsable = titles.isNotEmpty && url.startsWith('http');
 
     // 磁盘缓存键：有片名就按「片名|年份|集号」（与片名兜底的进程内缓存同构），
     // 没片名退回播放地址 —— 同一集两种情况下键都稳定。
-    var cleanTitle = title.isEmpty ? '' : TmdbService.cleanTitle(title);
-    if (cleanTitle.isEmpty) cleanTitle = title;
-    final cacheKey = title.isEmpty
+    final mainTitle = titles.isEmpty ? '' : titles.first;
+    final cacheKey = titles.isEmpty
         ? 'u:$url'
-        : '${cleanTitle.toLowerCase()}|'
-            '${TmdbService.extractYear(title, '') ?? ''}|'
-            '${widget.selectedEpisodeIndex}';
+        : '${mainTitle.toLowerCase()}|'
+            '${TmdbService.extractYear(mainTitle, '') ?? ''}|'
+            '$_danmuEpisodeNo';
 
     // ① 磁盘缓存命中 → 直接上屏（几毫秒），不等远端 3~4 次往返。
     final disk = await _danmuReadDiskCache(cacheKey);
@@ -1584,7 +1602,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (titleFallbackUsable) {
       searchFuture = _danmuGetText(
         '$base/api/v2/search/anime'
-        '?keyword=${Uri.encodeQueryComponent(cleanTitle)}',
+        '?keyword=${Uri.encodeQueryComponent(titles.first)}',
       );
     }
 
@@ -1614,9 +1632,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     var danmuSource = 'url';
     List<DanmuItem>? fb;
     if (list.isEmpty && titleFallbackUsable) {
-      fb = await _danmuFetchByTitle(
+      fb = await _danmuFetchByTitles(
         base,
-        title,
+        titles,
         epName,
         url,
         searchFuture: searchFuture,
@@ -1664,7 +1682,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (list.isNotEmpty) unawaited(_danmuWriteDiskCache(cacheKey, list));
     list = _filterByBlockWords(list);
     AppLog.instance.log(
-      '[video_player] danmu loaded: ${list.length} 条 (source=$danmuSource, title=$title)',
+      '[video_player] danmu loaded: ${list.length} 条 '
+      '(source=$danmuSource, title=$mainTitle)',
     );
     // 代次校验：快速换集时丢弃过期响应，避免旧集弹幕盖到新集上
     if (!mounted || loadGen != _danmuLoadGen) return;
@@ -1836,6 +1855,49 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }
   }
 
+  /// 当前应匹配的季号：从片名里的「第N季 / Season N」解析，默认 1。
+  ///
+  /// ⚠️ 只能从**原始片名**取 —— `TmdbService.cleanTitle` 会把「第N季」删掉，
+  ///   用它去解析永远得到 1（第二季的弹幕就会全贴到第一季上）。
+  int get _danmuSeasonNo {
+    final t = widget.videoTitle ?? '';
+    final m = RegExp(r'第\s*([0-9]{1,2}|[一二三四五六七八九十])\s*季').firstMatch(t) ??
+        RegExp(r'[Ss]eason\s*(\d{1,2})').firstMatch(t);
+    if (m == null) return 1;
+    final raw = m.group(1) ?? '';
+    final n = int.tryParse(raw) ??
+        switch (raw) {
+          '一' => 1,
+          '二' => 2,
+          '三' => 3,
+          '四' => 4,
+          '五' => 5,
+          '六' => 6,
+          '七' => 7,
+          '八' => 8,
+          '九' => 9,
+          '十' => 10,
+          _ => null,
+        };
+    return (n != null && n > 0 && n < 100) ? n : 1;
+  }
+
+  /// 当前应匹配的集号：优先从集名解析（「第28集/话/期」「E28」），
+  /// 解析不到才退回「列表下标 + 1」。
+  ///
+  /// ⚠️ 下标不可靠：源里带「预告/花絮/合集」时整条列表会偏移一格，
+  ///   于是第 2 集会去拉第 1 集的弹幕。
+  int get _danmuEpisodeNo {
+    final ep = (widget.currentEpisodeName ?? '').trim();
+    if (ep.isNotEmpty) {
+      final m = RegExp(r'第\s*(\d{1,4})\s*[集话期回]').firstMatch(ep) ??
+          RegExp(r'[Ee][Pp]?\s*(\d{1,4})(?!\d)').firstMatch(ep);
+      final n = int.tryParse(m?.group(1) ?? '');
+      if (n != null && n > 0) return n;
+    }
+    return widget.selectedEpisodeIndex + 1;
+  }
+
   /// 用 Logvr-danmu 的 `POST /api/v2/match` 把「剧名 SxxExx」匹配成候选 episodeId。
   ///
   /// 相比 `search/anime → bangumi → comment` 三步链：**一次往返**、由服务端做
@@ -1858,7 +1920,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         widget.selectedEpisodeIndex == 0;
     final fileName = isSingle
         ? title
-        : '$title S01E${(widget.selectedEpisodeIndex + 1).toString().padLeft(2, '0')}';
+        : '$title S${_danmuSeasonNo.toString().padLeft(2, '0')}'
+            'E${_danmuEpisodeNo.toString().padLeft(2, '0')}';
     final body = await _danmuPostJson(
       '$base/api/v2/match',
       {'fileName': fileName},
@@ -1875,6 +1938,16 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       final out = <int>[];
       for (final m in matches) {
         if (m is! Map) continue;
+        // 🔴 必须校验 animeTitle 与请求片名对得上：
+        //   服务端在压力下曾把《功夫女足》匹配成《凤栖梧桐》的 episodeId
+        //   （另一个完全无关的剧）。不校验就会去拉那部剧的弹幕 —— 串剧。
+        final animeName = (m['animeTitle'] ?? '').toString().trim();
+        if (animeName.isNotEmpty && !_titleLooseMatch(animeName, title)) {
+          AppLog.instance.log(
+            '[video_player] danmu match 丢弃串剧候选: "$animeName" !~ "$title"',
+          );
+          continue;
+        }
         final id = (m['episodeId'] as num?)?.toInt() ?? 0;
         if (id > 0 && !out.contains(id)) out.add(id);
       }
@@ -1922,7 +1995,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     final year = TmdbService.extractYear(title, '');
 
     final cacheKey =
-        '${clean.toLowerCase()}|${year ?? ''}|${widget.selectedEpisodeIndex}';
+        '${clean.toLowerCase()}|${year ?? ''}|${_danmuEpisodeNo}';
     // ✅ 先看"整集弹幕"缓存：命中就秒出（不用再走 search→bangumi→comment）
     final cachedList = _danmuTitleListCache[cacheKey];
     if (cachedList != null) {
@@ -2011,6 +2084,37 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     return const [];
   }
 
+  /// 按**多个候选片名**依次尝试（TMDB 刮削名 → CMS 原名）。
+  ///
+  /// 为什么要两个名字：弹幕库索引的是爱优腾/B站等平台的标题，
+  /// TMDB 中文名通常更接近它；但 TMDB 偶尔给的是台译/副标题，
+  /// 这时 CMS 原名反而能命中 ⇒ 第一个没数据就换第二个，成本只多 1~2 次请求。
+  ///
+  /// 返回 `null` = 请求失败（可重试）；空列表 = 服务在线但所有名字都没数据。
+  Future<List<DanmuItem>?> _danmuFetchByTitles(
+    String base,
+    List<String> titles,
+    String episodeName,
+    String videoUrl, {
+    Future<String?>? searchFuture,
+  }) async {
+    List<DanmuItem>? last;
+    for (var i = 0; i < titles.length; i++) {
+      final list = await _danmuFetchByTitle(
+        base,
+        titles[i],
+        episodeName,
+        videoUrl,
+        // 并行搜索只给第一个名字用（后面的按需再发，避免白打请求触发 429）
+        searchFuture: i == 0 ? searchFuture : null,
+      );
+      if (list == null) return null; // 请求失败 → 可重试
+      if (list.isNotEmpty) return list;
+      last = list;
+    }
+    return last ?? const [];
+  }
+
   /// 从番剧详情里选出当前集的 episodeId。
   ///
   /// 返回 `null` = 请求失败（可重试）；`0` = 服务在线但没这一集。
@@ -2037,7 +2141,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         }
       }
     }
-    final idx = widget.selectedEpisodeIndex.clamp(0, episodes.length - 1);
+    // 兜底：按**集号**取（第 N 集 → episodes[N-1]）。
+    // ⚠️ 不用「列表下标」——源列表带预告/花絮时会整体偏移一格，
+    //   按下标取会把第 2 集的弹幕贴到第 1 集上。
+    final byNo = _danmuEpisodeNo - 1;
+    final idx = (byNo >= 0 && byNo < episodes.length)
+        ? byNo
+        : widget.selectedEpisodeIndex.clamp(0, episodes.length - 1);
     final e = episodes[idx];
     if (e is! Map) return 0;
     return (e['episodeId'] as num?)?.toInt() ?? 0;

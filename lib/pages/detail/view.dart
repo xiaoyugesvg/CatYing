@@ -1076,6 +1076,11 @@ class _DetailPageState extends State<DetailPage> {
       headers: headers.isEmpty ? null : headers,
       resumeSeconds: _controller.resumeSeconds.value,
       videoTitle: info?.name,
+      // 弹幕匹配优先用 TMDB 刮削名（更接近爱优腾/B站的索引标题），
+      // 没刮削到就回落到 CMS 原名
+      danmuTitle: (info != null && info.tmdbName.isNotEmpty)
+          ? info.tmdbName
+          : null,
       currentEpisodeName: episode?.name,
       episodeNames: _controller.currentEpisodes.map((e) => e.name).toList(),
       selectedEpisodeIndex: _controller.selectedEpisodeIndex.value,
