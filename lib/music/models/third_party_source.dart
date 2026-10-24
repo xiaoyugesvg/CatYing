@@ -369,6 +369,18 @@ class ThirdPartySourceStore {
     await _persist();
   }
 
+  /// 按**显示名**把某个源挪到整个列表最前面。
+  ///
+  /// 用名字而不是 id：内置 MusicFree 源的 id 里带版本号（文件名），
+  /// 升级后 id 会变，写死 id 就失效了。
+  Future<void> moveToFrontByName(String name) async {
+    final idx = _items.indexWhere((e) => e.name == name);
+    if (idx <= 0) return;
+    final item = _items.removeAt(idx);
+    _items.insert(0, item);
+    await _persist();
+  }
+
   Future<void> setEnabled(String id, bool enabled) async {
     final idx = _items.indexWhere((e) => e.id == id);
     if (idx < 0) return;

@@ -2,6 +2,11 @@
   "desc": "0.1.0",
   "plugins": [
     {
+      "name": "咪咕音乐",
+      "url": "https://gcore.jsdelivr.net/gh/hebijunge/musicfree-plugins@master/plugins/migu-source.plugin.v1.9.18.js",
+      "version": "1.9.18"
+    },
+    {
       "name": "QQ音乐",
       "url": "https://gcore.jsdelivr.net/gh/hebijunge/musicfree-plugins@master/plugins/qq-source.plugin.v1.9.23.js",
       "version": "1.9.23"
@@ -15,11 +20,6 @@
       "name": "酷狗音乐",
       "url": "https://gcore.jsdelivr.net/gh/hebijunge/musicfree-plugins@master/plugins/kugou-source.plugin.v1.9.22.js",
       "version": "1.9.22"
-    },
-    {
-      "name": "咪咕音乐",
-      "url": "https://gcore.jsdelivr.net/gh/hebijunge/musicfree-plugins@master/plugins/migu-source.plugin.v1.9.18.js",
-      "version": "1.9.18"
     },
     {
       "name": "网易云音乐",
