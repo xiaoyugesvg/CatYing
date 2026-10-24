@@ -388,6 +388,7 @@ class _ContentViewState extends State<ContentView>
               builder: (context, paletteRev, ___) => Obx(() {
                 final tabIndex =
                     MainTabController.instance.selectedTab.value;
+                final pages = _tabPages('$isLight-$paletteRev');
                 return AnimatedBuilder(
                   animation: _tabSlideCtrl,
                   builder: (context, child) {
@@ -402,13 +403,28 @@ class _ContentViewState extends State<ContentView>
                   },
                   // child 不参与动画重建：IndexedStack 以及 12 个 tab 页的
                   // Element/State 全部复用（保活滚动位置与已加载数据）
-                  child: IndexedStack(
-                    // 🔴 这里**不能**再拼 `ValueKey('tabs-$isLight-$paletteRev')`：
-                    // 换 key 会销毁重建全部 tab 页，阅读子 tab 与各页滚动位置
-                    // 全部丢失（用户实测"切个明暗就跳回默认首页"）。
-                    // 子页重建改由 `_tabPages(sig)` 换新实例来触发。
-                    index: tabIndex,
-                    children: _tabPages('$isLight-$paletteRev'),
+                  //
+                  // ⚡ 两层性能包裹（2026-10-24「切 tab 掉帧」）：
+                  //   · RepaintBoundary：切页是整屏位移，没有边界时整屏内容
+                  //     每帧重绘（含十几张海报）；有边界后只做图层位移。
+                  //   · TickerMode：IndexedStack 的其余 11 页虽不绘制，但它们的
+                  //     AnimationController 仍在跑（幻灯片轮播等），每帧抢主线程。
+                  //     只给当前页放行，后台页动画自动暂停。
+                  child: RepaintBoundary(
+                    child: IndexedStack(
+                      // 🔴 这里**不能**再拼 `ValueKey('tabs-$isLight-$paletteRev')`：
+                      // 换 key 会销毁重建全部 tab 页，阅读子 tab 与各页滚动位置
+                      // 全部丢失（用户实测"切个明暗就跳回默认首页"）。
+                      // 子页重建改由 `_tabPages(sig)` 换新实例来触发。
+                      index: tabIndex,
+                      children: [
+                        for (var i = 0; i < pages.length; i++)
+                          TickerMode(
+                            enabled: i == tabIndex,
+                            child: pages[i],
+                          ),
+                      ],
+                    ),
                   ),
                 );
               }),

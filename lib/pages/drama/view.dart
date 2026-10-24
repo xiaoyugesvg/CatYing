@@ -628,11 +628,46 @@ class _DramaPageState extends State<DramaPage> {
                     borderRadius: BorderRadius.circular(12),
                     child: v.pic.isEmpty
                         ? _ph(isDark)
-                        : CachedNetworkImage(
-                            imageUrl: v.pic,
-                            fit: BoxFit.cover,
-                            width: double.infinity,
-                            errorWidget: (_, __, ___) => _ph(isDark),
+                        // 与影视卡片同一套：底层铺满压暗 + 前景完整显示，
+                        // 既不拉伸也不裁掉封面内容
+                        : LayoutBuilder(
+                            builder: (context, box) {
+                              final dpr =
+                                  MediaQuery.of(context).devicePixelRatio;
+                              final logicalW = box.maxWidth.isFinite
+                                  ? box.maxWidth
+                                  : 120.0;
+                              final w =
+                                  (logicalW * dpr).round().clamp(120, 600);
+                              Widget layer(BoxFit fit,
+                                  {bool dim = false, bool isBack = false}) {
+                                return CachedNetworkImage(
+                                  imageUrl: v.pic,
+                                  fit: fit,
+                                  width: double.infinity,
+                                  memCacheWidth: w,
+                                  maxWidthDiskCache: 600,
+                                  fadeInDuration: Duration.zero,
+                                  color: dim
+                                      ? Colors.black.withValues(alpha: 0.45)
+                                      : null,
+                                  colorBlendMode:
+                                      dim ? BlendMode.darken : null,
+                                  errorWidget: (_, __, ___) => isBack
+                                      ? const SizedBox.shrink()
+                                      : _ph(isDark),
+                                );
+                              }
+
+                              return Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  layer(BoxFit.cover,
+                                      dim: true, isBack: true),
+                                  layer(BoxFit.contain),
+                                ],
+                              );
+                            },
                           ),
                   ),
                 ),

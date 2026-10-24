@@ -1455,6 +1455,13 @@ class _RecommendBannerState extends State<_RecommendBanner>
 
   Timer? _autoTimer;
 
+  /// 当前 tab 是否在前台可见。
+  ///
+  /// 用户 2026-10-24：「点一个、切走了，后台还在跑一样」—— 首页被 IndexedStack
+  /// 保活，切走后 5 秒一次的自动翻页 + 进度条动画照跑不误（既耗电，动画还会
+  /// 卡在半路）。可见性从 TickerMode 读（ContentView 已按 tab 开关）。
+  bool _visible = true;
+
   /// 「标签页」上方那条标签条（活动标签自动居中要按它算滚动量）
   final ScrollController _tabsCtrl = ScrollController();
 
@@ -1466,13 +1473,35 @@ class _RecommendBannerState extends State<_RecommendBanner>
   /// 提了自动播放）。所以这个样式直接不起定时器。
   void _restartAuto() {
     _autoTimer?.cancel();
+    // 不在前台就不排定时器：等 didChangeDependencies 唤醒
+    if (!_visible) return;
     if (widget.style == HomeBannerStyle.tabs) return;
     _autoTimer = Timer.periodic(const Duration(seconds: 5), (_) => _advance());
     if (_usesProgressBar) _progress.forward(from: 0);
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final on = TickerMode.of(context);
+    if (on == _visible) return;
+    _visible = on;
+    if (on) {
+      _restartAuto(); // 回到前台：重新计时，不追补后台错过的页
+    } else {
+      _autoTimer?.cancel();
+      _autoTimer = null;
+      _progress.stop();
+    }
+  }
+
   void _advance() {
-    if (!mounted || widget.videos.isEmpty || !_pageCtrl.hasClients) return;
+    if (!mounted ||
+        !_visible ||
+        widget.videos.isEmpty ||
+        !_pageCtrl.hasClients) {
+      return;
+    }
     _pageCtrl.nextPage(
       duration: const Duration(milliseconds: 400),
       curve: Curves.easeOut,

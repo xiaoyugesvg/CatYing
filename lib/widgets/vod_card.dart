@@ -241,16 +241,48 @@ class VodCard extends StatelessWidget {
         ),
       );
     }
-    return CachedNetworkImage(
-      imageUrl: picUrl,
-      // fill = 拉伸填满（可能变形），但**保证整张图都显示出来**。
-      // 之前用 cover 会裁掉两侧/上下，用户反馈"图片显示不全"。
-      fit: BoxFit.fill,
-      placeholder: (_, __) => ColoredBox(color: AppTheme.backgroundTertiary),
-      errorWidget: (_, __, ___) => ColoredBox(
-        color: AppTheme.backgroundTertiary,
-        child: Icon(Icons.broken_image_outlined, color: AppTheme.textTertiary),
-      ),
+    // 🔴 必须给解码尺寸：源站海报常常 1000px+，不设 memCacheWidth 会按原图
+    //    整张解码（单张 4~6MB 位图），一屏十几张 ⇒ 滑动时解码 + GC 双抖，
+    //    体感就是"列表卡顿"。按卡片实际像素宽（逻辑宽 × dpr）解码最省。
+    return LayoutBuilder(
+      builder: (context, box) {
+        final dpr = MediaQuery.of(context).devicePixelRatio;
+        final logicalW = box.maxWidth.isFinite ? box.maxWidth : 160.0;
+        final targetW = (logicalW * dpr).round().clamp(120, 720);
+        // 两层同图（解码只做一次，memCacheWidth 相同 ⇒ 共用缓存）：
+        //   · 底层 cover + 压暗 = 填满卡片，没有黑边；
+        //   · 前景 contain = **整张图完整显示**，不拉伸、不裁切。
+        // 竖图（多数海报）两层重合看不出差别；横图会完整落在中间，
+        // 两侧由压暗的同图铺底 —— 既不变形也不缺内容。
+        Widget layer(BoxFit fit, {bool dim = false, bool isBack = false}) {
+          return CachedNetworkImage(
+            imageUrl: picUrl,
+            fit: fit,
+            memCacheWidth: targetW,
+            maxWidthDiskCache: 720,
+            fadeInDuration: Duration.zero,
+            alignment: Alignment.center,
+            color: dim ? Colors.black.withValues(alpha: 0.45) : null,
+            colorBlendMode: dim ? BlendMode.darken : null,
+            placeholder: (_, __) => ColoredBox(color: AppTheme.backgroundTertiary),
+            errorWidget: (_, __, ___) => isBack
+                ? const SizedBox.shrink()
+                : ColoredBox(
+                    color: AppTheme.backgroundTertiary,
+                    child: Icon(Icons.broken_image_outlined,
+                        color: AppTheme.textTertiary),
+                  ),
+          );
+        }
+
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            layer(BoxFit.cover, dim: true, isBack: true),
+            layer(BoxFit.contain),
+          ],
+        );
+      },
     );
   }
 }

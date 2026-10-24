@@ -416,6 +416,12 @@ class AppPlayer {
         try {
           await vc.dispose();
         } catch (_) {}
+      } else {
+        // 共享的 controller 不能 dispose（别人还在用），但必须**停住** ——
+        // 否则页面已经关了、声音还在放（用户反馈「像多个播放器在运行」）。
+        try {
+          await vc.pause();
+        } catch (_) {}
       }
     }
     _vc = null;
