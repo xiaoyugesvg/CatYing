@@ -1809,13 +1809,23 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   HttpClient get _danmuClient =>
       _danmuHttpClient ??=
-          (HttpClient()..connectionTimeout = const Duration(seconds: 6));
+          (HttpClient()..connectionTimeout = const Duration(seconds: 10));
 
-  /// 弹幕接口单次请求的**总**超时（建连 + 收响应头 + 读 body 共用）。
+  /// 单次请求的超时预算，**按接口分档**（不能一刀切）。
   ///
-  /// ⚠️ 原来三段各 `.timeout(8s)` 串起来最坏 24s（日志实证：09.665 发起 →
-  ///   32.530 才判失败），一次判定就拖掉二十多秒，期间还占着限流额度。
-  static const Duration _danmuReqTimeout = Duration(seconds: 8);
+  /// 🔴 实测（用户服务器 2026-10-24）：`comment/10006`（功夫女足 / 360 源）
+  ///   首次返回 **13.65 秒 / 1.69 MB / 21578 条** —— 服务端是现场去上游平台
+  ///   抓取并合并的，慢是常态（缓存命中后才快）。之前统一 8 秒会把这份真实
+  ///   数据直接判成"0 条"，用户看到的就是"死活不出弹幕"。
+  ///
+  /// 分档原则：
+  ///   · 搜索 / 番剧详情：命中上游索引，10~20s；
+  ///   · match：同上，且要解析文件名，20s；
+  ///   · comment：最重（抓取 + 合并 + 大 body），35s。
+  static const Duration _danmuTimeoutDefault = Duration(seconds: 10);
+  static const Duration _danmuTimeoutLookup = Duration(seconds: 20);
+  static const Duration _danmuTimeoutMatch = Duration(seconds: 20);
+  static const Duration _danmuTimeoutComment = Duration(seconds: 35);
 
   /// 最近一次弹幕请求是否被服务端限流（HTTP 429）。
   ///
@@ -1840,7 +1850,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   ///   · `null` —— 请求失败（HTTP 非 200 / 超时 / 异常）→ **可重试**，
   ///     调用方不得置位 `_danmuLoaded`（否则一次波动永久锁死弹幕）；
   ///   · `''` 或非空串 —— 请求成功，响应体就是这么多 ✓。
-  Future<String?> _danmuGetText(String api) async {
+  Future<String?> _danmuGetText(
+    String api, {
+    Duration timeout = _danmuTimeoutDefault,
+  }) async {
     final client = _danmuClient;
     try {
       return await () async {
@@ -1853,7 +1866,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         }
         return await res.transform(utf8.decoder).join();
       }()
-          .timeout(_danmuReqTimeout);
+          .timeout(timeout);
     } catch (e) {
       AppLog.instance.log('[video_player] danmu request fail: $e');
       return null;
@@ -1863,8 +1876,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   /// POST JSON（弹幕接口专用；语义同 [_danmuGetText]：失败返回 null）
   Future<String?> _danmuPostJson(
     String api,
-    Map<String, dynamic> payload,
-  ) async {
+    Map<String, dynamic> payload, {
+    Duration timeout = _danmuTimeoutMatch,
+  }) async {
     final client = _danmuClient;
     try {
       return await () async {
@@ -1880,7 +1894,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         }
         return await res.transform(utf8.decoder).join();
       }()
-          .timeout(_danmuReqTimeout);
+          .timeout(timeout);
     } catch (e) {
       AppLog.instance.log('[video_player] danmu post fail: $e');
       return null;
@@ -2039,8 +2053,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         '[video_player] danmu title-fallback episodeId 命中: $cacheKey',
       );
       final list = await _danmuFetchComments(base, cached);
-      if (list != null && list.isNotEmpty) _rememberDanmuList(cacheKey, list);
-      return list; // null（请求失败）向上传播 → 调用方保留重试
+      if (list == null) {
+        // ⚠️ episodeId 会随服务端重启/换实例而失效（实测同一 id 过一会儿
+        //   返回 404）。缓存不丢的话，之后每次重试都会撞同一个坏 id，
+        //   永远恢复不了 ⇒ 这里丢掉缓存，下一轮重新 match。
+        _danmuEpCache.remove(cacheKey);
+        return null;
+      }
+      if (list.isNotEmpty) _rememberDanmuList(cacheKey, list);
+      return list;
     }
 
     // ① 先用 match 接口（一次往返，服务端自己解析「剧名 S01E01」）
@@ -2063,7 +2084,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     final searchUrl =
         '$base/api/v2/search/anime'
         '?keyword=${Uri.encodeQueryComponent(clean)}';
-    final searchBody = await _danmuGetText(searchUrl);
+    final searchBody = await _danmuGetText(
+      searchUrl,
+      timeout: _danmuTimeoutLookup,
+    );
     if (searchBody == null) return null; // 请求失败 → 可重试
     if (searchBody.isEmpty) return const []; // 服务在线但没搜到 → 真 0 条
     final animes = _danmuParseList(searchBody, 'animes');
@@ -2144,7 +2168,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     Object? animeId,
     String episodeName,
   ) async {
-    final bgBody = await _danmuGetText('$base/api/v2/bangumi/$animeId');
+    final bgBody = await _danmuGetText(
+      '$base/api/v2/bangumi/$animeId',
+      timeout: _danmuTimeoutLookup,
+    );
     if (bgBody == null) return null; // 请求失败 → 可重试
     if (bgBody.isEmpty) return 0;
     final bangumi = _danmuParseMap(bgBody, 'bangumi');
@@ -2175,12 +2202,16 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   }
 
   /// 用 episodeId 取弹幕（兜底链路的最后一步）。失败返回 `null`（可重试）。
+  ///
+  /// ⚠️ 这里的超时必须**比别的接口宽**：服务端首次要现场去上游抓取并合并
+  ///   （实测 13.65 秒 / 1.69 MB），8 秒会把它直接判成 0 条。
   Future<List<DanmuItem>?> _danmuFetchComments(
     String base,
     int episodeId,
   ) async {
     final body = await _danmuGetText(
       '$base/api/v2/comment/$episodeId?format=json&duration=true',
+      timeout: _danmuTimeoutComment,
     );
     if (body == null) return null;
     if (body.isEmpty) return const [];
