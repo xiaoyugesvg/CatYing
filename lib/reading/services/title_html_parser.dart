@@ -209,10 +209,15 @@ class TitleHtml {
     required String chapterName,
   }) {
     final root = TitleBoxBlock(TitleCss(), <TitleBlock>[]);
-    if (source.trim().isEmpty) return TitleHtmlDoc(root);
+    var src = source.trim();
+    // 源阅读导出的标题样式常以 `cmt:` 开头（注释标记），不能当正文渲染出来
+    if (src.toLowerCase().startsWith('cmt:')) {
+      src = src.substring(4).trimLeft();
+    }
+    if (src.isEmpty) return TitleHtmlDoc(root);
     dom.DocumentFragment frag;
     try {
-      frag = html_parser.parseFragment(source);
+      frag = html_parser.parseFragment(src);
     } catch (_) {
       return TitleHtmlDoc(root);
     }

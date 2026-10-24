@@ -28,6 +28,7 @@ import '../services/book_source_service.dart';
 import '../services/chapter_alignment.dart';
 import '../services/reader_notes_service.dart';
 import '../services/reader_style_store.dart';
+import '../services/srs_style_importer.dart';
 import '../services/title_html_parser.dart';
 import '../services/tts_service.dart';
 import '../services/ai_service.dart';
@@ -6300,6 +6301,15 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               },
               compact: true,
             ),
+            _chip(
+              '导入 .srs',
+              false,
+              () async {
+                await _importSrsStyle();
+                setSheet(() {});
+              },
+              compact: true,
+            ),
           ],
         ),
       ),
@@ -8597,6 +8607,64 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         _toast('解析失败：不是样式 JSON');
       }
     }
+  }
+
+  /// 导入「源阅读」`.srs` 样式（Base64 → 逐字节 XOR 0x60）。
+  ///
+  /// 也接受已经解密好的 `.json`（10MB 左右，含内嵌背景图）。
+  /// 背景图会落盘到 `<Documents>/reader_styles/`，样式里存的是本地路径。
+  Future<void> _importSrsStyle() async {
+    final files = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['srs', 'json', 'srsx', 'txt'],
+    );
+    if (files.isEmpty) return;
+    final picked = files.first;
+    _toast('正在解析样式…');
+    // 让 SnackBar 先画出来（下面解析 10MB 左右的 JSON 会占住 UI 线程）
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+
+    Map<String, dynamic>? json;
+    try {
+      final bytes = await picked.readAsBytes();
+      json = SrsStyleImporter.parse(bytes);
+    } catch (_) {
+      _toast('读取文件失败');
+      return;
+    }
+    if (json == null) {
+      _toast('解析失败：不是源阅读 .srs / 样式 JSON');
+      return;
+    }
+
+    // 按当前日夜模式取对应那张背景图
+    final night = _bgIndex == 5;
+    String? imagePath;
+    final img = SrsStyleImporter.backgroundBytes(json, night: night);
+    if (img != null) {
+      try {
+        final dir = await getApplicationDocumentsDirectory();
+        final d = Directory('${dir.path}/reader_styles');
+        if (!d.existsSync()) d.createSync(recursive: true);
+        final f = File(
+          '${d.path}/srs_${DateTime.now().millisecondsSinceEpoch}_${night ? 'n' : 'd'}.png',
+        );
+        await f.writeAsBytes(img, flush: true);
+        imagePath = f.path;
+      } catch (_) {}
+    }
+
+    final id = 'srs:${DateTime.now().millisecondsSinceEpoch}';
+    final style = SrsStyleImporter.toReaderStyle(
+      json,
+      id: id,
+      night: night,
+      bgImagePath: imagePath,
+    );
+    setState(() => _myStyles = [..._myStyles, style]);
+    await _styleStore.saveCustom(_myStyles);
+    _applyReaderStyle(style);
+    _toast('已导入「${style.name}」');
   }
 
   /// 当前阅读外观 → [ReaderStyle] 快照（「保存当前为样式」用）
