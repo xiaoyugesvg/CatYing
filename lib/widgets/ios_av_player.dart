@@ -32,6 +32,9 @@ class IosAvPlayer extends AppPlayer {
     });
   }
 
+  @override
+  String get engineName => 'AVPlayer (iOS 原生)';
+
   IosAvPlayer({super.config}) {
     _ensureHandlerInstalled();
     // ⚠️ 同 KSPlayer：不在构造时抢占「活跃」身份，只有真正 `open()` 的实例

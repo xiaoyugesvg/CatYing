@@ -211,6 +211,15 @@ class AppPlayer {
   /// 是否支持内嵌字幕轨枚举 / 切换
   bool get supportsSubtitles => false;
 
+  /// 内核名称（播放信息面板显示），子类覆盖为真实内核。
+  String get engineName => 'AVPlayer (video_player)';
+
+  /// 内核特有的运行数据（播放信息面板显示）。
+  ///
+  /// 各实现按能力补充，比如 MPV 能拿到像素格式 / 缓冲时长 / 音频码率；
+  /// 拿不到就返回空 —— 面板只渲染存在项，不会出现「未知」占位。
+  Map<String, String> get debugInfo => const {};
+
   List<SubtitleTrackInfo> _subtitleTracks = const <SubtitleTrackInfo>[];
 
   /// 当前媒体可用的字幕轨（空 = 无内嵌字幕）

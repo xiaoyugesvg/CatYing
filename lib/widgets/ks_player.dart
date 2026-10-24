@@ -125,6 +125,9 @@ class KSPlayer extends AppPlayer {
   @override
   bool get supportsSubtitles => true;
 
+  @override
+  String get engineName => 'KSPlayer';
+
   /// 枚举原生侧（KSPlayerLayer.player）的内嵌字幕轨。
   /// 位图字幕（PGS/VobSub）也一并列出 —— FF 内核可直接渲染。
   @override

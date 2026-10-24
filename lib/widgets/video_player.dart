@@ -3709,10 +3709,14 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             _danmuToggleButton(),
             _engineSwitchButton(),
 
-            // 字幕：内核支持字幕就显示入口（mpv / KSPlayer）；
-            // 当前媒体没有内嵌轨时点开是「暂无字幕」说明，而不是干脆看不到按钮。
-            if (_subtitleTracks.isNotEmpty || _player.supportsSubtitles)
-              _subtitleButton(),
+            // 字幕：**常显**。内核支持字幕但当前没轨时，点开是说明文案；
+            // 内核不支持（如 AVPlayer）也点得开，里面会提示「换个内核试试」——
+            // 原来用 `supportsSubtitles` 决定是否显示，切内核后按钮会时有时无，
+            // 用户只会觉得"切了没生效"。
+            _subtitleButton(),
+
+            // 播放信息（内核 / 分辨率 / 缓冲 / 解码格式 / 弹幕条数）
+            _playInfoButton(),
 
             if (_isNativeFullscreen) ...[
               const SizedBox(width: 4),
@@ -5667,12 +5671,168 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     );
   }
 
+  /// 顶栏「!」：播放信息面板。
+  ///
+  /// 为什么需要：切内核后"字幕没了 / 画面变糊 / 一直转圈"这类问题，
+  /// 只能靠现场数据判断 —— 现在到底是 AVPlayer 还是 mpv、有没有硬解、
+  /// 缓冲区多少、弹幕拉到了几条。之前这些都看不到，只能靠猜。
+  Widget _playInfoButton() {
+    return _iconButton(
+      icon: Icons.info_outline,
+      size: 20,
+      width: 36,
+      onTap: () => _safeTap(_showPlayInfo),
+    );
+  }
+
+  Future<void> _showPlayInfo() async {
+    final s = _player.state;
+    final w = s.width;
+    final h = s.height;
+    String dur(Duration d) {
+      final hh = d.inHours;
+      final mm = (d.inMinutes % 60).toString().padLeft(2, '0');
+      final ss = (d.inSeconds % 60).toString().padLeft(2, '0');
+      return hh > 0 ? '$hh:$mm:$ss' : '$mm:$ss';
+    }
+
+    String num2(double v) {
+      final t = v.toStringAsFixed(2);
+      return t.endsWith('.00') ? t.substring(0, t.length - 3) : t;
+    }
+
+    final rows = <(String, String)>[
+      ('内核', _player.engineName),
+      ('状态', s.buffering ? '缓冲中' : (s.playing ? '播放中' : '已暂停')),
+      if (w > 0 && h > 0)
+        (
+          '分辨率',
+          '${w.round()} × ${h.round()}   比例 ${(w / h).toStringAsFixed(2)}'
+        ),
+      if (s.duration > Duration.zero) ('时长', dur(s.duration)),
+      ('已播放', dur(s.position)),
+      ('播放速率', '${num2(s.rate)}x'),
+      ('音量', '${s.volume.round()}%'),
+      (
+        '内嵌字幕',
+        _player.supportsSubtitles
+            ? '支持 · 当前 ${_subtitleTracks.length} 轨'
+            : '当前内核不支持'
+      ),
+      ('弹幕', '${_danmus.length} 条'),
+      ..._player.debugInfo.entries.map((e) => (e.key, e.value)),
+      ('地址', _prettyMediaUrl(widget.url)),
+    ];
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E1E),
+      barrierColor: Colors.black.withValues(alpha: 0.55),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 8),
+                Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                  child: Row(
+                    children: [
+                      const Text(
+                        '播放信息',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: AppTheme.fontHeadline,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        widget.videoTitle ?? '',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white38,
+                          fontSize: AppTheme.fontCaption,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                for (final r in rows)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 7,
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: 84,
+                          child: Text(
+                            r.$1,
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: AppTheme.fontSubhead,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: SelectableText(
+                            r.$2,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: AppTheme.fontSubhead,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 10),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// 地址只显示 `host + 截断路径`：完整 CDN 直链又长又带签名，没参考价值。
+  String _prettyMediaUrl(String url) {
+    try {
+      final u = Uri.parse(url);
+      final p = u.path.length > 64 ? '${u.path.substring(0, 64)}…' : u.path;
+      return '${u.host}$p';
+    } catch (_) {
+      return url.length > 80 ? '${url.substring(0, 80)}…' : url;
+    }
+  }
+
   /// 字幕选择菜单 —— 底部弹层列出内嵌字幕轨（含「关闭字幕」），
   /// 当前生效轨打勾；位图字幕额外标注「样式不可调」。
   /// 弹层样式与「播放器核心」面板一致（深色、上圆角、拖拽条）。
   Future<void> _showSubtitleSheet() async {
     final tracks = _subtitleTracks;
     final selected = _player.selectedSubtitleIndex;
+    final supportHint = _player.supportsSubtitles
+        ? '当前视频没有内嵌字幕轨（可换一个源试试）'
+        : '当前内核（${_player.engineName}）不支持内嵌字幕轨，'
+            '切到「播放器核心 → MPV / KSPlayer」后再看';
     final picked = await showModalBottomSheet<int>(
       context: context,
       backgroundColor: const Color(0xFF1E1E1E),
@@ -5734,11 +5894,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   onTap: () => Navigator.of(sheetContext).pop(-1),
                 ),
                 if (tracks.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(16, 8, 16, 12),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
                     child: Text(
-                      '当前视频没有内嵌字幕轨',
-                      style: TextStyle(
+                      supportHint,
+                      style: const TextStyle(
                         color: Colors.white54,
                         fontSize: AppTheme.fontSubhead,
                       ),

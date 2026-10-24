@@ -86,6 +86,43 @@ class MpvAppPlayer extends AppPlayer {
   @override
   bool get supportsSubtitles => true;
 
+  @override
+  String get engineName => 'MPV (libmpv)';
+
+  @override
+  Map<String, String> get debugInfo {
+    final s = _mpv.state;
+    final vp = s.videoParams;
+    final ap = s.audioParams;
+    final info = <String, String>{};
+    if (vp.pixelformat != null && vp.pixelformat!.isNotEmpty) {
+      info['视频像素格式'] = vp.pixelformat!;
+    }
+    if (vp.hwPixelformat != null && vp.hwPixelformat!.isNotEmpty) {
+      info['硬解格式'] = vp.hwPixelformat!;
+    }
+    if (s.buffer > Duration.zero) {
+      info['缓冲区'] = '${(s.buffer.inMilliseconds / 1000).toStringAsFixed(1)} s';
+    }
+    if (s.bufferingPercentage > 0) {
+      info['缓冲进度'] = '${s.bufferingPercentage.toStringAsFixed(0)}%';
+    }
+    if (ap.format != null && ap.format!.isNotEmpty) {
+      info['音频编码'] = ap.format!;
+    }
+    if (ap.sampleRate != null && ap.sampleRate! > 0) {
+      info['采样率'] = '${ap.sampleRate} Hz';
+    }
+    if (ap.channels != null && ap.channels!.isNotEmpty) {
+      info['声道'] = ap.channels!;
+    }
+    final br = s.audioBitrate;
+    if (br != null && br > 0) {
+      info['音频码率'] = '${(br / 1000).toStringAsFixed(0)} kbps';
+    }
+    return info;
+  }
+
   SubtitleTrackInfo _toSubtitleInfo(SubtitleTrack t) {
     final title = t.title?.trim() ?? '';
     final lang = t.language?.trim() ?? '';
