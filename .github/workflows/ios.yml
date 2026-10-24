@@ -796,3 +796,48 @@ jobs:
             printf 'OFF=+%s %s ' "$off" "$ADDR"
             xcrun atos -o "$DWARF" -arch arm64 "$ADDR" 2>/dev/null | head -1
           done
+
+  # ── 构建记录只保留最近 10 次 ──────────────────────────────────
+  # GitHub 不会自动清理旧的 workflow run / artifact：
+  #   · 每次 push 都会新建一个 run，并各自上传一份同名 artifact（v4 不会覆盖）
+  #   · 一次 IPA ≈ 200MB，10 次就 2GB，旧包没人下载却一直占仓库存储配额
+  # 这里在构建结束后删掉第 11 次及更早的 run（删 run 会连带删掉它的产物）。
+  # 当前这次 run 一定在最新的 10 个里，不会被误删。
+  prune-runs:
+    name: 只保留最近 10 次构建
+    needs: build-ios-trollstore
+    if: always() && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Delete old workflow runs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const KEEP = 10;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRuns,
+              { owner, repo, workflow_id: 'ios.yml', per_page: 100 }
+            );
+            // 按创建时间从新到旧
+            const sorted = runs.sort(
+              (a, b) => new Date(b.created_at) - new Date(a.created_at)
+            );
+            let deleted = 0;
+            for (const r of sorted.slice(KEEP)) {
+              try {
+                await github.rest.actions.deleteWorkflowRun({
+                  owner, repo, run_id: r.id,
+                });
+                deleted++;
+                core.info(`已删除旧构建 #${r.run_number} (${r.created_at})`);
+              } catch (e) {
+                core.warning(`删除 #${r.run_number} 失败: ${e.message}`);
+              }
+            }
+            core.info(
+              `共 ${sorted.length} 次构建，保留最新 ${Math.min(sorted.length, KEEP)} 次，删除 ${deleted} 次`
+            );
