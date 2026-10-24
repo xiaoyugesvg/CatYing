@@ -1791,7 +1791,79 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }
   }
 
-  /// 片名 → 弹幕的兜底链路：搜索番剧 → 取分集 → 取弹幕。
+  /// POST JSON（弹幕接口专用；语义同 [_danmuGetText]：失败返回 null）
+  Future<String?> _danmuPostJson(
+    String api,
+    Map<String, dynamic> payload,
+  ) async {
+    final client = _danmuClient;
+    try {
+      final req = await client
+          .postUrl(Uri.parse(api))
+          .timeout(const Duration(seconds: 8));
+      req.headers.set('User-Agent', 'NewTv/1.0');
+      req.headers.contentType =
+          ContentType('application', 'json', charset: 'utf-8');
+      req.add(utf8.encode(jsonEncode(payload)));
+      final res = await req.close().timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) {
+        AppLog.instance.log(
+          '[video_player] danmu HTTP ${res.statusCode} ($api)',
+        );
+        return null;
+      }
+      return await res.transform(utf8.decoder).join().timeout(
+            const Duration(seconds: 8),
+          );
+    } catch (e) {
+      AppLog.instance.log('[video_player] danmu post fail: $e');
+      return null;
+    }
+  }
+
+  /// 用 Logvr-danmu 的 `POST /api/v2/match` 直接把「剧名 SxxExx」匹配成 episodeId。
+  ///
+  /// 相比 `search/anime → bangumi → comment` 三步链：**一次往返**、由服务端做
+  /// 文件名解析与平台优先级匹配（该接口本来就是 Logvr 推荐的主匹配入口），
+  /// 非标准命名的剧集命中率高得多。
+  ///
+  /// 返回：`null` = 请求失败（可重试）；`0` = 服务在线但没匹配到；>0 = episodeId。
+  Future<int?> _danmuMatchEpisode(String base, String title) async {
+    // 集号：该服务按「剧名 S01E01」格式解析最稳（实测中文「第N集」不稳）
+    final epNo = widget.selectedEpisodeIndex + 1;
+    final fileName = '$title S01E${epNo.toString().padLeft(2, '0')}';
+    final body = await _danmuPostJson(
+      '$base/api/v2/match',
+      {'fileName': fileName},
+    );
+    if (body == null) return null;
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is! Map) return 0;
+      final matches = decoded['matches'];
+      if (matches is! List || matches.isEmpty) {
+        AppLog.instance.log('[video_player] danmu match 未匹配: $fileName');
+        return 0;
+      }
+      final first = matches.first;
+      if (first is! Map) return 0;
+      final id = (first['episodeId'] as num?)?.toInt() ?? 0;
+      if (id > 0) {
+        AppLog.instance.log(
+          '[video_player] danmu match 命中: $fileName → episodeId=$id '
+          '(${first['animeTitle']} / ${first['episodeTitle']})',
+        );
+      } else {
+        AppLog.instance.log('[video_player] danmu match 无 episodeId: $fileName');
+      }
+      return id;
+    } catch (e) {
+      AppLog.instance.log('[video_player] danmu match 解析失败: $e');
+      return 0;
+    }
+  }
+
+  /// 片名 → 弹幕的兜底链路：match → 搜索番剧 → 取分集 → 取弹幕。
   ///
   /// 解析结果按「片名|年份|集号」缓存（进程内），避免每一集都跑 3 次请求：
   /// 该服务有速率限制，实测密集请求会返回 429。
@@ -1844,7 +1916,16 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       return list; // null（请求失败）向上传播 → 调用方保留重试
     }
 
-    // ① 搜索番剧（若调用方已并行发起，直接复用那个 future，省一轮往返）
+    // ① 先用 match 接口（一次往返，服务端自己解析「剧名 S01E01」）
+    final matchedEp = await _danmuMatchEpisode(base, clean);
+    if (matchedEp != null && matchedEp > 0) {
+      _rememberDanmuEp(cacheKey, matchedEp);
+      final list = await _danmuFetchComments(base, matchedEp);
+      if (list != null && list.isNotEmpty) _rememberDanmuList(cacheKey, list);
+      return list;
+    }
+
+    // ② 搜索番剧（若调用方已并行发起，直接复用那个 future，省一轮往返）
     final String? searchBody;
     if (searchFuture != null) {
       searchBody = await searchFuture;
@@ -1862,9 +1943,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       return const [];
     }
 
-    // 只在「首条标题包含片名」时才采用，避免搜到同名无关内容就贴弹幕
+    // 只在「首条标题与片名互相包含」时才采用，避免搜到同名无关内容就贴弹幕。
+    // ⚠️ 原来是单向 `firstName.contains(clean)`：片名里带年份/副标题时
+    //   （如 clean = "仙逆 2023"，而结果叫 "仙逆第一季(2023)"）永远判不中 ⇒
+    //   明明搜到了也放弃 ⇒ 一条弹幕都没有。改成去掉空格/标点后双向包含。
     final firstName = (animes.first['animeTitle'] ?? '').toString().trim();
-    if (firstName.isEmpty || !firstName.contains(clean)) {
+    if (firstName.isEmpty || !_titleLooseMatch(firstName, clean)) {
       AppLog.instance.log(
         '[video_player] danmu search 首条不匹配，放弃: "$firstName" !~ "$clean"',
       );
@@ -1873,7 +1957,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     final animeId = animes.first['animeId'];
     if (animeId == null) return const [];
 
-    // ② 取分集列表
+    // ③ 取分集列表
     final bgBody = await _danmuGetText('$base/api/v2/bangumi/$animeId');
     if (bgBody == null) return null; // 请求失败 → 可重试
     if (bgBody.isEmpty) return const [];
@@ -1881,7 +1965,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     final episodes = (bangumi?['episodes'] as List?) ?? const [];
     if (episodes.isEmpty) return const [];
 
-    // ③ 选集：优选用「当前集名」在分集标题里找，否则退回按集号顺序
+    // ④ 选集：优选用「当前集名」在分集标题里找，否则退回按集号顺序
     int episodeId = 0;
     if (episodeName.isNotEmpty) {
       for (final e in episodes) {
@@ -1921,6 +2005,20 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (body == null) return null;
     if (body.isEmpty) return const [];
     return parseDanmuBodyAsync(body);
+  }
+
+  /// 片名宽松匹配：去掉空格与常见标点后**双向**包含即算命中。
+  ///
+  /// 用于「搜索结果首条是否就是我们要的剧」——原来只做单向 `contains`，
+  /// 片名里多一个年份/副标题就永远判不中（等于没有弹幕）。
+  bool _titleLooseMatch(String a, String b) {
+    String norm(String s) => s
+        .toLowerCase()
+        .replaceAll(RegExp(r'[\s\[\]【】（）()·．.\-_:：,，、!！?？]'), '');
+    final x = norm(a);
+    final y = norm(b);
+    if (x.isEmpty || y.isEmpty) return false;
+    return x.contains(y) || y.contains(x);
   }
 
   /// 解析 JSON 并取出指定 key 的数组（失败返回空）
@@ -4350,7 +4448,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                             // ===== 弹幕设置（按参考图重排）=====
                             Row(
                               children: [
-                                const _SettingsRowLabel('弹幕'),
+                                // 带上条数：能一眼区分「没匹配到」和「上屏失败」
+                                _SettingsRowLabel(
+                                  _danmus.isEmpty ? '弹幕' : '弹幕 ${_danmus.length} 条',
+                                ),
                                 const Spacer(),
                                 Switch(
                                   value: _danmuOn,
