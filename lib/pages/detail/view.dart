@@ -117,6 +117,14 @@ class _DetailPageState extends State<DetailPage> {
   /// 最后留下一个没挂视频层的孤儿实例（表现：切换没变化、只有声音没画面）。
   bool _engineSwapInFlight = false;
 
+  /// 「正在切换内核」：期间播放器区域只渲染"加载中"空壳。
+  ///
+  /// iOS 上 AVPlayer 的画面是 `UiKitView`（原生视图），mpv / KSPlayer 是
+  /// Flutter `Texture`；原生视图的移除是异步的，同一帧里换掉会出现
+  /// 「有声音没画面」。这个标记让 build 先不挂任何画面，等原生视图退场
+  /// （见 `_waitPlatformViewDetach`）再创建新内核。
+  bool _engineSwapping = false;
+
   /// 用户已选的字幕（跨内核热切换接力）。
   /// 各内核的字幕轨 id 不同，切换时按语言的 matchKey 把同一条字幕找回。
   SubtitleChoice? _subtitleChoice;
@@ -720,9 +728,14 @@ class _DetailPageState extends State<DetailPage> {
       _playerEngine = engine;
       final old = _player;
       _player = null;
+      _engineSwapping = true;
+      setState(() {}); // 先把旧画面从树里摘掉
+      await old?.dispose();
+      await _waitPlatformViewDetach();
+      if (!mounted) return;
+      _engineSwapping = false;
       _lastPlayerUrl = '';
       _lastPlayerHeadersKey = '';
-      await old?.dispose();
       setState(() {});
       return;
     }
@@ -740,7 +753,18 @@ class _DetailPageState extends State<DetailPage> {
     final old = _player;
     // 先置空：_createPlayerAndOpen 才会走「按新引擎重建」分支而非「只换源」
     _player = null;
+    // 🔴 iOS 换内核"有声音没画面"的根因：
+    //   AVPlayer 的画面是 `UiKitView`（原生 AVPlayerLayer），
+    //   mpv / KSPlayer 的画面是 Flutter `Texture`。iOS 上平台视图的移除是
+    //   **异步**的 —— 如果同一帧里摘掉原生视图、挂上新纹理，原生视图还留在
+    //   视图层级最上层把画面盖住，于是只剩声音；退出播放页重进（整页重建）才恢复。
+    //   所以这里先渲染一帧"加载中"空壳，等原生视图真正退场再创建新内核。
+    _engineSwapping = true;
+    setState(() {});
     await old?.dispose();
+    await _waitPlatformViewDetach();
+    if (!mounted) return;
+    _engineSwapping = false;
     _createPlayerAndOpen(
       url,
       headers,
@@ -1011,8 +1035,30 @@ class _DetailPageState extends State<DetailPage> {
     return h.clamp(220.0, 560.0);
   }
 
+  /// 等 iOS 原生视图（UiKitView）真正从视图层级退场。
+  ///
+  /// 平台视图的移除是异步的（要等原生层销毁 + 合成器回收），
+  /// 留 250ms 覆盖一到两帧；其它平台没有平台视图，零开销。
+  Future<void> _waitPlatformViewDetach() async {
+    if (!Platform.isIOS) return;
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+  }
+
   Widget _buildPlayerWidget({required bool isFull, required bool isPip}) {
     final url = _controller.playUrl.value!;
+    // 内核切换过渡帧：只渲染空壳，**不要**在这里调 _ensurePlayer ——
+    // 否则新实例会在原生视图还没退场时就建好，画面又会被盖住。
+    if (_engineSwapping) {
+      return AspectRatio(
+        aspectRatio: 4 / 3,
+        child: Container(
+          color: Colors.black,
+          child: const Center(
+            child: CircularProgressIndicator(color: Colors.white),
+          ),
+        ),
+      );
+    }
     // 网页播放器页（非直链媒体 URL）→ 用 WebView 兜底播放
     // （对应 catmovie WebviewView：第三方解析页 / parse=1 网页端 / player 页）
     if (_isWebPageUrl(url)) {
