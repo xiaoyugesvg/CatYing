@@ -23,7 +23,10 @@ class HomeController extends GetxController {
   List<SortFilter> get currentFilters {
     final sortId = selectedSort.value?.id;
     if (sortId == null) return [];
-    return sorts.firstWhereOrNull((s) => s.id == sortId)?.filters ?? [];
+    final raw = sorts.firstWhereOrNull((s) => s.id == sortId)?.filters ?? [];
+    // 没有任何可选项的组直接不渲染：以前会画出一行"组名 + 空白"，
+    // 看起来像筛选按钮坏掉了（py 源的 filters 格式不标准时最容易出现）
+    return raw.where((f) => f.values.isNotEmpty).toList();
   }
 
   @override

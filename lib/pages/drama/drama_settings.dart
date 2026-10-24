@@ -20,6 +20,29 @@ class DramaSettings {
   static const _kSources = 'drama_source_keys_v1';
   static const _kGroups = 'drama_groups_v1';
 
+  /// 短剧页当前看的源（单源模式）。
+  ///
+  /// 用户 2026-10-24：「短剧不要一下子刷新所有的…就是影视那种，
+  /// 左上角一个切换源，我一个个切换，不要每一次刷新那么多源」——
+  /// 列表页一次只扫这一个源；空串 = 跟随首页当前源。
+  static const _kPicked = 'drama_picked_source_v1';
+
+  static Future<String> pickedSourceKey() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      return sp.getString(_kPicked) ?? '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  static Future<void> savePickedSourceKey(String key) async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setString(_kPicked, key);
+    } catch (_) {}
+  }
+
   static const List<String> defaultKeywords = [
     '短剧',
     '微短剧',

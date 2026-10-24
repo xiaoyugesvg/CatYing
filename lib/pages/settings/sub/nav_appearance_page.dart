@@ -93,6 +93,60 @@ class _NavAppearancePageState extends State<NavAppearancePage> {
           },
         ),
         const SizedBox(height: AppTheme.spacingLG),
+        // ── 不透明度（2026-10-24 用户：「菜单栏太他么透明了」）────────
+        ListenableBuilder(
+          listenable: s,
+          builder: (context, _) {
+            final v = s.navBarOpacity;
+            return SettingsGroup(
+              title: '底栏不透明度',
+              hint: '所有风格通用。觉得底栏太透、字压在内容上看不清就往上调；'
+                  '100% = 完全不透明。',
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 6, 10, 4),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          const SizedBox(width: 6),
+                          Icon(Icons.opacity_rounded,
+                              size: 18, color: AppTheme.textSecondary),
+                          const SizedBox(width: 8),
+                          Text(
+                            '${(v * 100).round()}%',
+                            style: TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: AppTheme.fontSubhead,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const Spacer(),
+                          TextButton(
+                            onPressed: () => s.setNavBarOpacity(1.0),
+                            child: const Text('不透明'),
+                          ),
+                          TextButton(
+                            onPressed: () => s.setNavBarOpacity(0.60),
+                            child: const Text('通透'),
+                          ),
+                        ],
+                      ),
+                      Slider(
+                        value: v,
+                        min: FloatingNavSpec.minOpacity,
+                        max: FloatingNavSpec.maxOpacity,
+                        divisions: 14,
+                        onChanged: (x) => s.setNavBarOpacity(x),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: AppTheme.spacingLG),
         ListenableBuilder(
           listenable: s,
           builder: (context, _) {
@@ -182,20 +236,27 @@ class _NavAppearancePageState extends State<NavAppearancePage> {
         deco = BoxDecoration(color: FloatingNavSpec.barColor(isDark, pal));
         dot = pal.primary;
         break;
-      case FloatingNavStyle.liquid:
+      case FloatingNavStyle.frost:
+        // 磨砂：半透玻璃 + 顶部高光细边
         deco = BoxDecoration(
           gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
             colors: isDark
                 ? [
-                    Colors.white.withValues(alpha: 0.20),
+                    Colors.white.withValues(alpha: 0.16),
                     Colors.white.withValues(alpha: 0.06),
                   ]
                 : [
-                    Colors.white.withValues(alpha: 0.85),
-                    Colors.white.withValues(alpha: 0.50),
+                    Colors.white.withValues(alpha: 0.74),
+                    Colors.white.withValues(alpha: 0.52),
                   ],
+          ),
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.14)
+                : Colors.white.withValues(alpha: 0.85),
+            width: 0.8,
           ),
         );
         dot = pal.primary;
@@ -219,54 +280,48 @@ class _NavAppearancePageState extends State<NavAppearancePage> {
         );
         dot = FloatingNavSpec.neonColor;
         break;
-      case FloatingNavStyle.outline:
-        // 与真实底栏一致：淡底 + 主题色描边
-        final accent = FloatingNavSpec.styleContentColor(
-          FloatingNavStyle.outline,
-          selected: true,
-          isDark: isDark,
-          palette: pal,
-        );
+      case FloatingNavStyle.reverse:
+        // 反色：与界面明暗相反
         deco = BoxDecoration(
-          color: (isDark ? const Color(0xFF101012) : Colors.white)
-              .withValues(alpha: isDark ? 0.30 : 0.42),
+          color: isDark
+              ? const Color(0xFFF3F3F5).withValues(alpha: 0.96)
+              : const Color(0xFF1E2024).withValues(alpha: 0.94),
           border: Border.all(
-            color: accent.withValues(alpha: isDark ? 0.70 : 0.55),
-            width: 1.2,
+            color: isDark
+                ? Colors.black.withValues(alpha: 0.06)
+                : Colors.white.withValues(alpha: 0.10),
+            width: 0.6,
           ),
         );
-        dot = accent;
+        dot = isDark ? Colors.black : Colors.white;
         break;
-      case FloatingNavStyle.jelly:
-        final accent = FloatingNavSpec.styleContentColor(
-          FloatingNavStyle.outline,
-          selected: true,
+      case FloatingNavStyle.solid:
+        // 实心：实底 + 主题色实心选中块
+        deco = BoxDecoration(
+          color: isDark
+              ? const Color(0xFF17171A)
+              : const Color(0xFFFDFDFE),
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.06)
+                : Colors.black.withValues(alpha: 0.05),
+            width: 0.6,
+          ),
+        );
+        dot = FloatingNavSpec.styleIndicatorColor(
+          FloatingNavStyle.solid,
           isDark: isDark,
           palette: pal,
         );
-        deco = BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: isDark
-                ? [
-                    accent.withValues(alpha: 0.34),
-                    accent.withValues(alpha: 0.16),
-                  ]
-                : [
-                    accent.withValues(alpha: 0.22),
-                    accent.withValues(alpha: 0.10),
-                  ],
-          ),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: isDark ? 0.16 : 0.70),
-          ),
-        );
-        dot = accent;
         break;
     }
+    // 预览也跟随不透明度滑杆
+    final preview = FloatingNavSpec.applyOpacity(
+      deco,
+      SettingsService().navBarOpacity,
+    );
     return Container(
-      decoration: deco,
+      decoration: preview,
       child: Center(
         child: Row(
           mainAxisSize: MainAxisSize.min,

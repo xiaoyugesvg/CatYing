@@ -86,16 +86,15 @@ class _LivePageState extends State<LivePage> {
 
   bool _fullscreen = false;
 
-  /// 短剧模式：纯竖屏全屏（复用 _fullscreen 全屏布局，方向锁 portraitUp）
-  bool _dramaMode = false;
-
-  /// 抖音模式：纯竖屏全屏（与短剧互斥；全屏布局同短剧）
-  bool _douyinMode = false;
   bool _audioMode = false;
   String? _playError;
 
   /// 正在切台/加载流（显示播放器中间转圈）
   bool _switching = false;
+
+  /// 本次切台是否已经因「20 秒没出画面」判过超时。
+  /// 只用于让**迟到的画面**把超时提示撤掉（真实 error 提示不能被撤）。
+  bool _switchTimedOut = false;
 
   /// 加载遮罩兜底计时器
   Timer? _switchTimer;
@@ -319,8 +318,6 @@ class _LivePageState extends State<LivePage> {
     // 用 _fullscreen 守卫：非全屏销毁时不动全局状态，避免误清上层页面的锁。
     if (_fullscreen) {
       _fullscreen = false;
-      _dramaMode = false;
-      _douyinMode = false;
       PlayerFullscreenController.instance.exit('live');
       try {
         unawaited(SystemUiController.exit('live'));
@@ -371,6 +368,7 @@ class _LivePageState extends State<LivePage> {
     _lastOpenAt = now;
     _everOpened = true;
     _playError = null;
+    _switchTimedOut = false;
     AppLog.instance.log(
       '[live] 开播/切台: '
       '核心=${_iosUseKs ? 'KS(FF)' : (_iosUseMpv ? 'MPV' : (Platform.isIOS ? 'AVPlayer' : 'MPV'))} '
@@ -387,7 +385,15 @@ class _LivePageState extends State<LivePage> {
     _switchTimer?.cancel();
     // 兜底：最多显示 20 秒（真正就绪时由 position/buffering 监听提前清掉）
     _switchTimer = Timer(const Duration(seconds: 20), () {
-      if (mounted && _switching) setState(() => _switching = false);
+      if (!mounted || !_switching) return;
+      setState(() {
+        _switching = false;
+        // ⚠️ 不能只撤遮罩：有些流「连上了但一直不发数据」，也不触发 error
+        //   ⇒ 撤掉转圈后就是**纯黑屏 + 没有任何提示**，用户只能退出重进。
+        //   这里补一个可点的重试入口（点画面中央的重试图标即可重新拉流）。
+        _switchTimedOut = true;
+        _playError ??= '加载超时，点此重试';
+      });
     });
     // 复用同一 Player，切台只 open 新地址，避免黑屏/闪断
     _player ??= Player(
@@ -519,10 +525,16 @@ class _LivePageState extends State<LivePage> {
     // 出画面了就撤掉「加载中」遮罩（position 前进即视为已开播）
     _switchReadySub = positions.listen((pos) {
       if (!mounted) return;
-      if (_switching && pos > Duration.zero) {
-        _switchTimer?.cancel();
-        setState(() => _switching = false);
-      }
+      if (pos <= Duration.zero || (!_switching && !_switchTimedOut)) return;
+      _switchTimer?.cancel();
+      setState(() {
+        _switching = false;
+        // 迟到的画面：把 20 秒超时的提示一起撤掉（真实 error 不会被撤）
+        if (_switchTimedOut) {
+          _switchTimedOut = false;
+          _playError = null;
+        }
+      });
     });
     // 兜底：进入 playing 状态**延迟确认**再撤「加载中」遮罩。
     // ⚠️ 不能 playing=true 立即撤 —— iOS AVPlayer 的 playing 会早于画面帧
@@ -1794,7 +1806,7 @@ class _LivePageState extends State<LivePage> {
                       tooltip: '投屏',
                     ),
                     // 播放器核心切换：点击弹出菜单由用户选择（iOS：AVPlayer/MPV），
-                    // 只有一个可用内核（Android/桌面）时不显示。样式同「短」「抖」按钮。
+                    // 只有一个可用内核（Android/桌面）时不显示。
                     if (_liveEngines.length > 1)
                       Tooltip(
                         message: '播放器核心',
@@ -1831,71 +1843,7 @@ class _LivePageState extends State<LivePage> {
                           ),
                         ),
                       ),
-                    // 短剧模式：纯竖屏全屏（样式参考弹幕按钮「短」字）
-                    Tooltip(
-                      message: _dramaMode ? '退出短剧' : '短剧模式',
-                      preferBelow: false,
-                      child: GestureDetector(
-                        onTap: _toggleDramaMode,
-                        behavior: HitTestBehavior.opaque,
-                        child: Container(
-                          width: 38,
-                          height: 38,
-                          alignment: Alignment.center,
-                          // 与右上功能钮同款背景：半透明黑圆底 + 细白描边，
-                          // 亮/暗画面下都清晰（不再裸文字压视频）
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.22),
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.14),
-                            ),
-                          ),
-                          child: Text(
-                            '短',
-                            style: TextStyle(
-                              color: _dramaMode
-                                  ? AppTheme.accentColor
-                                  : Colors.white,
-                              fontSize: AppTheme.fontHeadline,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    // 抖音模式：纯竖屏全屏 + 右侧切换胶囊（「抖」字）
-                    Tooltip(
-                      message: _douyinMode ? '退出抖音' : '抖音模式',
-                      preferBelow: false,
-                      child: GestureDetector(
-                        onTap: _toggleDouyinMode,
-                        behavior: HitTestBehavior.opaque,
-                        child: Container(
-                          width: 38,
-                          height: 38,
-                          alignment: Alignment.center,
-                          // 与「短」同款背景
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.22),
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.14),
-                            ),
-                          ),
-                          child: Text(
-                            '抖',
-                            style: TextStyle(
-                              color: _douyinMode
-                                  ? AppTheme.accentColor
-                                  : Colors.white,
-                              fontSize: AppTheme.fontHeadline,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
+                    // 短剧 / 抖音模式按钮已移除（直播页只保留常规全屏）。
                     _VideoTopIcon(
                       icon: _fullscreen
                           ? Icons.fullscreen_exit
@@ -2905,79 +2853,39 @@ class _LivePageState extends State<LivePage> {
   }
 
   Future<void> _toggleFullscreen() async {
-    // 短剧/抖音模式点全屏按钮 → 退出模式全屏（还原方向）
-    if (_dramaMode || _douyinMode) {
-      await _leaveFullscreenUi();
-      return;
-    }
     if (_fullscreen) {
       await _leaveFullscreenUi();
       return;
     }
-    await _enterFullscreenUi(portrait: false);
+    await _enterFullscreenUi();
   }
 
-  /// 短剧模式：纯竖屏全屏（复用全屏布局，方向锁 portraitUp）
-  Future<void> _toggleDramaMode() async {
-    if (_dramaMode) {
-      await _leaveFullscreenUi();
-      return;
-    }
-    // 若处于横屏全屏，先退出还原方向，再进竖屏
-    if (_fullscreen) {
-      await _leaveFullscreenUi();
-    }
-    await _enterFullscreenUi(portrait: true, douyin: false);
-  }
-
-  /// 抖音模式：纯竖屏全屏（与短剧互斥；进入时右侧切换胶囊）
-  Future<void> _toggleDouyinMode() async {
-    if (_douyinMode) {
-      await _leaveFullscreenUi();
-      return;
-    }
-    // 若处于横屏全屏，先退出还原方向，再进竖屏
-    if (_fullscreen) {
-      await _leaveFullscreenUi();
-    }
-    await _enterFullscreenUi(portrait: true, douyin: true);
-  }
-
-  /// 进入全屏（portrait=false 横屏 / portrait=true 竖屏短剧或抖音）
-  Future<void> _enterFullscreenUi({
-    required bool portrait,
-    bool douyin = false,
-  }) async {
+  /// 进入全屏（横屏）
+  Future<void> _enterFullscreenUi() async {
     setState(() {
       _fullscreen = true;
-      _dramaMode = portrait && !douyin;
-      _douyinMode = portrait && douyin;
     });
     // 通知全局：全屏时隐藏底部悬浮导航栏
     PlayerFullscreenController.instance.enter('live');
     await SystemUiController.enter(
       'live',
       mode: SystemUiMode.immersiveSticky,
-      // 横屏 = 左右横屏；竖屏短剧 = 仅竖屏
+      // 横屏 = 左右横屏
       orientations: Platform.isIOS
-          ? (portrait
-                ? const [DeviceOrientation.portraitUp]
-                : const [
-                    DeviceOrientation.landscapeLeft,
-                    DeviceOrientation.landscapeRight,
-                  ])
+          ? const [
+              DeviceOrientation.landscapeLeft,
+              DeviceOrientation.landscapeRight,
+            ]
           : null,
       // 视频黑底 → 浅色状态栏图标
       overlayStyle: SystemUiOverlayStyle.light,
     );
   }
 
-  /// 退出全屏 / 短剧 / 抖音（还原**进入前**的方向与系统栏状态）
+  /// 退出全屏（还原**进入前**的方向与系统栏状态）
   Future<void> _leaveFullscreenUi() async {
     setState(() {
       _fullscreen = false;
-      _dramaMode = false;
-      _douyinMode = false;
     });
     PlayerFullscreenController.instance.exit('live');
     await SystemUiController.exit('live');

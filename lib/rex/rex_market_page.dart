@@ -56,7 +56,30 @@ class _RexMarketPageState extends State<RexMarketPage> {
   @override
   void initState() {
     super.initState();
-    _service.load();
+    // 市场 = 订阅：进来先铺上次记住的集合（离线也能看清单），没有就留空。
+    _service.load().then((_) {
+      if (!mounted) return;
+      final saved = _service.collections;
+      if (saved.isEmpty) {
+        setState(() {});
+        return;
+      }
+      _applyCollection(saved.first);
+    });
+  }
+
+  /// 用一份已订阅的集合直接铺满界面（不联网，读的是上次落盘的清单）
+  void _applyCollection(RexCollection col) {
+    setState(() {
+      _collection = col;
+      _urlCtrl.text = col.url;
+      _selected.clear();
+      for (final it in col.items) {
+        if (!_service.hasUrl(it.url)) _selected.add(it.url);
+      }
+    });
+    // 内置集合第一次进来只有地址、没有清单 → 自动联网拉一次
+    if (col.items.isEmpty) _fetch(col.url);
   }
 
   @override
@@ -136,6 +159,9 @@ class _RexMarketPageState extends State<RexMarketPage> {
     });
     try {
       final col = await _service.fetchCollection(input);
+      // 市场 = 订阅：拉到就存下来。否则退出页面就丢，下次进来又是空白，
+      // 已经导入过的模块也看不出"来自哪个集合"。
+      await _service.saveCollection(col);
       if (!mounted) return;
       setState(() {
         _collection = col;
@@ -300,24 +326,37 @@ class _RexMarketPageState extends State<RexMarketPage> {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         title: Text('REX 市场',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
-                fontSize: AppTheme.fontHeadline,
-                fontWeight: FontWeight.w600,
+                fontSize: AppTheme.fontTitle3,
+                fontWeight: FontWeight.bold,
                 color: _fg)),
         actions: [
-          IconButton(
-            tooltip: '扫码导入',
-            icon: Icon(Icons.qr_code_scanner_rounded, color: _fg),
-            onPressed: _importing ? null : _scanImport,
-          ),
+          // 导入入口收成**一个下拉小列表**（用户 2026-10-24：
+          // 「链接、文本、二维码、本地，搞个下拉小列表，不要单独把二维码放出来」）
           PopupMenuButton<String>(
-            tooltip: '更多导入方式',
+            tooltip: '导入模块',
             padding: EdgeInsets.zero,
-            icon: Icon(Icons.more_horiz_rounded, color: _fg),
-            onSelected: (v) {
-              if (v == 'link') _singleImport();
-              if (v == 'file') _importFromFile();
-            },
+            icon: Icon(Icons.add_circle_outline_rounded, color: _fg),
+            onSelected: _importing
+                ? null
+                : (v) {
+                    switch (v) {
+                      case 'link':
+                        _singleImport();
+                        break;
+                      case 'text':
+                        _importFromText();
+                        break;
+                      case 'scan':
+                        _scanImport();
+                        break;
+                      case 'file':
+                        _importFromFile();
+                        break;
+                    }
+                  },
             itemBuilder: (_) => const [
               PopupMenuItem(
                 value: 'link',
@@ -325,7 +364,25 @@ class _RexMarketPageState extends State<RexMarketPage> {
                   dense: true,
                   contentPadding: EdgeInsets.zero,
                   leading: Icon(Icons.link_rounded, size: 19),
-                  title: Text('单个模块地址'),
+                  title: Text('链接（单个模块地址）'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'text',
+                child: ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.notes_rounded, size: 19),
+                  title: Text('文本（粘贴模块源码）'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'scan',
+                child: ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.qr_code_scanner_rounded, size: 19),
+                  title: Text('二维码'),
                 ),
               ),
               PopupMenuItem(
@@ -334,7 +391,7 @@ class _RexMarketPageState extends State<RexMarketPage> {
                   dense: true,
                   contentPadding: EdgeInsets.zero,
                   leading: Icon(Icons.folder_open_rounded, size: 19),
-                  title: Text('从本地 .js 文件导入'),
+                  title: Text('本地（.js 文件）'),
                 ),
               ),
             ],
@@ -347,6 +404,7 @@ class _RexMarketPageState extends State<RexMarketPage> {
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
         children: [
           _sourceCard(),
+          if (_service.collections.isNotEmpty) _subscribedRow(),
           if (_loading) ...[
             const SizedBox(height: 28),
             const Center(child: CircularProgressIndicator()),
@@ -369,6 +427,7 @@ class _RexMarketPageState extends State<RexMarketPage> {
             const SizedBox(height: 6),
             ..._list(),
           ],
+          if (_service.modules.isNotEmpty) ..._importedSection(),
         ],
       ),
       bottomNavigationBar: _collection == null ? null : _bottomBar(),
@@ -452,6 +511,203 @@ class _RexMarketPageState extends State<RexMarketPage> {
           ],
         ),
       );
+
+  /// 「已订阅的集合」横排：点一下切过去，长按取消订阅（不动已导入模块）。
+  Widget _subscribedRow() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('已订阅集合',
+                  style: TextStyle(color: _sub, fontSize: AppTheme.fontCaption)),
+              const SizedBox(width: 6),
+              Text('点切换 · 长按取消',
+                  style: TextStyle(
+                      color: _sub.withValues(alpha: 0.7),
+                      fontSize: AppTheme.fontCaption)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          SizedBox(
+            height: 32,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: _service.collections.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (_, i) {
+                final c = _service.collections[i];
+                final on = c.url == _collection?.url;
+                final name = c.title.trim().isEmpty
+                    ? (Uri.tryParse(c.url)?.host ?? '未命名集合')
+                    : c.title.trim();
+                return GestureDetector(
+                  onTap: () => _applyCollection(c),
+                  onLongPress: () => _confirmUnsubscribe(c),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 11),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: on ? _accent.withValues(alpha: 0.16) : _tile,
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                          color: on ? _accent.withValues(alpha: 0.45) : _line,
+                          width: on ? 1.1 : 0.8),
+                    ),
+                    child: Text(
+                      '$name · ${c.items.length}',
+                      maxLines: 1,
+                      style: TextStyle(
+                        color: on ? _accent : _sub,
+                        fontSize: AppTheme.fontCaption,
+                        fontWeight: on ? FontWeight.w600 : FontWeight.w400,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmUnsubscribe(RexCollection c) async {
+    final name = c.title.trim().isEmpty ? '这个集合' : '「${c.title.trim()}」';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('取消订阅集合'),
+        content: Text('$name 将从「已订阅集合」里移除。\n'
+            '已经导入的模块不受影响，仍可在下面单独删除。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child:
+                const Text('取消订阅', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await _service.removeCollection(c.url);
+    if (!mounted) return;
+    setState(() {
+      if (_collection?.url != c.url) return;
+      final rest = _service.collections;
+      _collection = rest.isEmpty ? null : rest.first;
+      _selected.clear();
+      final cur = _collection;
+      if (cur != null) {
+        _urlCtrl.text = cur.url;
+        for (final it in cur.items) {
+          if (!_service.hasUrl(it.url)) _selected.add(it.url);
+        }
+      }
+    });
+  }
+
+  /// 本机已导入、但**不在当前集合**里的模块。
+  ///
+  /// 市场原来只渲染"当前拉到的清单"：从本地文件导入的、或从别的集合导入的
+  /// 模块，在这里完全看不见，也就没法删除。这一段把它们列全。
+  List<Widget> _importedSection() {
+    final inCollection = {
+      for (final e in _collection?.items ?? const <RexCollectionItem>[]) e.url,
+    };
+    final extras =
+        _service.modules.where((m) => !inCollection.contains(m.url)).toList();
+    if (extras.isEmpty) return const [];
+    return [
+      const SizedBox(height: 20),
+      Row(
+        children: [
+          Text('已导入 · 不在本集合',
+              style: TextStyle(
+                  color: _fg,
+                  fontSize: AppTheme.fontSubhead,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(width: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+            decoration: BoxDecoration(
+                color: _tile, borderRadius: BorderRadius.circular(999)),
+            child: Text('${extras.length}',
+                style: TextStyle(color: _sub, fontSize: AppTheme.fontCaption)),
+          ),
+        ],
+      ),
+      for (final m in extras) _importedTile(m),
+    ];
+  }
+
+  Widget _importedTile(RexModule m) {
+    // 用户 2026-10-24：名称下面不要再显示链接
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: _tile,
+        borderRadius: BorderRadius.circular(AppTheme.radiusLG),
+        border: Border.all(color: _line, width: 0.8),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.extension_rounded, size: 17, color: _accent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(m.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    color: _fg,
+                    fontSize: AppTheme.fontSubhead,
+                    fontWeight: FontWeight.w600)),
+          ),
+          IconButton(
+            tooltip: '移除模块',
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+            icon: Icon(Icons.delete_outline_rounded,
+                size: 19, color: _sub.withValues(alpha: 0.9)),
+            onPressed: _importing ? null : () => _confirmRemove(m.title, m.url),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 移除一个已导入的模块（本地文件导入的会连源码文件一起删）
+  Future<void> _confirmRemove(String title, String url) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('移除模块'),
+        content: Text('从本机移除「$title」？\n'
+            '${RexService.isLocal(url) ? '本地脚本文件也会一起删除。' : '之后可以再从市场重新添加。'}'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('移除', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await _service.remove(url);
+    if (!mounted) return;
+    setState(() => _selected.remove(url));
+    AppToast.show('已移除「$title」', '');
+  }
 
   Widget _errorCard() => Container(
         padding: const EdgeInsets.all(14),
@@ -685,8 +941,8 @@ class _RexMarketPageState extends State<RexMarketPage> {
     if (_grid) {
       // 列数跟着 REX 自己的偏好走（默认 2 列；市场卡片信息多，最多三列）
       final cols = PlayerPrefs.instance.rexGridColumns.value.clamp(2, 3);
-      // 3 列时卡片更窄 → 纵向拉高，避免标题/标签被挤掉
-      final ratio = cols == 2 ? 1.22 : 0.86;
+      // 固定高度：卡片尺寸刚好包住内容（用户 2026-10-24：
+      // 「整体的卡片尺寸满足内容就行，不要搞得太大了」）
       return [
         GridView.builder(
           shrinkWrap: true,
@@ -694,9 +950,9 @@ class _RexMarketPageState extends State<RexMarketPage> {
           padding: const EdgeInsets.only(top: 10),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: cols,
-            mainAxisSpacing: 10,
-            crossAxisSpacing: 10,
-            childAspectRatio: ratio,
+            mainAxisSpacing: 8,
+            crossAxisSpacing: 8,
+            mainAxisExtent: cols == 2 ? 126 : 112,
           ),
           itemCount: shown.length,
           itemBuilder: (_, i) =>
@@ -744,9 +1000,13 @@ class _RexMarketPageState extends State<RexMarketPage> {
                   _selected.add(it.url);
                 }
               }),
+      // 已导入的模块：长按也能移除（不看底部那个小垃圾桶时的快捷方式）
+      onLongPress: (_importing || !added)
+          ? null
+          : () => _confirmRemove(it.title, it.url),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 140),
-        padding: const EdgeInsets.fromLTRB(11, 11, 11, 10),
+        padding: const EdgeInsets.fromLTRB(10, 9, 10, 8),
         decoration: BoxDecoration(
           color: on
               ? _accent.withValues(alpha: _isDark ? 0.14 : 0.07)
@@ -763,40 +1023,41 @@ class _RexMarketPageState extends State<RexMarketPage> {
             Row(
               children: [
                 Container(
-                  width: compact ? 28 : 34,
-                  height: compact ? 28 : 34,
+                  width: compact ? 24 : 30,
+                  height: compact ? 24 : 30,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: _accent.withValues(alpha: on ? 0.22 : 0.12),
-                    borderRadius: BorderRadius.circular(compact ? 8 : 10),
+                    borderRadius: BorderRadius.circular(compact ? 7 : 9),
                   ),
                   child: Icon(Icons.extension_rounded,
-                      size: compact ? 15 : 18, color: _accent),
+                      size: compact ? 13 : 16, color: _accent),
                 ),
                 const Spacer(),
                 _CheckBox(on: on),
               ],
             ),
-            const SizedBox(height: 9),
+            SizedBox(height: compact ? 5 : 6),
             Text(
               it.title.isEmpty ? '(未命名)' : it.title,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: _fg,
-                fontSize: AppTheme.fontSubhead,
+                fontSize:
+                    compact ? AppTheme.fontCaption : AppTheme.fontSubhead,
                 fontWeight: FontWeight.w600,
-                height: 1.25,
+                height: 1.2,
               ),
             ),
-            const SizedBox(height: 3),
+            const SizedBox(height: 2),
             Text(
               it.author.isNotEmpty ? it.author : (it.description),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(color: _sub, fontSize: AppTheme.fontCaption),
             ),
-            const Spacer(),
+            SizedBox(height: compact ? 4 : 5),
             Row(
               children: [
                 if (compact)
@@ -810,6 +1071,21 @@ class _RexMarketPageState extends State<RexMarketPage> {
                     if (ver.isNotEmpty) const SizedBox(width: 4),
                     _pill('已添加', accent: true),
                   ],
+                ],
+                // 已导入 → 卡片底部给一个可见的移除入口（长按同样可以）
+                if (added) ...[
+                  const Spacer(),
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _importing
+                        ? null
+                        : () => _confirmRemove(it.title, it.url),
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: Icon(Icons.delete_outline_rounded,
+                          size: 15, color: _sub),
+                    ),
+                  ),
                 ],
               ],
             ),
@@ -833,6 +1109,9 @@ class _RexMarketPageState extends State<RexMarketPage> {
                   _selected.add(it.url);
                 }
               }),
+      onLongPress: (_importing || !added)
+          ? null
+          : () => _confirmRemove(it.title, it.url),
       child: Container(
         margin: const EdgeInsets.only(top: 8),
         padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
@@ -892,6 +1171,18 @@ class _RexMarketPageState extends State<RexMarketPage> {
                 ],
               ),
             ),
+            if (added)
+              IconButton(
+                tooltip: '移除模块',
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                padding: EdgeInsets.zero,
+                icon: Icon(Icons.delete_outline_rounded,
+                    size: 18, color: _sub),
+                onPressed: _importing
+                    ? null
+                    : () => _confirmRemove(it.title, it.url),
+              ),
           ],
         ),
       ),
@@ -1070,6 +1361,51 @@ class _RexMarketPageState extends State<RexMarketPage> {
         _showFailures(res.errors);
       }
       setState(() {});
+    } catch (e) {
+      if (mounted) AppToast.show('导入失败', '$e');
+    } finally {
+      if (mounted) setState(() => _importing = false);
+    }
+  }
+
+  /// 文本导入：粘贴一段 REX 模块 JS 源码，作为本地模块保存
+  /// （与「本地文件」同一套 local:// 机制，只是省掉了先存文件这一步）。
+  Future<void> _importFromText() async {
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('粘贴模块源码'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLines: 8,
+          minLines: 4,
+          style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+          decoration: const InputDecoration(
+            hintText: 'var WidgetMetadata = { … }',
+            alignLabelWithHint: true,
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('导入')),
+        ],
+      ),
+    );
+    final code = ctrl.text;
+    ctrl.dispose();
+    if (ok != true || code.trim().isEmpty || !mounted) return;
+    setState(() => _importing = true);
+    try {
+      final m = await _service.importLocalCode(code);
+      if (!mounted) return;
+      setState(() {});
+      AppToast.show('已导入「${m.title}」', '');
     } catch (e) {
       if (mounted) AppToast.show('导入失败', '$e');
     } finally {

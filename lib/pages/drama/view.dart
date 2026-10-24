@@ -13,15 +13,19 @@ import 'drama_history_page.dart';
 import 'drama_manage_page.dart';
 import 'drama_search_page.dart';
 import 'drama_settings.dart';
+import 'drama_source_sheet.dart';
 
 /// 「短剧」分类页（2026-10-22）。
 ///
 /// 底栏里的「短剧」tab（默认不启用，用户在「设置 → 主页页面」打开）。
 ///
-/// 数据完全来自视频线路：
-///   1. 扫描参与聚合的源（默认只有当前源，可在本页「设置」里多选）；
-///   2. 在每个源的分类里匹配关键词（默认 短剧/微短剧/竖屏/爽剧/短剧场）；
-///   3. 命中的「源 · 分类」作为一组，选哪组就按普通分类接口拉列表。
+/// 单源模式（用户 2026-10-24：「不要一下子刷新所有的…就是影视那种，
+/// 左上角一个切换源，我一个个切换」）：
+///   1. 左上角是当前源（默认跟随首页源），点头像/源名换一个，**一次只扫这一个**；
+///   2. 在该源的分类里匹配关键词（默认 短剧/微短剧/竖屏/爽剧/短剧场）；
+///   3. 命中的分类作为本页的 tab chips，选哪个就按普通分类接口拉列表。
+/// 扫描结果按源落盘（DramaSettings.cachedGroups），换源时先读缓存，
+/// 没缓存才扫 —— 不会每次进页面都打十几个源的分类接口。
 /// 不写死任何站源、不内置内容、不绕过任何 VIP。
 class DramaPage extends StatefulWidget {
   const DramaPage({super.key});
@@ -30,15 +34,11 @@ class DramaPage extends StatefulWidget {
   State<DramaPage> createState() => _DramaPageState();
 }
 
-/// 一个「源 + 分类」组合
+/// 当前源命中的一个短剧分类
 class _DramaGroup {
   const _DramaGroup(this.source, this.sort);
   final SourceBean source;
   final SortData sort;
-
-  String get label => source.name == sort.name
-      ? source.name
-      : '${source.name} · ${sort.name}';
 }
 
 class _DramaPageState extends State<DramaPage> {
@@ -48,7 +48,10 @@ class _DramaPageState extends State<DramaPage> {
   int _groupIdx = 0;
   List<String> _keywords = DramaSettings.defaultKeywords;
 
-  /// 短剧源 key 集合（当前聚合到的源 + 设置里勾选的源）：
+  /// 当前在看的源（左上角切换）
+  SourceBean? _source;
+
+  /// 短剧源 key 集合（当前源 + 缓存里扫出过短剧分类的源）：
   /// 「继续观看」只挑这些源下的记录，避免把普通影视记录混进来
   final Set<String> _dramaSourceKeys = {};
 
@@ -81,10 +84,6 @@ class _DramaPageState extends State<DramaPage> {
     }
   }
 
-  /// 参与聚合的源：设置里选了就按选择，没选就只扫当前源
-  /// （实现与搜索页共用 [DramaSettings.targets]）
-  Future<List<SourceBean>> _targets() => DramaSettings.targets();
-
   /// 按 key 找源（订阅线路 + 本地源两套都查，缓存还原分组时要用）
   SourceBean? _findSource(String key) {
     final api = ApiConfig.instance;
@@ -96,16 +95,25 @@ class _DramaPageState extends State<DramaPage> {
     return null;
   }
 
-  /// 用上次落盘的扫描结果还原分组（进页面默认走这里，不再每次重扫）
-  Future<List<_DramaGroup>?> _groupsFromCache() async {
+  /// 当前源：设置里挑过的优先，否则跟随首页当前源
+  Future<SourceBean?> _currentSource() async {
+    final key = await DramaSettings.pickedSourceKey();
+    if (key.isNotEmpty) {
+      final hit = _findSource(key);
+      if (hit != null) return hit;
+    }
+    return ApiConfig.instance.homeSourceBean.value;
+  }
+
+  /// 某个源上次落盘的短剧分类（换源回来先走这里，不重扫）
+  Future<List<_DramaGroup>?> _groupsFromCache(String sourceKey) async {
     final rows = await DramaSettings.cachedGroups();
-    if (rows.isEmpty) return null;
     final out = <_DramaGroup>[];
     for (final r in rows) {
-      final sourceKey = r['source'] ?? '';
+      if (r['source'] != sourceKey) continue;
       final source = _findSource(sourceKey);
       // 源被删/停用 → 这条缓存作废
-      if (source == null) continue;
+      if (source == null) return null;
       out.add(_DramaGroup(
         source,
         SortData(
@@ -118,7 +126,22 @@ class _DramaPageState extends State<DramaPage> {
     return out.isEmpty ? null : out;
   }
 
-  /// [rescan] = true 才重新扫描各源的分类；否则优先用缓存。
+  /// 「继续观看」用的源集合：全部扫出过短剧分类的源 + 当前源
+  Future<void> _refreshHistorySources() async {
+    final rows = await DramaSettings.cachedGroups();
+    if (!mounted) return;
+    setState(() {
+      _dramaSourceKeys
+        ..clear()
+        ..addAll(
+          rows.map((r) => r['source'] ?? '').where((e) => e.isNotEmpty),
+        );
+      final s = _source;
+      if (s != null) _dramaSourceKeys.add(s.key);
+    });
+  }
+
+  /// [rescan] = true 才重新扫当前源的分类；否则优先用缓存。
   Future<void> _load({bool rescan = false}) async {
     setState(() {
       _loading = true;
@@ -131,19 +154,26 @@ class _DramaPageState extends State<DramaPage> {
     });
     _keywords = await DramaSettings.keywords();
 
-    // ── 缓存优先：上次扫到的分组直接用 ──────────────────────────
+    final source = await _currentSource();
+    if (!mounted) return;
+    if (source == null) {
+      setState(() {
+        _source = null;
+        _loading = false;
+        _error = '还没有可用的视频源\n先到「切换源」里选一个影视源，或添加通用源';
+      });
+      return;
+    }
+    setState(() => _source = source);
+    await _refreshHistorySources();
+
+    // ── 缓存优先：这个源上次扫到的短剧分类直接用 ────────────────
     if (!rescan) {
-      final cached = await _groupsFromCache();
+      final cached = await _groupsFromCache(source.key);
       if (!mounted) return;
       if (cached != null) {
-        final picked = await DramaSettings.sourceKeys();
-        if (!mounted) return;
         setState(() {
           _groups = cached;
-          _dramaSourceKeys
-            ..clear()
-            ..addAll(picked)
-            ..addAll(cached.map((g) => g.source.key));
           _groupIdx = 0;
           _loading = false;
         });
@@ -152,69 +182,41 @@ class _DramaPageState extends State<DramaPage> {
       }
     }
 
-    final targets = await _targets();
-    if (targets.isEmpty) {
-      setState(() {
-        _loading = false;
-        _error = '还没有可用的视频源\n先到「切换源」里选一个影视源，或添加通用源';
-      });
-      return;
-    }
-
-    final found = <_DramaGroup>[];
-    var done = 0;
-    // 并发 4 个一批，避免一次把几百条线路全打出去
-    for (var i = 0; i < targets.length; i += 4) {
-      final batch = targets.skip(i).take(4).toList();
-      final results = await Future.wait(batch.map(_probeSource));
-      found.addAll(results.expand((e) => e));
-      done += batch.length;
-      if (mounted) {
-        setState(() => _scanHint = '正在扫描 $done/${targets.length} 个源…');
-      }
-    }
+    // 只扫这一个源（不再并发扫所有源）
+    setState(() => _scanHint = '正在扫描「${source.name}」的分类…');
+    final found = await _probeSource(source);
     if (!mounted) return;
 
     if (found.isEmpty) {
       setState(() {
         _loading = false;
         _scanHint = '';
-        _error = '已扫描 ${targets.length} 个源，没有找到短剧分类\n'
-            '可在「设置」里改关键词，或添加通用源';
+        _error = '「${source.name}」没有匹配短剧关键词的分类\n'
+            '点左上角源名换一个源，或在「设置」里改关键词';
       });
       return;
     }
-    // 扫描结果与旧缓存**合并**：站点抖动漏扫几个源时，不把之前的分组弄丢；
-    // 但已经不在「参与聚合的源」里的分组要丢掉（用户主动取消勾选）。
-    final targetKeys = targets.map((s) => s.key).toSet();
+    // 落盘：保留其他源的缓存，整组替换这个源的
     final oldRows = await DramaSettings.cachedGroups();
-    final merged = <String, Map<String, String>>{};
-    for (final r in oldRows) {
-      if (!targetKeys.contains(r['source'])) continue;
-      merged['${r['source']}|${r['id']}'] = r;
-    }
-    for (final g in found) {
-      merged['${g.source.key}|${g.sort.id}'] = {
-        'source': g.source.key,
-        'id': g.sort.id,
-        'name': g.sort.name,
-        'flag': g.sort.flag,
-      };
-    }
-    await DramaSettings.saveGroups(merged.values.toList());
-    final groups = await _groupsFromCache() ?? found;
-    // 设置里勾选的源 + 全部短剧源，都算「短剧源」
-    final picked = await DramaSettings.sourceKeys();
+    final merged = <Map<String, String>>[
+      for (final r in oldRows)
+        if (r['source'] != source.key) r,
+      for (final g in found)
+        {
+          'source': g.source.key,
+          'id': g.sort.id,
+          'name': g.sort.name,
+          'flag': g.sort.flag,
+        },
+    ];
+    await DramaSettings.saveGroups(merged);
     if (!mounted) return;
     setState(() {
-      _groups = groups;
-      _dramaSourceKeys
-        ..clear()
-        ..addAll(picked)
-        ..addAll(groups.map((g) => g.source.key));
+      _groups = found;
       _groupIdx = 0;
       _scanHint = '';
     });
+    await _refreshHistorySources();
     await _loadPage(1);
   }
 
@@ -266,7 +268,7 @@ class _DramaPageState extends State<DramaPage> {
         _loading = false;
         _loadingMore = false;
         if (page == 1) {
-          _error = '「${g.label}」加载失败：${e.toString().split('\n').first}';
+          _error = '「${g.sort.name}」加载失败：${e.toString().split('\n').first}';
         }
       });
     }
@@ -278,8 +280,36 @@ class _DramaPageState extends State<DramaPage> {
       builder: (_) => const DramaManagePage(),
     ));
     if (!mounted) return;
-    // 管理页可能改了关键词/参与源 —— 必须重扫，不能用缓存
+    // 管理页可能改了关键词 —— 重扫当前源（单源，开销小）
     _load(rescan: true);
+  }
+
+  /// 左上角换源：列出全部源，扫出过短剧分类的标「短剧」徽章排前面。
+  /// 选中后先读缓存，没缓存才扫 —— 换源不再是「把十几个源全刷一遍」。
+  Future<void> _pickSource() async {
+    final api = ApiConfig.instance;
+    final all = <SourceBean>[
+      ...api.sourceBeanList,
+      if (api.localSourcesEnabled.value) ...api.localVideoSources,
+    ];
+    if (all.isEmpty) return;
+    final rows = await DramaSettings.cachedGroups();
+    // 已经扫出过短剧分类的源（面板里标徽章 + 缓存优先排序）
+    final dramaKeys =
+        rows.map((r) => r['source'] ?? '').where((e) => e.isNotEmpty).toSet();
+    if (!mounted) return;
+
+    // 面板能力与影视的源切换一致：两列网格 / 搜索 / 定位 / 排序 / 长按菜单
+    final picked = await DramaSourceSheet.show(
+      context,
+      sources: all,
+      cachedKeys: dramaKeys,
+      currentKey: _source?.key,
+    );
+    if (picked == null || !mounted) return;
+    await DramaSettings.savePickedSourceKey(picked.key);
+    if (!mounted || picked.key == _source?.key) return;
+    _load();
   }
 
   /// 顶部幻灯片：只取有封面的条目，最多 8 张
@@ -296,14 +326,64 @@ class _DramaPageState extends State<DramaPage> {
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        centerTitle: true,
-        title: Text(
-          '短剧',
-          style: TextStyle(
-            fontSize: AppTheme.fontHeadline,
-            fontWeight: FontWeight.w600,
-            color: fg,
-          ),
+        // 顶栏按小程序 / 影视的写法：大标题靠左 + 下面一行「当前源」药丸，
+        // 右侧只留图标（用户 2026-10-24：参考小程序、影视、阅读的界面）。
+        centerTitle: false,
+        titleSpacing: 12,
+        toolbarHeight: 72,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '短剧',
+              style: TextStyle(
+                fontSize: AppTheme.fontTitle3,
+                fontWeight: FontWeight.bold,
+                height: 1.1,
+                color: fg,
+              ),
+            ),
+            const SizedBox(height: 5),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _pickSource,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(8, 3, 6, 3),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.08)
+                      : Colors.black.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.live_tv_rounded,
+                        size: 12,
+                        color: isDark ? Colors.white70 : Colors.black54),
+                    const SizedBox(width: 4),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 170),
+                      child: Text(
+                        _source?.name ?? '选择源',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: AppTheme.fontCaption,
+                          color: isDark ? Colors.white70 : Colors.black87,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    Icon(Icons.keyboard_arrow_down_rounded,
+                        size: 15,
+                        color: isDark ? Colors.white70 : Colors.black54),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
         actions: [
           IconButton(
@@ -323,12 +403,6 @@ class _DramaPageState extends State<DramaPage> {
             tooltip: '短剧设置',
             icon: Icon(Icons.tune_rounded, color: fg),
             onPressed: _openSettings,
-          ),
-          IconButton(
-            tooltip: '重新扫描分类',
-            icon: Icon(Icons.refresh_rounded, color: fg),
-            // 只有手动点刷新才重扫；平时进页面走缓存
-            onPressed: _loading ? null : () => _load(rescan: true),
           ),
           const SizedBox(width: 4),
         ],
@@ -375,15 +449,20 @@ class _DramaPageState extends State<DramaPage> {
                 ),
               ),
               const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 10,
+                runSpacing: 8,
                 children: [
                   OutlinedButton(
-                    onPressed: _load,
+                    onPressed: () => _load(rescan: true),
                     child: const Text('重试'),
                   ),
-                  const SizedBox(width: 10),
                   FilledButton(
+                    onPressed: _pickSource,
+                    child: const Text('换个源'),
+                  ),
+                  OutlinedButton(
                     onPressed: _openSettings,
                     child: const Text('短剧设置'),
                   ),
@@ -395,12 +474,13 @@ class _DramaPageState extends State<DramaPage> {
       );
     }
     return RefreshIndicator(
-      onRefresh: _load,
+      // 下拉 = 重新扫当前源的分类（单源，开销小）；平时进页面走缓存
+      onRefresh: () => _load(rescan: true),
       child: CustomScrollView(
         controller: _scroll,
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
-          // 分组 chips：多个「源 · 分类」时用来切换
+          // 分类 chips：当前源命中的几个短剧分类（同影视首页的分类 tab）
           if (_groups.length > 1)
             SliverToBoxAdapter(
               child: SizedBox(
@@ -427,24 +507,27 @@ class _DramaPageState extends State<DramaPage> {
                         },
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 6),
+                              horizontal: 13, vertical: 6),
                           decoration: BoxDecoration(
                             color: on
-                                ? AppTheme.accentColor
+                                ? AppTheme.accentOnSurface.withValues(
+                                    alpha: isDark ? 0.24 : 0.12)
                                 : (isDark
-                                    ? Colors.white.withValues(alpha: 0.08)
-                                    : Colors.black.withValues(alpha: 0.05)),
-                            borderRadius: BorderRadius.circular(18),
+                                    ? Colors.white.withValues(alpha: 0.07)
+                                    : Colors.black.withValues(alpha: 0.045)),
+                            borderRadius: BorderRadius.circular(999),
                           ),
                           child: Text(
-                            _groups[i].label,
+                            _groups[i].sort.name,
                             style: TextStyle(
                               fontSize: AppTheme.fontFootnote,
+                              fontWeight:
+                                  on ? FontWeight.w600 : FontWeight.w500,
                               color: on
-                                  ? Colors.white
+                                  ? AppTheme.accentOnSurface
                                   : (isDark
                                       ? Colors.white70
-                                      : Colors.black87),
+                                      : Colors.black54),
                             ),
                           ),
                         ),
@@ -489,9 +572,9 @@ class _DramaPageState extends State<DramaPage> {
               sliver: SliverGrid(
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 3,
-                  mainAxisSpacing: 12,
+                  mainAxisSpacing: 14,
                   crossAxisSpacing: 10,
-                  childAspectRatio: 0.55,
+                  childAspectRatio: 0.60,
                 ),
                 delegate: SliverChildBuilderDelegate(
                   (context, i) => _card(_videos[i], isDark),
@@ -538,16 +621,46 @@ class _DramaPageState extends State<DramaPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: v.pic.isEmpty
-                  ? _ph(isDark)
-                  : CachedNetworkImage(
-                      imageUrl: v.pic,
-                      fit: BoxFit.cover,
-                      width: double.infinity,
-                      errorWidget: (_, __, ___) => _ph(isDark),
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: v.pic.isEmpty
+                        ? _ph(isDark)
+                        : CachedNetworkImage(
+                            imageUrl: v.pic,
+                            fit: BoxFit.cover,
+                            width: double.infinity,
+                            errorWidget: (_, __, ___) => _ph(isDark),
+                          ),
+                  ),
+                ),
+                // 集数/更新信息压在封面左下角（和影视卡片一致，
+                // 名称下面不再多一行，网格看起来更整齐）
+                if (v.note.trim().isNotEmpty)
+                  Positioned(
+                    left: 5,
+                    bottom: 5,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 1.5),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: Text(
+                        v.note,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w500),
+                      ),
                     ),
+                  ),
+              ],
             ),
           ),
           const SizedBox(height: 6),
@@ -558,19 +671,10 @@ class _DramaPageState extends State<DramaPage> {
             style: TextStyle(
               fontSize: AppTheme.fontFootnote,
               height: 1.25,
+              fontWeight: FontWeight.w500,
               color: isDark ? Colors.white : Colors.black87,
             ),
           ),
-          if (v.note.isNotEmpty)
-            Text(
-              v.note,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 11,
-                color: isDark ? Colors.white54 : Colors.black45,
-              ),
-            ),
         ],
       ),
     );

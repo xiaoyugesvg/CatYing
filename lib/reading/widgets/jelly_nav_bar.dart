@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 
 import 'package:flutter/material.dart';
 import '../../common/floating_nav_spec.dart';
@@ -88,7 +88,7 @@ class _JellyNavBarState extends State<JellyNavBar>
   /// 当前栏的取色调色板（可被 widget.palette 覆盖）
   JellyPalette get _pal => widget.palette ?? JellyTheme.palette;
 
-  /// 当前悬浮栏风格（设置页可切换：水墨 / 液态玻璃 / 炫彩 / 霓虹）
+  /// 当前悬浮栏风格（设置页可切换：水墨 / 磨砂 / 炫彩 / 霓虹 / 反色 / 实心）
   FloatingNavStyle get _style =>
       FloatingNavStyle.fromId(SettingsService().navStyle);
 
@@ -121,17 +121,18 @@ class _JellyNavBarState extends State<JellyNavBar>
       duration: const Duration(milliseconds: 850), // 切换速度放慢（原 600）
       vsync: this,
     )..value = 1.0; // 初始处于静止态，指示器归位到当前项
-    // 背景动画开关变化时重建：决定悬浮栏是否套 BackdropFilter 模糊
-    SettingsService().addListener(_onBgAnimChanged);
+    // 设置变化时重建：背景动画开关决定是否套 BackdropFilter 模糊，
+    // 风格 / 不透明度也是每次 build 现读的 ⇒ 改完立即生效。
+    SettingsService().addListener(_onSettingsChanged);
   }
 
-  void _onBgAnimChanged() {
+  void _onSettingsChanged() {
     if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
-    SettingsService().removeListener(_onBgAnimChanged);
+    SettingsService().removeListener(_onSettingsChanged);
     _controller.dispose();
     super.dispose();
   }
@@ -262,13 +263,13 @@ class _JellyNavBarState extends State<JellyNavBar>
               ),
             ),
           );
-          // 炫彩/霓虹是不透明底，模糊背景没有意义（白耗一次全屏高斯）。
-          // outline/jelly 是**半透明**底（浅色 alpha 只有 0.42 / 0.22）——
-          // 不加模糊的话下方正文会原样透出，和栏内文字叠在一起看不清，
-          // 所以它们也要跟 ink/liquid 一样走 BackdropFilter。
+          // 炫彩/霓虹/实心是近乎不透明的底，模糊背景没有意义（白耗一次全屏高斯）。
+          // 磨砂/反色/水墨是**半透明**底 —— 不加模糊的话下方正文会原样透出，
+          // 和栏内文字叠在一起看不清，所以它们要走 BackdropFilter。
           final useBlur = !bgAnim &&
               _style != FloatingNavStyle.aurora &&
-              _style != FloatingNavStyle.neon;
+              _style != FloatingNavStyle.neon &&
+              _style != FloatingNavStyle.solid;
           return Padding(
             padding: EdgeInsets.fromLTRB(
               horizontalMargin + sidePad,
@@ -279,7 +280,7 @@ class _JellyNavBarState extends State<JellyNavBar>
             child: Container(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(_floatingRadius),
-                boxShadow: _barShadow(),
+                boxShadow: _barShadow(isDark),
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(_floatingRadius),
@@ -298,33 +299,41 @@ class _JellyNavBarState extends State<JellyNavBar>
   }
 
   /// 悬浮胶囊底色（按风格分支）
+  ///
+  /// 出口处统一乘一次「底栏不透明度」（设置 → 底栏风格里的滑杆），
+  /// 所以下面每种风格只需给出各自的**理想配色**。
   BoxDecoration _barDecoration(bool isDark, {required bool opaque}) {
     final radius = BorderRadius.circular(_floatingRadius);
+    final BoxDecoration deco;
     switch (_style) {
-      case FloatingNavStyle.liquid:
-        // 液态玻璃：高透光渐变 + 白色高光描边
-        return BoxDecoration(
+      case FloatingNavStyle.frost:
+        // 磨砂：一层半透玻璃 + 顶部高光细边（不染主题色，避免和 ink 撞）
+        deco = BoxDecoration(
           borderRadius: radius,
           gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
             colors: isDark
                 ? [
-                    Colors.white.withValues(alpha: 0.18),
-                    Colors.white.withValues(alpha: 0.05),
+                    Colors.white.withValues(alpha: 0.16),
+                    Colors.white.withValues(alpha: 0.06),
                   ]
                 : [
-                    Colors.white.withValues(alpha: 0.82),
-                    Colors.white.withValues(alpha: 0.46),
+                    Colors.white.withValues(alpha: 0.74),
+                    Colors.white.withValues(alpha: 0.52),
                   ],
           ),
           border: Border.all(
-            color: Colors.white.withValues(alpha: isDark ? 0.22 : 0.75),
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.14)
+                : Colors.white.withValues(alpha: 0.85),
+            width: 0.8,
           ),
         );
+        break;
       case FloatingNavStyle.aurora:
         // 炫彩：固定霓虹渐变（不跟主题走，否则墨灰主题下不"炫"）
-        return BoxDecoration(
+        deco = BoxDecoration(
           borderRadius: radius,
           gradient: const LinearGradient(
             begin: Alignment.topLeft,
@@ -333,9 +342,10 @@ class _JellyNavBarState extends State<JellyNavBar>
           ),
           border: Border.all(color: Colors.white.withValues(alpha: 0.30)),
         );
+        break;
       case FloatingNavStyle.neon:
         // 霓虹：深色底 + 发光描边
-        return BoxDecoration(
+        deco = BoxDecoration(
           color: const Color(0xFF101116),
           borderRadius: radius,
           border: Border.all(
@@ -343,63 +353,55 @@ class _JellyNavBarState extends State<JellyNavBar>
             width: 1.2,
           ),
         );
-      case FloatingNavStyle.jelly:
-        // 果冻：主题色半透明底 + 白色高光边框，像一块彩色软胶
-        final accent = FloatingNavSpec.styleContentColor(
-          FloatingNavStyle.outline,
-          selected: true,
-          isDark: isDark,
-          palette: _pal,
-        );
-        return BoxDecoration(
-          borderRadius: radius,
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: isDark
-                ? [
-                    accent.withValues(alpha: 0.34),
-                    accent.withValues(alpha: 0.16),
-                  ]
-                : [
-                    accent.withValues(alpha: 0.22),
-                    accent.withValues(alpha: 0.10),
-                  ],
-          ),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: isDark ? 0.16 : 0.70),
-          ),
-        );
-      case FloatingNavStyle.outline:
-        // 描边：近乎透明的底 + 主题色细描边，尽量不遮内容
-        final accent = FloatingNavSpec.styleContentColor(
-          FloatingNavStyle.outline,
-          selected: true,
-          isDark: isDark,
-          palette: _pal,
-        );
-        return BoxDecoration(
-          color: (isDark ? const Color(0xFF101012) : Colors.white)
-              .withValues(alpha: isDark ? 0.30 : 0.42),
+        break;
+      case FloatingNavStyle.reverse:
+        // 反色：浅色主题给深胶囊、深色主题给浅胶囊（与界面明暗相反）
+        deco = BoxDecoration(
+          color: isDark
+              ? const Color(0xFFF3F3F5).withValues(alpha: 0.96)
+              : const Color(0xFF1E2024).withValues(alpha: 0.94),
           borderRadius: radius,
           border: Border.all(
-            color: accent.withValues(alpha: isDark ? 0.70 : 0.55),
-            width: 1.2,
+            color: isDark
+                ? Colors.black.withValues(alpha: 0.06)
+                : Colors.white.withValues(alpha: 0.10),
+            width: 0.6,
           ),
         );
+        break;
+      case FloatingNavStyle.solid:
+        // 实心：几乎不透明的实底（用户嫌太透明时的首选）
+        deco = BoxDecoration(
+          color: isDark
+              ? const Color(0xFF17171A)
+              : const Color(0xFFFDFDFE),
+          borderRadius: radius,
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.06)
+                : Colors.black.withValues(alpha: 0.05),
+            width: 0.6,
+          ),
+        );
+        break;
       case FloatingNavStyle.ink:
-        return BoxDecoration(
+        deco = BoxDecoration(
           color: FloatingNavSpec.barColor(
             isDark,
             _pal,
           ).withValues(alpha: opaque ? FloatingNavSpec.barAlpha : 0.8),
           borderRadius: radius,
         );
+        break;
     }
+    return FloatingNavSpec.applyOpacity(
+      deco,
+      SettingsService().navBarOpacity,
+    );
   }
 
   /// 悬浮胶囊外阴影（炫彩/霓虹带同色光晕）
-  List<BoxShadow> _barShadow() {
+  List<BoxShadow> _barShadow(bool isDark) {
     switch (_style) {
       case FloatingNavStyle.aurora:
         return [
@@ -417,28 +419,29 @@ class _JellyNavBarState extends State<JellyNavBar>
             spreadRadius: 1,
           ),
         ];
-      case FloatingNavStyle.liquid:
+      case FloatingNavStyle.frost:
+        // 磨砂：大范围柔光阴影，托起玻璃层
         return [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.16),
-            blurRadius: 22,
+            color: Colors.black.withValues(alpha: isDark ? 0.34 : 0.10),
+            blurRadius: 26,
             offset: const Offset(0, 8),
           ),
         ];
-      case FloatingNavStyle.jelly:
+      case FloatingNavStyle.reverse:
         return [
           BoxShadow(
-            color: _pal.primary.withValues(alpha: 0.26),
-            blurRadius: 18,
+            color: Colors.black.withValues(alpha: isDark ? 0.28 : 0.16),
+            blurRadius: 20,
             offset: const Offset(0, 6),
           ),
         ];
-      case FloatingNavStyle.outline:
+      case FloatingNavStyle.solid:
         return [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
+            color: Colors.black.withValues(alpha: isDark ? 0.42 : 0.12),
+            blurRadius: 22,
+            offset: const Offset(0, 6),
           ),
         ];
       case FloatingNavStyle.ink:

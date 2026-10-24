@@ -239,6 +239,14 @@ class SourceService {
             if (s.isNotEmpty) values.add(SortFilterValue(n: s, v: s));
           }
         }
+      } else if (rawValues is Map) {
+        // 少数 py 源把选项写成对象：{"内地": "大陆", "全部": ""}
+        // 以前只认 List ⇒ 这一组变成「有行、没芯片」，看起来像筛选按钮失效。
+        rawValues.forEach((k, v) {
+          final n = k.toString();
+          final val = v?.toString() ?? '';
+          if (n.isNotEmpty) values.add(SortFilterValue(n: n, v: val));
+        });
       }
       out.add(SortFilter(key: key, name: name, values: values));
     }
@@ -944,10 +952,15 @@ class SourceService {
         final id = rawId?.toString() ?? '';
         if (id.isEmpty) continue;
         final name = (c['type_name'] ?? c['name'] ?? id).toString();
-        // 少数源把 filters 直接挂在分类项里；顶层共用组用 '*' 兜底
+        // 少数源把 filters 直接挂在分类项里；顶层共用组用 '*' 兜底。
+        // 个别 py 源的顶层 key 用的是**分类名**而不是 type_id，所以两种都查一遍
+        //（用户反馈：py 源在首页看不到筛选按钮）。
         final own = _parseFilters(c['filters'])[id] ?? const <SortFilter>[];
+        final byName = _parseFilters(c['filters'])[name];
         final merged = <SortFilter>[
           ...?filtersMap[id],
+          ...?filtersMap[name],
+          if (byName != null) ...byName,
           ...?filtersMap['*'],
           ...own,
         ];

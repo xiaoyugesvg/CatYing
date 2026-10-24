@@ -168,6 +168,9 @@ class PlayerPrefs {
   /// REX 页面的列数（默认 2 —— 用户 2026-10-23：「REX 页面默认卡片一行 2 列」）
   final rexGridColumns = 2.obs;
 
+  /// REX 订阅管理页视图：0 = 列表，2/3/4 = 一行几列（默认 2 列卡片）
+  final rexManageView = 2.obs;
+
   /// 收藏页 / 历史页各自的列数（与首页独立，便于分别设置）
   final favGridColumns = 4.obs;
   final historyGridColumns = 4.obs;
@@ -264,6 +267,8 @@ class PlayerPrefs {
     gridColumns.value = (cols >= 2 && cols <= 4) ? cols : 3;
     final rc = prefs.getInt('rex_grid_columns') ?? 2;
     rexGridColumns.value = (rc >= 2 && rc <= 4) ? rc : 2;
+    final rmv = prefs.getInt('rex_manage_view') ?? 2;
+    rexManageView.value = (rmv == 0 || (rmv >= 2 && rmv <= 4)) ? rmv : 2;
     final fc = prefs.getInt('fav_grid_columns') ?? 4;
     favGridColumns.value = (fc >= 2 && fc <= 6) ? fc : 4;
     final hc = prefs.getInt('history_grid_columns') ?? 4;
@@ -409,6 +414,13 @@ class PlayerPrefs {
     rexGridColumns.value = n.clamp(2, 4);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('rex_grid_columns', rexGridColumns.value);
+  }
+
+  /// REX 订阅管理页视图：0 = 列表，2/3/4 = 一行几列
+  Future<void> setRexManageView(int v) async {
+    rexManageView.value = (v == 0 || (v >= 2 && v <= 4)) ? v : 2;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('rex_manage_view', rexManageView.value);
   }
 
   Future<void> setEngine(PlayerEngine e) async {

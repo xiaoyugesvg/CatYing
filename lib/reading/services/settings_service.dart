@@ -251,6 +251,9 @@ class SettingsService extends ChangeNotifier {
   // 悬浮底栏外观（用户 2026-10-18）：风格 id + 各 tab 的自定义图标路径
   static const _kNavStyleKey = 'nav_style';
   static const _kNavCustomIconsKey = 'nav_custom_icons';
+
+  /// 悬浮底栏不透明度（2026-10-24：用户「菜单栏太透明了」→ 可调）
+  static const _kNavBarOpacityKey = 'nav_bar_opacity';
   static const _kNavOrderVersionKey =
       'nav_order_version'; // 导航 tab 顺序版本（v2: 书架与收藏互换）
   static const _kPageTabsFollowNavKey = 'page_tabs_follow_nav';
@@ -411,7 +414,8 @@ class SettingsService extends ChangeNotifier {
   List<NavTab> _visibleNavTabs = NavTab.values.toList(); // 导航栏可见 tab，默认全显示
   bool _navFloating = true; // 导航栏是否悬浮（胶囊型毛玻璃样式），默认开启
   bool _navIconOnly = false; // 导航栏只显示图标（隐藏文字标签），默认关
-  String _navStyle = 'ink'; // 悬浮栏风格：ink / liquid / aurora / neon
+  String _navStyle = 'ink'; // 悬浮栏风格：ink / frost / aurora / neon / reverse / solid
+  double _navBarOpacity = 0.95; // 悬浮底栏不透明度（0.30~1.0）
   final Map<String, String> _navCustomIcons = {}; // tab 标签 → 自定义图标文件路径
   bool _pageTabsFollowNav = true; // 收藏/书架/下载页 tab 是否跟随导航栏 manga/book 可见性
 
@@ -670,6 +674,9 @@ class SettingsService extends ChangeNotifier {
   bool get navIconOnly => _navIconOnly;
   String get navStyle => _navStyle;
 
+  /// 悬浮底栏不透明度（0.30~1.0，1.0 = 完全不透）
+  double get navBarOpacity => _navBarOpacity;
+
   /// 自定义底栏图标（tab 标签 → 图片路径）。
   Map<String, String> get navCustomIcons => Map.unmodifiable(_navCustomIcons);
 
@@ -912,6 +919,10 @@ class SettingsService extends ChangeNotifier {
       _navIconOnly = prefs.getBool(_kNavIconOnlyKey) ?? false;
       // 悬浮底栏风格 + 自定义图标
       _navStyle = prefs.getString(_kNavStyleKey) ?? 'ink';
+      final navOp = prefs.getDouble(_kNavBarOpacityKey);
+      _navBarOpacity = (navOp == null || navOp < 0.3 || navOp > 1.0)
+          ? 0.95
+          : navOp;
       final iconsRaw = prefs.getString(_kNavCustomIconsKey);
       if (iconsRaw != null && iconsRaw.isNotEmpty) {
         try {
@@ -2575,7 +2586,8 @@ class SettingsService extends ChangeNotifier {
     }
   }
 
-  /// 设置悬浮底栏风格（值见 `FloatingNavStyle.id`：ink / liquid / aurora / neon）
+  /// 设置悬浮底栏风格（值见 `FloatingNavStyle.id`：
+  /// ink / frost / aurora / neon / reverse / solid）
   Future<void> setNavStyle(String id) async {
     if (_navStyle == id) return;
     _navStyle = id;
@@ -2586,6 +2598,23 @@ class SettingsService extends ChangeNotifier {
       PrefsMirror.snapshotSoon();
     } catch (e) {
       _log('保存底栏风格失败: $e');
+    }
+  }
+
+  /// 设置悬浮底栏不透明度（0.30~1.0）。
+  ///
+  /// 底栏每次 build 都读这个值 ⇒ 拖滑杆立即生效，不需要重启页面。
+  Future<void> setNavBarOpacity(double v) async {
+    final next = v.clamp(0.30, 1.0);
+    if ((_navBarOpacity - next).abs() < 0.001) return;
+    _navBarOpacity = next;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble(_kNavBarOpacityKey, next);
+      PrefsMirror.snapshotSoon();
+    } catch (e) {
+      _log('保存底栏不透明度失败: $e');
     }
   }
 

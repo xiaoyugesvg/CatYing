@@ -2,11 +2,13 @@ import 'dart:async';
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../common/theme.dart';
 import '../models/movie.dart';
 import '../services/player_prefs.dart';
 import '../widgets/app_toast.dart';
+import '../widgets/card_action_sheet.dart';
 import '../widgets/vod_card.dart';
 import 'rex_detail_page.dart';
 import 'rex_layout_sheet.dart';
@@ -111,6 +113,7 @@ class _RexHomePageState extends State<RexHomePage> {
     // 当前选中的模块被停用/删除 → 回到第一个
     if (!list.any((m) => m.url == _selectedUrl)) {
       _selectedUrl = list.first.url;
+      RexService.instance.lastModuleUrl = _selectedUrl;
       _fn = list.first.listFunctions.isEmpty
           ? null
           : list.first.listFunctions.first;
@@ -211,6 +214,8 @@ class _RexHomePageState extends State<RexHomePage> {
 
   void _selectModule(RexModule m) {
     if (m.url == _selectedUrl) return;
+    // 记下"首页正在用的模块"，订阅管理页的「定位」要用
+    RexService.instance.lastModuleUrl = m.url;
     setState(() {
       _selectedUrl = m.url;
       _fn = m.listFunctions.isEmpty ? null : m.listFunctions.first;
@@ -494,111 +499,329 @@ class _RexHomePageState extends State<RexHomePage> {
     );
   }
 
-  /// 源（模块）切换面板 —— 顶栏左上角那个名字点开就是它
+  /// 源（模块）切换面板 —— 顶栏左上角那个名字点开就是它。
+  ///
+  /// 模块一多，纯两列卡片往下翻很难找，所以这里补了：
+  /// 搜索 / 排序 / 视图（列表 · 2 列 · 3 列）/ 定位当前模块。
   Future<void> _openModuleSheet() async {
-    final list = _modules;
-    if (list.isEmpty) return;
+    final all = _modules;
+    if (all.isEmpty) return;
+    // 面板内的临时状态（不落盘；列数那一项跟随 REX 的视图偏好）
+    var keyword = '';
+    var sort = 0; // 0 默认 / 1 名称 / 2 作者
+    var listMode = false;
+    var cols = PlayerPrefs.instance.rexGridColumns.value.clamp(2, 3);
+    final searchCtrl = TextEditingController();
+    final scroll = ScrollController();
+
+    List<RexModule> visible() {
+      final k = keyword.trim().toLowerCase();
+      final list = k.isEmpty
+          ? List<RexModule>.of(all)
+          : all
+              .where((m) =>
+                  m.title.toLowerCase().contains(k) ||
+                  m.author.toLowerCase().contains(k) ||
+                  m.id.toLowerCase().contains(k))
+              .toList();
+      if (sort == 1) {
+        list.sort((a, b) => a.title.compareTo(b.title));
+      } else if (sort == 2) {
+        list.sort((a, b) => a.author.compareTo(b.author));
+      }
+      return list;
+    }
+
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppTheme.backgroundSecondary,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (ctx) => SafeArea(
-        top: false,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(ctx).size.height * 0.62),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                child: Row(
-                  children: [
-                    Text('切换模块',
-                        style: TextStyle(
-                            color: _fg,
-                            fontSize: AppTheme.fontHeadline,
-                            fontWeight: FontWeight.w600)),
-                    const Spacer(),
-                    Text('${list.length} 个',
-                        style: TextStyle(
-                            color: _sub, fontSize: AppTheme.fontCaption)),
-                  ],
-                ),
-              ),
-              // 与影视首页的「源切换」一致：卡片视图，一行两个
-              Flexible(
-                child: GridView.builder(
-                  shrinkWrap: true,
-                  padding: const EdgeInsets.fromLTRB(16, 2, 16, 14),
-                  gridDelegate:
-                      const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    mainAxisSpacing: 8,
-                    crossAxisSpacing: 10,
-                    childAspectRatio: 3.4,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final shown = visible();
+          final width = MediaQuery.of(ctx).size.width;
+          final crossAxisCount = listMode ? 1 : cols;
+          final itemW =
+              (width - 32 - 10 * (crossAxisCount - 1)) / crossAxisCount;
+          // 列表模式按「一行 50 高」算；网格 2 列沿用原来的 3.4，3 列收紧一点
+          final ratio = listMode ? (itemW / 50) : (cols == 2 ? 3.4 : 2.7);
+          final itemH = itemW / ratio;
+          final compact = !listMode && cols >= 3;
+
+          // 定位到当前模块：按固定的行高算偏移（GridView 里屏幕外的项没被
+          // build，用 GlobalKey + ensureVisible 是拿不到 context 的）
+          void locate() {
+            final i = shown.indexWhere((m) => m.url == _module?.url);
+            if (i < 0 || !scroll.hasClients) return;
+            final row = i ~/ crossAxisCount;
+            final target = row * (itemH + 8) - itemH;
+            scroll.animateTo(
+              target.clamp(0.0, scroll.position.maxScrollExtent),
+              duration: const Duration(milliseconds: 260),
+              curve: Curves.easeOut,
+            );
+          }
+
+          return SafeArea(
+            top: false,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(ctx).size.height * 0.62),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+                    child: Row(
+                      children: [
+                        Text('切换模块',
+                            style: TextStyle(
+                                color: _fg,
+                                fontSize: AppTheme.fontHeadline,
+                                fontWeight: FontWeight.w600)),
+                        const Spacer(),
+                        Text(
+                            shown.length == all.length
+                                ? '${all.length} 个'
+                                : '${shown.length}/${all.length} 个',
+                            style: TextStyle(
+                                color: _sub,
+                                fontSize: AppTheme.fontCaption)),
+                      ],
+                    ),
                   ),
-                  itemCount: list.length,
-                  itemBuilder: (_, i) {
-                    final m = list[i];
-                    final on = m.url == _module?.url;
-                    return GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        _selectModule(m);
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        decoration: BoxDecoration(
-                          color: on
-                              ? AppTheme.accentColor.withValues(alpha: 0.12)
-                              : AppTheme.backgroundTertiary,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: on
-                                ? AppTheme.accentColor.withValues(alpha: 0.4)
-                                : AppTheme.glassBorderSoft,
-                            width: on ? 1 : 0.5,
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              on
-                                  ? Icons.check_circle
-                                  : Icons.radio_button_unchecked,
-                              size: 16,
-                              color:
-                                  on ? AppTheme.accentColor : _sub,
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                m.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: on ? _fg : _sub,
-                                  fontSize: AppTheme.fontSubhead,
-                                  fontWeight:
-                                      on ? FontWeight.w600 : FontWeight.w400,
+                  // ── 工具行：搜索 / 排序 / 视图 / 定位 ──────────────
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: SizedBox(
+                            height: 34,
+                            child: TextField(
+                              controller: searchCtrl,
+                              style: TextStyle(
+                                  color: _fg,
+                                  fontSize: AppTheme.fontSubhead),
+                              decoration: InputDecoration(
+                                hintText: '搜索模块 / 作者',
+                                hintStyle: TextStyle(
+                                    color: _sub,
+                                    fontSize: AppTheme.fontSubhead),
+                                prefixIcon: Icon(Icons.search_rounded,
+                                    size: 17, color: _sub),
+                                prefixIconConstraints: const BoxConstraints(
+                                    minWidth: 32, minHeight: 32),
+                                isDense: true,
+                                contentPadding:
+                                    const EdgeInsets.symmetric(vertical: 8),
+                                filled: true,
+                                fillColor: AppTheme.backgroundTertiary,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(
+                                      AppTheme.radiusMD),
+                                  borderSide: BorderSide.none,
                                 ),
                               ),
+                              onChanged: (v) =>
+                                  setSheet(() => keyword = v.trim()),
                             ),
+                          ),
+                        ),
+                        PopupMenuButton<int>(
+                          tooltip: '排序',
+                          padding: EdgeInsets.zero,
+                          iconSize: 20,
+                          icon: Icon(Icons.sort_rounded, size: 20, color: _sub),
+                          initialValue: sort,
+                          onSelected: (v) => setSheet(() => sort = v),
+                          itemBuilder: (_) => const [
+                            PopupMenuItem(value: 0, child: Text('默认顺序')),
+                            PopupMenuItem(value: 1, child: Text('按名称')),
+                            PopupMenuItem(value: 2, child: Text('按作者')),
                           ],
                         ),
-                      ),
-                    );
-                  },
-                ),
+                        IconButton(
+                          tooltip: '视图',
+                          padding: EdgeInsets.zero,
+                          visualDensity: VisualDensity.compact,
+                          icon: Icon(
+                            listMode
+                                ? Icons.view_list_rounded
+                                : Icons.grid_view_rounded,
+                            size: 20,
+                            color: _sub,
+                          ),
+                          onPressed: () async {
+                            final picked = await showRexLayoutSheet(
+                              ctx,
+                              listMode: listMode,
+                              current: cols,
+                              maxColumns: 3,
+                              onPick: (n) =>
+                                  PlayerPrefs.instance.setRexGridColumns(n),
+                            );
+                            if (picked == null) return;
+                            setSheet(() {
+                              listMode = picked == 0;
+                              if (picked > 0) cols = picked.clamp(2, 3);
+                            });
+                          },
+                        ),
+                        IconButton(
+                          tooltip: '定位当前模块',
+                          padding: EdgeInsets.zero,
+                          visualDensity: VisualDensity.compact,
+                          icon: Icon(Icons.my_location_rounded,
+                              size: 19, color: _sub),
+                          onPressed: locate,
+                        ),
+                      ],
+                    ),
+                  ),
+                  Flexible(
+                    child: shown.isEmpty
+                        ? Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 28),
+                            child: Center(
+                              child: Text('没有匹配的模块',
+                                  style: TextStyle(
+                                      color: _sub,
+                                      fontSize: AppTheme.fontFootnote)),
+                            ),
+                          )
+                        : GridView.builder(
+                            controller: scroll,
+                            shrinkWrap: true,
+                            padding: const EdgeInsets.fromLTRB(16, 2, 16, 14),
+                            gridDelegate:
+                                SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: crossAxisCount,
+                              mainAxisSpacing: 8,
+                              crossAxisSpacing: 10,
+                              childAspectRatio: ratio,
+                            ),
+                            itemCount: shown.length,
+                            itemBuilder: (_, i) {
+                              final m = shown[i];
+                              final on = m.url == _module?.url;
+                              return GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () {
+                                  Navigator.pop(ctx);
+                                  _selectModule(m);
+                                },
+                                // 长按 → 卡片式菜单（与影视源面板同一套手势）
+                                onLongPress: () => _moduleMenu(ctx, m),
+                                child: Container(
+                                  padding: EdgeInsets.symmetric(
+                                      horizontal: compact ? 8 : 12),
+                                  decoration: BoxDecoration(
+                                    color: on
+                                        ? AppTheme.accentColor
+                                            .withValues(alpha: 0.12)
+                                        : AppTheme.backgroundTertiary,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: on
+                                          ? AppTheme.accentColor
+                                              .withValues(alpha: 0.4)
+                                          : AppTheme.glassBorderSoft,
+                                      width: on ? 1 : 0.5,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        on
+                                            ? Icons.check_circle
+                                            : Icons.radio_button_unchecked,
+                                        size: compact ? 14 : 16,
+                                        color: on ? AppTheme.accentColor : _sub,
+                                      ),
+                                      SizedBox(width: compact ? 5 : 8),
+                                      Expanded(
+                                        child: Text(
+                                          m.title,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: on ? _fg : _sub,
+                                            fontSize: compact
+                                                ? AppTheme.fontCaption
+                                                : AppTheme.fontSubhead,
+                                            fontWeight: on
+                                                ? FontWeight.w600
+                                                : FontWeight.w400,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
+    );
+    searchCtrl.dispose();
+    scroll.dispose();
+  }
+
+  /// 模块卡片长按 → 卡片式菜单（使用 / 刷新 / 管理）
+  ///
+  /// 影视的源面板是「长按拖动排序 + ⋮ 菜单」；REX 模块顺序在订阅管理页排，
+  /// 所以这里长按直接给菜单，比再塞一个 ⋮ 更省空间。
+  Future<void> _moduleMenu(BuildContext sheetCtx, RexModule m) async {
+    HapticFeedback.mediumImpact();
+    await showCardActions(
+      context,
+      title: m.title,
+      subtitle: RexService.isLocal(m.url)
+          ? '本地模块'
+          : '${m.listFunctions.length} 个分类${m.canSearch ? ' · 可搜索' : ''}',
+      actions: [
+        CardAction(
+          icon: Icons.play_circle_outline_rounded,
+          label: '使用',
+          onTap: () {
+            if (sheetCtx.mounted) Navigator.pop(sheetCtx);
+            _selectModule(m);
+          },
+        ),
+        CardAction(
+          icon: Icons.sync_rounded,
+          label: '刷新',
+          onTap: () async {
+            try {
+              await RexService.instance.refreshModule(m);
+              if (mounted) setState(() {});
+              AppToast.show('已刷新「${m.title}」', '');
+            } catch (e) {
+              AppToast.show('刷新失败：$e', '');
+            }
+          },
+        ),
+        CardAction(
+          icon: Icons.tune_rounded,
+          label: '管理',
+          onTap: () {
+            if (sheetCtx.mounted) Navigator.pop(sheetCtx);
+            Navigator.of(context).push(MaterialPageRoute<void>(
+              settings: const RouteSettings(name: 'rex:manage'),
+              builder: (_) => const RexManagePage(),
+            ));
+          },
+        ),
+      ],
     );
   }
 

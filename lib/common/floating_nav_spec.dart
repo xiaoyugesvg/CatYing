@@ -34,8 +34,8 @@ enum FloatingNavStyle {
   /// 当前默认：跟随主题色的浅色胶囊
   ink('ink', '水墨'),
 
-  /// 液态玻璃：高透光 + 白色高光描边
-  liquid('liquid', '液态玻璃'),
+  /// 磨砂：半透玻璃底 + 顶部高光细边（2026-10-24 重做，取代「液态玻璃」）
+  frost('frost', '磨砂'),
 
   /// 炫彩：主题色渐变，图标纯白
   aurora('aurora', '炫彩'),
@@ -43,21 +43,35 @@ enum FloatingNavStyle {
   /// 霓虹：深色底 + 发光描边
   neon('neon', '霓虹'),
 
-  /// 描边：透明底 + 主题色细描边（最轻，几乎不遮挡内容）
-  outline('outline', '描边'),
+  /// 反色：底色与界面明暗**相反**（浅色主题下是深胶囊，深色主题下是浅胶囊），
+  /// 一眼就能和「水墨」区分开（2026-10-24 新增，取代「描边」）
+  reverse('reverse', '反色'),
 
-  /// 果冻：主题色半透明底 + 白色高光，选中项是实心主题色
-  jelly('jelly', '果冻');
+  /// 实心：几乎不透明的实底 + 主题色实心选中块，最"实"、最不挡字
+  ///（2026-10-24 新增，取代「果冻」；用户嫌底栏太透明）
+  solid('solid', '实心');
 
   const FloatingNavStyle(this.id, this.label);
 
   final String id;
   final String label;
 
-  static FloatingNavStyle fromId(String? id) => values.firstWhere(
-        (e) => e.id == id,
-        orElse: () => FloatingNavStyle.ink,
-      );
+  /// 旧 id 迁移：改版把「液态玻璃 / 描边 / 果冻」换掉了，
+  /// 老用户存的是旧 id，直接回落到最接近的新风格，不要跳回水墨。
+  static const Map<String, FloatingNavStyle> _legacy = {
+    'liquid': FloatingNavStyle.frost,
+    'outline': FloatingNavStyle.reverse,
+    'jelly': FloatingNavStyle.solid,
+  };
+
+  static FloatingNavStyle fromId(String? id) {
+    final old = _legacy[id];
+    if (old != null) return old;
+    return values.firstWhere(
+      (e) => e.id == id,
+      orElse: () => FloatingNavStyle.ink,
+    );
+  }
 }
 
 /// 底栏统一视觉规格（几何 / 取色 / 阴影）。
@@ -161,7 +175,7 @@ class FloatingNavSpec {
 
   // ── 风格取色（2026-10-18 新增）────────────────────────────────
   //
-  // 悬浮栏支持 4 种风格：水墨 / 液态玻璃 / 炫彩 / 霓虹。
+  // 悬浮栏 6 种风格：水墨 / 磨砂 / 炫彩 / 霓虹 / 反色 / 实心。
   // 图标文字色与选中指示器底色都从这里取，底栏与侧栏共用同一套，
   // 避免"自定义了风格但某一处仍是旧配色"。
 
@@ -177,16 +191,23 @@ class FloatingNavSpec {
         return Colors.white.withValues(alpha: selected ? 1 : 0.76);
       case FloatingNavStyle.neon:
         return selected ? Colors.white : Colors.white.withValues(alpha: 0.58);
-      case FloatingNavStyle.jelly:
-        // 选中项是实心主题色 → 必须白字；未选中用可读的主题色
+      case FloatingNavStyle.reverse:
+        // 底是"反色"的：深色主题里胶囊是浅色 ⇒ 字要黑；
+        // 浅色主题里胶囊是深色 ⇒ 字要白。
+        if (isDark) {
+          return selected
+              ? Colors.black
+              : Colors.black.withValues(alpha: 0.55);
+        }
+        return selected ? Colors.white : Colors.white.withValues(alpha: 0.64);
+      case FloatingNavStyle.solid:
+        // 实心：选中块是主题色 ⇒ 白字；未选中压在实底上，对比度足够
         return selected
             ? Colors.white
-            : _legibleAccent(isDark, palette).withValues(alpha: 0.72);
-      case FloatingNavStyle.outline:
-        return selected
-            ? _legibleAccent(isDark, palette)
-            : _legibleAccent(isDark, palette).withValues(alpha: 0.62);
-      case FloatingNavStyle.liquid:
+            : (isDark
+                ? Colors.white.withValues(alpha: 0.62)
+                : palette.navUnselected);
+      case FloatingNavStyle.frost:
       case FloatingNavStyle.ink:
         return selected
             ? selectedColor(isDark, palette)
@@ -228,17 +249,67 @@ class FloatingNavSpec {
         return Colors.white.withValues(alpha: 0.26);
       case FloatingNavStyle.neon:
         return neonColor.withValues(alpha: 0.30);
-      case FloatingNavStyle.jelly:
-        // 果冻：选中项直接是实心主题色块
+      case FloatingNavStyle.solid:
+        // 实心：选中项直接是实心主题色块
         return _legibleAccent(isDark, palette);
-      case FloatingNavStyle.outline:
-        // 描边：选中项用主题色的淡底，不抢描边的视觉
-        return _legibleAccent(isDark, palette)
-            .withValues(alpha: isDark ? 0.20 : 0.12);
-      case FloatingNavStyle.liquid:
-        return Colors.white.withValues(alpha: isDark ? 0.20 : 0.62);
+      case FloatingNavStyle.reverse:
+        // 反色底上用"底色的反方向"做高亮：深胶囊里提亮、浅胶囊里压暗
+        return isDark
+            ? Colors.black.withValues(alpha: 0.10)
+            : Colors.white.withValues(alpha: 0.20);
+      case FloatingNavStyle.frost:
+        // 磨砂：中性高亮，不染主题色，玻璃感更纯
+        return isDark
+            ? Colors.white.withValues(alpha: 0.16)
+            : Colors.black.withValues(alpha: 0.06);
       case FloatingNavStyle.ink:
         return isDark ? palette.navSelectedFg : palette.navSelectedBg;
     }
+  }
+
+  // ── 全风格不透明度（用户 2026-10-24：「菜单栏太透明了，加个可调整透明度」）──
+
+  /// 可调范围。0.30 已经很透（能看清底下内容），1.0 = 完全不透。
+  static const double minOpacity = 0.30;
+  static const double maxOpacity = 1.0;
+  static const double defaultOpacity = 0.95;
+
+  static double clampOpacity(double v) => v.clamp(minOpacity, maxOpacity);
+
+  /// 把整条底栏的底色/渐变按 [opacity] 整体压暗透明度。
+  ///
+  /// 只在**出口处**统一乘一次 —— 六种风格各自的配色分支不用关心透明度，
+  /// 也就不会出现"调了滑杆只有水墨变了、炫彩没反应"。
+  /// 描边、阴影、图标颜色不参与：描边变淡会让胶囊边缘消失。
+  static BoxDecoration applyOpacity(BoxDecoration deco, double opacity) {
+    final o = clampOpacity(opacity);
+    if (o >= 0.999) return deco;
+    Color fade(Color c) => c.withValues(alpha: c.a * o);
+    final g = deco.gradient;
+    Gradient? gradient = g;
+    if (g is LinearGradient) {
+      gradient = LinearGradient(
+        begin: g.begin,
+        end: g.end,
+        stops: g.stops,
+        colors: [for (final c in g.colors) fade(c)],
+      );
+    } else if (g is RadialGradient) {
+      gradient = RadialGradient(
+        center: g.center,
+        radius: g.radius,
+        colors: [for (final c in g.colors) fade(c)],
+      );
+    } else if (g is SweepGradient) {
+      gradient = SweepGradient(
+        startAngle: g.startAngle,
+        endAngle: g.endAngle,
+        colors: [for (final c in g.colors) fade(c)],
+      );
+    }
+    return deco.copyWith(
+      color: deco.color == null ? null : fade(deco.color!),
+      gradient: gradient,
+    );
   }
 }

@@ -156,7 +156,7 @@ class _DramaManagePageState extends State<DramaManagePage> {
                 const SizedBox(height: 8),
                 _keywordBox(),
                 const SizedBox(height: 22),
-                _sectionTitle('聚合范围', '不选 = 只扫当前源，速度最快'),
+                _sectionTitle('聚合范围', '只影响搜索：不选 = 只搜当前源'),
                 const SizedBox(height: 8),
                 _sourceCard(),
                 const SizedBox(height: 22),
@@ -191,7 +191,8 @@ class _DramaManagePageState extends State<DramaManagePage> {
             const SizedBox(width: 9),
             Expanded(
               child: Text(
-                '短剧页会扫描这些源的分类名，把命中的「源 · 分类」聚合成一组。',
+                '短剧页一次只看一个源：点左上角源名切换；'
+                '这里的关键词决定源的哪些分类算短剧，勾选的源用于搜索聚合。',
                 style: TextStyle(
                     color: _sub, fontSize: AppTheme.fontCaption, height: 1.55),
               ),
@@ -355,8 +356,8 @@ class _DramaManagePageState extends State<DramaManagePage> {
                     const SizedBox(height: 2),
                     Text(
                       _keys.isEmpty
-                          ? '点这里可以多选参与聚合的源'
-                          : '点这里调整参与聚合的源',
+                          ? '点这里可以多选搜索时聚合的源'
+                          : '点这里调整搜索时聚合的源',
                       style: TextStyle(
                           color: _sub, fontSize: AppTheme.fontCaption),
                     ),
@@ -478,7 +479,7 @@ class _SourcePickerDialogState extends State<_SourcePickerDialog> {
                 s.key.contains(_kw))
             .toList();
     return AlertDialog(
-      title: const Text('参与聚合的源'),
+      title: const Text('搜索时聚合的源'),
       content: SizedBox(
         width: 420,
         height: MediaQuery.of(context).size.height * 0.55,

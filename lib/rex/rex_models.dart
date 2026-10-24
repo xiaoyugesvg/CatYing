@@ -293,6 +293,16 @@ class RexCollectionItem {
         version: '${j['version'] ?? ''}',
         description: '${j['description'] ?? ''}',
       );
+
+  /// 落盘用（市场把集合当订阅缓存下来，下次进来不用联网就能显示清单）
+  Map<String, dynamic> toJson() => {
+        'url': url,
+        'title': title,
+        'id': id,
+        'author': author,
+        'version': version,
+        'description': description,
+      };
 }
 
 /// `.rex` 集合：`{ title, description, icon, widgets: [...] }`
@@ -313,6 +323,27 @@ class RexCollection {
   final List<RexCollectionItem> items;
 
   bool get isEmpty => items.isEmpty;
+
+  Map<String, dynamic> toJson() => {
+        'url': url,
+        'title': title,
+        'description': description,
+        'icon': icon,
+        'items': items.map((e) => e.toJson()).toList(),
+      };
+
+  factory RexCollection.fromJson(Map<String, dynamic> j) => RexCollection(
+        url: '${j['url'] ?? ''}',
+        title: '${j['title'] ?? ''}',
+        description: '${j['description'] ?? ''}',
+        icon: '${j['icon'] ?? ''}',
+        items: [
+          if (j['items'] is List)
+            for (final e in j['items'] as List)
+              if (e is Map)
+                RexCollectionItem.fromJson(e.cast<String, dynamic>()),
+        ],
+      );
 }
 
 /// 批量导入结果
