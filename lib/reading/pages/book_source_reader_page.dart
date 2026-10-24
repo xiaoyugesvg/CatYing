@@ -2079,7 +2079,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   @override
   Widget build(BuildContext context) {
-    final bg = _bgs[_bgIndex];
+    // 面板 / 顶栏 / 底栏也跟随样式：底色用当前实际背景（含样式自带底色），
+    // 前景用 [_fg]（含样式日/夜字色）。原来固定用 `_bgs[_bgIndex]`，
+    // 套了米黄/古风样式后正文变了、面板还是原来的灰白，观感割裂。
+    final bg = <Color>[_bgTop, _fg];
     // ⚠️ 兜底安全区：iOS 上个别机型/系统版本会把 `MediaQuery.padding` 报成 0
     //   （用户截图：正文顶到状态栏、底栏压到 Home 条 —— 就是"字被遮住"）。
     //   `viewPadding` 是设备真实的安全区（不会被上层 SafeArea 消费），
@@ -2535,7 +2538,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           final pi = _safePageIndex();
           return withPressDownBookmark(
             BookPageCover(
-              backgroundColor: _customBgColor ?? _bgs[_bgIndex][0],
+              backgroundColor: _bgTop,
               page: _pageContent(fg, _pages[pi], chapter: _chapterOfPage(pi)),
               nextPage: pi + 1 < _pages.length
                   ? _pageContent(
@@ -3597,11 +3600,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     // 有**任何图片背景**（自选图 / 内置壁纸）时不铺页底色 ✓（否则会把图盖住 ✗）
     final imgBg =
         (_customBgPath != null && File(_customBgPath!).existsSync()) ||
-        _bgImageAsset != null;
+        _bgImageAsset != null ||
+        // 只有夜间壁纸的样式（日间无图）：夜间也不铺底色，否则会把壁纸盖住
+        (_bgIndex == 5 && _bgImageAssetNight != null);
     final body = imgBg
         ? _pageBody(fg, page, chapter: chapter)
         : ColoredBox(
-            color: _customBgColor ?? _bgs[_bgIndex][0],
+            color: _bgTop,
             child: _pageBody(fg, page, chapter: chapter),
           );
     // 页缘投影：只在"两页并排平移"的模式（左右 / 无动画）画 —— 给两页之间
@@ -4527,7 +4532,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// ⚠️ 2026-10-21 用户要求：竖栏**不要背景**（去掉原来的白色胶囊卡片与投影），
   ///   只留图标本身悬浮在正文上 ✓。
   Widget _sideDock(Color fg) {
-    final ink = _bgIndex == 5 && _customBgColor == null;
+    // 只看"当前是不是夜间模式"（背景索引 5）。
+    // 原来还要求 `_customBgColor == null` ⇒ 套了样式（自带底色）之后
+    // 图标永远停在月亮、tooltip 也一直是「切换夜间」，看起来就像没切换。
+    final ink = _bgIndex == 5;
     return Positioned(
       right: 12,
       top: 0,
