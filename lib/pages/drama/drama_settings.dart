@@ -94,6 +94,57 @@ class DramaSettings {
     } catch (_) {}
   }
 
+  /// 按「短剧设置」白名单过滤源列表。
+  ///
+  /// [keys] 为空 = 用户没勾过（表示"不限"），原样返回 [all] 的副本。
+  ///
+  /// 抽成纯函数：左上角切换器、当前源解析、聚合目标三处共用**同一份规则**，
+  /// 也便于单测（见 test/drama_source_selection_test.dart）。
+  static List<SourceBean> filterBySelection(
+    List<SourceBean> all,
+    Set<String> keys,
+  ) {
+    if (keys.isEmpty) return List<SourceBean>.of(all);
+    return all.where((s) => keys.contains(s.key)).toList();
+  }
+
+  /// 解析短剧页「当前应显示的源」。
+  ///
+  /// 规则（与左上角切换器的可选范围保持一致）：
+  ///   1. 记录里挑过的 key **且在白名单内** → 用它；
+  ///   2. 白名单非空 → 取第一个（勾选的源被删/取消勾选时自动落位）；
+  ///   3. 白名单为空（没勾过）→ 跟随首页当前源。
+  static SourceBean? resolveCurrentSource({
+    required List<SourceBean> all,
+    required Set<String> keys,
+    required String pickedKey,
+    required SourceBean? homeSource,
+  }) {
+    final allowed = filterBySelection(all, keys);
+    final inWhite = keys.isEmpty || allowed.any((s) => s.key == pickedKey);
+    if (pickedKey.isNotEmpty && inWhite) {
+      for (final s in all) {
+        if (s.key == pickedKey) return s;
+      }
+    }
+    if (keys.isNotEmpty && allowed.isNotEmpty) return allowed.first;
+    return homeSource;
+  }
+
+  /// 解析「参与聚合的源」（列表页扫描 / 搜索页共用）。
+  ///
+  /// [keys] 为空 → 只取首页当前源；非空 → 白名单过滤。
+  static List<SourceBean> resolveTargets({
+    required List<SourceBean> all,
+    required Set<String> keys,
+    required SourceBean? homeSource,
+  }) {
+    if (keys.isEmpty) {
+      return homeSource == null ? const <SourceBean>[] : <SourceBean>[homeSource];
+    }
+    return all.where((s) => keys.contains(s.key)).toList();
+  }
+
   /// 参与聚合的源：设置里选了就按选择，没选就只取当前源。
   ///
   /// 列表页扫描分类、搜索页搜内容都用同一份，避免两处各算一套
@@ -104,12 +155,11 @@ class DramaSettings {
       ...api.sourceBeanList,
       if (api.localSourcesEnabled.value) ...api.localVideoSources,
     ];
-    final keys = await sourceKeys();
-    if (keys.isEmpty) {
-      final cur = api.homeSourceBean.value;
-      return cur == null ? const [] : [cur];
-    }
-    return all.where((s) => keys.contains(s.key)).toList();
+    return resolveTargets(
+      all: all,
+      keys: await sourceKeys(),
+      homeSource: api.homeSourceBean.value,
+    );
   }
 
   /// 上次扫描到的「源 · 分类」缓存。

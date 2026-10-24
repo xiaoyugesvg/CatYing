@@ -96,34 +96,35 @@ class _DramaPageState extends State<DramaPage> {
     return null;
   }
 
-  /// 短剧可用的源白名单（「短剧设置 → 参与聚合的源」里勾选的）。
-  ///
-  /// 返回空列表 = **没勾过**，此时表示"不限"（沿用旧的跟随首页源行为）——
-  /// 否则新用户第一次进短剧页会一个源都没有。
-  Future<List<SourceBean>> _allowedSources() async {
+  /// 全部可选源（订阅线路 + 本地源）
+  List<SourceBean> _allSources() {
     final api = ApiConfig.instance;
-    final all = <SourceBean>[
+    return <SourceBean>[
       ...api.sourceBeanList,
       if (api.localSourcesEnabled.value) ...api.localVideoSources,
     ];
-    final keys = await DramaSettings.sourceKeys();
-    if (keys.isEmpty) return const [];
-    return all.where((s) => keys.contains(s.key)).toList();
   }
 
-  /// 当前源：设置里挑过的优先，否则跟随首页当前源
+  /// 短剧可用的源白名单（「短剧设置 → 参与聚合的源」里勾选的）。
+  ///
+  /// 没勾过时返回全部（表示"不限"）—— 否则新用户第一次进短剧页
+  /// 一个源都没有。过滤规则见 [DramaSettings.filterBySelection]。
+  Future<List<SourceBean>> _allowedSources() async {
+    return DramaSettings.filterBySelection(
+      _allSources(),
+      await DramaSettings.sourceKeys(),
+    );
+  }
+
+  /// 当前源：设置里挑过的优先（且必须在白名单内），否则白名单第一个，
+  /// 再否则跟随首页当前源。
   Future<SourceBean?> _currentSource() async {
-    final allowed = await _allowedSources();
-    final key = await DramaSettings.pickedSourceKey();
-    final inWhite = allowed.isEmpty || allowed.any((s) => s.key == key);
-    if (key.isNotEmpty && inWhite) {
-      final hit = _findSource(key);
-      if (hit != null) return hit;
-    }
-    // 白名单里有源就用第一个（和左上角切换器的范围保持一致），
-    // 否则（没勾 / 全部失效）跟随首页当前源
-    if (allowed.isNotEmpty) return allowed.first;
-    return ApiConfig.instance.homeSourceBean.value;
+    return DramaSettings.resolveCurrentSource(
+      all: _allSources(),
+      keys: await DramaSettings.sourceKeys(),
+      pickedKey: await DramaSettings.pickedSourceKey(),
+      homeSource: ApiConfig.instance.homeSourceBean.value,
+    );
   }
 
   /// 某个源上次落盘的短剧分类（换源回来先走这里，不重扫）
@@ -313,15 +314,9 @@ class _DramaPageState extends State<DramaPage> {
   ///
   /// 选中后先读缓存，没缓存才扫 —— 换源不再是「把十几个源全刷一遍」。
   Future<void> _pickSource() async {
-    final api = ApiConfig.instance;
-    final all = <SourceBean>[
-      ...api.sourceBeanList,
-      if (api.localSourcesEnabled.value) ...api.localVideoSources,
-    ];
-    if (all.isEmpty) return;
+    if (_allSources().isEmpty) return;
 
-    final white = await _allowedSources();
-    final allowed = white.isEmpty ? all : white;
+    final allowed = await _allowedSources();
     if (!mounted) return;
     if (allowed.isEmpty) {
       AppToast.message('短剧设置里勾选的源都不可用，请重新选择');
