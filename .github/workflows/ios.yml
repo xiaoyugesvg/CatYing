@@ -53,6 +53,8 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: write
+      # 删旧 workflow run（「只保留最新 1 个」）需要 actions: write
+      actions: write
 
     env:
       # iOS 用的是「NodeMobile.xcframework」嵌入方案（参考 D:\gz\tvbox-Swift-main）
@@ -796,3 +798,44 @@ jobs:
             printf 'OFF=+%s %s ' "$off" "$ADDR"
             xcrun atos -o "$DWARF" -arch arm64 "$ADDR" 2>/dev/null | head -1
           done
+
+      - name: Prune old runs (只保留最新 1 个)
+        # 每次构建结束只保留 1 个 Actions run（连带它的 artifacts 一起删），
+        # 避免 run 列表 + 30 天 artifacts 无限堆积（用户 2026-10-25 要求）。
+        # 用 GITHUB_TOKEN 调 REST API：列出本 workflow（ios.yml）的 runs，
+        # 删除除当前 run（github.run_id）之外的**所有已完成** run。
+        # 说明：
+        #  · 当前 run 处于 in-progress 不能删，删其它已完成 run 即可达到"只留 1 个"；
+        #  · PR 触发的 run 不删 —— PR 页面的 check 状态要保留展示；
+        #  · python3 仅在 macOS runner 上临时解析 JSON，不进安装包。
+        if: github.event_name != 'pull_request'
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          API="https://api.github.com/repos/${{ github.repository }}"
+          AUTH=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json")
+          RUN_ID=${{ github.run_id }}
+          echo "=== 保留最新 1 个 run（当前 = $RUN_ID），删除其余已完成 run ==="
+          while :; do
+            JSON=$(curl -fsSL "${AUTH[@]}" \
+              "$API/actions/workflows/ios.yml/runs?per_page=100")
+            IDS=$(printf '%s' "$JSON" | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          for r in d.get('workflow_runs', []):
+              if r['id'] != $RUN_ID and r['status'] == 'completed':
+                  print(r['id'])
+          ")
+            if [ -z "$IDS" ]; then
+              echo "✅ 没有更旧的已完成 run 需要清理"
+              break
+            fi
+            for ID in $IDS; do
+              echo "  删除 run $ID ..."
+              curl -fsSL -X DELETE "${AUTH[@]}" "$API/actions/runs/$ID" \
+                && echo "  ✅ 已删除 $ID"
+            done
+          done
+          echo "=== 清理完成 ==="
