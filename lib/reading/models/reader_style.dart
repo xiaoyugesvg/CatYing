@@ -24,6 +24,7 @@ class ReaderStyle {
     this.fgColor,
     this.fgColorNight,
     this.bgImageAsset,
+    this.bgImageAssetNight,
     this.bgImagePath,
     this.bgImageDark = false,
     // ── ② 排版 ──
@@ -103,6 +104,9 @@ class ReaderStyle {
 
   /// 内置壁纸 asset（`assets/images/reader_bg/...`）
   final String? bgImageAsset;
+
+  /// 夜间壁纸 asset（null = 夜间沿用 [bgImageAsset]，再压暗）
+  final String? bgImageAssetNight;
 
   /// 自定义壁纸的本地文件路径（另一台设备上不存在时自动忽略）
   final String? bgImagePath;
@@ -185,6 +189,7 @@ class ReaderStyle {
     fgColor: fgColor,
     fgColorNight: fgColorNight,
     bgImageAsset: bgImageAsset,
+    bgImageAssetNight: bgImageAssetNight,
     bgImagePath: bgImagePath,
     bgImageDark: bgImageDark,
     fontSize: fontSize,
@@ -240,6 +245,7 @@ class ReaderStyle {
     'fgColor': fgColor,
     'fgColorNight': fgColorNight,
     'bgImageAsset': bgImageAsset,
+    'bgImageAssetNight': bgImageAssetNight,
     'bgImagePath': bgImagePath,
     'bgImageDark': bgImageDark,
     'fontSize': fontSize,
@@ -300,6 +306,7 @@ class ReaderStyle {
     fgColor: _i(j['fgColor']),
     fgColorNight: _i(j['fgColorNight']),
     bgImageAsset: j['bgImageAsset'] as String?,
+    bgImageAssetNight: j['bgImageAssetNight'] as String?,
     bgImagePath: j['bgImagePath'] as String?,
     bgImageDark: j['bgImageDark'] as bool? ?? false,
     fontSize: _d(j['fontSize'], 18),
@@ -546,6 +553,7 @@ class ReaderStyle {
       fgColor: 0xFF000000,
       fgColorNight: 0xFFD6D6D6,
       bgImageAsset: 'assets/images/reader_bg/reading_bg_gufeng_day.webp',
+      bgImageAssetNight: 'assets/images/reader_bg/reading_bg_gufeng_night.webp',
       bgImageDark: false,
       fontSize: 24,
       lineHeight: 1.625,
@@ -579,6 +587,7 @@ class ReaderStyle {
       fgColor: 0xFF323232,
       fgColorNight: 0xFFFFFCF7,
       bgImageAsset: 'assets/images/reader_bg/reading_bg_pomo_day.webp',
+      bgImageAssetNight: 'assets/images/reader_bg/reading_bg_pomo_night.webp',
       bgImageDark: false,
       fontSize: 24,
       lineHeight: 1.625,

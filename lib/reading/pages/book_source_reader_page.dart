@@ -207,6 +207,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 当前选中的内置壁纸（null = 不用壁纸，走 `_bgIndex` 的纯色底 ✓）
   String? _bgImageAsset;
 
+  /// 夜间专用壁纸（样式自带；null = 夜间沿用日间图并压暗）
+  String? _bgImageAssetNight;
+
   /// 当前壁纸是否为深色（A3：深色壁纸自动换浅字，避免深底黑字）。
   /// null = 未分析（尚未选壁纸）。
   bool? _bgImageDark;
@@ -565,12 +568,16 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 「主题」tab 选了自定义字色就以它为准；
   /// 自定义/内置背景为深色时自动换浅色文字，避免深底黑字。
   Color get _fg {
-    // 壁纸是样式自带的那一张（日间图）时，始终用它对应的日间字色：
-    // 否则切到夜间会用 textColorNight（浅色）去配日间浅底 ⇒ 正文几乎看不见。
-    final over = (_bgImageAsset != null || _bgIndex != 5)
-        ? _fgOverride
-        : (_fgNightOverride ?? _fgOverride);
-    if (over != null) return over;
+    // 夜间：优先样式的 textColorNight；没配就用浅色（深底必须浅字，
+    // 不能回落到日间深色字）。手动选的浅色字也保留。
+    if (_bgIndex == 5) {
+      final n = _fgNightOverride;
+      if (n != null) return n;
+      final d = _fgOverride;
+      if (d != null && d.computeLuminance() > 0.35) return d;
+      return const Color(0xFFB8B8B8);
+    }
+    if (_fgOverride != null) return _fgOverride!;
     // A3：选了壁纸 → 按壁纸明暗决定文字色（深图浅字 / 浅图深字）✓
     if (_bgImageAsset != null && _bgImageDark != null) {
       return _bgImageDark! ? const Color(0xFFE2E2E2) : const Color(0xFF1A1A1A);
@@ -578,6 +585,21 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     return _bgTop.computeLuminance() < 0.4
         ? const Color(0xFFB8B8B8)
         : _bgs[_bgIndex][1];
+  }
+
+  /// 夜间模式：把壁纸压暗一层。
+  ///
+  /// 样式自带的壁纸都是日间纸色；夜间如果只把字换成浅色、底图不动，
+  /// 就成了"浅底浅字"，正文几乎看不见（用户截图里的古风/泼墨就是这个问题）。
+  Widget _nightDim(Widget child) {
+    if (_bgIndex != 5 || _bgImageAssetNight != null) return child;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        child,
+        const ColoredBox(color: Color(0x73000000)),
+      ],
+    );
   }
 
   /// 当前背景下的次要前景色（说明文字用）
@@ -1095,6 +1117,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             (ov?['bgImage'] as String?) ?? p.getString('reading.bgImage');
         if (bgImg != null && bgImg.isNotEmpty) {
           _bgImageAsset = bgImg;
+          _bgImageAssetNight = p.getString('reading.bgImageNight');
           _bgImageDark = p.getBool('reading.bgImageDark');
         }
         // ✅ 书签**按章**读回 ✓ —— 只读"即将显示的那一章"的键 ✓，
@@ -1312,6 +1335,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           await p.setString('reading.bgImage', _bgImageAsset!);
         } else {
           await p.remove('reading.bgImage');
+        }
+        if (_bgImageAssetNight != null) {
+          await p.setString('reading.bgImageNight', _bgImageAssetNight!);
+        } else {
+          await p.remove('reading.bgImageNight');
         }
         if (_bgImageDark != null) {
           await p.setBool('reading.bgImageDark', _bgImageDark!);
@@ -2102,7 +2130,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     final useFileBg =
         _customBgPath != null && File(_customBgPath!).existsSync();
     // 有任何图片背景（自选图 / 内置壁纸）⇒ Scaffold 底色透明，露出图片 ✓
-    final useImgBg = useFileBg || _bgImageAsset != null;
+    // 夜间优先用样式自带的夜间壁纸（古风/泼墨都有单独的黑白两版）
+    final bgAsset =
+        _bgIndex == 5 ? (_bgImageAssetNight ?? _bgImageAsset) : _bgImageAsset;
+    final useImgBg = useFileBg || bgAsset != null;
     return Scaffold(
       backgroundColor: useImgBg ? Colors.transparent : bg[0],
       body: Stack(
@@ -2110,19 +2141,23 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         children: [
           // 背景层：自定义图片优先（cover 铺满），否则内置/自定义色
           if (useFileBg)
-            Image.file(
-              File(_customBgPath!),
-              fit: BoxFit.cover,
-              gaplessPlayback: true,
-              errorBuilder: (_, __, ___) => Container(color: bg[0]),
+            _nightDim(
+              Image.file(
+                File(_customBgPath!),
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                errorBuilder: (_, __, ___) => Container(color: bg[0]),
+              ),
             )
-          else if (_bgImageAsset != null)
+          else if (bgAsset != null)
             // 内置壁纸（14 张里选的一张 ✓）
-            Image.asset(
-              _bgImageAsset!,
-              fit: BoxFit.cover,
-              gaplessPlayback: true,
-              errorBuilder: (_, __, ___) => Container(color: bg[0]),
+            _nightDim(
+              Image.asset(
+                bgAsset,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                errorBuilder: (_, __, ___) => Container(color: bg[0]),
+              ),
             )
           else
             Container(color: bg[0]),
@@ -3471,6 +3506,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     if (picked.isEmpty) {
       setState(() {
         _bgImageAsset = null;
+        _bgImageAssetNight = null;
         _bgImageDark = null;
       });
       _scheduleSavePrefs();
@@ -3480,6 +3516,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     if (!mounted) return;
     setState(() {
       _bgImageAsset = picked;
+      // 手动选壁纸 ⇒ 不再用样式的夜间专用图
+      _bgImageAssetNight = null;
       _bgImageDark = dark;
     });
     _scheduleSavePrefs();
@@ -6833,7 +6871,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   Widget _bgImageChip(String? asset, void Function(VoidCallback) upd) {
     final selected = _bgImageAsset == asset;
     return GestureDetector(
-      onTap: () => upd(() => _bgImageAsset = asset),
+      onTap: () => upd(() {
+        _bgImageAsset = asset;
+        _bgImageAssetNight = null;
+      }),
       child: Container(
         width: 44,
         height: 52,
@@ -8887,6 +8928,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       fgColor: _fgOverride?.toARGB32(),
       fgColorNight: _fgNightOverride?.toARGB32(),
       bgImageAsset: _bgImageAsset,
+      bgImageAssetNight: _bgImageAssetNight,
       bgImagePath: _customBgPath,
       bgImageDark: _bgImageDark ?? false,
       fontSize: _fontSize,
@@ -9016,6 +9058,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       _titleFontSize = s.titleFontSize;
       _titleBold = s.titleBold;
       _bgImageAsset = s.bgImageAsset;
+      _bgImageAssetNight = s.bgImageAssetNight;
       _bgImageDark = s.bgImageAsset == null ? null : s.bgImageDark;
       _customBgPath = (path != null && File(path).existsSync()) ? path : null;
       _fontSize = s.fontSize.clamp(12.0, 30.0);
