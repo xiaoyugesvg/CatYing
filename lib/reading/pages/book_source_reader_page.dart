@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -17,12 +18,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/book_source.dart';
 import '../models/book_content.dart';
+import '../models/reader_style.dart';
 import '../models/reading_settings.dart';
 import '../novel_source/novel_chinese_converter.dart';
 import '../services/book_paginator.dart';
 import '../services/book_source_service.dart';
 import '../services/chapter_alignment.dart';
 import '../services/reader_notes_service.dart';
+import '../services/reader_style_store.dart';
 import '../services/tts_service.dart';
 import '../services/ai_service.dart';
 import '../services/reading_time_service.dart';
@@ -248,6 +251,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   /// 已保存的排版预设名
   final List<String> _savedPresets = [];
+
+  /// 「阅读样式」：用户自己存的样式（内置样式在 [ReaderStyle.builtins]）
+  List<ReaderStyle> _myStyles = [];
+
+  /// 当前生效的样式 id（只用于卡片上打「当前」标；null = 手调过、无样式）
+  String? _activeStyleId;
+
+  final ReaderStyleStore _styleStore = ReaderStyleStore();
 
   /// 专注加粗：长段开头加粗描述（参考图 IMG_8494/8495）
   bool _focusBold = false;
@@ -935,7 +946,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       // 只在用户**没有从详情页指定章节**时才恢复进度，
       // 否则点"第 5 章"却被跳到上次读到的地方就很怪。
       final savedIdx = p.getInt(_progressKey);
+      // 「阅读样式」：用户样式列表 + 当前选中的样式 id
+      final myStyles = await _styleStore.loadCustom();
+      final activeStyle = await _styleStore.loadActiveId();
       if (!mounted) return;
+      _myStyles = myStyles;
+      _activeStyleId = activeStyle;
       setState(() {
         // ✅ **覆盖值优先，逐项回退全局**（本会话第 2 轮 ✓）
         final fsV = (ov?['fontSize'] as num?)?.toDouble() ?? fs;
@@ -5509,7 +5525,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if (tab == 0) ..._layoutPresetTab(ctx, setSheet),
+                          if (tab == 0) ..._layoutStyleTab(ctx, setSheet),
                           if (tab == 1) ..._layoutThemeTab(upd),
                           if (tab == 2) ..._layoutTextTab(updLayout),
                           if (tab == 3) ..._layoutMarginTab(updLayout),
@@ -5528,38 +5544,275 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     );
   }
 
-  static const _layoutTabs = ['预设', '主题', '文字', '边距', '底线'];
+  static const _layoutTabs = ['样式', '主题', '文字', '边距', '底线'];
 
-  /// 「预设」tab：暂无预设 → 提示"调好排版后点「存预设」"
-  List<Widget> _layoutPresetTab(BuildContext ctx, StateSetter setSheet) {
-    final presets = _savedPresets;
-    if (presets.isEmpty) {
-      return [
-        const SizedBox(height: 30),
-        Center(
-          child: Text(
-            '暂无预设，调好排版后点「存预设」',
-            style: TextStyle(fontSize: AppTheme.fontSubhead, color: _fgMuted),
-          ),
-        ),
-        const SizedBox(height: 30),
-      ];
-    }
+  /// 「样式」tab：内置样式 / 我的样式（点一下整套套用）+ 老的排版预设。
+  ///
+  /// 与「主题/文字/边距/底线」四个 tab 的分工：
+  ///   · 这里是**成套**的（配色 + 排版 + 边距 + 信息栏 + 翻页一起换）；
+  ///   · 那四个是**单项微调**（调完如果想留下来 → 「存当前样式」）。
+  List<Widget> _layoutStyleTab(BuildContext ctx, StateSetter setSheet) {
     return [
-      for (final name in presets)
-        ListTile(
-          contentPadding: EdgeInsets.zero,
-          title: Text(
-            name,
-            style: TextStyle(fontSize: AppTheme.fontBody, color: _fg),
+      Row(
+        children: [
+          Expanded(
+            child: _chip(
+              '存当前样式',
+              false,
+              () async {
+                await _saveCurrentAsStyle();
+                setSheet(() {});
+              },
+              compact: true,
+            ),
           ),
-          trailing: IconButton(
-            icon: Icon(Icons.delete_outline, size: 20, color: _fgMuted),
-            onPressed: () => setSheet(() => _savedPresets.remove(name)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _chip(
+              '导入 Legado 排版',
+              false,
+              () async {
+                await _importStyle();
+                setSheet(() {});
+              },
+              compact: true,
+            ),
           ),
-          onTap: () => _applyPreset(name),
+        ],
+      ),
+      const SizedBox(height: 4),
+      _sectionLabel('内置样式'),
+      Wrap(
+        spacing: 10,
+        runSpacing: 10,
+        children: [
+          for (final s in ReaderStyle.builtins) _styleCard(s, setSheet),
+        ],
+      ),
+      if (_myStyles.isNotEmpty) ...[
+        _sectionLabel('我的样式（长按可重命名 / 删除）'),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [for (final s in _myStyles) _styleCard(s, setSheet)],
         ),
+      ],
+      if (_savedPresets.isNotEmpty) ...[
+        _sectionLabel('排版预设'),
+        for (final name in _savedPresets)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+            title: Text(
+              name,
+              style: TextStyle(fontSize: AppTheme.fontBody, color: _fg),
+            ),
+            trailing: IconButton(
+              icon: Icon(Icons.delete_outline, size: 20, color: _fgMuted),
+              onPressed: () => setSheet(() => _savedPresets.remove(name)),
+            ),
+            onTap: () => _applyPreset(name),
+          ),
+      ],
+      const SizedBox(height: 12),
     ];
+  }
+
+  /// 一张样式卡片：小样 + 名字；当前生效的打勾。
+  Widget _styleCard(ReaderStyle s, StateSetter setSheet) {
+    final selected = _activeStyleId == s.id;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        _applyReaderStyle(s);
+        setSheet(() {});
+      },
+      onLongPress: s.builtin
+          ? null
+          : () async {
+              await _showStyleActions(s);
+              setSheet(() {});
+            },
+      child: SizedBox(
+        width: 96,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                _stylePreview(s, selected: selected),
+                if (selected)
+                  Positioned(
+                    right: 3,
+                    top: 3,
+                    child: Icon(
+                      Icons.check_circle_rounded,
+                      size: 15,
+                      color: _fg,
+                      shadows: const [
+                        Shadow(color: Colors.white, blurRadius: 3),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              s.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: AppTheme.fontFootnote,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                color: selected ? _fg : _fg.withValues(alpha: 0.72),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 样式小样：按样式自己的底色 / 壁纸 / 文字色 / 行距画一张"迷你书页"，
+  /// 让用户在**点之前**就大致看出观感（不是纯色块）。
+  Widget _stylePreview(ReaderStyle s, {bool selected = false}) {
+    final bg = s.bgColor != null
+        ? Color(s.bgColor!)
+        : _bgs[s.bgIndex.clamp(0, _bgs.length - 1)][0];
+    final dark = ThemeData.estimateBrightnessForColor(bg) == Brightness.dark;
+    final fg = s.fgColor != null
+        ? Color(s.fgColor!)
+        : (dark ? const Color(0xFFE2E2E2) : const Color(0xFF1A1A1A));
+    final asset = s.bgImageAsset;
+    // 迷你行距：把真实行高（相对字号）压到 2~5px，看得出松紧即可
+    final gap = (s.lineHeight - 1).clamp(0.15, 1.2) * 4;
+    final showHeader = s.statusItems.contains('时间') ||
+        s.statusItems.contains('书名');
+    final showFooter = s.statusItems.contains('页码') ||
+        s.statusItems.contains('进度');
+    return Container(
+      width: 96,
+      height: 118,
+      padding: const EdgeInsets.fromLTRB(7, 6, 7, 6),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: selected ? _fg : _fg.withValues(alpha: 0.16),
+          width: selected ? 2 : 0.8,
+        ),
+        image: asset == null
+            ? null
+            : DecorationImage(
+                image: AssetImage(asset),
+                fit: BoxFit.cover,
+                colorFilter: s.bgImageDark
+                    ? ColorFilter.mode(
+                        Colors.black.withValues(alpha: 0.45),
+                        BlendMode.darken,
+                      )
+                    : null,
+              ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (showHeader) ...[
+            Container(
+              height: 2,
+              width: 22,
+              color: fg.withValues(alpha: 0.45),
+            ),
+            const SizedBox(height: 3),
+          ],
+          // 标题
+          Container(
+            height: 4,
+            width: 34,
+            decoration: BoxDecoration(
+              color: fg.withValues(alpha: 0.85),
+              borderRadius: BorderRadius.circular(1),
+            ),
+          ),
+          SizedBox(height: gap + 2),
+          // 正文若干行（最后一行短，像真实段落）
+          for (var i = 0; i < 5; i++) ...[
+            Container(
+              height: 2.6,
+              width: i == 4 ? 38 : double.infinity,
+              color: fg.withValues(alpha: 0.62),
+            ),
+            SizedBox(height: gap),
+          ],
+          const Spacer(),
+          if (showFooter)
+            Align(
+              alignment: Alignment.centerRight,
+              child: Container(
+                height: 2,
+                width: 18,
+                color: fg.withValues(alpha: 0.4),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 长按「我的样式」：重命名 / 用当前排版覆盖 / 删除
+  Future<void> _showStyleActions(ReaderStyle s) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: _sheetBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (c) => SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(s.name, style: TextStyle(color: _fgMuted)),
+            ),
+            ListTile(
+              leading: Icon(Icons.drive_file_rename_outline, color: _fg),
+              title: Text('重命名', style: TextStyle(color: _fg)),
+              onTap: () => Navigator.pop(c, 'rename'),
+            ),
+            ListTile(
+              leading: Icon(Icons.save_as_outlined, color: _fg),
+              title: Text('用当前排版覆盖', style: TextStyle(color: _fg)),
+              onTap: () => Navigator.pop(c, 'update'),
+            ),
+            ListTile(
+              leading: Icon(Icons.delete_outline, color: _fg),
+              title: Text('删除', style: TextStyle(color: _fg)),
+              onTap: () => Navigator.pop(c, 'delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == null) return;
+    switch (action) {
+      case 'rename':
+        await _renameStyle(s);
+      case 'update':
+        final updated = _styleSnapshot(s.id, s.name);
+        setState(() {
+          _myStyles = [
+            for (final e in _myStyles) e.id == s.id ? updated : e,
+          ];
+          _activeStyleId = s.id;
+        });
+        await _styleStore.saveCustom(_myStyles);
+        await _styleStore.saveActiveId(s.id);
+        _toast('已用当前排版覆盖「${s.name}」');
+      case 'delete':
+        await _deleteStyle(s);
+    }
   }
 
   /// 「背景图」里的一张小卡片（asset = null ⇒ 「无」= 不用壁纸）。
@@ -7024,6 +7277,369 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     });
     await _savePrefs();
     _toast('已保存预设「$name」');
+  }
+
+  // ── 阅读样式（预设样式 / 我的样式 / Legado 排版导入）────────────
+
+  /// 当前阅读外观 → [ReaderStyle] 快照（「保存当前为样式」用）
+  ReaderStyle _styleSnapshot(String id, String name, {bool builtin = false}) {
+    return ReaderStyle(
+      id: id,
+      name: name,
+      builtin: builtin,
+      bgIndex: _bgIndex,
+      dayBgIndex: _dayBgIndex,
+      bgColor: _customBgColor?.toARGB32(),
+      fgColor: _fgOverride?.toARGB32(),
+      bgImageAsset: _bgImageAsset,
+      bgImagePath: _customBgPath,
+      bgImageDark: _bgImageDark ?? false,
+      fontSize: _fontSize,
+      lineHeight: _lineHeight,
+      letterSpacing: _letterSpacing,
+      fontWeight: _fontWeight,
+      paraSpacing: _paraSpacing,
+      indent: _indent,
+      titleAlign: _titleAlign,
+      titleStyle: _titleStyle,
+      hideRepeatTitle: _hideRepeatTitle,
+      focusBold: _focusBold,
+      padLeft: _padLeft,
+      padRight: _padRight,
+      padTop: _padTop,
+      padBottom: _padBottom,
+      headerPadH: _headerPadH,
+      headerPadTop: _headerPadTop,
+      footerPadH: _footerPadH,
+      footerPadBottom: _footerPadBottom,
+      statusItems: _rs.statusItems.toList(),
+      hideStatusBar: _rs.hideStatusBar,
+      statusTextScale: _rs.statusTextScale,
+      pageMode: _rs.pageMode.name,
+      dualPage: _rs.dualPage,
+      underlineColor: _underlineColor?.toARGB32(),
+      underlineStyle: _underlineStyle,
+      underlineAlpha: _underlineAlpha,
+      underlineWidth: _underlineWidth,
+      underlineGap: _underlineGap,
+      underlineFull: _underlineFull,
+    );
+  }
+
+  /// 一键套用一套样式：配色 / 背景 / 排版 / 边距 / 信息栏 / 翻页动画一次改完。
+  ///
+  /// 改完必须**重排**（字号行距边距全变了，旧 `_pages` 是按旧度量切的），
+  /// 但用防抖 —— 用户可能连着点好几张卡片对比效果。
+  void _applyReaderStyle(ReaderStyle s) {
+    final mode = PageMode.values.firstWhere(
+      (m) => m.name == s.pageMode,
+      orElse: () => PageMode.slide,
+    );
+    // 夜间底（索引 5）时优先用样式的夜间底色
+    final night = _bgIndex == 5;
+    final custom = night ? (s.bgColorNight ?? s.bgColor) : s.bgColor;
+    final path = s.bgImagePath;
+    setState(() {
+      _bgIndex = s.bgIndex.clamp(0, _bgs.length - 1);
+      _dayBgIndex = s.dayBgIndex.clamp(0, _bgs.length - 1);
+      _customBgColor = custom == null ? null : Color(custom);
+      _fgOverride = s.fgColor == null ? null : Color(s.fgColor!);
+      _bgImageAsset = s.bgImageAsset;
+      _bgImageDark = s.bgImageAsset == null ? null : s.bgImageDark;
+      _customBgPath = (path != null && File(path).existsSync()) ? path : null;
+      _fontSize = s.fontSize.clamp(12.0, 30.0);
+      _lineHeight = s.lineHeight.clamp(1.05, 3.0);
+      _letterSpacing = s.letterSpacing.clamp(-2.0, 4.0);
+      _fontWeight = s.fontWeight.clamp(100.0, 900.0);
+      _paraSpacing = s.paraSpacing.clamp(0.0, 2.0);
+      _indent = s.indent.clamp(0.0, 4.0);
+      _titleAlign = s.titleAlign;
+      _titleStyle = s.titleStyle;
+      _hideRepeatTitle = s.hideRepeatTitle;
+      _focusBold = s.focusBold;
+      _padLeft = s.padLeft.clamp(0.0, 80.0);
+      _padRight = s.padRight.clamp(0.0, 80.0);
+      _padTop = s.padTop.clamp(0.0, 120.0);
+      _padBottom = s.padBottom.clamp(0.0, 120.0);
+      _headerPadH = s.headerPadH.clamp(0.0, 80.0);
+      _headerPadTop = s.headerPadTop.clamp(0.0, 80.0);
+      _footerPadH = s.footerPadH.clamp(0.0, 80.0);
+      _footerPadBottom = s.footerPadBottom.clamp(0.0, 80.0);
+      _underlineColor = s.underlineColor == null
+          ? null
+          : Color(s.underlineColor!);
+      _underlineStyle = s.underlineStyle;
+      _underlineAlpha = s.underlineAlpha;
+      _underlineWidth = s.underlineWidth;
+      _underlineGap = s.underlineGap;
+      _underlineFull = s.underlineFull;
+      _rs = _rs.copyWith(
+        pageMode: mode,
+        statusItems: s.statusItems.toSet(),
+        hideStatusBar: s.hideStatusBar,
+        statusTextScale: s.statusTextScale,
+        dualPage: s.dualPage,
+      );
+      // 上下滚动模式不分页 ⇒ 和 `_paginate()` 的清理保持一致
+      if (!mode.paginates) _pages = const [];
+      _activeStyleId = s.id;
+    });
+    _styleStore.saveActiveId(s.id);
+    _scheduleSavePrefs();
+    _scheduleRepaginate();
+    _toast('已套用「${s.name}」');
+  }
+
+  /// 「保存当前为样式」：把此刻的外观存成一条**我的样式**
+  Future<void> _saveCurrentAsStyle() async {
+    final ctrl = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: _bgTop,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          '保存为阅读样式',
+          style: TextStyle(fontSize: AppTheme.fontTitle3, color: _fg),
+        ),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: InputDecoration(
+            labelText: '样式名',
+            labelStyle: TextStyle(
+              fontSize: AppTheme.fontSubhead,
+              color: _fgMuted,
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c),
+            child: Text('取消', style: TextStyle(color: _fgMuted)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, ctrl.text.trim()),
+            style: FilledButton.styleFrom(
+              backgroundColor: _fg.withValues(alpha: 0.9),
+              foregroundColor: _bgTop,
+            ),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (name == null || name.isEmpty) return;
+    final id = 'user:${DateTime.now().millisecondsSinceEpoch}';
+    final style = _styleSnapshot(id, name);
+    setState(() {
+      // 同名 = 覆盖（用户视角"我的样式"里不该出现两个同名）
+      _myStyles = [
+        ..._myStyles.where((s) => s.name != name),
+        style,
+      ];
+      _activeStyleId = id;
+    });
+    await _styleStore.saveCustom(_myStyles);
+    await _styleStore.saveActiveId(id);
+    await _savePrefs();
+    _toast('已保存样式「$name」');
+  }
+
+  Future<void> _renameStyle(ReaderStyle s) async {
+    final ctrl = TextEditingController(text: s.name);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: _bgTop,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          '重命名样式',
+          style: TextStyle(fontSize: AppTheme.fontTitle3, color: _fg),
+        ),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: InputDecoration(
+            labelText: '样式名',
+            labelStyle: TextStyle(
+              fontSize: AppTheme.fontSubhead,
+              color: _fgMuted,
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c),
+            child: Text('取消', style: TextStyle(color: _fgMuted)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, ctrl.text.trim()),
+            style: FilledButton.styleFrom(
+              backgroundColor: _fg.withValues(alpha: 0.9),
+              foregroundColor: _bgTop,
+            ),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (name == null || name.isEmpty) return;
+    setState(() {
+      _myStyles = [
+        for (final e in _myStyles) e.id == s.id ? e.renamed(name) : e,
+      ];
+    });
+    await _styleStore.saveCustom(_myStyles);
+    _toast('已重命名为「$name」');
+  }
+
+  Future<void> _deleteStyle(ReaderStyle s) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: _bgTop,
+        title: Text(
+          '删除样式',
+          style: TextStyle(fontSize: AppTheme.fontTitle3, color: _fg),
+        ),
+        content: Text(
+          '确定删除「${s.name}」？',
+          style: TextStyle(fontSize: AppTheme.fontBody, color: _fgMuted),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: Text('取消', style: TextStyle(color: _fgMuted)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: _fg.withValues(alpha: 0.9),
+              foregroundColor: _bgTop,
+            ),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() {
+      _myStyles = [..._myStyles.where((e) => e.id != s.id)];
+      if (_activeStyleId == s.id) _activeStyleId = null;
+    });
+    await _styleStore.saveCustom(_myStyles);
+    _toast('已删除「${s.name}」');
+  }
+
+  /// 导入 Legado 排版：贴「导入排版」链接（`legado://import/readConfig?src=…`
+  /// 或裸 zip 地址），也可以直接从本地选 `.zip` / `.json`。
+  ///
+  /// 站点给的就是 `.../yuedu/theme/readcode/id/<id>.zip`，里面是
+  /// `readConfig.json` —— 只含排版参数，不含背景图片（见 [ReaderStyle.fromLegado]）。
+  Future<void> _importStyle() async {
+    final ctrl = TextEditingController();
+    final input = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: _bgTop,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          '导入 Legado 排版',
+          style: TextStyle(fontSize: AppTheme.fontTitle3, color: _fg),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '粘贴「导入排版」链接（legado://… 或 readcode/id/xx.zip）',
+              style: TextStyle(
+                fontSize: AppTheme.fontFootnote,
+                color: _fgMuted,
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              decoration: InputDecoration(
+                hintText: 'https://…/readcode/id/108.zip',
+                hintStyle: TextStyle(
+                  fontSize: AppTheme.fontSubhead,
+                  color: _fgMuted,
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, '__file__'),
+            child: Text(
+              '选文件',
+              style: TextStyle(color: _fgMuted),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(c),
+            child: Text('取消', style: TextStyle(color: _fgMuted)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, ctrl.text.trim()),
+            style: FilledButton.styleFrom(
+              backgroundColor: _fg.withValues(alpha: 0.9),
+              foregroundColor: _bgTop,
+            ),
+            child: const Text('导入'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (input == null) return;
+
+    Map<String, dynamic>? cfg;
+    if (input == '__file__') {
+      // file_picker 13：静态方法，直接返回 List<PlatformFile>（无 withData，
+      // 取字节走 `readAsBytes()`）
+      final files = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['zip', 'json'],
+      );
+      if (files.isEmpty) return;
+      try {
+        final bytes = await files.first.readAsBytes();
+        cfg = ReaderStyleImporter.decodeConfig(bytes);
+      } catch (_) {
+        _toast('读取文件失败');
+        return;
+      }
+    } else {
+      final url = ReaderStyleImporter.extractUrl(input);
+      if (url == null) {
+        _toast('链接不对，需要 http(s) 地址');
+        return;
+      }
+      _toast('正在下载排版…');
+      cfg = await ReaderStyleImporter.fetchConfig(url);
+    }
+    if (cfg == null) {
+      _toast('解析失败：不是 Legado 的排版文件');
+      return;
+    }
+    final id = 'import:${DateTime.now().millisecondsSinceEpoch}';
+    final rawName = (cfg['name'] as String?)?.trim() ?? '';
+    final style = ReaderStyle.fromLegado(
+      cfg,
+      id: id,
+      nameOverride: rawName.isEmpty ? '导入样式' : rawName,
+    );
+    setState(() => _myStyles = [..._myStyles, style]);
+    await _styleStore.saveCustom(_myStyles);
+    _applyReaderStyle(style);
   }
 
   /// 排版面板里的一行"标签 + 滑块 + 减 + 数值 + 加"
