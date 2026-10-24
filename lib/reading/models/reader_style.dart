@@ -807,10 +807,33 @@ class ReaderStyle {
       statusItems: [],
     ),
 
-    // 「古风·完美版」「泼墨山水」：参数照搬 db 的 readerStyle。
-    // 这两套在源设备上用的是自定义背景图（db 里只有文件名，图不在 db 内），
-    // 这里先用相近的宣纸色打底；图片放进 assets/images/reader_bg/ 后，
-    // 补一个 bgImageAsset 即可，其余不用动。
+    ReaderStyle(
+      id: 'builtin:duokan',
+      name: '多看阅读',
+      builtin: true,
+      bgIndex: 0,
+      dayBgIndex: 0,
+      bgColor: 0xFFFAF8F3,
+      bgColorNight: 0xFF1F2022,
+      fontSize: 19,
+      lineHeight: 1.8,
+      letterSpacing: 0.3,
+      paraSpacing: 0.55,
+      indent: 2,
+      titleAlign: 1,
+      padLeft: 24,
+      padRight: 24,
+      padTop: 18,
+      padBottom: 26,
+      // 多看底部是「页码 + 百分比」，顶部不放信息
+      footerL: 'p',
+      footerR: '%',
+      statusItems: [],
+    ),
+
+    // 「古风·完美版」「泼墨山水」：参数 + 背景图都照搬 db 的 readerStyle
+    // （背景图来自 Legado 的 files/bg/，已转 WebP 收进 assets；夜间对应的
+    // 暗色版也在「背景壁纸」里，可手动换）。
     ReaderStyle(
       id: 'builtin:gufeng',
       name: '古风·完美版',
@@ -819,6 +842,9 @@ class ReaderStyle {
       dayBgIndex: 3,
       bgColor: 0xFFF3ECDD,
       bgColorNight: 0xFF2A2724,
+      // Legado 原背景（宣纸 + 云纹 / 海浪纹）；夜间可换 _night 那张壁纸
+      bgImageAsset: 'assets/images/reader_bg/reading_bg_gufeng_day.webp',
+      bgImageDark: false,
       fontSize: 24,
       lineHeight: 1.63,
       letterSpacing: 0.8,
@@ -845,6 +871,9 @@ class ReaderStyle {
       dayBgIndex: 3,
       bgColor: 0xFFF5F2EA,
       bgColorNight: 0xFF1E2224,
+      // Legado 原背景（淡日 + 飞鸟 + 底部水墨山峦 + 山水印章）
+      bgImageAsset: 'assets/images/reader_bg/reading_bg_pomo_day.webp',
+      bgImageDark: false,
       fontSize: 24,
       lineHeight: 1.63,
       letterSpacing: 0.8,

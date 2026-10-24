@@ -191,6 +191,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     'assets/images/reader_bg/reading_bg_sand_dark.jpg',
     // 夜间竹林（刘海屏，顶部有画面、下方深色）
     'assets/images/reader_bg/reading_bg_night_forest.png',
+    // 古风·完美版 / 泼墨山水（Legado 原背景，日间 + 夜间两版）
+    'assets/images/reader_bg/reading_bg_gufeng_day.webp',
+    'assets/images/reader_bg/reading_bg_gufeng_night.webp',
+    'assets/images/reader_bg/reading_bg_pomo_day.webp',
+    'assets/images/reader_bg/reading_bg_pomo_night.webp',
   ];
 
   /// 当前选中的内置壁纸（null = 不用壁纸，走 `_bgIndex` 的纯色底 ✓）
