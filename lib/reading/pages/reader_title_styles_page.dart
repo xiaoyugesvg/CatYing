@@ -343,21 +343,31 @@ class _ReaderTitleStylesPageState extends State<ReaderTitleStylesPage> {
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
         children: [
           _label('内置模板 ${_builtin.length} 套 · 长按管理'),
-          Wrap(
-            spacing: 10,
-            runSpacing: 14,
-            children: [
-              for (final s in _builtin)
-                _card(
-                  name: s.label,
-                  html: _htmlOf(s),
-                  selected: s == _current && widget.currentHtml.isEmpty,
-                  onTap: () => _apply(s, _htmlOf(s)),
-                  onMore: s == ReaderTitleStyle.none
-                      ? null
-                      : () => _showBuiltinActions(s),
-                ),
-            ],
+          // 固定一行两个：按可用宽度算卡片宽度，居中、比原来大一圈
+          // （用户 2026-10-25：原来 Wrap + 固定 150 宽，右边留一大块空，很乱）
+          LayoutBuilder(
+            builder: (context, c) {
+              const gap = 14.0;
+              final w = ((c.maxWidth - gap) / 2).clamp(120.0, 260.0);
+              return Wrap(
+                spacing: gap,
+                runSpacing: 18,
+                alignment: WrapAlignment.center,
+                children: [
+                  for (final s in _builtin)
+                    _card(
+                      width: w,
+                      name: s.label,
+                      html: _htmlOf(s),
+                      selected: s == _current && widget.currentHtml.isEmpty,
+                      onTap: () => _apply(s, _htmlOf(s)),
+                      onMore: s == ReaderTitleStyle.none
+                          ? null
+                          : () => _showBuiltinActions(s),
+                    ),
+                ],
+              );
+            },
           ),
           const SizedBox(height: 20),
           _label('我的标题样式 ${_mine.length} 套'),
@@ -398,11 +408,6 @@ class _ReaderTitleStylesPageState extends State<ReaderTitleStylesPage> {
             ),
           ),
           const SizedBox(height: 8),
-          Text(
-            '支持 div/p/h1~h6/span、margin/padding、border、float、background-image、text-shadow。'
-            '「章节数」占位符当前不渲染（避免右上角孤立数字）。',
-            style: TextStyle(fontSize: 11, color: _fg.withValues(alpha: 0.4)),
-          ),
         ],
       ),
     );
@@ -421,6 +426,7 @@ class _ReaderTitleStylesPageState extends State<ReaderTitleStylesPage> {
   );
 
   Widget _card({
+    required double width,
     required String name,
     required String html,
     required bool selected,
@@ -432,7 +438,7 @@ class _ReaderTitleStylesPageState extends State<ReaderTitleStylesPage> {
       onTap: onTap,
       onLongPress: onMore,
       child: SizedBox(
-        width: 150,
+        width: width,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -440,12 +446,12 @@ class _ReaderTitleStylesPageState extends State<ReaderTitleStylesPage> {
               clipBehavior: Clip.none,
               children: [
                 Container(
-                  height: 76,
+                  height: 104,
                   width: double.infinity,
-                  padding: const EdgeInsets.all(6),
+                  padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
                     color: _fg.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: selected ? _fg : _fg.withValues(alpha: 0.16),
                       width: selected ? 2 : 1,
@@ -488,13 +494,14 @@ class _ReaderTitleStylesPageState extends State<ReaderTitleStylesPage> {
                   ),
               ],
             ),
-            const SizedBox(height: 5),
+            const SizedBox(height: 6),
             Text(
               name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
                 color: _fg.withValues(alpha: selected ? 1 : 0.72),
               ),
@@ -583,7 +590,8 @@ class _ReaderTitleStylesPageState extends State<ReaderTitleStylesPage> {
     return ClipRect(
       child: FittedBox(
         fit: BoxFit.scaleDown,
-        alignment: Alignment.topLeft,
+        // 居中放大：原来 topLeft 靠左上，卡片右侧一大块空白
+        alignment: Alignment.center,
         child: SizedBox(
           width: 300,
           child: TitleHtml.build(

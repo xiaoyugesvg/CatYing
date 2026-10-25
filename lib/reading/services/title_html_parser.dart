@@ -240,8 +240,11 @@ class TitleHtml {
     final out = <TitleBlock>[];
     for (final node in nodes) {
       if (node is dom.Text) {
+        // 「章节数」占位符**不渲染**（用户 2026-10-25：阅读界面左上角那枚孤立
+        // 数字要去掉）。留空后，外层没装饰的盒子会被下面的空盒逻辑丢掉，
+        // 不会多出一段空白。
         final text = _cleanText(node.text)
-            .replaceAll('章节数', number)
+            .replaceAll('章节数', '')
             .replaceAll('章节名', name);
         if (text.isEmpty) continue;
         out.add(TitleTextBlock(parent.inheritFromParent(), text));
@@ -256,6 +259,23 @@ class TitleHtml {
         continue;
       }
       final css = _applyDecls(parent, node.attributes['style'], tag);
+      // 「章节名」所在的盒子整体缩到 0.8：
+      //   用户要的是"章节名称 + 外框一起小一号"，所以缩放必须作用在**盒子**
+      //   的 fontScale 上 —— 内衬/圆角都是 em 推导的，跟着字号一起缩才协调。
+      final ownText = node.nodes
+          .whereType<dom.Text>()
+          .map((t) => t.text)
+          .join();
+      // 整个盒子只装了「章节数」→ 连盒子一起去掉。
+      //   否则像「古风·蓝章」那种给数字加了蓝底圆角的版式，会留下一个空药丸。
+      if (ownText.contains('章节数') &&
+          ownText.replaceAll('章节数', '').trim().isEmpty) {
+        continue;
+      }
+      if (ownText.contains('章节名')) {
+        css.fontScale = css.fontScale * 0.8;
+        if (css.fontPx != null) css.fontPx = css.fontPx! * 0.8;
+      }
       final kids = _buildChildren(node.nodes, css, number, name);
       if (!_allowedTags.contains(tag)) {
         // 不认识的标签：拍平（只保留子节点），不让样式丢失
@@ -323,11 +343,16 @@ class TitleHtml {
                     ? Alignment.center
                     : Alignment.centerLeft);
         case 'background-size':
+          // ⚠️ `auto 100%` 是标题样式里最常见的写法（高撑满、宽按比例），
+          // 对应 Flutter 的 **fitHeight**，不是 contain —— 用 contain 会把整张图
+          // 缩进盒子里（宽高都受约束），表现就是"图变小了、位置也不对"。
           css.backgroundFit = v.contains('cover')
               ? BoxFit.cover
-              : (v.contains('contain') || v.contains('auto')
-                    ? BoxFit.contain
-                    : BoxFit.contain);
+              : (v.contains('100%') && v.contains('auto')
+                  ? BoxFit.fitHeight
+                  : (v.contains('contain')
+                      ? BoxFit.contain
+                      : BoxFit.fitHeight));
         case 'font-size':
           final m = _numUnit(e.value);
           if (m != null) {

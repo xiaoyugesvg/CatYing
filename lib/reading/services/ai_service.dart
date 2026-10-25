@@ -24,7 +24,19 @@ class AiService extends ChangeNotifier {
   String apiKey = '';
   String model = 'deepseek-chat';
 
+  // ── 阅读模块的**独立**配置（2026-10-25）─────────────────────
+  // 用户要求：全 App 只有「AI 管理」一处配置，宠物**固定**用它；
+  // 但阅读可以单独选另一家（比如把便宜的模型留给阅读，宠物用好一点的）。
+  bool readerSeparate = false;
+  String readerBaseUrl = '';
+  String readerApiKey = '';
+  String readerModel = '';
+
   bool get isConfigured => apiKey.trim().isNotEmpty;
+
+  /// 阅读 AI 是否真的在用独立配置（开关开着且填了 Key）
+  bool get readerActive => readerSeparate && readerApiKey.trim().isNotEmpty;
+
 
   Future<void> init() async {
     try {
@@ -39,6 +51,10 @@ class AiService extends ChangeNotifier {
         model = (m['model'] as String?)?.trim().isNotEmpty == true
             ? m['model'] as String
             : model;
+        readerSeparate = m['readerSeparate'] == true;
+        readerBaseUrl = (m['readerBaseUrl'] as String?) ?? '';
+        readerApiKey = (m['readerApiKey'] as String?) ?? '';
+        readerModel = (m['readerModel'] as String?) ?? '';
       }
     } catch (e) {
       debugPrint('[AiService] 加载配置失败: $e');
@@ -50,16 +66,28 @@ class AiService extends ChangeNotifier {
     required String baseUrl,
     required String apiKey,
     required String model,
+    bool? readerSeparate,
+    String? readerBaseUrl,
+    String? readerApiKey,
+    String? readerModel,
   }) async {
     this.baseUrl = baseUrl.trim().isEmpty ? 'https://api.deepseek.com' : baseUrl.trim();
     this.apiKey = apiKey.trim();
     this.model = model.trim().isEmpty ? 'deepseek-chat' : model.trim();
+    if (readerSeparate != null) this.readerSeparate = readerSeparate;
+    if (readerBaseUrl != null) this.readerBaseUrl = readerBaseUrl.trim();
+    if (readerApiKey != null) this.readerApiKey = readerApiKey.trim();
+    if (readerModel != null) this.readerModel = readerModel.trim();
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_cfgKey, jsonEncode({
         'baseUrl': this.baseUrl,
         'apiKey': this.apiKey,
         'model': this.model,
+        'readerSeparate': this.readerSeparate,
+        'readerBaseUrl': this.readerBaseUrl,
+        'readerApiKey': this.readerApiKey,
+        'readerModel': this.readerModel,
       }));
     } catch (e) {
       debugPrint('[AiService] 保存配置失败: $e');
@@ -72,28 +100,43 @@ class AiService extends ChangeNotifier {
   /// 另外兼容两种常见写法（各家 baseUrl 差异很大）：
   ///   · 用户直接填了完整地址（以 `/chat/completions` 结尾）⇒ 原样用；
   ///   · 智谱等以 `/v4` 结尾 ⇒ `$b/chat/completions`（不能再塞 `/v1`）。
-  String get _endpoint {
-    final b = baseUrl.replaceAll(RegExp(r'/+$'), '');
+  String get _endpoint => _endpointOf(baseUrl);
+
+  String _endpointOf(String b0) {
+    final b = b0.replaceAll(RegExp(r'/+$'), '');
     if (b.endsWith('/chat/completions')) return b;
     if (b.endsWith('/v1') || b.endsWith('/v4')) return '$b/chat/completions';
     return '$b/v1/chat/completions';
   }
 
   /// 发起一次对话，返回助手回复文本。失败抛中文可读错误。
+  ///
+  /// [scoped] 只给**阅读模块**用：为 true 且开了「阅读使用独立 AI」时，
+  /// 用阅读那套 base/key/model；其余调用方（宠物、日志诊断、AI 管理测试）
+  /// 一律走全局配置。
   Future<String> chat({
     required String system,
     required String user,
     Duration timeout = const Duration(seconds: 90),
+    bool scoped = false,
   }) async {
-    if (apiKey.trim().isEmpty) {
-      throw '尚未配置 AI 接口（需要 API Key）';
+    final useReader = scoped && readerActive;
+    final key = useReader ? readerApiKey.trim() : apiKey.trim();
+    final mdl = useReader && readerModel.trim().isNotEmpty
+        ? readerModel.trim()
+        : model;
+    final endpoint = useReader ? _endpointOf(readerBaseUrl) : _endpoint;
+    if (key.isEmpty) {
+      throw useReader
+          ? '阅读的独立 AI 还没填 Key（设置 → AI 管理 → 阅读使用独立 AI）'
+          : '尚未配置 AI 接口（需要 API Key）';
     }
     final dio = Dio(BaseOptions(
       connectTimeout: const Duration(seconds: 15),
       receiveTimeout: timeout,
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer ${apiKey.trim()}',
+        'Authorization': 'Bearer $key',
       },
     ));
     // ✅ **AI 总结 / 问答也走「网络代理」**（本轮接上 ✓）—— 本服务是**每次调用临时建 Dio** ✓
@@ -105,9 +148,9 @@ class AiService extends ChangeNotifier {
     applyGlobalProxy(dio);
     try {
       final resp = await dio.post<Map<String, dynamic>>(
-        _endpoint,
+        endpoint,
         data: {
-          'model': model,
+          'model': mdl,
           'messages': [
             {'role': 'system', 'content': system},
             {'role': 'user', 'content': user},

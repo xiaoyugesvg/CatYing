@@ -6,6 +6,7 @@ import 'package:get/get.dart';
 
 import '../../common/theme.dart';
 import 'pet_center_page.dart';
+import 'pet_chat_sheet.dart';
 import 'pet_service.dart';
 import 'pet_view.dart';
 
@@ -87,24 +88,28 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
   }
 
   Future<void> _onTap() async {
-    // 互动反馈：先弹一下再说话
+    // 互动反馈：先弹一下
     setState(() => _bounce = true);
     Timer(const Duration(milliseconds: 180), () {
       if (mounted) setState(() => _bounce = false);
     });
+    // 用户 2026-10-25：点宠物 → 直接开对话（文字 / 系统听写），
+    // 不再只是随机说一句；"摸摸/喂食"收进长按菜单。
     final ok = await _pet.play();
+    if (!mounted) return;
     if (!ok) {
       _say('让我歇一会儿…');
       return;
     }
-    const lines = [
-      '陪你读书真开心！',
-      '今天也要加油呀～',
-      '这一页好好看！',
-      '摸摸头，继续读～',
-      '嘿嘿，猫币又多了吗？',
-    ];
-    _say(lines[Random().nextInt(lines.length)]);
+    // 用户 2026-10-25：对话改成**中间弹窗**，不再从底部抽上来。
+    final ctx = Get.context;
+    if (ctx == null) return;
+    showDialog(
+      context: ctx,
+      barrierDismissible: true,
+      barrierColor: Colors.black26,
+      builder: (_) => const PetChatSheet(),
+    );
   }
 
   Future<void> _feed() async {
@@ -345,14 +350,18 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
             );
 
             if (dockLeft || dockRight) {
-              // 贴边时把身体大半藏到屏幕外，只露出头和手（用户 2026-10-18）
+              // 贴边姿态（用户 2026-10-25：斜着 45°）——
+              //   一半身子推到屏幕外，同时整体朝屏幕内侧倾 45°，
+              //   像从边缘斜插进来的贴纸。
               petBody = Transform.translate(
-                offset: Offset(dockLeft ? -petSize * 0.55 : petSize * 0.55, 0),
+                offset: Offset(
+                  dockLeft ? -petSize * 0.45 : petSize * 0.45,
+                  0,
+                ),
                 child: Transform.rotate(
-                  angle: dockLeft ? 0.05 : -0.05,
-                  alignment: dockLeft
-                      ? Alignment.centerLeft
-                      : Alignment.centerRight,
+                  angle: dockLeft ? pi / 4 : -pi / 4,
+                  alignment:
+                      dockLeft ? Alignment.bottomLeft : Alignment.bottomRight,
                   child: petBody,
                 ),
               );

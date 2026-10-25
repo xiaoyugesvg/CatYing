@@ -101,9 +101,19 @@ export async function listPublic(channel, before = 0) {
             thumb = pick(photo, /background-image:url\('([^']+)'\)/);
         }
 
-        const text = node.find('.tgme_widget_message_text').first().text().trim();
-        const title = (text.split('\n').map((s) => s.trim()).filter(Boolean)[0] || '')
-            .slice(0, 120) || docTitle.slice(0, 120) || `消息 ${id}`;
+        // 标题：把 <br> 还原成换行再取第一行 ——
+        // cheerio 的 .text() 会把整段粘连成一行，直接截 120 字会出现
+        // 「Signed Gifts. You can now add...August Features1 •」这种一长串。
+        const textNode = node.find('.tgme_widget_message_text').first();
+        textNode.find('br').replaceWith('\n');
+        const rawText = textNode.text().trim();
+        const firstLine = rawText
+            .split('\n')
+            .map((s) => s.trim())
+            .filter(Boolean)[0] || '';
+        const title = shorten(firstLine, 60) ||
+            shorten(docTitle, 60) ||
+            `消息 ${id}`;
 
         const durText = node.find('.tgme_widget_message_video_duration').first().text().trim();
         const duration = durText ? toSeconds(durText) : 0;
@@ -153,6 +163,22 @@ export async function resolvePublic(channel, id) {
         return { ok: false, error: '该帖子没有可直接播放的视频（可能是文档或超大文件）' };
     }
     return { ok: true, url: src.replace(/&amp;/g, '&') };
+}
+
+/// 标题压缩：优先切到第一个句号/问号，其次按空格断词，最后暴力截断。
+///
+/// 为什么不能直接 slice：Telegram 的帖子正文常是一整段，
+/// 直接截 60 字会得到「Signed Gifts. You can now add your signature and a comme」
+/// 这种半截英文，列表里非常难读。
+function shorten(s, n) {
+    let t = String(s || '').replace(/\s+/g, ' ').trim();
+    if (!t) return '';
+    const m = t.match(/^(.{4,60}?)[。．.!?！？]/);
+    if (m) return m[1].trim();
+    if (t.length <= n) return t;
+    const cut = t.slice(0, n);
+    const sp = cut.lastIndexOf(' ');
+    return ((sp > 24 ? cut.slice(0, sp) : cut).trim()) + '…';
 }
 
 function toSeconds(t) {

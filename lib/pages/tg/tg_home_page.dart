@@ -1,19 +1,26 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../common/theme.dart';
+import '../../miniapp/pages/mini_app_player_page.dart';
 import '../../services/tg_service.dart';
 import '../../widgets/app_toast.dart';
-import '../settings/sub/tg_channel_page.dart';
 import '../settings/sub/tg_source_page.dart';
 
-/// 「TG」分类页（底部菜单栏可选，**默认关闭**）
+/// 「TG」分类页 —— 按影视首页的结构重做（2026-10-25）
 ///
-/// 两条入口并存：
-///   · **公开频道**：贴一个 @用户名 / t.me 链接就能看，不用登录
-///   · **我的频道**：扫码登录后，列出账号里加入的群 / 频道（含私有）
-///
-/// 页面本身不解析任何协议，全部交给内置 Node 的 `/tg`。
+/// 顶栏（左 → 右）：
+///   · 左边：**切换群组**（点开是弹窗：收藏 + 账号里的群）
+///   · 中间：当前群名
+///   · 右边：搜索 / 视图（网格↔列表）/ 设置
+/// 内容：
+///   · 幻灯片：当前群最新几条有封面的视频，4 秒自动翻
+///   · 群组横滑条：一点就切
+///   · 视频网格（2 列）或列表，每批 12 条，点击弹操作面板
 class TgHomePage extends StatefulWidget {
   const TgHomePage({super.key});
 
@@ -23,347 +30,990 @@ class TgHomePage extends StatefulWidget {
 
 class _TgHomePageState extends State<TgHomePage> {
   final TgService _tg = TgService.instance;
-  final TextEditingController _input = TextEditingController();
+  final ScrollController _scroll = ScrollController();
+  final TextEditingController _searchCtrl = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
+
+  static const int _pageSize = 12;
+  static const _kViewMode = 'tg.viewMode.v1';
+
+  // 当前群
+  String _peer = '';
+  String _title = '';
+  String _mode = 'public';
+
+  List<Map<String, dynamic>> _items = [];
+  List<Map<String, dynamic>> _channels = []; // 收藏（含内置）
+  List<Map<String, dynamic>> _dialogs = []; // 账号里的群
 
   bool _loading = true;
-  bool _authorized = false;
-  String _meName = '';
-  List<Map<String, dynamic>> _saved = [];
-  List<Map<String, dynamic>> _dialogs = [];
+  bool _more = true;
+  bool _grid = true;
+  bool _searching = false;
+  String _query = '';
+  String _error = '';
+  int _offset = 0;
+
+  Timer? _bannerTimer;
+  final PageController _bannerCtrl = PageController(viewportFraction: 0.92);
+  int _bannerIndex = 0;
 
   @override
   void initState() {
     super.initState();
+    _scroll.addListener(() {
+      if (_scroll.position.pixels >
+          _scroll.position.maxScrollExtent - 400) {
+        _loadMore();
+      }
+    });
     _boot();
   }
 
   @override
   void dispose() {
-    _input.dispose();
+    _bannerTimer?.cancel();
+    _bannerCtrl.dispose();
+    _scroll.dispose();
+    _searchCtrl.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
   Future<void> _boot() async {
+    final p = await SharedPreferences.getInstance();
+    _grid = (p.getBool(_kViewMode) ?? true);
     await _tg.loadSettings();
     await _tg.pushConfig();
-    await _refresh();
+    await _tg.seedDefaults();
+    await _reloadGroups();
+    if (_channels.isNotEmpty) {
+      final c = _channels.first;
+      _peer = (c['peer'] ?? '').toString();
+      _title = (c['title'] ?? _peer).toString();
+      _mode = (c['mode'] ?? 'public').toString();
+    } else if (_dialogs.isNotEmpty) {
+      final d = _dialogs.first;
+      _peer = (d['peer'] ?? '').toString();
+      _title = (d['title'] ?? _peer).toString();
+      _mode = 'login';
+    }
+    await _reloadItems();
   }
 
-  Future<void> _refresh() async {
-    setState(() => _loading = true);
+  Future<void> _reloadGroups() async {
+    _channels = await _tg.channels();
     final st = await _tg.status();
-    final saved = await _tg.channels();
-    if (!mounted) return;
-    final authed = st['authorized'] == true;
-    setState(() {
-      _loading = false;
-      _authorized = authed;
-      _meName = ((st['me'] as Map?)?['name'] ?? '').toString();
-      _saved = saved;
-    });
-    if (authed) {
+    if (st['authorized'] == true) {
       final r = await _tg.dialogs();
-      if (!mounted) return;
+      _dialogs = ((r['items'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((e) => e.cast<String, dynamic>())
+          .toList();
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _reloadItems() async {
+    _items = [];
+    _offset = 0;
+    _more = true;
+    _error = '';
+    if (mounted) setState(() => _loading = true);
+    if (_peer.isEmpty) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+    await _loadMore();
+    _startBanner();
+  }
+
+  Future<void> _loadMore() async {
+    if (_loading && _items.isNotEmpty) return;
+    if (!_more || _peer.isEmpty) return;
+    setState(() => _loading = true);
+    final r = _mode == 'public'
+        ? await _tg.publicList(_peer, offsetId: _offset)
+        : await _tg.videos(_peer, offsetId: _offset, limit: _pageSize);
+    if (!mounted) return;
+    if (r['ok'] == true) {
+      var list = (r['items'] as List? ?? const [])
+          .whereType<Map>()
+          .map((e) => e.cast<String, dynamic>())
+          .toList();
+      if (_mode == 'public' && list.length > _pageSize) {
+        list = list.sublist(0, _pageSize);
+      }
       setState(() {
-        _dialogs = ((r['items'] as List?) ?? const [])
-            .whereType<Map>()
-            .map((e) => e.cast<String, dynamic>())
-            .toList();
+        _items.addAll(list);
+        _offset = _mode == 'public'
+            ? (list.isEmpty ? 0 : (list.last['id'] as num).toInt())
+            : ((r['next'] as num?)?.toInt() ?? 0);
+        _more = list.isNotEmpty && _offset > 0;
+        _loading = false;
       });
     } else {
-      setState(() => _dialogs = []);
+      setState(() {
+        _loading = false;
+        _error = r['error']?.toString() ?? '加载失败';
+      });
     }
   }
 
-  Future<void> _openPublic() async {
-    final raw = _input.text.trim();
-    if (raw.isEmpty) {
-      AppToast.message('先填频道 @用户名 或 t.me 链接');
-      return;
+  // ── 幻灯片 ─────────────────────────────────────────────
+  List<Map<String, dynamic>> get _bannerItems => _items
+      .where((e) => (e['thumb'] ?? '').toString().isNotEmpty)
+      .take(6)
+      .toList();
+
+  void _startBanner() {
+    _bannerTimer?.cancel();
+    final n = _bannerItems.length;
+    if (n <= 1) return;
+    _bannerTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted || !_bannerCtrl.hasClients) return;
+      _bannerIndex = (_bannerIndex + 1) % n;
+      _bannerCtrl.animateToPage(
+        _bannerIndex,
+        duration: const Duration(milliseconds: 520),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
+  // ── 搜索 ───────────────────────────────────────────────
+  void _toggleSearch() {
+    setState(() {
+      _searching = !_searching;
+      if (!_searching) {
+        _query = '';
+        _searchCtrl.clear();
+      }
+    });
+    if (_searching) {
+      Future.delayed(const Duration(milliseconds: 120),
+          () => _searchFocus.requestFocus());
     }
-    final peer = raw
-        .replaceAll(RegExp(r'^https?://'), '')
-        .replaceAll(RegExp(r'^(www\.)?(t|telegram)\.me/'), '')
-        .replaceAll(RegExp(r'^s/'), '')
-        .replaceAll(RegExp(r'[/?#].*$'), '');
-    if (peer.isEmpty) {
-      AppToast.message('频道名解析失败');
-      return;
-    }
-    await _tg.addChannel(peer, title: peer, mode: 'public');
-    _input.clear();
-    await _refresh();
+  }
+
+  List<Map<String, dynamic>> get _visibleItems {
+    if (_query.trim().isEmpty) return _items;
+    final q = _query.trim().toLowerCase();
+    return _items
+        .where((e) => (e['title'] ?? '').toString().toLowerCase().contains(q))
+        .toList();
+  }
+
+  void _toggleView() {
+    setState(() => _grid = !_grid);
+    SharedPreferences.getInstance().then((p) => p.setBool(_kViewMode, _grid));
+  }
+
+  // ── 切换群组（弹窗）─────────────────────────────────────
+  Future<void> _openSwitchSheet() async {
+    await _reloadGroups();
     if (!mounted) return;
-    Get.to(() => TgChannelPage(peer: peer, title: peer, mode: 'public'));
+    final picked = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (c) => _switchSheet(c),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _peer = (picked['peer'] ?? '').toString();
+      _title = (picked['title'] ?? _peer).toString();
+      _mode = (picked['mode'] ?? 'public').toString();
+    });
+    await _reloadItems();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppTheme.backgroundPrimary,
-      body: SafeArea(
-        bottom: false,
-        child: RefreshIndicator(
-          onRefresh: _refresh,
-          child: ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 90),
-            children: [
-              _header(),
-              const SizedBox(height: 14),
-              _publicAdder(),
-              const SizedBox(height: 18),
-              _sectionTitle('收藏的频道', trailing: _saved.isEmpty ? null : '${_saved.length}'),
-              if (_saved.isEmpty)
-                _emptyLine('还没有收藏。上面贴一个公开频道就能直接看。')
-              else
-                ..._saved.map(_savedRow),
-              const SizedBox(height: 18),
-              _sectionTitle(
-                '我的频道（需登录）',
-                trailing: _authorized ? (_meName.isEmpty ? '已登录' : _meName) : null,
-              ),
-              if (!_authorized) _loginHint(),
-              if (_authorized && _dialogs.isEmpty && !_loading)
-                _emptyLine('这个账号还没有加入任何群 / 频道'),
-              ..._dialogs.map(_dialogRow),
-              const SizedBox(height: 24),
-            ],
+  Widget _switchSheet(BuildContext c) {
+    Widget row(Map<String, dynamic> d) {
+      final peer = (d['peer'] ?? '').toString();
+      final mode = (d['mode'] ?? 'public').toString();
+      final on = peer == _peer;
+      return ListTile(
+        dense: true,
+        leading: Icon(mode == 'login' ? Icons.lock_outline : Icons.public,
+            size: 19,
+            color: on ? AppTheme.accentOnSurface : AppTheme.textTertiary),
+        title: Text(
+          (d['title'] ?? peer).toString(),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 13.5,
+            fontWeight: on ? FontWeight.w600 : FontWeight.w400,
+            color: on ? AppTheme.accentOnSurface : AppTheme.textPrimary,
           ),
         ),
-      ),
-    );
-  }
+        subtitle: Text('@$peer',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 11, color: AppTheme.textTertiary)),
+        trailing: on
+            ? Icon(Icons.check, size: 17, color: AppTheme.accentOnSurface)
+            : null,
+        onTap: () => Navigator.pop(c, {
+          'peer': peer,
+          'title': (d['title'] ?? peer).toString(),
+          'mode': mode,
+        }),
+      );
+    }
 
-  Widget _header() {
-    return Row(
-      children: [
-        Text('TG',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 26,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.5,
-            )),
-        const SizedBox(width: 8),
-        Text('公开频道 + 自己的群',
-            style: TextStyle(color: AppTheme.textTertiary, fontSize: 12)),
-        const Spacer(),
-        IconButton(
-          tooltip: '刷新',
-          onPressed: _loading ? null : _refresh,
-          icon: Icon(Icons.refresh, color: AppTheme.textTertiary, size: 20),
-        ),
-        IconButton(
-          tooltip: 'TG 设置',
-          onPressed: () async {
-            await Get.to(() => const TgSourcePage());
-            await _refresh();
-          },
-          icon: Icon(Icons.settings_outlined,
-              color: AppTheme.textTertiary, size: 20),
-        ),
-      ],
-    );
-  }
-
-  Widget _publicAdder() {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppTheme.backgroundCard,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.public, color: AppTheme.accentOnSurface, size: 20),
-          const SizedBox(width: 10),
-          Expanded(
-            child: TextField(
-              controller: _input,
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-              textInputAction: TextInputAction.go,
-              onSubmitted: (_) => _openPublic(),
-              decoration: InputDecoration(
-                hintText: '@频道名 或 t.me/频道名',
-                hintStyle: TextStyle(color: AppTheme.textTertiary, fontSize: 12),
-                isDense: true,
-                border: InputBorder.none,
-              ),
-            ),
-          ),
-          TextButton(onPressed: _openPublic, child: const Text('打开')),
-        ],
-      ),
-    );
-  }
-
-  Widget _savedRow(Map<String, dynamic> c) {
-    final peer = (c['peer'] ?? '').toString();
-    final mode = (c['mode'] ?? 'public').toString();
-    return Dismissible(
-      key: ValueKey('saved_$peer'),
-      direction: DismissDirection.endToStart,
-      background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 16),
-        color: Colors.redAccent.withValues(alpha: 0.85),
-        child: const Icon(Icons.delete_outline, color: Colors.white, size: 20),
-      ),
-      onDismissed: (_) async {
-        await _tg.removeChannel(peer);
-        await _refresh();
-      },
-      child: _row(
-        icon: Icons.public,
-        title: (c['title'] ?? peer).toString(),
-        subtitle: '@$peer',
-        badge: mode == 'login' ? '登录' : '公开',
-        onTap: () => Get.to(() => TgChannelPage(
-          peer: peer,
-          title: (c['title'] ?? peer).toString(),
-          mode: mode,
-        )),
-      ),
-    );
-  }
-
-  Widget _dialogRow(Map<String, dynamic> d) {
-    final peer = (d['peer'] ?? '').toString();
-    final title = (d['title'] ?? peer).toString();
-    return _row(
-      icon: d['type'] == 'channel' ? Icons.campaign_outlined : Icons.groups_outlined,
-      title: title,
-      subtitle: '@${d['username'] ?? ''}'.trim() == '@' ? peer : '@${d['username']}  $peer',
-      onTap: () => Get.to(() => TgChannelPage(peer: peer, title: title, mode: 'login')),
-      onLongPress: () async {
-        await _tg.addChannel(peer, title: title, mode: 'login');
-        if (!mounted) return;
-        AppToast.message('已加入 TG 收藏');
-        await _refresh();
-      },
-    );
-  }
-
-  Widget _row({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    String? badge,
-    VoidCallback? onTap,
-    VoidCallback? onLongPress,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        onLongPress: onLongPress,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-          decoration: BoxDecoration(
-            color: AppTheme.backgroundCard,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Row(
-            children: [
-              Icon(icon, size: 19, color: AppTheme.accentOnSurface),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w500),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: AppTheme.textTertiary, fontSize: 11),
-                    ),
-                  ],
-                ),
-              ),
-              if (badge != null)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: AppTheme.backgroundTertiary,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(badge,
-                      style: TextStyle(color: AppTheme.textTertiary, fontSize: 10)),
-                ),
-              const SizedBox(width: 4),
-              Icon(Icons.chevron_right, size: 18, color: AppTheme.textTertiary),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _loginHint() {
-    return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: () => Get.to(() => const TgSourcePage()),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: AppTheme.backgroundCard,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
+    return SafeArea(
+      top: false,
+      child: ConstrainedBox(
+        constraints:
+            BoxConstraints(maxHeight: MediaQuery.of(c).size.height * 0.72),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.qr_code_2, color: AppTheme.accentOnSurface, size: 20),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                '想看你自己加入的群 / 私有频道？点这里扫码登录（不需要验证码）',
-                style: TextStyle(
-                    color: AppTheme.textSecondary, fontSize: 12, height: 1.4),
+            const SizedBox(height: 8),
+            Container(
+              width: 38,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppTheme.textTertiary.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(10),
               ),
             ),
-            Icon(Icons.chevron_right, size: 18, color: AppTheme.textTertiary),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Row(
+                children: [
+                  Text('切换群组',
+                      style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.textPrimary)),
+                  const Spacer(),
+                  Text('${_channels.length + _dialogs.length} 个',
+                      style: TextStyle(
+                          fontSize: 11, color: AppTheme.textTertiary)),
+                ],
+              ),
+            ),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  if (_channels.isNotEmpty) ...[
+                    _sheetLabel('收藏的频道'),
+                    ..._channels.map(row),
+                  ],
+                  if (_dialogs.isNotEmpty) ...[
+                    _sheetLabel('账号里的群 / 频道'),
+                    ..._dialogs.map((d) => row({
+                          'peer': d['peer'],
+                          'title': d['title'],
+                          'mode': 'login',
+                        })),
+                  ],
+                  if (_channels.isEmpty && _dialogs.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 30),
+                      child: Center(
+                        child: Text('还没有可切换的频道\n去「设置 → TG 设置」里加一个',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                fontSize: 12,
+                                height: 1.6,
+                                color: AppTheme.textTertiary)),
+                      ),
+                    ),
+                  const SizedBox(height: 10),
+                ],
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _sectionTitle(String text, {String? trailing}) {
+  Widget _sheetLabel(String t) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+        child: Text(t,
+            style: TextStyle(fontSize: 11, color: AppTheme.textTertiary)),
+      );
+
+  // ── 点击条目：操作弹窗 ──────────────────────────────────
+  void _itemSheet(Map<String, dynamic> it) {
+    final title = (it['title'] ?? '').toString();
+    Get.bottomSheet(
+      Container(
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundSecondary,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                width: 38,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.textTertiary.withValues(alpha: 0.35),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                child: Text(title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textPrimary)),
+              ),
+              ListTile(
+                dense: true,
+                leading: Icon(Icons.play_circle_outline,
+                    color: AppTheme.accentOnSurface),
+                title: Text('播放', style: TextStyle(color: AppTheme.textPrimary)),
+                onTap: () {
+                  Get.back();
+                  _play(it);
+                },
+              ),
+              ListTile(
+                dense: true,
+                leading: Icon(Icons.bookmark_add_outlined,
+                    color: AppTheme.textSecondary),
+                title: Text('收藏当前频道',
+                    style: TextStyle(color: AppTheme.textPrimary)),
+                onTap: () async {
+                  Get.back();
+                  await _tg.addChannel(_peer, title: _title, mode: _mode);
+                  await _reloadGroups();
+                  if (mounted) AppToast.message('已加入 TG 收藏');
+                },
+              ),
+              ListTile(
+                dense: true,
+                leading: Icon(Icons.link_rounded, color: AppTheme.textSecondary),
+                title: Text('复制消息链接',
+                    style: TextStyle(color: AppTheme.textPrimary)),
+                onTap: () async {
+                  Get.back();
+                  final url = 'https://t.me/$_peer/${it['id']}';
+                  await _copy(url);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+      backgroundColor: Colors.transparent,
+    );
+  }
+
+  Future<void> _copy(String text) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    AppToast.message('链接已复制');
+  }
+
+  void _play(Map<String, dynamic> it) {
+    final rel = (it['url'] ?? '').toString();
+    if (rel.isEmpty) {
+      AppToast.message('地址为空');
+      return;
+    }
+    Get.to(() => MiniAppPlayerPage(
+          url: _tg.absolute(rel),
+          title: (it['title'] ?? '').toString(),
+        ));
+  }
+
+  // ── UI ─────────────────────────────────────────────────
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppTheme.backgroundPrimary,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            _header(),
+            Expanded(child: _content()),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _header() {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.fromLTRB(12, 8, 6, 6),
       child: Row(
         children: [
-          Text(text,
-              style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600)),
-          const Spacer(),
-          if (trailing != null)
-            Text(trailing,
-                style: TextStyle(color: AppTheme.textTertiary, fontSize: 11)),
+          // 左：切换群组
+          InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: _openSwitchSheet,
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(10, 6, 8, 6),
+              decoration: BoxDecoration(
+                color: AppTheme.backgroundTertiary,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.swap_horiz_rounded,
+                      size: 16, color: AppTheme.textSecondary),
+                  const SizedBox(width: 4),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 120),
+                    child: Text(
+                      _title.isEmpty ? '选择群组' : _title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textPrimary),
+                    ),
+                  ),
+                  Icon(Icons.expand_more_rounded,
+                      size: 17, color: AppTheme.textTertiary),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // 中：搜索框（点开才展开）
+          Expanded(
+            child: _searching
+                ? Container(
+                    height: 34,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    decoration: BoxDecoration(
+                      color: AppTheme.backgroundTertiary,
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.search,
+                            size: 16, color: AppTheme.textTertiary),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: TextField(
+                            controller: _searchCtrl,
+                            focusNode: _searchFocus,
+                            onChanged: (v) => setState(() => _query = v),
+                            style: TextStyle(
+                                fontSize: 13, color: AppTheme.textPrimary),
+                            decoration: InputDecoration(
+                              isDense: true,
+                              border: InputBorder.none,
+                              hintText: '在当前群内搜索',
+                              hintStyle: TextStyle(
+                                  fontSize: 12, color: AppTheme.textTertiary),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: '搜索',
+            onPressed: _toggleSearch,
+            icon: Icon(_searching ? Icons.close : Icons.search,
+                size: 20, color: AppTheme.textSecondary),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: _grid ? '切换为列表' : '切换为网格',
+            onPressed: _toggleView,
+            icon: Icon(_grid ? Icons.view_list_rounded : Icons.grid_view_rounded,
+                size: 20, color: AppTheme.textSecondary),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: 'TG 设置',
+            onPressed: () async {
+              await Get.to(() => const TgSourcePage());
+              await _reloadGroups();
+            },
+            icon: Icon(Icons.settings_outlined,
+                size: 20, color: AppTheme.textSecondary),
+          ),
         ],
       ),
     );
   }
 
-  Widget _emptyLine(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Text(text,
-          style: TextStyle(
-              color: AppTheme.textTertiary, fontSize: 12, height: 1.5)),
+  Widget _content() {
+    if (_peer.isEmpty) {
+      return _emptyGuide();
+    }
+    if (_items.isEmpty && _loading) {
+      return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+    }
+    if (_items.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_error.isEmpty ? '这个群组里没有视频文件' : _error,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppTheme.textTertiary, fontSize: 13)),
+            const SizedBox(height: 12),
+            TextButton(onPressed: _reloadItems, child: const Text('重试')),
+          ],
+        ),
+      );
+    }
+    final list = _visibleItems;
+    return RefreshIndicator(
+      onRefresh: _reloadItems,
+      child: CustomScrollView(
+        controller: _scroll,
+        slivers: [
+          if (!_searching && _bannerItems.isNotEmpty)
+            SliverToBoxAdapter(child: _banner()),
+          if (!_searching) SliverToBoxAdapter(child: _groupStrip()),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+              child: Row(
+                children: [
+                  Text(_query.isEmpty ? '最新' : '搜索结果 ${list.length}',
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.textPrimary)),
+                  const Spacer(),
+                  if (_loading)
+                    const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2)),
+                ],
+              ),
+            ),
+          ),
+          if (list.isEmpty)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 40),
+                child: Center(
+                  child: Text('没有匹配的视频',
+                      style: TextStyle(
+                          fontSize: 12, color: AppTheme.textTertiary)),
+                ),
+              ),
+            )
+          else if (_grid)
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
+              sliver: SliverGrid(
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 10,
+                  crossAxisSpacing: 10,
+                  mainAxisExtent: 194,
+                ),
+                delegate: SliverChildBuilderDelegate(
+                  (context, i) => _card(list[i]),
+                  childCount: list.length,
+                ),
+              ),
+            )
+          else
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, i) => _row(list[i]),
+                  childCount: list.length,
+                ),
+              ),
+            ),
+          if (_more && _query.isEmpty)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 26),
+                child: Center(
+                  child: Text(_loading ? '加载中…' : '上滑加载更多',
+                      style: TextStyle(
+                          fontSize: 11, color: AppTheme.textTertiary)),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
+  }
+
+  Widget _emptyGuide() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.telegram, size: 40, color: AppTheme.textTertiary),
+            const SizedBox(height: 12),
+            Text('还没有可看的群组\n公开频道直接贴名字就能看，私有群需要扫码登录',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 12.5, height: 1.7, color: AppTheme.textTertiary)),
+            const SizedBox(height: 14),
+            FilledButton(
+              onPressed: () async {
+                await Get.to(() => const TgSourcePage());
+                await _reloadGroups();
+              },
+              child: const Text('去设置'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── 幻灯片 ─────────────────────────────────────────────
+  Widget _banner() {
+    final items = _bannerItems;
+    return SizedBox(
+      height: 168,
+      child: PageView.builder(
+        controller: _bannerCtrl,
+        itemCount: items.length,
+        onPageChanged: (i) => setState(() => _bannerIndex = i),
+        itemBuilder: (context, i) {
+          final it = items[i];
+          return GestureDetector(
+            onTap: () => _itemSheet(it),
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 5, vertical: 6),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                color: AppTheme.backgroundTertiary,
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image.network(
+                    _tg.absolute((it['thumb'] ?? '').toString()),
+                    fit: BoxFit.cover,
+                    cacheWidth: 900,
+                    errorBuilder: (_, __, ___) => Container(
+                      color: AppTheme.backgroundTertiary,
+                    ),
+                  ),
+                  // 底部渐变，保证文字可读
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.transparent,
+                            Colors.black.withValues(alpha: 0.62),
+                          ],
+                          stops: const [0.45, 1.0],
+                        ),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 14,
+                    right: 14,
+                    bottom: 12,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          (it['title'] ?? '').toString(),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              height: 1.3),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          [
+                            if ((it['duration'] as num? ?? 0) > 0)
+                              _dur((it['duration'] as num).toInt()),
+                            if ((it['size'] as num? ?? 0) > 0)
+                              _size((it['size'] as num).toInt()),
+                          ].join('  ·  '),
+                          style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.82),
+                              fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  // ── 群组横滑 ───────────────────────────────────────────
+  Widget _groupStrip() {
+    final all = [
+      ..._channels,
+      ..._dialogs.map((d) => {
+            'peer': d['peer'],
+            'title': d['title'],
+            'mode': 'login',
+          }),
+    ];
+    if (all.length <= 1) return const SizedBox.shrink();
+    return SizedBox(
+      height: 42,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        itemCount: all.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, i) {
+          final d = all[i];
+          final peer = (d['peer'] ?? '').toString();
+          final on = peer == _peer;
+          return GestureDetector(
+            onTap: () async {
+              if (on) return;
+              setState(() {
+                _peer = peer;
+                _title = (d['title'] ?? peer).toString();
+                _mode = (d['mode'] ?? 'public').toString();
+              });
+              await _reloadItems();
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 13),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color:
+                    on ? AppTheme.accentOnSurface : AppTheme.backgroundTertiary,
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Text(
+                (d['title'] ?? peer).toString(),
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: on ? FontWeight.w600 : FontWeight.w400,
+                  color: on ? Colors.white : AppTheme.textSecondary,
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  // ── 卡片 ───────────────────────────────────────────────
+  Widget _card(Map<String, dynamic> it) {
+    final title = (it['title'] ?? '').toString();
+    final thumb = (it['thumb'] ?? '').toString();
+    final dur = (it['duration'] as num?)?.toInt() ?? 0;
+    final size = (it['size'] as num?)?.toInt() ?? 0;
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => _itemSheet(it),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundCard,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AspectRatio(
+              aspectRatio: 16 / 9,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (thumb.isEmpty)
+                    Container(
+                      color: AppTheme.backgroundTertiary,
+                      child: Icon(Icons.movie_outlined,
+                          size: 22, color: AppTheme.textTertiary),
+                    )
+                  else
+                    Image.network(
+                      _tg.absolute(thumb),
+                      fit: BoxFit.cover,
+                      cacheWidth: 400,
+                      errorBuilder: (_, __, ___) => Container(
+                        color: AppTheme.backgroundTertiary,
+                        child: Icon(Icons.movie_outlined,
+                            size: 22, color: AppTheme.textTertiary),
+                      ),
+                    ),
+                  if (dur > 0)
+                    Positioned(
+                      right: 5,
+                      bottom: 5,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.62),
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                        child: Text(_dur(dur),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+                  Positioned(
+                    left: 5,
+                    top: 5,
+                    child: Icon(Icons.play_circle_fill_rounded,
+                        size: 20,
+                        color: Colors.white.withValues(alpha: 0.9),
+                        shadows: const [
+                          Shadow(color: Colors.black26, blurRadius: 4)
+                        ]),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: 12.5,
+                              height: 1.3)),
+                    ),
+                    Text(size > 0 ? _size(size) : '',
+                        style: TextStyle(
+                            color: AppTheme.textTertiary, fontSize: 10.5)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _row(Map<String, dynamic> it) {
+    final title = (it['title'] ?? '').toString();
+    final thumb = (it['thumb'] ?? '').toString();
+    final dur = (it['duration'] as num?)?.toInt() ?? 0;
+    final size = (it['size'] as num?)?.toInt() ?? 0;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _itemSheet(it),
+        child: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: AppTheme.backgroundCard,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: SizedBox(
+                  width: 108,
+                  height: 62,
+                  child: thumb.isEmpty
+                      ? Container(
+                          color: AppTheme.backgroundTertiary,
+                          child: Icon(Icons.movie_outlined,
+                              size: 22, color: AppTheme.textTertiary))
+                      : Image.network(_tg.absolute(thumb),
+                          fit: BoxFit.cover,
+                          cacheWidth: 216,
+                          errorBuilder: (_, __, ___) => Container(
+                                color: AppTheme.backgroundTertiary,
+                                child: Icon(Icons.movie_outlined,
+                                    size: 22, color: AppTheme.textTertiary),
+                              )),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 13,
+                            height: 1.35)),
+                    const SizedBox(height: 5),
+                    Text(
+                      [
+                        if (dur > 0) _dur(dur),
+                        if (size > 0) _size(size),
+                      ].join('  ·  '),
+                      style: TextStyle(
+                          color: AppTheme.textTertiary, fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.play_circle_outline,
+                  color: AppTheme.accentOnSurface, size: 22),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  static String _dur(int s) {
+    final h = s ~/ 3600;
+    final m = (s % 3600) ~/ 60;
+    final ss = s % 60;
+    final mm = m.toString().padLeft(h > 0 ? 2 : 1, '0');
+    final sss = ss.toString().padLeft(2, '0');
+    return h > 0 ? '$h:$mm:$sss' : '$mm:$sss';
+  }
+
+  static String _size(int b) {
+    if (b >= 1 << 30) return '${(b / (1 << 30)).toStringAsFixed(2)} GB';
+    if (b >= 1 << 20) return '${(b / (1 << 20)).toStringAsFixed(0)} MB';
+    return '${(b / 1024).toStringAsFixed(0)} KB';
   }
 }

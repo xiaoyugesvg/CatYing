@@ -1,15 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 
 import '../../common/theme.dart';
+import '../../pages/settings/sub/ai_settings_page.dart';
+import '../../widgets/app_toast.dart';
 import '../services/ai_service.dart';
-import '../theme/jelly_theme.dart';
 import 'pet_service.dart';
+import 'pet_view.dart';
 
-/// 桌宠 AI 闲聊（2026-10-22）。
+/// 桌宠对话（2026-10-25 重做）
 ///
-/// 参考 QQ 宠物复刻的「AI 闲聊」：宠物用自己的口吻回话，
-/// 并把当前等级 / 心情 / 饱食度塞进 system prompt，让回答贴合养成状态。
-/// 走用户自己的 OpenAI 兼容接口（复用阅读模块的 [AiService] 配置）。
+/// 三条硬规则（用户明确要求）：
+///   1. **宠物只用「AI 管理」里的配置** —— 这里不再有自己的接口表单，
+///      没配就直接跳过去配；阅读模块的独立配置不影响宠物。
+///   2. 点宠物 = 开这个面板，能打字，也能用系统听写说话（键盘上的麦克风）。
+///   3. 布局从"一个裸输入框"改成：头像 + 气泡 + 快捷话题 + 胶囊输入条。
 class PetChatSheet extends StatefulWidget {
   const PetChatSheet({super.key});
 
@@ -21,13 +26,29 @@ class _PetChatSheetState extends State<PetChatSheet> {
   final _ai = AiService();
   final _input = TextEditingController();
   final _scroll = ScrollController();
+  final _focus = FocusNode();
 
-  /// (是否用户, 文本)
   final List<({bool me, String text})> _messages = [];
+  bool _busy = false;
+  bool _ready = false;
 
-  /// 会话内存上限：只保留最近 N 条（上下文本身只拼最近 6 条，
-  /// 这里防的是"聊很久之后列表无限涨"）
   static const int _maxMessages = 100;
+
+  @override
+  void initState() {
+    super.initState();
+    _ai.init().then((_) {
+      if (mounted) setState(() => _ready = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _input.dispose();
+    _scroll.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
 
   void _append(({bool me, String text}) m) {
     _messages.add(m);
@@ -36,49 +57,22 @@ class _PetChatSheetState extends State<PetChatSheet> {
     }
   }
 
-  bool _busy = false;
-  bool _showConfig = false;
-
-  // 配置表单（未配置时展示）
-  final _base = TextEditingController();
-  final _key = TextEditingController();
-  final _model = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _ai.init().then((_) {
-      if (!mounted) return;
-      setState(() {
-        _showConfig = !_ai.isConfigured;
-        _base.text = _ai.baseUrl;
-        _model.text = _ai.model;
-      });
-    });
-  }
-
-  @override
-  void dispose() {
-    _input.dispose();
-    _scroll.dispose();
-    _base.dispose();
-    _key.dispose();
-    _model.dispose();
-    super.dispose();
-  }
-
   String get _systemPrompt {
     final p = PetService.instance;
-    final sp = p.species.name;
-    return '你是一只名叫「$sp」的桌面宠物，说话简短、活泼、带一点撒娇，'
+    return '你是一只名叫「${p.species.name}」的熊猫桌宠，说话简短、活泼、带一点撒娇，'
         '每次回复不超过 80 字，不要用列表和 Markdown。'
         '当前状态：等级 ${p.level}，饱食度 ${p.hunger.round()}，'
         '心情 ${p.mood.round()}，猫币 ${p.coins}。'
         '如果饱食度低就小声提醒喂饭，心情低就要求陪玩。';
   }
 
-  Future<void> _send() async {
-    final text = _input.text.trim();
+  Future<void> _send([String? preset]) async {
+    if (!_ai.isConfigured) {
+      await Get.to(() => const AiSettingsPage());
+      if (mounted) setState(() {});
+      return;
+    }
+    final text = (preset ?? _input.text).trim();
     if (text.isEmpty || _busy) return;
     setState(() {
       _append((me: true, text: text));
@@ -87,13 +81,11 @@ class _PetChatSheetState extends State<PetChatSheet> {
     _input.clear();
     _jumpBottom();
     try {
-      // AiService 只接受单轮，这里把最近 6 条上下文拼进 user
       final recent = _messages.length > 7
           ? _messages.sublist(_messages.length - 7, _messages.length - 1)
           : _messages.sublist(0, _messages.length - 1);
-      final ctx = recent
-          .map((m) => '${m.me ? "主人" : "我"}：${m.text}')
-          .join('\n');
+      final ctx =
+          recent.map((m) => '${m.me ? "主人" : "我"}：${m.text}').join('\n');
       final user = ctx.isEmpty ? text : '$ctx\n主人：$text\n我：';
       final reply = await _ai.chat(system: _systemPrompt, user: user);
       if (!mounted) return;
@@ -118,213 +110,338 @@ class _PetChatSheetState extends State<PetChatSheet> {
     });
   }
 
-  Future<void> _saveConfig() async {
-    await _ai.saveConfig(
-      baseUrl: _base.text,
-      apiKey: _key.text,
-      model: _model.text,
-    );
-    if (!mounted) return;
-    setState(() => _showConfig = false);
-  }
-
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bg = isDark ? JellyTheme.cardDark : JellyTheme.cardLight;
-    final maxH = MediaQuery.of(context).size.height * 0.72;
-    return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
-      child: Container(
-        constraints: BoxConstraints(maxHeight: maxH),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+    final maxH = MediaQuery.of(context).size.height * 0.66;
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    return Center(
+      child: AnimatedPadding(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+        // 键盘弹起时整卡片上移，而不是被顶出屏幕
+        padding: EdgeInsets.only(
+          left: 20,
+          right: 20,
+          bottom: bottomInset + 24,
+          top: 24,
         ),
-        child: SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 8),
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: JellyTheme.textSecondary.withValues(alpha: 0.35),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 10, 12, 4),
-                child: Row(
-                  children: [
-                    Icon(Icons.chat_bubble_outline_rounded,
-                        size: 20, color: JellyTheme.primary),
-                    const SizedBox(width: 8),
-                    Text(
-                      '和宠物聊聊',
-                      style: TextStyle(
-                        fontSize: AppTheme.fontSubhead,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white : AppTheme.textPrimary,
-                      ),
-                    ),
-                    const Spacer(),
-                    if (!_showConfig)
-                      IconButton(
-                        tooltip: '接口设置',
-                        icon: const Icon(Icons.settings_outlined, size: 20),
-                        onPressed: () => setState(() => _showConfig = true),
-                      ),
-                  ],
-                ),
-              ),
-              if (_showConfig)
-                _configForm(isDark)
-              else ...[
-                Expanded(
-                  child: _messages.isEmpty
-                      ? _emptyHint(isDark)
-                      : ListView.builder(
-                          controller: _scroll,
-                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                          itemCount: _messages.length + (_busy ? 1 : 0),
-                          itemBuilder: (context, i) {
-                            if (i == _messages.length) {
-                              return _bubble(false, '…', isDark);
-                            }
-                            final m = _messages[i];
-                            return _bubble(m.me, m.text, isDark);
-                          },
-                        ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _input,
-                          textInputAction: TextInputAction.send,
-                          onSubmitted: (_) => _send(),
-                          decoration: InputDecoration(
-                            hintText: '说点什么…',
-                            isDense: true,
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 12),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(24),
-                              borderSide: BorderSide.none,
-                            ),
-                            filled: true,
-                            fillColor: isDark
-                                ? Colors.white.withValues(alpha: 0.06)
-                                : Colors.black.withValues(alpha: 0.04),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      IconButton.filled(
-                        onPressed: _busy ? null : _send,
-                        icon: const Icon(Icons.arrow_upward_rounded, size: 20),
-                      ),
-                    ],
-                  ),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: 360, maxHeight: maxH),
+          child: Container(
+            decoration: BoxDecoration(
+              color: AppTheme.backgroundSecondary,
+              borderRadius: BorderRadius.circular(22),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.18),
+                  blurRadius: 28,
+                  offset: const Offset(0, 10),
                 ),
               ],
-            ],
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _header(),
+                const Divider(height: 1, thickness: 0.5),
+                if (!_ready)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 40),
+                    child: Center(
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+                  )
+                else if (!_ai.isConfigured)
+                  _needConfig()
+                else ...[
+                  // 用 Flexible + shrinkWrap：卡片按内容长高（不硬撑满 66%），
+                  // 消息多了才封顶到 maxHeight 并可滚动。
+                  Flexible(
+                    child: _messages.isEmpty
+                        ? _emptyHint()
+                        : ListView.builder(
+                            controller: _scroll,
+                            shrinkWrap: true,
+                            padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+                            itemCount: _messages.length + (_busy ? 1 : 0),
+                            itemBuilder: (context, i) {
+                              if (i == _messages.length) {
+                                return _bubble(false, '…', typing: true);
+                              }
+                              final m = _messages[i];
+                              return _bubble(m.me, m.text);
+                            },
+                          ),
+                  ),
+                  if (_messages.isEmpty) _quickChips(),
+                  _inputBar(),
+                ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _emptyHint(bool isDark) {
+  Widget _header() {
+    final p = PetService.instance;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 8, 10),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: AppTheme.backgroundTertiary,
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: PetView(
+              species: p.species,
+              outfit: p.equippedOutfit,
+              outfits: p.equippedOutfitsByName,
+              t: 0.5,
+              size: 38,
+              headOnly: true,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  p.species.name,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Text(
+                  'Lv.${p.level} · 心情 ${p.mood.round()}',
+                  style: TextStyle(color: AppTheme.textTertiary, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            onPressed: () => Get.back(),
+            icon: Icon(Icons.close_rounded,
+                size: 20, color: AppTheme.textTertiary),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _needConfig() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 26, 20, 30),
+      child: Column(
+        children: [
+          Icon(Icons.smart_toy_outlined,
+              size: 34, color: AppTheme.textTertiary),
+          const SizedBox(height: 12),
+          Text(
+            '还没有配置 AI\n宠物固定使用「设置 → AI 管理」里的配置',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 13,
+              height: 1.6,
+            ),
+          ),
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: () async {
+              await Get.to(() => const AiSettingsPage());
+              if (mounted) setState(() {});
+            },
+            child: const Text('去配置'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _emptyHint() {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(28),
+        padding: const EdgeInsets.symmetric(horizontal: 28),
         child: Text(
-          '它现在饿着肚子也能陪你聊几句。\n试试：「今天心情怎么样？」',
+          '摸摸头也能聊天。\n想说话就点下面的麦克风（用键盘听写）。',
           textAlign: TextAlign.center,
           style: TextStyle(
-            fontSize: AppTheme.fontBody,
-            height: 1.6,
-            color: JellyTheme.textSecondary,
+            fontSize: 13,
+            height: 1.7,
+            color: AppTheme.textTertiary,
           ),
         ),
       ),
     );
   }
 
-  Widget _bubble(bool me, String text, bool isDark) {
-    final fg = me ? Colors.white : (isDark ? Colors.white : Colors.black87);
-    final bub = me
-        ? JellyTheme.primary
-        : (isDark
-            ? Colors.white.withValues(alpha: 0.08)
-            : Colors.black.withValues(alpha: 0.05));
-    return Align(
-      alignment: me ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.72,
-        ),
-        decoration: BoxDecoration(
-          color: bub,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Text(
-          text,
-          style: TextStyle(fontSize: AppTheme.fontBody, height: 1.45, color: fg),
-        ),
-      ),
-    );
-  }
-
-  Widget _configForm(bool isDark) {
-    Widget field(TextEditingController c, String label, {bool obscure = false}) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: TextField(
-          controller: c,
-          obscureText: obscure,
-          decoration: InputDecoration(
-            labelText: label,
-            isDense: true,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
+  Widget _quickChips() {
+    const items = ['今天心情怎么样？', '讲个冷笑话', '推荐一本书', '陪我读一会儿'];
+    return SizedBox(
+      height: 40,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        itemCount: items.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, i) {
+          return ActionChip(
+            label: Text(items[i], style: const TextStyle(fontSize: 12)),
+            onPressed: () => _send(items[i]),
+            backgroundColor: AppTheme.backgroundTertiary,
+            side: BorderSide.none,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
             ),
-          ),
-        ),
-      );
-    }
+          );
+        },
+      ),
+    );
+  }
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+  Widget _bubble(bool me, String text, {bool typing = false}) {
+    final petBg = AppTheme.backgroundCard;
+    final meBg = AppTheme.accentOnSurface;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        mainAxisAlignment:
+            me ? MainAxisAlignment.end : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Text(
-            '填入任意 OpenAI 兼容接口即可（默认 DeepSeek）。Key 只存本机。',
-            style: TextStyle(
-              fontSize: AppTheme.fontCaption,
-              height: 1.5,
-              color: JellyTheme.textSecondary,
+          if (!me) ...[
+            _miniAvatar(),
+            const SizedBox(width: 8),
+          ],
+          Flexible(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.68,
+              ),
+              decoration: BoxDecoration(
+                color: me ? meBg : petBg,
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(16),
+                  topRight: const Radius.circular(16),
+                  bottomLeft: Radius.circular(me ? 16 : 4),
+                  bottomRight: Radius.circular(me ? 4 : 16),
+                ),
+              ),
+              child: Text(
+                typing ? '…' : text,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  height: 1.5,
+                  color: me ? Colors.white : AppTheme.textPrimary,
+                ),
+              ),
             ),
           ),
-          const SizedBox(height: 12),
-          field(_base, '接口地址（如 https://api.deepseek.com）'),
-          field(_key, 'API Key', obscure: true),
-          field(_model, '模型（如 deepseek-chat）'),
-          const SizedBox(height: 4),
-          FilledButton(
-            onPressed: _saveConfig,
-            child: const Text('保存并开始聊天'),
+          if (me) const SizedBox(width: 4),
+        ],
+      ),
+    );
+  }
+
+  Widget _miniAvatar() {
+    final p = PetService.instance;
+    return Container(
+      width: 26,
+      height: 26,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: AppTheme.backgroundTertiary,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: PetView(
+        species: p.species,
+        outfit: p.equippedOutfit,
+        outfits: p.equippedOutfitsByName,
+        t: 0.5,
+        size: 26,
+        headOnly: true,
+      ),
+    );
+  }
+
+  Widget _inputBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: AppTheme.backgroundTertiary,
+                borderRadius: BorderRadius.circular(24),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: '语音输入',
+                    onPressed: () {
+                      _focus.requestFocus();
+                      AppToast.message('点键盘上的麦克风就能说话（系统听写）');
+                    },
+                    icon: Icon(Icons.mic_none_rounded,
+                        size: 20, color: AppTheme.textSecondary),
+                  ),
+                  Expanded(
+                    child: TextField(
+                      controller: _input,
+                      focusNode: _focus,
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: (_) => _send(),
+                      style: TextStyle(
+                          fontSize: 13.5, color: AppTheme.textPrimary),
+                      decoration: const InputDecoration(
+                        hintText: '跟它说点什么…',
+                        isDense: true,
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Material(
+            color: AppTheme.accentOnSurface,
+            shape: const CircleBorder(),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: _busy ? null : () => _send(),
+              child: Padding(
+                padding: const EdgeInsets.all(11),
+                child: _busy
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.arrow_upward_rounded,
+                        size: 19, color: Colors.white),
+              ),
+            ),
           ),
         ],
       ),

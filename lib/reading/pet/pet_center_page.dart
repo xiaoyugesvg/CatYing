@@ -93,8 +93,41 @@ class _PetCenterPageState extends State<PetCenterPage>
               const SizedBox(height: 14),
               _actionsCard(),
               const SizedBox(height: 18),
+              // 换装：用户 2026-10-25「服饰后加」——
+              //   新版熊猫还没做服饰贴图，这里先收起整套穿搭 UI，
+              //   否则点进去能选、但宠物身上什么都不显示（像坏了）。
               _sectionTitle('换装'),
-              _outfits(),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: JellyTheme.cardLight,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.checkroom_outlined,
+                        size: 22, color: JellyTheme.textSecondary),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('服饰 · 后续开放',
+                              style: TextStyle(
+                                  fontSize: AppTheme.fontBody,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.textPrimary)),
+                          const SizedBox(height: 3),
+                          Text('新版熊猫还没做服饰贴图，等模型定稿后再上',
+                              style: TextStyle(
+                                  fontSize: AppTheme.fontCaption,
+                                  color: JellyTheme.textSecondary)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(height: 18),
               _sectionTitle('图鉴（$ownedPets/${PetSpecies.pets.length}）'),
               _collection(),
@@ -593,163 +626,6 @@ class _PetCenterPageState extends State<PetCenterPage>
             onChanged: _pet.setEnabled,
           ),
         ],
-      ),
-    );
-  }
-
-  /// QQ秀式衣橱：按部位分组（头饰 / 面部 / 颈部 / 上衣 / 手持 / 背景），
-  /// 每个部位横向排「不戴 + 该部位的所有单品」。
-  Widget _outfits() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (final slot in PetOutfitSlot.values) _outfitSlotRow(slot),
-      ],
-    );
-  }
-
-  Widget _outfitSlotRow(PetOutfitSlot slot) {
-    final current = _pet.equippedSlots[slot];
-    final items = PetOutfits.forSlot(slot);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                slot.label,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: _isDark ? Colors.white : JellyTheme.textPrimaryLight,
-                ),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                current == null
-                    ? '未穿戴'
-                    : (PetOutfits.byId(current)?.name ?? ''),
-                style: TextStyle(
-                  fontSize: 10.5,
-                  color: JellyTheme.textSecondary,
-                ),
-              ),
-              const Spacer(),
-              if (current != null)
-                GestureDetector(
-                  onTap: () => _pet.clearOutfitSlot(slot),
-                  child: Text(
-                    '摘下',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: JellyTheme.textSecondary,
-                      decoration: TextDecoration.underline,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            height: 96,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: items.length + 1,
-              separatorBuilder: (_, _) => const SizedBox(width: 8),
-              itemBuilder: (_, i) {
-                if (i == 0) {
-                  return _outfitChip(slot: slot, item: null);
-                }
-                return _outfitChip(slot: slot, item: items[i - 1]);
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _outfitChip({required PetOutfitSlot slot, PetOutfitInfo? item}) {
-    final current = _pet.equippedSlots[slot];
-    final selected = item == null ? current == null : current == item.id;
-    final owned = item == null || _pet.ownsOutfit(item);
-    final label = item?.name ?? '不戴';
-    // 自定义图片没有矢量头/身体坐标 ⇒ 用 QQ 小人做换装预览，
-    // 否则会拿「自定义」这个非 QQ 物种去画，落回旧的动物团子。
-    final previewSpecies = _pet.isCustomPet ? PetSpecies.qqBoy : _pet.species;
-    return GestureDetector(
-      onTap: () async {
-        if (item == null) {
-          await _pet.clearOutfitSlot(slot);
-          return;
-        }
-        final ok = await _pet.buyOutfit(item);
-        if (!ok) {
-          _toast('需要 Lv.${item.unlockLevel} / ${item.price} 猫币');
-        }
-      },
-      child: Container(
-        width: 78,
-        padding: const EdgeInsets.fromLTRB(5, 6, 5, 6),
-        decoration: BoxDecoration(
-          color: _card,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: selected ? JellyTheme.primary : Colors.transparent,
-            width: 1.5,
-          ),
-        ),
-        child: Column(
-          children: [
-            SizedBox(
-              height: 46,
-              child: item == null
-                  ? Center(
-                      child: Icon(
-                        Icons.block_rounded,
-                        size: 22,
-                        color: JellyTheme.textSecondary,
-                      ),
-                    )
-                  : PetView(
-                      species: previewSpecies,
-                      outfit: PetOutfits.none.id,
-                      // 只预览这一件，方便看清单品本身
-                      outfits: {slot.name: item.id},
-                      t: 0.6,
-                      size: 46,
-                      mood: 80,
-                      // 图片宠物没有矢量头，直接显示全身（能看到配饰戴上的效果）
-                      headOnly:
-                          previewSpecies.imageAsset == null &&
-                          (slot == PetOutfitSlot.hat ||
-                              slot == PetOutfitSlot.face),
-                    ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w600,
-                color: _isDark ? Colors.white : JellyTheme.textPrimaryLight,
-              ),
-            ),
-            Text(
-              owned ? (selected ? '已穿戴' : '点击穿戴') : '${item.price} 币',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 9,
-                color: JellyTheme.textSecondary,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

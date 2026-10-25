@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../common/theme.dart';
 import '../../../reading/services/ai_service.dart';
 import 'log_diagnosis_page.dart';
 
@@ -36,12 +37,14 @@ const List<_Provider> _providers = [
     'qwen3-coder',
     '有免费模型',
   ),
-  // 自建反代（用户自己的服务器）：路径以你实际的反代配置为准
+  // 自建反代（用户自己的服务器）：地址以你实际的反代/网关为准。
+  // ⚠️ OpenCode 官方面板是**账号密码登录的 Web 端**，不是 OpenAI 兼容 API；
+  //   要在这里用它，得在它前面挂一层兼容网关（one-api / new-api 之类）。
   _Provider(
-    'OpenCode(自建)',
+    '自建(OpenAI兼容)',
     'https://opencodeai.cn/v1',
     'qwen3-coder',
-    '自己的服务器',
+    '需兼容网关',
   ),
   // OpenRouter：聚合网关，带 `:free` 后缀的模型真免费（有限速）。
   _Provider(
@@ -72,6 +75,12 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
   final TextEditingController _key = TextEditingController();
   final TextEditingController _model = TextEditingController();
 
+  // 阅读独立配置（宠物永远用上面那份）
+  final TextEditingController _rBase = TextEditingController();
+  final TextEditingController _rKey = TextEditingController();
+  final TextEditingController _rModel = TextEditingController();
+  bool _readerSeparate = false;
+
   String? _selected;
   bool _obscure = true;
   bool _testing = false;
@@ -89,6 +98,9 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
     _base.dispose();
     _key.dispose();
     _model.dispose();
+    _rBase.dispose();
+    _rKey.dispose();
+    _rModel.dispose();
     super.dispose();
   }
 
@@ -99,6 +111,10 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
     _base.text = _ai.baseUrl;
     _key.text = _ai.apiKey;
     _model.text = _ai.model;
+    _rBase.text = _ai.readerBaseUrl;
+    _rKey.text = _ai.readerApiKey;
+    _rModel.text = _ai.readerModel;
+    _readerSeparate = _ai.readerSeparate;
     for (final p in _providers) {
       if (_ai.baseUrl.startsWith(p.baseUrl)) {
         _selected = p.name;
@@ -129,11 +145,17 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
       baseUrl: _base.text,
       apiKey: _key.text,
       model: _model.text,
+      readerSeparate: _readerSeparate,
+      readerBaseUrl: _rBase.text,
+      readerApiKey: _rKey.text,
+      readerModel: _rModel.text,
     );
     if (!mounted) return true;
     setState(() {
       _ok = true;
-      _msg = '已保存，全 App 的 AI 功能都会用这份配置';
+      _msg = _readerSeparate && _rKey.text.trim().isNotEmpty
+          ? '已保存：宠物用上面的配置，阅读用下面的独立配置'
+          : '已保存，宠物与各模块都用这份配置';
     });
     return true;
   }
@@ -171,146 +193,380 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('AI 管理')),
+      backgroundColor: AppTheme.backgroundPrimary,
+      appBar: AppBar(
+        backgroundColor: AppTheme.backgroundPrimary,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        iconTheme: IconThemeData(color: AppTheme.textPrimary),
+        title: Text(
+          'AI 管理',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: AppTheme.textPrimary,
+          ),
+        ),
+      ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(14, 10, 14, 30),
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
         children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Text(
-                '这里是全 App 唯一的 AI 配置。填一次 Key，宠物对话、以及后续接入 '
-                'AI 的模块都共用，不用到处重复配置。\n\n'
-                'Key 只保存在本机，不会上传。阅读模块原有的 AI 功能不受影响。',
-                style: TextStyle(
-                  fontSize: 12.5,
-                  height: 1.6,
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            '服务商',
-            style: TextStyle(
-              fontSize: 12,
-              color: scheme.onSurfaceVariant,
-              letterSpacing: 0.3,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final p in _providers)
-                ChoiceChip(
-                  label: Text(p.name),
-                  selected: _selected == p.name,
-                  onSelected: (_) => _pick(p),
-                ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          _field(
-            _base,
-            '接口地址',
-            hint: '如 https://api.deepseek.com',
-            keyboard: TextInputType.url,
-          ),
-          const SizedBox(height: 12),
-          _field(
-            _key,
-            'API Key',
-            hint: 'sk-...',
-            obscure: _obscure,
-            suffix: IconButton(
-              icon: Icon(
-                _obscure ? Icons.visibility_off : Icons.visibility,
-                size: 18,
-              ),
-              onPressed: () => setState(() => _obscure = !_obscure),
-            ),
-          ),
-          const SizedBox(height: 12),
-          _field(_model, '模型', hint: '如 deepseek-chat'),
+          _statusCard(),
           const SizedBox(height: 18),
+          _label('服务商'),
+          _providerChips(),
+          const SizedBox(height: 14),
+          _surface(
+            Column(
+              children: [
+                _field(
+                  _base,
+                  '接口地址',
+                  hint: 'https://api.deepseek.com',
+                  keyboard: TextInputType.url,
+                ),
+                const SizedBox(height: 10),
+                _field(
+                  _key,
+                  'API Key',
+                  hint: 'sk-...',
+                  obscure: _obscure,
+                  suffix: IconButton(
+                    icon: Icon(
+                      _obscure ? Icons.visibility_off : Icons.visibility,
+                      size: 18,
+                      color: AppTheme.textTertiary,
+                    ),
+                    onPressed: () => setState(() => _obscure = !_obscure),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _field(_model, '模型', hint: 'deepseek-chat'),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
-                child: FilledButton.tonal(
-                  onPressed: _testing ? null : () => _test(),
-                  child: _testing
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('测试连接'),
+                child: _button(
+                  _testing ? '连接中…' : '测试连接',
+                  tonal: true,
+                  busy: _testing,
+                  onTap: _testing ? null : _test,
                 ),
               ),
               const SizedBox(width: 10),
+              Expanded(child: _button('保存', onTap: () => _save())),
+            ],
+          ),
+          if (_msg != null) _msgRow(),
+          const SizedBox(height: 16),
+          _readerCard(),
+          const SizedBox(height: 14),
+          _surface(
+            InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const LogDiagnosisPage()),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: AppTheme.backgroundTertiary,
+                        borderRadius: BorderRadius.circular(11),
+                      ),
+                      child: Icon(Icons.troubleshoot_rounded,
+                          size: 18, color: AppTheme.accentOnSurface),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('日志诊断',
+                              style: TextStyle(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.textPrimary)),
+                          const SizedBox(height: 2),
+                          Text('读运行日志，让 AI 给出优化建议',
+                              style: TextStyle(
+                                  fontSize: 11.5, color: AppTheme.textTertiary)),
+                        ],
+                      ),
+                    ),
+                    Icon(Icons.chevron_right,
+                        size: 18, color: AppTheme.textTertiary),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            '所有服务商都按 OpenAI 兼容协议调用。地址以 /v1、/v4 结尾会自动补全，'
+            '也可以直接填完整的 .../chat/completions。',
+            style: TextStyle(
+              fontSize: 11.5,
+              height: 1.6,
+              color: AppTheme.textTertiary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── 组件 ───────────────────────────────────────────────
+  Widget _label(String t) => Padding(
+        padding: const EdgeInsets.only(left: 2, bottom: 8),
+        child: Text(t,
+            style: TextStyle(fontSize: 11.5, color: AppTheme.textTertiary)),
+      );
+
+  Widget _surface(Widget child) => Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundCard,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: child,
+      );
+
+  Widget _statusCard() {
+    final name = _selected ?? (_key.text.trim().isEmpty ? '未配置' : '自定义');
+    final ok = _key.text.trim().isNotEmpty;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundCard,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: ok
+                      ? AppTheme.accentOnSurface.withValues(alpha: 0.14)
+                      : AppTheme.backgroundTertiary,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.auto_awesome_rounded,
+                  size: 19,
+                  color: ok ? AppTheme.accentOnSurface : AppTheme.textTertiary,
+                ),
+              ),
+              const SizedBox(width: 12),
               Expanded(
-                child: FilledButton(
-                  onPressed: () => _save(),
-                  child: const Text('保存'),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('当前使用',
+                        style: TextStyle(
+                            fontSize: 11, color: AppTheme.textTertiary)),
+                    const SizedBox(height: 2),
+                    Text(
+                      '$name · ${_model.text.trim().isEmpty ? '未填模型' : _model.text.trim()}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: ok
+                      ? const Color(0x1F2E9E5B)
+                      : AppTheme.backgroundTertiary,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  ok ? '已配置' : '未配置',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w600,
+                    color: ok ? const Color(0xFF2E9E5B) : AppTheme.textTertiary,
+                  ),
                 ),
               ),
             ],
           ),
-          if (_msg != null) ...[
-            const SizedBox(height: 14),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  _ok ? Icons.check_circle_outline : Icons.error_outline,
-                  size: 16,
-                  color: _ok ? Colors.green : scheme.error,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    _msg!,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      height: 1.5,
-                      color: _ok ? scheme.onSurface : scheme.error,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 24),
+          const SizedBox(height: 10),
           Text(
-            '说明：所有服务商都按 OpenAI 兼容协议调用。若你的服务商地址以 '
-            '/v4 或 /v1 结尾会被自动补全；也可以直接填完整的 '
-            '.../chat/completions。',
+            '宠物对话固定用这份配置；阅读可以单独配一套。Key 只存本机。',
             style: TextStyle(
-              fontSize: 11.5,
-              height: 1.6,
-              color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
-            ),
+                fontSize: 11.5, height: 1.55, color: AppTheme.textTertiary),
           ),
-          const SizedBox(height: 20),
-          // AI 底座之上的第一个实际用途：日志诊断
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.troubleshoot),
-              title: const Text('日志诊断'),
-              subtitle: const Text('读运行日志，让 AI 给出优化建议'),
-              trailing: const Icon(Icons.chevron_right, size: 18),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const LogDiagnosisPage(),
+        ],
+      ),
+    );
+  }
+
+  Widget _providerChips() {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final p in _providers)
+          GestureDetector(
+            onTap: () => _pick(p),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 140),
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+              decoration: BoxDecoration(
+                color: _selected == p.name
+                    ? AppTheme.accentOnSurface
+                    : AppTheme.backgroundTertiary,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                p.name,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: _selected == p.name
+                      ? FontWeight.w600
+                      : FontWeight.w400,
+                  color: _selected == p.name
+                      ? Colors.white
+                      : AppTheme.textSecondary,
                 ),
               ),
             ),
           ),
+      ],
+    );
+  }
+
+  Widget _button(
+    String text, {
+    bool tonal = false,
+    bool busy = false,
+    VoidCallback? onTap,
+  }) {
+    return Material(
+      color: tonal ? AppTheme.backgroundTertiary : AppTheme.accentOnSurface,
+      borderRadius: BorderRadius.circular(22),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: onTap,
+        child: SizedBox(
+          height: 44,
+          child: Center(
+            child: busy
+                ? SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppTheme.textSecondary,
+                    ),
+                  )
+                : Text(
+                    text,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: tonal ? AppTheme.textPrimary : Colors.white,
+                    ),
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _msgRow() {
+    final ok = _ok;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12, left: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            ok ? Icons.check_circle_outline : Icons.error_outline,
+            size: 15,
+            color: ok ? const Color(0xFF2E9E5B) : const Color(0xFFD25757),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              _msg!,
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.5,
+                color: ok ? AppTheme.textSecondary : const Color(0xFFD25757),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _readerCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundCard,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('阅读使用独立 AI',
+                        style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textPrimary)),
+                    const SizedBox(height: 2),
+                    Text('只影响阅读的总结 / 问答，宠物不受影响',
+                        style: TextStyle(
+                            fontSize: 11.5, color: AppTheme.textTertiary)),
+                  ],
+                ),
+              ),
+              Switch.adaptive(
+                value: _readerSeparate,
+                activeTrackColor: AppTheme.accentOnSurface,
+                onChanged: (v) => setState(() => _readerSeparate = v),
+              ),
+            ],
+          ),
+          if (_readerSeparate) ...[
+            const SizedBox(height: 10),
+            _field(_rBase, '阅读接口地址',
+                hint: 'https://api.deepseek.com',
+                keyboard: TextInputType.url),
+            const SizedBox(height: 10),
+            _field(_rKey, '阅读 API Key', hint: 'sk-...', obscure: true),
+            const SizedBox(height: 10),
+            _field(_rModel, '阅读模型', hint: 'deepseek-chat'),
+          ],
         ],
       ),
     );
@@ -324,20 +580,38 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
     bool obscure = false,
     Widget? suffix,
   }) {
-    return TextField(
-      controller: c,
-      obscureText: obscure,
-      keyboardType: keyboard,
-      style: const TextStyle(fontSize: 14),
-      decoration: InputDecoration(
-        labelText: label,
-        hintText: hint,
-        suffixIcon: suffix,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 2, bottom: 5),
+          child: Text(label,
+              style: TextStyle(fontSize: 10.5, color: AppTheme.textTertiary)),
         ),
-        isDense: true,
-      ),
+        Container(
+          decoration: BoxDecoration(
+            color: AppTheme.backgroundTertiary,
+            borderRadius: BorderRadius.circular(13),
+          ),
+          padding: const EdgeInsets.only(left: 12, right: 4),
+          child: TextField(
+            controller: c,
+            obscureText: obscure,
+            keyboardType: keyboard,
+            onChanged: (_) => setState(() {}),
+            style: TextStyle(fontSize: 13.5, color: AppTheme.textPrimary),
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle:
+                  TextStyle(fontSize: 13, color: AppTheme.textTertiary),
+              suffixIcon: suffix,
+              border: InputBorder.none,
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(vertical: 13),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

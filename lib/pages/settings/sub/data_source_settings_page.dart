@@ -11,7 +11,6 @@ import '../../../widgets/app_toast.dart';
 import '../../../widgets/common_widgets.dart';
 import '../../../widgets/source_kind_badge.dart';
 import '../controller.dart';
-import 'ai_settings_page.dart';
 import 'cf_sites_page.dart';
 import 'engine_settings_page.dart';
 import 'local_python_sources_page.dart';
@@ -114,15 +113,6 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
             title: 'Cloudflare 验证',
             subtitle: '验证一次后自动复用，不再重复弹窗',
             onTap: () => Get.to(() => const CfSitesPage()),
-          ),
-        ),
-        // AI 管理：全 App 唯一的 Key 配置（宠物对话等共用）
-        _card(
-          SettingsRow(
-            icon: Icons.smart_toy_outlined,
-            title: 'AI 管理',
-            subtitle: '填一次 Key，宠物对话与各模块共用',
-            onTap: () => Get.to(() => const AiSettingsPage()),
           ),
         ),
         // Telegram 源：扫码登录后用自己加入的频道当片库（内置 Node 跑 MTProto）

@@ -8,6 +8,7 @@ import '../../hiker/pages/hiker_settings_page.dart';
 import 'controller.dart';
 import 'sub/about_settings_page.dart';
 import 'sub/ad_block_settings_page.dart';
+import 'sub/ai_settings_page.dart';
 import 'sub/calendar_settings_page.dart';
 import 'sub/unified_theme_settings_page.dart';
 import 'sub/danmu_settings_page.dart';
@@ -102,6 +103,14 @@ class _SettingsPageState extends State<SettingsPage> {
                   icon: Icons.movie_outlined,
                   title: '订阅管理',
                   onTap: () => Get.to(() => const DataSourceSettingsPage()),
+                ),
+                const SizedBox(height: AppTheme.spacingMD),
+                // AI 管理（2026-10-25：从「订阅管理」里提出来做顶层入口 ——
+                // 宠物对话、日志诊断都依赖它，藏在二级页里找不到）
+                _categoryTile(
+                  icon: Icons.smart_toy_outlined,
+                  title: 'AI 管理',
+                  onTap: () => Get.to(() => const AiSettingsPage()),
                 ),
                 const SizedBox(height: AppTheme.spacingMD),
                 // 程序（独立小程序模块：TVBox 配置 影视+直播）

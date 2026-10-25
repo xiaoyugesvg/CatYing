@@ -67,17 +67,24 @@ class PetView extends StatelessWidget {
     return out;
   }
 
+  /// GIF 熊猫头（用户 2026-10-25 指定：`aigei` 那张 280×280 透明底动图）。
+  ///
+  /// 已随包打到 `assets/images/`（159KB / 24 帧）——
+  /// 不走网络：那条链接是带 token 的临时直链，换签名就 403，而且离线会白屏。
+  static const String gifHead = 'assets/images/pet_panda_head.gif';
+
   @override
   Widget build(BuildContext context) {
     final asset = species.imageAsset;
     if (asset != null && !headOnly) {
       return _buildImagePet(asset);
     }
-    // 矢量宠物：默认画**全身**（大脑袋 + 小身体），换装才有的放矢；
-    // 头像模式（[headOnly] = true）仍放大头部。
-    //
-    // QQ 秀风格（用户 2026-10-18）：人形小人 + 多部位换装；
-    // 生肖插画只作为登录头像，不再走桌宠绘制。
+    // 熊猫（species.qq）：头用 GIF，身体仍用矢量画 ——
+    // 纯 GIF 只有头，没有身子；纯矢量又被嫌不像熊猫。
+    if (species.qq) {
+      return headOnly ? _gifHeadOnly() : _buildGifPanda();
+    }
+    // 其它物种：保留原来的水墨画笔
     return SizedBox(
       width: size,
       height: size,
@@ -85,22 +92,82 @@ class PetView extends StatelessWidget {
       // 不会连带周边列表/文字一起重绘（视觉完全一致，纯性能）。
       child: RepaintBoundary(
         child: CustomPaint(
-          painter: species.qq
-              ? BlobPetPainter(
-                  species: species,
-                  outfits: _equipped,
-                  t: t,
-                  mood: mood,
-                  headOnly: headOnly,
-                )
-              : _InkPetPainter(
-                  species: species,
-                  outfit: outfit,
-                  outfits: _equipped,
-                  t: t,
-                  mood: mood,
-                  headOnly: headOnly,
-                ),
+          painter: _InkPetPainter(
+            species: species,
+            outfit: outfit,
+            outfits: _equipped,
+            t: t,
+            mood: mood,
+            headOnly: headOnly,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 只显示 GIF 头（列表头像 / 聊天小头像）
+  Widget _gifHeadOnly() {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Image.asset(
+        gifHead,
+        fit: BoxFit.contain,
+        gaplessPlayback: true,
+        filterQuality: FilterQuality.medium,
+      ),
+    );
+  }
+
+  /// 全身：矢量身体（无头）+ GIF 头，整只做同一个呼吸/浮动/摇摆
+  Widget _buildGifPanda() {
+    final cycle = t * 2 * math.pi;
+    final s = size / 100.0;
+    final bob = math.sin(cycle) * 1.7 * s;
+    final breathe = 1 + math.sin(cycle * 2) * 0.011;
+    final sway = math.sin(cycle + 0.8) * 0.02;
+    return SizedBox(
+      width: size,
+      height: size,
+      child: RepaintBoundary(
+        child: Transform.translate(
+          offset: Offset(0, bob),
+          child: Transform.rotate(
+            angle: sway,
+            child: Transform.scale(
+              scale: breathe,
+              child: Stack(
+                children: [
+                  CustomPaint(
+                    size: Size.square(size),
+                    painter: BlobPetPainter(
+                      species: species,
+                      outfits: _equipped,
+                      t: t,
+                      mood: mood,
+                      drawHead: false,
+                      animate: false,
+                    ),
+                  ),
+                  // GIF 头的位置由动图本身的留白反推：
+                  //   bbox ≈ (1%,8%)–(90%,90%) ⇒ 按头宽 52 单位反推整图 58 单位，
+                  //   left 0.236 / top 0.075 / 边长 0.58。
+                  Positioned(
+                    left: size * 0.236,
+                    top: size * 0.075,
+                    width: size * 0.58,
+                    height: size * 0.58,
+                    child: Image.asset(
+                      gifHead,
+                      fit: BoxFit.contain,
+                      gaplessPlayback: true,
+                      filterQuality: FilterQuality.medium,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );

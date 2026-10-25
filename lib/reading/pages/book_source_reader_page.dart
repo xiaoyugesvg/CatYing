@@ -4638,9 +4638,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       }
       return;
     }
-    // 仿真/覆盖（仅文字模式）：组件内部自绘点击稳定（无 Scrollable 竞争），
-    // 交给组件处理。图片模式已在上面的分支里处理完并 return。
+    // 仿真/覆盖（仅文字模式）：左右两边的翻页交给组件自己处理；
+    // 但**中间 1/3 必须能呼出功能面板** —— 原来这里直接 return，
+    // 导致这两种翻页模式下单击永远弹不出面板（用户 2026-10-25）。
     if (_rs.pageMode == PageMode.curl || _rs.pageMode == PageMode.cover) {
+      final w = size.width;
+      if (pos.dx >= w / 3 && pos.dx <= w * 2 / 3) _toggleBar();
       return;
     }
     // 文字模式：3×3 分区 + 「点击区域」配置；menu 动作由双击/双指承担
@@ -11864,13 +11867,19 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     const Spacer(),
                     FilledButton(
                       onPressed: () async {
+                        // 阅读的这套配置写进「阅读独立」槽位（readerSeparate=true）：
+                        // 宠物固定用「设置 → AI 管理」的全局配置，两者互不覆盖。
                         await ai.saveConfig(
-                          baseUrl: baseCtrl.text,
-                          apiKey: keyCtrl.text,
-                          model: modelCtrl.text,
+                          baseUrl: ai.baseUrl,
+                          apiKey: ai.apiKey,
+                          model: ai.model,
+                          readerSeparate: true,
+                          readerBaseUrl: baseCtrl.text,
+                          readerApiKey: keyCtrl.text,
+                          readerModel: modelCtrl.text,
                         );
                         if (ctx.mounted) Navigator.pop(ctx);
-                        _toast('AI 配置已保存');
+                        _toast('阅读 AI 配置已保存（只影响阅读）');
                       },
                       child: const Text('保存并返回'),
                     ),
@@ -11925,7 +11934,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       default:
         return;
     }
-    _showAiLoading(action, () => ai.chat(system: system, user: user));
+    _showAiLoading(
+        action, () => ai.chat(system: system, user: user, scoped: true));
   }
 
   /// 问答：先弹输入框，再用本章做上下文回答
@@ -11967,6 +11977,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             '你是小说阅读助手，基于给出的本章内容用简体中文回答读者问题。'
             '内容无关时如实说明。',
         user: '《${widget.bookName}》本章内容：\n$body\n\n读者问题：$question',
+        scoped: true,
       ),
     );
   }

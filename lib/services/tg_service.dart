@@ -158,6 +158,38 @@ class TgService {
 
   // ── 收藏的频道（本地，跨启动保留）─────────────────────────
   static const _kChannels = 'tg.channels.v1';
+  // v2：内置频道从 @telegram 换成 @cctv1（用户 2026-10-25 指定）
+  static const _kSeeded = 'tg.seeded.v2';
+
+  /// 首次开启 TG 时内置的公开频道
+  ///
+  /// 用户指定：`https://t.me/cctv1/53257` ⇒ 频道名是 **cctv1**。
+  /// 实测（2026-10-25）：`t.me/s/cctv1` 一页有 19 个视频帖，
+  /// `t.me/cctv1/53257?embed=1` 能解析出 `cdn5.telesco.pe/...mp4` 直链，
+  /// 不用登录就能播。
+  static const List<Map<String, String>> builtinChannels = [
+    {'peer': 'cctv1', 'title': 'CCTV1（内置）', 'mode': 'public'},
+  ];
+
+  /// 首次运行塞入内置频道。已塞过或用户已有频道时什么都不做。
+  ///
+  /// 换内置频道时记得**同时升 [_kSeeded]**，否则老用户不会再触发一次；
+  /// 这里会顺手把上一版的内置项（标题带「（内置）」）删掉，避免留两个。
+  Future<void> seedDefaults() async {
+    final p = await SharedPreferences.getInstance();
+    if (p.getBool(_kSeeded) == true) return;
+    final list = await channels();
+    final wanted = builtinChannels.map((e) => e['peer']).toSet();
+    list.removeWhere((e) =>
+        (e['title'] ?? '').toString().contains('（内置）') &&
+        !wanted.contains(e['peer']));
+    for (final c in builtinChannels.reversed) {
+      if (list.any((e) => e['peer'] == c['peer'])) continue;
+      list.insert(0, {...c});
+    }
+    await _saveChannels(list);
+    await p.setBool(_kSeeded, true);
+  }
 
   /// 形如 [{peer, title, mode}]，mode ∈ public / login
   Future<List<Map<String, dynamic>>> channels() async {

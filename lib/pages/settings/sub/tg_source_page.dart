@@ -78,6 +78,8 @@ class _TgSourcePageState extends State<TgSourcePage> {
     _proxyPortCtrl.text = _tg.proxyPort;
     await _tg.pushConfig();
     await _refreshStatus();
+    // 首次进入塞一个内置公开频道（与 TG 分类页共用同一份收藏）
+    await _tg.seedDefaults();
     final saved = await _tg.channels();
     if (mounted) {
       setState(() {
