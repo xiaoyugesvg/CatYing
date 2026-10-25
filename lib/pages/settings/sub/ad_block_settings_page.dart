@@ -456,7 +456,17 @@ class _AdBlockSettingsPageState extends State<AdBlockSettingsPage> {
 
   // ── CSS 过滤器（整份注入）──────────────────────────────────
 
-  Future<void> _importLimbo() => _importFilterUrl(AdBlockService.kLimboCssUrl);
+  /// 联网更新内置版：多个镜像源挨个试（官网挂了也能更新）
+  Future<void> _importLimbo() async {
+    AppToast.message('正在下载…');
+    final (ok, msg) = await _svc.importLimboFilter();
+    if (!mounted) return;
+    if (ok) {
+      AppToast.message(msg);
+    } else {
+      AppToast.error(msg);
+    }
+  }
 
   Future<void> _importAnyFilter() async {
     final u = await SettingsDialogs.editText(
@@ -698,7 +708,7 @@ class _AdBlockSettingsPageState extends State<AdBlockSettingsPage> {
               SettingsRow(
                 icon: Icons.download_rounded,
                 title: _svc.filterIsCustom ? '联网更新（覆盖自定义）' : '联网更新内置版',
-                subtitle: '约 320 KB；更新后会变成"自定义"',
+                subtitle: '从 Adblock4limbo 仓库拉最新规则，自动换源重试；更新后变成"自定义"',
                 onTap: _importLimbo,
               ),
               SettingsRow(

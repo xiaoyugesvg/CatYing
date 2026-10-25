@@ -176,8 +176,13 @@ class _PluginExploreViewState extends State<PluginExploreView> {
         _tagGroups = tagGroups;
         _loading = false;
         // 榜单/歌单都没有 → 给明确说明（不是"空白页"）
+        // 带上插件名：同平台可能有多个插件（如咪咕官方版 / Cookie 版），
+        // 只说"该插件"用户根本不知道该换哪个（2026-10-25）。
         if (groups.isEmpty && tagGroups.isEmpty) {
-          _error = '该插件没有提供榜单或推荐歌单（只支持搜索/取地址）';
+          _error = '「${widget.source.name}」没有提供榜单或推荐歌单'
+              '（只支持搜索/取地址）\n\n'
+              '同平台若装了支持榜单的插件（如咪咕官方版），'
+              '在「我的 → 音源管理」里启用后会自动改用它';
         }
       });
 

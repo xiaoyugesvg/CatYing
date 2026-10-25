@@ -31,8 +31,6 @@ import '../widgets/import_box_icon.dart';
 import '../theme/jelly_theme.dart';
 import '../../common/theme.dart';
 import '../../services/app_log.dart';
-import '../../services/python_manager.dart';
-import '../../services/python_sources_service.dart';
 
 /// 书源仓库 —— 小说书源（Legado 格式）的导入与管理。
 ///
@@ -1772,24 +1770,6 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                 ],
               ),
               const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: () => Navigator.pop(ctx, 'python'),
-                  icon: Icon(
-                    Icons.code_rounded,
-                    size: 16,
-                    color: JellyTheme.textSecondary,
-                  ),
-                  label: Text(
-                    '导入 Python 源',
-                    style: TextStyle(
-                      fontSize: AppTheme.fontFootnote,
-                      color: JellyTheme.textSecondary,
-                    ),
-                  ),
-                ),
-              ),
             ],
           ),
         ),
@@ -1810,8 +1790,6 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
       await _importByCode();
     } else if (action == 'qr') {
       await _importByQrCode();
-    } else if (action == 'python') {
-      await _importByPython();
     }
   }
 
@@ -2169,84 +2147,6 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
       await _importBytes(bytes);
     } catch (e) {
       _toast('导入失败：${e.toString().split('\n').first}');
-    }
-  }
-
-  /// 导入 Python 源（.py 文件 → PythonSourcesService 注册 + 生成书源条目）。
-  ///
-  /// 生成的书源 raw 带 `pythonKey`（= 文件名去 .py），搜索/详情/目录/正文
-  /// 由 CPython 引擎的 `src.spider.book.<pythonKey>` 执行（book_source_python_engine.dart）。
-  /// 引擎未就绪（非 iOS / 未启动）时仍会写条目，但给出提示。
-  Future<void> _importByPython() async {
-    try {
-      final result = await FilePicker.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: const ['py'],
-      );
-      if (result.isEmpty) return;
-      final f = result.first;
-      String code;
-      final path = f.path;
-      if (path == null) {
-        _toast('读不出这个文件（没有本地路径）');
-        return;
-      }
-      try {
-        code = await File(path).readAsString();
-      } catch (_) {
-        _toast('文件读取失败');
-        return;
-      }
-      if (code.trim().isEmpty) {
-        _toast('文件是空的');
-        return;
-      }
-      // key = 文件名去 .py（兼容带路径的情况）
-      final fileName = f.name.endsWith('.py')
-          ? f.name.substring(0, f.name.length - 3)
-          : f.name;
-      final key = fileName.replaceAll(RegExp(r'[^A-Za-z0-9_\-]'), '_');
-      if (key.isEmpty) {
-        _toast('文件名不合法');
-        return;
-      }
-      setState(() => _busy = true);
-      // 1. 写文件 + 注册进引擎
-      final installed = await PythonSourcesService.instance.installSource(
-        'book',
-        key,
-        code,
-      );
-      if (!installed.ok) {
-        _toast('Python 源注册失败：${installed.message ?? '未知错误'}');
-        return;
-      }
-      // 2. 生成书源条目（Legado 形态 + pythonKey）
-      final src = BookSource(
-        raw: <String, dynamic>{
-          'bookSourceName': key,
-          'bookSourceUrl': 'python://$key',
-          'bookSourceGroup': 'Python',
-          'bookSourceComment': 'Python 书源（CPython 引擎执行）',
-          'bookSourceType': 0,
-          'enabled': true,
-          'enabledExplore': false,
-          'pythonKey': key,
-        },
-        id: 'python:$key',
-      );
-      final r = await store.addAll([src]);
-      _toast(
-        '已导入 Python 源「$key」'
-        '${(r.added > 0 || r.updated > 0) ? '' : '（已存在，已更新）'}'
-        '${!PythonManager.instance.isIOS ? '；注意：Python 引擎需 iOS 真机' : ''}',
-      );
-      // 刷新列表（store 有监听时无需手动重载，保守起见触发一次）
-      if (mounted) setState(() {});
-    } catch (e) {
-      _toast('导入失败：${e.toString().split('\n').first}');
-    } finally {
-      if (mounted) setState(() => _busy = false);
     }
   }
 

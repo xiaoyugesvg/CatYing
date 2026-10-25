@@ -22,7 +22,7 @@ import { TelegramClient, Api } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 import { ConnectionTCPFull } from 'telegram/network/index.js';
 import QRCode from 'qrcode';
-import { looksLikeAd } from './public.js';
+import { looksLikeAd, titleFromGuillemets } from './public.js';
 
 // ── 全局状态 ────────────────────────────────────────────────
 // 内置应用凭据（Telegram Desktop 公开的一组）：Dart 侧没推配置时也能直接扫码，
@@ -437,17 +437,14 @@ function isPlayable(doc) {
 }
 
 function titleOf(msg, fallback) {
+    // 只认「《片名》」（与公开频道同一套规则，用户 2026-10-25）：
+    //   带书名号 → 取里头的文字；没有 → 返回空，调用方会跳过这条。
     const cap = (msg.message || '').trim();
-    if (cap) {
-        const first = cap.split('\n').map((s) => s.trim()).filter(Boolean)[0] || '';
-        if (first) return first.slice(0, 120);
-    }
-    const fn = fallback || '';
-    if (fn) {
-        const noExt = fn.replace(/\.[a-z0-9]{2,5}$/i, '');
-        return noExt.slice(0, 120);
-    }
-    return `消息 ${msg.id}`;
+    const fromCap = titleFromGuillemets(cap);
+    if (fromCap) return fromCap;
+    const fromFile = titleFromGuillemets(fallback);
+    if (fromFile) return fromFile;
+    return '';
 }
 
 function toItem(msg, doc) {
@@ -496,7 +493,9 @@ export async function videos(peer, offsetId = 0, limit = 30, depth = 0) {
             const doc = media.document;
             if (!isPlayable(doc)) continue;
             const item = toItem(m, doc);
-            // 标题带广告词的一律不要（与公开频道同一套规则）
+            // 只收「《片名》」（没有书名号的整条丢掉），书名号里带广告词也丢
+            // —— 与公开频道同一套规则
+            if (!item.title) continue;
             if (looksLikeAd(item.title) || looksLikeAd(item.fileName)) continue;
             items.push(item);
         }

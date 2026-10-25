@@ -123,12 +123,15 @@ export async function listPublic(channel, before = 0, depth = 0) {
             .split('\n')
             .map((s) => s.trim())
             .filter(Boolean)[0] || '';
-        const title = shorten(firstLine, 60) ||
-            shorten(docTitle, 60) ||
-            `消息 ${id}`;
-
-        // 标题里带广告词的一律不要（用户 2026-10-25：「名称带有广告的那种就去掉」）
-        if (looksLikeAd(title) || looksLikeAd(docTitle)) return;
+        // 标题：只认「《片名》」（用户 2026-10-25）
+        //
+        //   · 带书名号 → 取书名号里的文字当片名
+        //   · 没书名号 → **整条丢掉**（这些频道的广告帖全是 emoji + 贷款/国际/信誉，
+        //     正常片子一律写《片名》，按书名号收比关键词表可靠）
+        //   · 书名号里还带广告词 → 也丢（第二道保险）
+        const title = titleFromGuillemets(rawText) || titleFromGuillemets(docTitle);
+        if (!title) return;
+        if (looksLikeAd(title) || looksLikeAd(firstLine)) return;
 
         const durText = node.find('.tgme_widget_message_video_duration').first().text().trim();
         const duration = durText ? toSeconds(durText) : 0;
@@ -206,9 +209,11 @@ const AD_WORDS = [
     // 拉人 / 引流
     '加群', '入群', '进群', '交流群', '粉丝群', '福利群', '资源群', '私聊', '私信',
     '引流', '加微信', '加微', '微信号', 'vx', 'v信', 'qq群', '企鹅群', '飞机号', '电报号',
-    // 灰产 / 博彩
+    // 灰产 / 博彩（用户 2026-10-25 追加：贷款、博彩、国际、信誉这类全不要）
     '百家乐', '时时彩', '六合彩', '彩票', '娱乐城', '棋牌', '博彩', '真人荷官', '稳赚',
-    '兼职', '日赚', '刷单', '返利', '注册送', '首存', '充值优惠', '优惠券',
+    '兼职', '日赚', '刷单', '返利', '注册送', '首存', '首充', '返水', '洗码', '优惠券',
+    '贷款', '借贷', '网贷', '信用卡', '外汇', '换汇', '信誉', '包网', '代充',
+    '国际', '出租', '出售',
     // 渠道类
     '总代理', '招代理', '代理加盟', '招募', '客服', '官网',
 ];
@@ -226,20 +231,15 @@ export function looksLikeAd(s) {
     return false;
 }
 
-/// 标题压缩：优先切到第一个句号/问号，其次按空格断词，最后暴力截断。
+/// 从「《片名》」里取片名 —— 用户 2026-10-25 定下的片库命名法：
+/// **只收带书名号的帖子**，标题就是书名号里的文字。
 ///
-/// 为什么不能直接 slice：Telegram 的帖子正文常是一整段，
-/// 直接截 60 字会得到「Signed Gifts. You can now add your signature and a comme」
-/// 这种半截英文，列表里非常难读。
-function shorten(s, n) {
-    let t = String(s || '').replace(/\s+/g, ' ').trim();
-    if (!t) return '';
-    const m = t.match(/^(.{4,60}?)[。．.!?！？]/);
-    if (m) return m[1].trim();
-    if (t.length <= n) return t;
-    const cut = t.slice(0, n);
-    const sp = cut.lastIndexOf(' ');
-    return ((sp > 24 ? cut.slice(0, sp) : cut).trim()) + '…';
+/// 为什么要这么硬：这些搬运频道的正常片子一律写 `《片名》第 x 集`，
+/// 而广告/博彩/贷款帖全是「一堆 emoji + 国际/信誉/贷款…」。
+/// 只认书名号比维护关键词表靠谱得多（关键词只作第二道保险）。
+export function titleFromGuillemets(s) {
+    const m = String(s || '').match(/《([^》]{1,60})》/);
+    return m ? m[1].replace(/\s+/g, ' ').trim() : '';
 }
 
 function toSeconds(t) {

@@ -221,8 +221,24 @@ class _DiscoverPageState extends State<DiscoverPage>
   /// 已启用的汽水插件（没有 = 没装 / 被停用）
   ThirdPartySource? get _sodaPlugin => _firstPluginWhere(_isSodaPlugin);
 
-  /// 已启用的咪咕插件（Cookie 版排在前面，用户登录态走它）
-  ThirdPartySource? get _miguPlugin => _firstPluginWhere(_isMiguPlugin);
+  /// 「咪咕」Tab 的内容源。
+  ///
+  /// ⚠️ 不能直接用「第一个咪咕插件」（用户 2026-10-25 截图：咪咕页一片空白，
+  ///   只有"该插件没有提供榜单或推荐歌单"）：
+  ///   · 「咪咕音乐（Cookie 版）」只实现了 搜索 / 歌词 / 取地址 ——
+  ///     没有 `getTopLists` / `getRecommendSheetTags`；
+  ///   · 内置源顺序又把 Cookie 版排在最前（播放时优先用登录态）
+  ///   ⇒ 拿它当内容源时榜单/歌单必然是空的。
+  ///   所以这里优先挑**脚本里真的实现了 getTopLists** 的那个（官方版）。
+  ThirdPartySource? get _miguExplorePlugin {
+    final list = _enabledPlugins.where(_isMiguPlugin).toList();
+    if (list.isEmpty) return null;
+    for (final s in list) {
+      if ((s.script ?? '').contains('getTopLists')) return s;
+    }
+    // 全都没实现榜单 ⇒ 仍然给第一个，让页面显示明确说明而不是"没装插件"
+    return list.first;
+  }
 
   /// 已启用的 B站插件
   ThirdPartySource? get _biliPlugin => _firstPluginWhere(_isBiliPlugin);
@@ -609,7 +625,7 @@ class _DiscoverPageState extends State<DiscoverPage>
         if (_tabMode != 'recommend') {
           final bound = switch (_tabMode) {
             'soda' => _sodaPlugin,
-            'migu' => _miguPlugin,
+            'migu' => _miguExplorePlugin,
             'bili' => _biliPlugin,
             _ => null,
           };

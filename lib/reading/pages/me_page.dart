@@ -31,6 +31,7 @@ import '../services/reader_style_store.dart';
 import '../pet/pet_models.dart';
 import '../pet/pet_view.dart';
 import 'reading_settings_page.dart';
+import 'purify_rules_page.dart';
 import 'search_page.dart';
 import 'book_source_repo_page.dart';
 import 'source_warehouse_page.dart';
@@ -238,7 +239,30 @@ class _MePageState extends State<MePage> {
                               ),
                             ),
                           ),
-                          // 5. 漫画源仓库 —— 服务**漫画**（SiteConfig 网页源，取图片）
+                          // 5. 净化规则 —— 正文净化的全局管理与导入
+                          //    （用户 2026-10-25：入口应该在「我的」，不该只藏在
+                          //    某本书的功能面板里）
+                          StaggeredEntrance(
+                            key: ValueKey('${_session}_purify'),
+                            index: 5,
+                            child: SizedBox(
+                              width: itemWidth,
+                              child: _buildMenuItem(
+                                isDark,
+                                icon: Icons.filter_alt_rounded,
+                                iconBg: JellyTheme.primary,
+                                title: '净化规则',
+                                subtitle: '正文替换 · 导入 legado 规则',
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const PurifyRulesPage(),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          // 5.1 漫画源仓库 —— 服务**漫画**（SiteConfig 网页源，取图片）
                           // 与下面的「书源仓库」是两个独立体系，别合并
                           StaggeredEntrance(
                             key: ValueKey('${_session}_source_repo'),

@@ -2123,6 +2123,17 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   ///
   /// 用 [TextSelectionToolbar] 是为了拿系统算好的锚点（选区上方/下方）。
   Widget _selectionMenu(BuildContext ctx, SelectableRegionState state) {
+    // 双击呼面板时，SelectionArea 会把双击处的词选中并来要菜单 ——
+    // 直接吞掉，否则面板刚出来就被"选字工具条"盖住（用户看到的就是"闪显一下"）。
+    if (_menuSuppressUntil.isAfter(DateTime.now())) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        state.hideToolbar();
+        state.clearSelection();
+        if (_selectedText.isNotEmpty) setState(() => _selectedText = '');
+      });
+      return const SizedBox.shrink();
+    }
     final anchors = state.contextMenuAnchors;
     void close() {
       state.hideToolbar();
@@ -3653,7 +3664,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 _go(-1);
               }
             },
-            onTapCenter: _toggleBar,
+            // ⚠️ 中间点击**不能**再交给组件自己做（原来这里是 `_toggleBar`）：
+            //   组件用自己的 Listener 逐次判定单击，双击 = 两次单击 = 开一次关一次，
+            //   用户看到的就是「双击闪一下、面板根本不出现」（2026-10-25）。
+            //   现在中间点击统一由外层 [_handleSingleTap] 处理（延迟 320ms，
+            //   双击会取消这个定时器）⇒ 双击只 toggle 一次。
+            onTapCenter: () {},
           );
         }
 
@@ -3700,7 +3716,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   _go(-1);
                 }
               },
-              onTapCenter: _toggleBar,
+              // 中间点击交给外层 [_handleSingleTap]（原因见仿真分支注释）
+              onTapCenter: () {},
             );
         }
 
@@ -3917,6 +3934,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         // 上下滚动：整章链一个 SelectionArea —— 可以跨段/跨章选文字，
         // 长按出系统选择手柄 + 我们的浮动小工具条（复制/书签/搜索/净化/更多）
         child: SelectionArea(
+          key: _selKeyScroll,
           onSelectionChanged: (c) => _selectedText = c?.plainText ?? '',
           contextMenuBuilder: _selectionMenu,
           child: SingleChildScrollView(
@@ -5068,6 +5086,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           // 分页模式：每页一个 SelectionArea（换页即清空选择）。
           // 长按 → 系统文字选择手柄，松手出我们的浮动小工具条。
           child: SelectionArea(
+            key: _selKeyPage,
             onSelectionChanged: (c) => _selectedText = c?.plainText ?? '',
             contextMenuBuilder: _selectionMenu,
             child: Padding(
@@ -5350,6 +5369,28 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   Offset? _lastTapPos;
   Timer? _tapTimer;
 
+  /// 选区容器（滚动 / 分页各一个），用来在双击呼面板时清掉选区
+  final GlobalKey<SelectableRegionState> _selKeyScroll = GlobalKey();
+  final GlobalKey<SelectableRegionState> _selKeyPage = GlobalKey();
+
+  /// 这段时间内不弹选区菜单（双击会误选一个词，见 [_onPtrUp]）
+  DateTime _menuSuppressUntil = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// 下一帧清掉所有选区（SelectionArea 的双击选词是异步落的，
+  /// 当场清会被它自己又选回来）
+  void _clearSelectionSoon() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      for (final k in [_selKeyScroll, _selKeyPage]) {
+        final s = k.currentState;
+        if (s == null) continue;
+        s.hideToolbar();
+        s.clearSelection();
+      }
+      if (_selectedText.isNotEmpty) setState(() => _selectedText = '');
+    });
+  }
+
   void _onPtrDown(PointerDownEvent e) {
     // 自动阅读：任意触摸都停（与 Legado 一致，避免"想停下来却翻过去"）
     if (_autoReadOn) _stopAutoRead();
@@ -5406,11 +5447,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       _lastTapAt = null;
       _lastTapPos = null;
       _tapTimer?.cancel();
-      // 仿真/覆盖：单击已经被组件自己处理成"开/关面板"，这里再 toggle 一次
-      // 会互相抵消（双击＝连关两次）。
-      if (_rs.pageMode != PageMode.curl && _rs.pageMode != PageMode.cover) {
-        _toggleBar();
-      }
+      // 双击：呼出/收起功能面板（所有翻页模式一致）
+      //
+      // ⚠️ 这里**必须**清一次选区：SelectionArea 会把"双击"理解成选中一个词
+      //   ⇒ 面板刚开出来就被选字工具条盖住，看着就是"闪显一下"（2026-10-25）。
+      _menuSuppressUntil =
+          DateTime.now().add(const Duration(milliseconds: 420));
+      _clearSelectionSoon();
+      _toggleBar();
       return;
     }
     _lastTapAt = now;
@@ -5479,14 +5523,15 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       }
       return;
     }
-    // 仿真 / 覆盖（仅文字模式）：**这里什么都别做**。
+    // 仿真 / 覆盖（仅文字模式）：左右翻页由翻页组件自己处理，
+    // 这里只补**中间点击** = 开合面板。
     //
-    // ⚠️ 2026-10-25 回退：上一版在这里补了一句 `_toggleBar()`，
-    //   但 `BookPageCurl` / `BookPageCover` 自己就带 `onTapCenter: _toggleBar`
-    //   （见 `_contentArea` 里的构造）⇒ 点中间会**连关两次**（开了又立刻关上），
-    //   用户看到的就是"仿真模式下单击永远出不来功能面板"。
-    //   点击、左右翻页全交给这两个组件处理。
+    // ⚠️ 组件的 `onTapCenter` 已经置空（见 `_contentArea`）：
+    //   它按"每次抬手"判单击，双击会被当两次单击 → 开一次关一次 = 闪一下。
+    //   走这里的话双击会被 [_onPtrUp] 吃掉第二击、取消定时器 ⇒ 只 toggle 一次。
     if (_rs.pageMode == PageMode.curl || _rs.pageMode == PageMode.cover) {
+      final w = size.width;
+      if (pos.dx > w / 3 && pos.dx < w * 2 / 3) _toggleBar();
       return;
     }
     // 文字模式：3×3 分区 + 「点击区域」配置；menu 动作由双击/双指承担

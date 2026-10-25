@@ -368,6 +368,9 @@ class _TgSourcePageState extends State<TgSourcePage> {
       children: [
         _section('连接'),
         _statusCard(),
+        // 代理常显：登录之后也找得到（用户 2026-10-25）
+        _section('代理'),
+        _proxyCard(),
         if (!_configured) _configCard(),
         if (_configured && !_authorized) ...[
           _section('登录（可选）'),
@@ -450,6 +453,93 @@ class _TgSourcePageState extends State<TgSourcePage> {
     ));
   }
 
+  /// 代理卡：**常显**（用户 2026-10-25：「TG 内置代理的开关呢？」）——
+  /// 原来它藏在「扫码登录」卡的高级设置里，而且 `_configured` 之后整张卡都不显示，
+  /// 登录过的用户就再也找不到代理开关了。
+  Widget _proxyCard() {
+    return _card(AppCard(
+      dense: true,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('内置代理池',
+                          style: TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 2),
+                      Text(
+                        '打开才走代理（自动挑最快的节点）；关闭一律直连',
+                        style: TextStyle(
+                            color: AppTheme.textTertiary,
+                            fontSize: 11,
+                            height: 1.4),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: _tg.proxyOn,
+                  onChanged: _probeBusy ? null : _togglePool,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(child: _field(_proxyHostCtrl, 'SOCKS5 地址（可空）')),
+              const SizedBox(width: 8),
+              SizedBox(
+                  width: 96,
+                  child: _field(_proxyPortCtrl, '端口',
+                      keyboard: TextInputType.number)),
+            ]),
+            const SizedBox(height: 6),
+            Text('若是系统级 VPN，这里留空即可；只开了 HTTP/SOCKS 代理时才需要填。',
+                style: TextStyle(color: AppTheme.textTertiary, fontSize: 11)),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _probeBusy ? null : () => _probeProxy(),
+                    icon: _probeBusy
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.bolt_rounded, size: 16),
+                    label: Text(_probeBusy ? '测速中，约 20 秒…' : '内置代理 · 自动测速'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: _probeBusy ? null : () => _applyProxy('', ''),
+                  child: const Text('不用代理'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '内置列表来自 watchttvv/free-proxy-list（gh-proxy 加速）。选好后：'
+              '公开频道的网页抓取、封面、播放中转都会走这个代理。',
+              style: TextStyle(
+                  color: AppTheme.textTertiary, fontSize: 11, height: 1.5),
+            ),
+          ],
+        ),
+      ),
+    ));
+  }
+
   Widget _configCard() {
     return _card(AppCard(
       dense: true,
@@ -489,74 +579,6 @@ class _TgSourcePageState extends State<TgSourcePage> {
               const SizedBox(height: 8),
               _field(_apiHashCtrl, 'api_hash（32 位，留空用内置）'),
               const SizedBox(height: 12),
-              // ── 代理总开关（默认关：填了地址不等于启用）──────────
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('内置代理池',
-                            style: TextStyle(
-                                color: AppTheme.textPrimary,
-                                fontSize: 13.5,
-                                fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 2),
-                        Text(
-                          '打开才走代理（自动挑最快的节点）；关闭一律直连',
-                          style: TextStyle(
-                              color: AppTheme.textTertiary,
-                              fontSize: 11,
-                              height: 1.4),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Switch(
-                    value: _tg.proxyOn,
-                    onChanged: _probeBusy ? null : _togglePool,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(children: [
-                Expanded(child: _field(_proxyHostCtrl, 'SOCKS5 地址（可空）')),
-                const SizedBox(width: 8),
-                SizedBox(width: 96, child: _field(_proxyPortCtrl, '端口', keyboard: TextInputType.number)),
-              ]),
-              const SizedBox(height: 6),
-              Text('若是系统级 VPN，这里留空即可；只开了 HTTP/SOCKS 代理时才需要填。',
-                  style: TextStyle(color: AppTheme.textTertiary, fontSize: 11)),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _probeBusy ? null : () => _probeProxy(),
-                      icon: _probeBusy
-                          ? const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.bolt_rounded, size: 16),
-                      label: Text(_probeBusy ? '测速中，约 20 秒…' : '内置代理 · 自动测速'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  TextButton(
-                    onPressed: _probeBusy ? null : () => _applyProxy('', ''),
-                    child: const Text('不用代理'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                '内置列表来自 watchttvv/free-proxy-list（gh-proxy 加速）。选好后：'
-                '公开频道的网页抓取、封面、播放中转都会走这个代理。',
-                style: TextStyle(
-                    color: AppTheme.textTertiary, fontSize: 11, height: 1.5),
-              ),
             ],
             const SizedBox(height: 12),
             Align(

@@ -71,6 +71,21 @@ class AdBlockService extends ChangeNotifier {
   static const String kLimboCssUrl =
       'https://limbopro.com/CSS/Adblock4limbo.user.css';
 
+  /// 联网更新的**备用源**（用户 2026-10-25：点「联网更新内置版」直接报
+  /// `DioException [unknown]: null`）——
+  /// 官网 `limbopro.com` 在部分地区/网络下 TLS 或 DNS 起不来，Dio 只能给出
+  /// unknown 错误；这份 CSS 在 GitHub 仓库里也有一份，所以按「仓库镜像 →
+  /// 原站」的顺序挨个试，任意一个通就成。
+  ///   · gh-proxy：国内最稳的 GitHub 反代；
+  ///   · raw.githubusercontent：直连（有代理时通常可用）；
+  ///   · jsDelivr：CDN 兜底（仓库太大可能 403，放最后）。
+  static const List<String> kLimboCssMirrors = [
+    'https://gh-proxy.com/https://raw.githubusercontent.com/limbopro/Adblock4limbo/main/CSS/Adblock4limbo.user.css',
+    'https://raw.githubusercontent.com/limbopro/Adblock4limbo/main/CSS/Adblock4limbo.user.css',
+    kLimboCssUrl,
+    'https://cdn.jsdelivr.net/gh/limbopro/Adblock4limbo@main/CSS/Adblock4limbo.user.css',
+  ];
+
   bool _enabled = true;
   bool _bubble = true;
   bool _builtin = true;
@@ -371,6 +386,26 @@ class AdBlockService extends ChangeNotifier {
   Future<(bool, String)> importFilterFromUrl(String url) async {
     final u = url.trim();
     if (u.isEmpty) return (false, '网址是空的');
+    return _downloadAndStore(u);
+  }
+
+  /// 「联网更新内置版」：按 [kLimboCssMirrors] 挨个试，任意一个成功即返回。
+  ///
+  /// 之前只打官网一个地址，官网一挂就只剩 `DioException [unknown]: null`
+  /// （用户 2026-10-25 截图），看不出到底哪一步坏了 —— 现在把每个源的
+  /// 失败原因都列出来。
+  Future<(bool, String)> importLimboFilter() async {
+    final fails = <String>[];
+    for (final u in kLimboCssMirrors) {
+      final r = await _downloadAndStore(u);
+      if (r.$1) return r;
+      fails.add('${Uri.parse(u).host}：${r.$2}');
+    }
+    return (false, '所有源都下载失败（${fails.length} 个）\n${fails.join('\n')}');
+  }
+
+  /// 下载一份 CSS 并落盘；返回 (成功?, 提示语)。
+  Future<(bool, String)> _downloadAndStore(String u) async {
     final dio = Dio(BaseOptions(
       connectTimeout: const Duration(seconds: 15),
       receiveTimeout: const Duration(seconds: 60),
@@ -396,10 +431,23 @@ class AdBlockService extends ChangeNotifier {
       notifyListeners();
       return (true, '已导入 ${(css.length / 1024).round()} KB（已替换内置版）');
     } catch (e) {
-      return (false, '下载失败：$e');
+      return (false, _netError(e));
     } finally {
       dio.close(force: true);
     }
+  }
+
+  /// 把 Dio 的 `unknown / null` 翻成人话：真正的原因大多在 `e.error` 里
+  /// （SocketException / HandshakeException / 超时…）。
+  String _netError(Object e) {
+    if (e is DioException) {
+      final inner = e.error?.toString().trim() ?? '';
+      final msg = (e.message ?? '').trim();
+      final detail = inner.isNotEmpty ? inner : msg;
+      final type = e.type.name;
+      return detail.isEmpty ? type : '$type · $detail';
+    }
+    return e.toString();
   }
 
   /// 回到**内置版**过滤器（删掉用户导入的那份）
