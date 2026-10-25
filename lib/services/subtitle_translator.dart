@@ -135,6 +135,9 @@ class SubtitleTranslator {
     await Future.wait(workers);
     progressTimer.stop();
 
+    // 取消：**不落盘**，避免留下一个"半中半英"的字幕文件被当成成品复用
+    if (isCancelled?.call() == true) throw '已取消';
+
     // 回填文本
     for (final c in cues) {
       final t = c.text.trim();
@@ -274,7 +277,9 @@ class SubtitleTranslator {
   }
 
   static String _outputPath(String path, String ext) {
-    final base = path.substring(0, path.length - ext.length - 1);
+    final i = path.lastIndexOf('.');
+    // 没有扩展名时不能按 ext.length 硬砍，否则会吃掉最后几个字符
+    final base = i <= 0 ? path : path.substring(0, i);
     return '$base.zh.$ext';
   }
 }

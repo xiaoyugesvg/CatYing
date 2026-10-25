@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:battery_plus/battery_plus.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import '../services/app_log.dart';
+import '../services/subtitle_translator.dart';
 import '../services/tmdb_service.dart';
 import 'app_player.dart';
 import 'ks_player.dart';
@@ -24,6 +26,7 @@ import '../pages/settings/sub/danmu_settings_page.dart';
 import '../models/player_engine.dart';
 import '../services/player_prefs.dart';
 part 'video_player_helpers.dart';
+part 'video_player_ext_subtitle.dart';
 
 /// 视频画面比例 - 对应 Swift VideoFitType
 enum VideoFitType {
@@ -697,6 +700,21 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   /// 已下发给内核的字幕选择 —— 防止父级 rebuild / 轨道列表刷新时重复应用
   SubtitleChoice? _appliedSubtitleChoice;
 
+  /// 外挂译文（方案 A，见 `video_player_ext_subtitle.dart`）
+  ///
+  /// 不走内核的外挂字幕能力：自己按 `_positionVN` 把中文叠在画面上，
+  /// 这样 AVPlayer / MPV / KSPlayer 三种内核表现完全一致。
+  List<SubtitleCue> _extCues = const <SubtitleCue>[];
+
+  /// 译文当前是否显示（可在字幕菜单里关）
+  bool _extOn = false;
+
+  /// 给 `video_player_ext_subtitle.dart` 里的扩展用。
+  ///
+  /// extension 里直接调 `setState` 会触发 `invalid_use_of_protected_member`
+  /// 警告（它只允许在 State 子类体内调用），拐一层就干净了。
+  void _extSetState(VoidCallback fn) => setState(fn);
+
   /// 播放进度 / 总时长：高频更新走 ValueNotifier，避免 position stream 触发整树 setState
   final ValueNotifier<Duration> _positionVN = ValueNotifier(Duration.zero);
   final ValueNotifier<Duration> _durationVN = ValueNotifier(Duration.zero);
@@ -1146,6 +1164,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       // 轨道就绪（内核广播新列表）后按父级持有的选择（matchKey）再应用一次
       _appliedSubtitleChoice = null;
       _subtitleTracks = _player.subtitleTracks;
+      // 外挂译文属于「这一集」：换了集/源就不再对应，直接丢掉
+      _extCues = const <SubtitleCue>[];
+      _extOn = false;
       // 弹幕跟随剧集：清空并重新按新 URL 拉取（否则 _danmuLoaded 卡住永远不换）
       _danmuLoaded = false;
       _danmuLoadGen++;
@@ -2954,6 +2975,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
         // 弹幕层（手势层之上, 不阻挡点击）
         if (_danmuOn && _danmus.isNotEmpty) _buildDanmuLayer(),
+
+        // 外挂译文层（方案 A）：自己叠中文，不依赖内核的外挂字幕能力
+        if (_extOn && _extCues.isNotEmpty) _buildExtSubtitleLayer(),
 
         // 手势层（覆盖整个区域，识别单击/双击/长按/拖动）
         Positioned.fill(child: _buildGestureLayer()),
@@ -6041,6 +6065,57 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                         : null,
                     onTap: () => Navigator.of(sheetContext).pop(i),
                   ),
+                // ── 外挂译文（方案 A）──────────────────────────────
+                // 和上面的内嵌轨互不影响：内核不支持字幕也能用
+                if (_extCues.isNotEmpty)
+                  ListTile(
+                    dense: true,
+                    leading: Icon(
+                      _extOn ? Icons.translate : Icons.translate_outlined,
+                      color: _extOn ? AppTheme.accentColor : Colors.white70,
+                      size: 20,
+                    ),
+                    title: Text(
+                      _extOn ? '关闭译文（外挂）' : '显示译文（外挂）',
+                      style: TextStyle(
+                        color: _extOn ? AppTheme.accentColor : Colors.white,
+                        fontSize: AppTheme.fontSubhead,
+                        fontWeight:
+                            _extOn ? FontWeight.w600 : FontWeight.w400,
+                      ),
+                    ),
+                    subtitle: Text(
+                      '${_extCues.length} 条 · 自绘层，换内核也不丢',
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: AppTheme.fontCaption,
+                      ),
+                    ),
+                    onTap: () => Navigator.of(sheetContext).pop(-3),
+                  ),
+                ListTile(
+                  dense: true,
+                  leading: const Icon(
+                    Icons.text_fields_rounded,
+                    color: Colors.white70,
+                    size: 20,
+                  ),
+                  title: const Text(
+                    '翻译外挂字幕…',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: AppTheme.fontSubhead,
+                    ),
+                  ),
+                  subtitle: const Text(
+                    '选一个 .srt / .ass，翻成中文后叠在画面上',
+                    style: TextStyle(
+                      color: Colors.white38,
+                      fontSize: AppTheme.fontCaption,
+                    ),
+                  ),
+                  onTap: () => Navigator.of(sheetContext).pop(-2),
+                ),
                 const SizedBox(height: 8),
               ],
             ),
@@ -6048,7 +6123,17 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         );
       },
     );
-    if (picked == null || picked == selected) return;
+    if (picked == null) return;
+    // 外挂译文两个入口（-3 显示/关闭、-2 选文件翻译），不走内嵌轨逻辑
+    if (picked == -3) {
+      _toggleExtSubtitle();
+      return;
+    }
+    if (picked == -2) {
+      await _pickExtSubtitle();
+      return;
+    }
+    if (picked == selected) return;
     await _player.selectSubtitleTrack(picked);
     if (!mounted) return;
     final choice = picked < 0

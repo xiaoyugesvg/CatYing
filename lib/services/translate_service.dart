@@ -125,6 +125,22 @@ class TranslateService {
 
   // ── 语言判定 ────────────────────────────────────────────────
 
+  /// 汉字（基本区 + 扩展 A + 兼容区）
+  static bool _isHan(int r) =>
+      (r >= 0x4E00 && r <= 0x9FFF) ||
+      (r >= 0x3400 && r <= 0x4DBF) ||
+      (r >= 0xF900 && r <= 0xFAFF);
+
+  /// 中日韩以外的"字母"（用来判断是不是外语）
+  static bool _isOtherLetter(int r) =>
+      // 西里尔 / 希腊 / 泰 / 阿拉伯 / 希伯来 / 天城文
+      (r >= 0x0400 && r <= 0x04FF) ||
+      (r >= 0x0370 && r <= 0x03FF) ||
+      (r >= 0x0E00 && r <= 0x0E7F) ||
+      (r >= 0x0600 && r <= 0x06FF) ||
+      (r >= 0x0590 && r <= 0x05FF) ||
+      (r >= 0x0900 && r <= 0x097F);
+
   /// 中文占比够高就认为不用翻（只判 CJK 字符比例）
   static bool looksChinese(String s) {
     if (s.isEmpty) return false;
@@ -135,23 +151,49 @@ class TranslateService {
         if ((r >= 65 && r <= 90) || (r >= 97 && r <= 122)) letters++;
         continue;
       }
-      // 基本汉字 + 扩展 A + 兼容区
-      if ((r >= 0x4E00 && r <= 0x9FFF) ||
-          (r >= 0x3400 && r <= 0x4DBF) ||
-          (r >= 0xF900 && r <= 0xFAFF)) {
-        cjk++;
-      }
+      if (_isHan(r)) cjk++;
     }
     final total = cjk + letters;
     if (total == 0) return false;
     return cjk / total >= 0.3;
   }
 
-  /// 是否需要翻译（有拉丁字母且不是中文）
+  /// 是否需要翻译
+  ///
+  /// ⚠️ 2026-10-25 修：原实现只认"拉丁字母"，**假名 / 谚文 / 西里尔全都判成
+  /// 不用翻** —— 日语字幕、日语频道标题会被当成中文直接跳过（用户点「翻译」
+  /// 提示"这条本来就是中文"，测试按钮也一直返回原文）。
+  /// 现在只要出现**假名 / 谚文 / 其它非汉字字母**就翻译；纯汉字 + 数字 + 符号
+  /// 才算"已经是中文"。
   static bool needsTranslation(String s) {
-    if (s.trim().isEmpty) return false;
-    if (looksChinese(s)) return false;
-    return RegExp(r'[A-Za-z]').hasMatch(s);
+    final t = s.trim();
+    if (t.isEmpty) return false;
+    var han = 0;
+    var latin = 0;
+    for (final r in t.runes) {
+      if (r < 0x80) {
+        if ((r >= 65 && r <= 90) || (r >= 97 && r <= 122)) latin++;
+        continue;
+      }
+      if (_isHan(r)) {
+        han++;
+        continue;
+      }
+      // 平假名 / 片假名 / 半角片假名 → 日语
+      if ((r >= 0x3040 && r <= 0x30FF) || (r >= 0x31F0 && r <= 0x31FF)) {
+        return true;
+      }
+      // 谚文 → 韩语
+      if ((r >= 0xAC00 && r <= 0xD7AF) ||
+          (r >= 0x1100 && r <= 0x11FF) ||
+          (r >= 0x3130 && r <= 0x318F)) {
+        return true;
+      }
+      if (_isOtherLetter(r)) return true;
+    }
+    if (latin == 0) return false; // 只有汉字 / 数字 / 符号
+    final total = han + latin;
+    return han / total < 0.3; // 与 [looksChinese] 同一阈值
   }
 
   // ── 单条 ──────────────────────────────────────────────────
@@ -214,7 +256,13 @@ class TranslateService {
 
   // ── Google 免 Key ──────────────────────────────────────────
 
-  Dio _googleDio() => Dio(BaseOptions(
+  /// 复用一个 Dio。
+  ///
+  /// ⚠️ 原来是**每次请求新建一个再 close** —— 一集字幕几百条、一页漫画几十段，
+  /// 就是几百次 HttpClient 建连/销毁，iOS 上既慢又容易撞 fd 上限。
+  Dio? _googleClient;
+
+  Dio get _googleDio => _googleClient ??= Dio(BaseOptions(
         connectTimeout: const Duration(seconds: 10),
         receiveTimeout: const Duration(seconds: 15),
         headers: {
@@ -224,6 +272,9 @@ class TranslateService {
                   'Version/17.0 Mobile/15E148 Safari/604.1',
         },
       ));
+
+  /// 单次请求最多送多少字符（端点超长会**静默截断**，不报错）
+  static const int _googleMaxChars = 1500;
 
   /// 批量：逐条翻（端点只吃单条），并发 3，单条失败保留原文
   Future<List<String>> _google(
@@ -257,15 +308,44 @@ class TranslateService {
     return out;
   }
 
-  /// 单条：主路 dict-chrome-ex，兜底 gtx
+  /// 单条：超长先切块（否则尾部被端点静默截断），再走 dict → gtx
   Future<String> _googleOne(String text, String from, String to) async {
-    final q = Uri.encodeComponent(text.length > 1800 ? text.substring(0, 1800) : text);
+    final t = text.trim();
+    if (t.length <= _googleMaxChars) return _googleOnce(t, from, to);
+    final buf = StringBuffer();
+    for (final part in _splitForGoogle(t)) {
+      buf.write(await _googleOnce(part, from, to));
+    }
+    return buf.toString();
+  }
+
+  /// 按句读/空白把长文本切成 ≤1500 字符的块（不把单词劈两半）
+  static List<String> _splitForGoogle(String s) {
+    final out = <String>[];
+    var rest = s;
+    const marks = ' \n\t.,!?;:。！？，；：、';
+    while (rest.length > _googleMaxChars) {
+      var cut = _googleMaxChars;
+      for (var i = _googleMaxChars; i > _googleMaxChars * 0.6; i--) {
+        if (marks.contains(rest[i - 1])) {
+          cut = i;
+          break;
+        }
+      }
+      out.add(rest.substring(0, cut).trim());
+      rest = rest.substring(cut).trim();
+    }
+    if (rest.isNotEmpty) out.add(rest);
+    return out;
+  }
+
+  Future<String> _googleOnce(String text, String from, String to) async {
+    final q = Uri.encodeComponent(text);
     final tl = to == 'zh' ? 'zh-CN' : to;
-    final dio = _googleDio();
     String? out;
     try {
       // 端点 1：dict-chrome-ex（实测最稳，返回 [["译文","en"], ...]）
-      final r = await dio.get<String>(
+      final r = await _googleDio.get<String>(
         '$googleDictEndpoint?client=dict-chrome-ex&sl=$from&tl=$tl&q=$q',
         options: Options(responseType: ResponseType.plain),
       );
@@ -278,7 +358,7 @@ class TranslateService {
     // 实测该端点经常对本机 IP 返回 429，所以放兜底位。
     if (out == null || out.isEmpty) {
       try {
-        final r = await dio.get<String>(
+        final r = await _googleDio.get<String>(
           '$googleGtxEndpoint?client=gtx&sl=$from&tl=$tl&dt=t&q=$q',
           options: Options(responseType: ResponseType.plain),
         );
@@ -287,7 +367,6 @@ class TranslateService {
         debugPrint('[Translate] gtx 失败: $e');
       }
     }
-    dio.close(force: true);
 
     if (out == null || out.trim().isEmpty) throw '翻译服务无返回';
     return out.trim();
