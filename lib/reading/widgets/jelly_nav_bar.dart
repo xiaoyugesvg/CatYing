@@ -50,18 +50,16 @@ class JellyNavBar extends StatefulWidget {
     this.floating = false,
     this.palette,
   }) : assert(
-         items.length >= 2 && items.length <= 6,
-         // ── 为什么上限从 5 放宽到 6 ────────────────────────────────
-         // cmbok 原生是 5 项（漫画/图书/书架/收藏/我的）。
-         // 猫影把阅读嵌进了影视 App，阅读自带悬浮栏而影视底栏被隐藏，
-         // 所以**必须在阅读栏里给一条回影视的路**（第 6 项「影视」）。
-         //
-         // ⚠️ 只放宽上限是不够的：项数一变，宽度算法必须能跟着缩。
-         // 原来的 `perItem = (屏宽×0.2).clamp(80,120)` 在 6 项时
-         // 需要 480~600px 而手机只有 ~350px 可用 → 必然溢出。
-         // 宽度算法已改成"按可用宽度反算"（见 _buildFloatingNavBar），
-         // 那里才是让 6 项能安全容纳的关键。
-         '导航项数需在 2~6 之间（5 项是 cmbok 原生，第 6 项是「返回影视」）',
+         items.length >= 2,
+         // ── 为什么取消了 6 项上限（2026-10-26）──────────────────────
+         // 影视首页的底栏项数是用户在「设置 → 主页页面」里自己勾的，
+         // 全开能有十几个（首页/直播/音乐/阅读/程序/RSS/海阔/Emby/短剧/
+         // 房间/REX/TG/史藏/设置）。原来硬性 assert ≤ 6：release 下断言
+         // 被剔除、栏里就全挤成 44px 一条（用户："分类太多，太密"），
+         // debug 下更会直接崩。
+         // 现在项多时不再压窄，改成**每条目保持正常宽度 + 整条横向可滑**
+         // （见 `_buildFloatingNavBar` 的 scrollable 分支），所以只保留下限。
+         '导航项至少要 2 个',
        );
 
   /// 悬浮导航栏总占用高度（高度 + 底部外边距），用于页面 FAB 等避让
@@ -95,7 +93,17 @@ class _JellyNavBarState extends State<JellyNavBar>
   late AnimationController _controller;
   int _previousIndex = 0;
 
-  // 果冻弹性曲线（直接 transform，避免在 build 中创建 CurvedAnimation 造成监听器泄漏）
+  /// 项太多时整条栏可横向滑动（用户 2026-10-26：「分类很多，太密」）
+  final ScrollController _scrollCtrl = ScrollController();
+
+  /// 最近一次布局时每项的宽度（自动滚到选中项要用）
+  double _scrollItemW = 0;
+
+  /// 上一次已经自动滚到过哪个下标（避免每次 build 都强行滚动，
+  /// 用户手动滑走后不该被拉回去）
+  int _revealedIndex = -1;
+
+  /// 果冻弹性曲线（直接 transform，避免在 build 中创建 CurvedAnimation 造成监听器泄漏）
   static const _curve = ElasticOutCurve(0.7);
 
   // 导航栏尺寸：整体加高，底部间距稍高于顶部，左右上角圆角
@@ -114,6 +122,30 @@ class _JellyNavBarState extends State<JellyNavBar>
   static const _floatingItemMin = 80.0; // 每项最小宽度（手机保底）
   static const _floatingItemMax = 120.0; // 每项最大宽度（宽屏上限）
   static const _floatingItemFactor = 0.2; // 随屏宽增长系数
+
+  /// 每项低于这个宽度就算"挤"：不再继续压窄，改成整条可横向滑动
+  static const _floatingItemComfort = 64.0;
+
+  /// 栏可滑动时：把当前选中的项滚进可视区（居中）
+  void _revealSelected(double itemWidth, bool scrollable) {
+    _scrollItemW = itemWidth;
+    if (!scrollable) return;
+    if (_revealedIndex == widget.currentIndex) return;
+    _revealedIndex = widget.currentIndex;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollCtrl.hasClients) return;
+      final pos = _scrollCtrl.position;
+      final center = widget.currentIndex * _scrollItemW + _scrollItemW / 2;
+      final target =
+          (center - pos.viewportDimension / 2).clamp(0.0, pos.maxScrollExtent);
+      if ((pos.pixels - target).abs() < 1) return;
+      _scrollCtrl.animateTo(
+        target.toDouble(),
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
 
   @override
   void initState() {
@@ -135,6 +167,7 @@ class _JellyNavBarState extends State<JellyNavBar>
   void dispose() {
     SettingsService().removeListener(_onSettingsChanged);
     _controller.dispose();
+    _scrollCtrl.dispose();
     super.dispose();
   }
 
@@ -228,15 +261,23 @@ class _JellyNavBarState extends State<JellyNavBar>
             _floatingItemMin,
             _floatingItemMax,
           );
-          final perItem = (available / widget.items.length).clamp(
-            // 保底 44px：小于这个宽度手指点不准（Apple HIG 的最小可点区域）
-            44.0,
-            ideal,
-          );
-          final contentWidth = widget.items.length * perItem;
+          // ── 项多到放不下时**不再硬挤**（用户 2026-10-26）──────────
+          //   以前：perItem 夹到最小 44px ⇒ 十几个分类全挤成一条，
+          //   文字省略号、手指也容易点错。
+          //   现在：只要按"舒适宽度"（≥64）放不下，就整条栏横向可滑，
+          //   每项保持 ideal 宽度（80~120），可视区就是胶囊的宽度。
+          final fit = available / widget.items.length;
+          final scrollable = fit < _floatingItemComfort;
+          final perItem =
+              scrollable ? ideal : fit.clamp(44.0, ideal);
+          final contentWidth = scrollable
+              ? available
+              : widget.items.length * perItem;
           // 胶囊居中：在屏幕边距基础上补足左右内边距，垂直结构保持不变（仍贴底部）
-          final sidePad =
-              ((constraints.maxWidth - contentWidth) / 2 - horizontalMargin)
+          // 可滑动时胶囊直接占满可用宽度（内容在内部滑），不再补居中留白
+          final sidePad = scrollable
+              ? 0.0
+              : ((constraints.maxWidth - contentWidth) / 2 - horizontalMargin)
                   .clamp(0.0, double.infinity);
           // 背景动画开启时跳过 BackdropFilter：底层每帧重绘下，高斯模糊逐帧采样
           // 是 GPU 主力开销；改用更高不透明度纯色（动效透出可接受，图标仍清晰）。
@@ -261,6 +302,8 @@ class _JellyNavBarState extends State<JellyNavBar>
                 iconSize: SettingsService().navIconOnly
                     ? 26
                     : _floatingIconSize,
+                // 项数放不下时按这个宽度排布并允许横向滑动
+                itemWidth: perItem,
               ),
             ),
           );
@@ -457,21 +500,34 @@ class _JellyNavBarState extends State<JellyNavBar>
   }
 
   /// 导航栏内部内容（弹性指示器 + 导航项），两种模式共用
+  ///
+  /// [itemWidth] 不为空时按该宽度排布每一项：总宽超过可视区就**整条横向滑动**
+  /// （项太多的场景），否则和以前一样平分宽度。
   Widget _buildNavContent({
     required double height,
     bool iconOnly = false,
     double iconSize = 22.0,
+    double? itemWidth,
   }) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final itemWidth = constraints.maxWidth / widget.items.length;
+        final count = widget.items.length;
+        final fitWidth = constraints.maxWidth / count;
+        // 没显式给宽度时（贴底固定栏）也走同一套：挤不下就滑动，
+        // 不把每项压成一条缝
+        final minComfort = iconOnly ? 52.0 : _floatingItemComfort;
+        final w = itemWidth ??
+            (fitWidth < minComfort ? minComfort : fitWidth);
+        final contentWidth = w * count;
+        final scrollable = contentWidth > constraints.maxWidth + 0.5;
+        _revealSelected(w, scrollable);
         final bandHeight = height;
         // 选中指示器：**形态**跟着风格走（圆形块 / 圆角矩形 / 底部圆点 / 底部短线）。
         // 用户 2026-10-24：「你就是换个颜色吗？」—— 所以形状也必须有区别。
         final ind = FloatingNavSpec.styleIndicator(_style);
         final indWidth = switch (ind) {
           NavIndicator.blob => bandHeight,
-          NavIndicator.pill => itemWidth * 0.74,
+          NavIndicator.pill => w * 0.74,
           NavIndicator.dot => 5.0,
           NavIndicator.underline => 18.0,
         };
@@ -481,7 +537,7 @@ class _JellyNavBarState extends State<JellyNavBar>
           NavIndicator.dot => 5.0,
           NavIndicator.underline => 3.0,
         };
-        final indPad = (itemWidth - indWidth) / 2;
+        final indPad = (w - indWidth) / 2;
         final bool indAtBottom =
             ind == NavIndicator.dot || ind == NavIndicator.underline;
         final indBottom = ind == NavIndicator.dot ? 6.0 : 4.0;
@@ -491,79 +547,88 @@ class _JellyNavBarState extends State<JellyNavBar>
           NavIndicator.dot => 3.0,
           NavIndicator.underline => 2.0,
         };
-        return Stack(
-          children: [
-            // 选中指示器（弹性滑动 + 弹性缩放）
-            AnimatedBuilder(
-              animation: _controller,
-              builder: (context, _) {
-                final progress = _curve.transform(_controller.value);
-                final left =
-                    _previousIndex * itemWidth +
-                    (widget.currentIndex - _previousIndex) *
-                        itemWidth *
-                        progress;
-                final scale = 0.88 + 0.12 * progress;
-                final isDark = Theme.of(context).brightness == Brightness.dark;
-                return Positioned(
-                  top: indAtBottom ? null : (bandHeight - indHeight) / 2,
-                  bottom: indAtBottom ? indBottom : null,
-                  left: left + indPad,
-                  width: indWidth,
-                  height: indHeight,
-                  child: Transform.scale(
-                    scale: scale,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: FloatingNavSpec.styleIndicatorColor(
-                          _style,
-                          isDark: isDark,
-                          palette: _pal,
+        final band = SizedBox(
+          width: contentWidth,
+          height: bandHeight,
+          child: Stack(
+            children: [
+              // 选中指示器（弹性滑动 + 弹性缩放）
+              AnimatedBuilder(
+                animation: _controller,
+                builder: (context, _) {
+                  final progress = _curve.transform(_controller.value);
+                  final left = _previousIndex * w +
+                      (widget.currentIndex - _previousIndex) * w * progress;
+                  final scale = 0.88 + 0.12 * progress;
+                  final isDark = Theme.of(context).brightness == Brightness.dark;
+                  return Positioned(
+                    top: indAtBottom ? null : (bandHeight - indHeight) / 2,
+                    bottom: indAtBottom ? indBottom : null,
+                    left: left + indPad,
+                    width: indWidth,
+                    height: indHeight,
+                    child: Transform.scale(
+                      scale: scale,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: FloatingNavSpec.styleIndicatorColor(
+                            _style,
+                            isDark: isDark,
+                            palette: _pal,
+                          ),
+                          borderRadius: BorderRadius.circular(indRadius),
+                          // 霓虹的底部短线带一点发光，和"纯色条"区分开
+                          boxShadow: ind == NavIndicator.underline
+                              ? [
+                                  BoxShadow(
+                                    color: FloatingNavSpec.neonColor
+                                        .withValues(alpha: 0.65),
+                                    blurRadius: 8,
+                                  ),
+                                ]
+                              : null,
                         ),
-                        borderRadius: BorderRadius.circular(indRadius),
-                        // 霓虹的底部短线带一点发光，和"纯色条"区分开
-                        boxShadow: ind == NavIndicator.underline
-                            ? [
-                                BoxShadow(
-                                  color: FloatingNavSpec.neonColor
-                                      .withValues(alpha: 0.65),
-                                  blurRadius: 8,
-                                ),
-                              ]
-                            : null,
                       ),
                     ),
-                  ),
-                );
-              },
-            ),
-            // 导航项（固定宽度，纵向拉伸保证点击区域）
-            Positioned.fill(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: List.generate(widget.items.length, (index) {
-                  return SizedBox(
-                    width: itemWidth,
-                    child: _JellyNavItem(
-                      item: widget.items[index],
-                      isSelected: index == widget.currentIndex,
-                      onTap: () => _onItemTap(index),
-                      onLongPress: widget.onLongPress != null
-                          ? () => widget.onLongPress!(index)
-                          : null,
-                      onSlideUp: widget.onSlideUp != null
-                          ? () => widget.onSlideUp!(index)
-                          : null,
-                      palette: _pal,
-                      style: _style,
-                      iconOnly: iconOnly,
-                      iconSize: iconSize,
-                    ),
                   );
-                }),
+                },
               ),
-            ),
-          ],
+              // 导航项（固定宽度，纵向拉伸保证点击区域）
+              Positioned.fill(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: List.generate(widget.items.length, (index) {
+                    return SizedBox(
+                      width: w,
+                      child: _JellyNavItem(
+                        item: widget.items[index],
+                        isSelected: index == widget.currentIndex,
+                        onTap: () => _onItemTap(index),
+                        onLongPress: widget.onLongPress != null
+                            ? () => widget.onLongPress!(index)
+                            : null,
+                        onSlideUp: widget.onSlideUp != null
+                            ? () => widget.onSlideUp!(index)
+                            : null,
+                        palette: _pal,
+                        style: _style,
+                        iconOnly: iconOnly,
+                        iconSize: iconSize,
+                      ),
+                    );
+                  }),
+                ),
+              ),
+            ],
+          ),
+        );
+        if (!scrollable) return band;
+        // 项太多：整条横向滑动（高度不变，胶囊外形与间距完全不受影响）
+        return SingleChildScrollView(
+          controller: _scrollCtrl,
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          child: band,
         );
       },
     );

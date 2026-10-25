@@ -639,7 +639,7 @@ class RexService {
       'functionName': fn.functionName,
       'params': params,
     });
-    return _items(data['items']);
+    return _items(data['items']).map((e) => _fixItem(e, module.site)).toList();
   }
 
   Future<List<RexItem>> search(
@@ -653,7 +653,53 @@ class RexService {
       'keyword': keyword,
       'page': page,
     });
-    return _items(data['items']);
+    return _items(data['items']).map((e) => _fixItem(e, module.site)).toList();
+  }
+
+  /// 脚本给的封面常是相对路径（`/upload/x.jpg`）或 `//host/x.jpg`：
+  /// 按模块 `site` 补成绝对地址，原本就完整的不动。
+  String _absCover(String url, String site) {
+    final u = url.trim();
+    if (u.isEmpty) return '';
+    if (u.startsWith('//')) return 'https:$u';
+    final low = u.toLowerCase();
+    if (low.startsWith('http://') ||
+        low.startsWith('https://') ||
+        low.startsWith('data:')) {
+      return u;
+    }
+    final base = site.trim();
+    if (base.isEmpty) return u;
+    try {
+      final b = base.startsWith('http') ? base : 'https://$base';
+      return Uri.parse(b).resolve(u).toString();
+    } catch (_) {
+      return u;
+    }
+  }
+
+  /// App 能不能真的把这串当图片加载（空串/相对路径/[object Object] 都不行）
+  bool _imageUsable(String url) {
+    final u = url.trim().toLowerCase();
+    return u.startsWith('http://') ||
+        u.startsWith('https://') ||
+        u.startsWith('data:image');
+  }
+
+  RexItem _fixItem(RexItem it, String site) {
+    final cover = _absCover(it.cover, site);
+    final backdrop = _absCover(it.backdrop, site);
+    if (cover == it.cover && backdrop == it.backdrop) return it;
+    return RexItem(
+      id: it.id,
+      title: it.title,
+      link: it.link,
+      cover: cover,
+      backdrop: backdrop,
+      description: it.description,
+      mediaType: it.mediaType,
+      playerType: it.playerType,
+    );
   }
 
   Future<RexItem?> detail(RexModule module, RexItem item) async {
@@ -663,18 +709,29 @@ class RexService {
       'link': item.link,
     });
     final raw = data['item'];
-    if (raw is! Map) return item;
-    final d = RexItem.fromJson(raw.cast<String, dynamic>());
+    if (raw is! Map) return _fixItem(item, module.site);
+    final d = _fixItem(RexItem.fromJson(raw.cast<String, dynamic>()), module.site);
+    final base = _fixItem(item, module.site);
+    // 🔴 用户 2026-10-26：「加载完播放列表后视频封面没了」——
+    //   loadDetail 返回的封面**不可用**（相对路径补不上 / [object Object] /
+    //   把网页地址当图片 / 数组第 1 条是分集）时，会把列表里好好的封面顶掉，
+    //   详情页就只剩灰底占位。只有"真能加载"的新封面才允许覆盖。
+    final cover = _imageUsable(d.cover)
+        ? d.cover
+        : (base.cover.isNotEmpty ? base.cover : d.cover);
+    final backdrop = _imageUsable(d.backdrop)
+        ? d.backdrop
+        : (base.backdrop.isNotEmpty ? base.backdrop : cover);
     // 模块偶尔把标题/封面丢了，用列表里的补上
     return RexItem(
-      id: d.id.isEmpty ? item.id : d.id,
-      title: d.title.isEmpty ? item.title : d.title,
-      link: d.link.isEmpty ? item.link : d.link,
-      cover: d.cover.isEmpty ? item.cover : d.cover,
-      backdrop: d.backdrop.isEmpty ? item.backdrop : d.backdrop,
-      description: d.description.isEmpty ? item.description : d.description,
-      mediaType: d.mediaType.isEmpty ? item.mediaType : d.mediaType,
-      playerType: d.playerType.isEmpty ? item.playerType : d.playerType,
+      id: d.id.isEmpty ? base.id : d.id,
+      title: d.title.isEmpty ? base.title : d.title,
+      link: d.link.isEmpty ? base.link : d.link,
+      cover: cover,
+      backdrop: backdrop,
+      description: d.description.isEmpty ? base.description : d.description,
+      mediaType: d.mediaType.isEmpty ? base.mediaType : d.mediaType,
+      playerType: d.playerType.isEmpty ? base.playerType : d.playerType,
     );
   }
 

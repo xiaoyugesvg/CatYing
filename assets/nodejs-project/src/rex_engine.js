@@ -304,12 +304,38 @@ async function callFn(mod, name, args) {
   }
 }
 
+/** 把脚本给的封面字段洗成字符串：对象/数组/字面量 "undefined" 一律当没给 */
+function cleanUrl(v) {
+  if (v == null) return '';
+  if (typeof v === 'object') return ''; // 避免 String({}) → "[object Object]"
+  const s = String(v).trim();
+  if (!s) return '';
+  const low = s.toLowerCase();
+  if (low === 'undefined' || low === 'null' || low === '[object object]' ||
+      low === 'true' || low === 'false') return '';
+  return s;
+}
+
+// 各家脚本的封面字段名并不统一（ForwardWidget 用 posterPath，影视源习惯
+// vod_pic/pic，也有直接给 cover/img 的）—— 全收，别再出现"字段名对不上
+// ⇒ 封面整条丢掉"（用户 2026-10-26：REX 加载完播放列表后封面没了）
+const COVER_KEYS = [
+  'coverUrl', 'posterPath', 'poster', 'pic', 'cover', 'vod_pic', 'vodPic',
+  'img', 'imgUrl', 'picUrl', 'image', 'thumb', 'thumbnail',
+];
+
+function pickCover(raw) {
+  for (const k of COVER_KEYS) {
+    const v = cleanUrl(raw[k]);
+    if (v) return v;
+  }
+  return '';
+}
+
 function normalizeItem(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const link = String(raw.link ?? raw.id ?? '');
-  const cover = String(
-    raw.coverUrl ?? raw.posterPath ?? raw.poster ?? raw.pic ?? ''
-  );
+  const cover = pickCover(raw);
   const title = String(raw.title ?? raw.name ?? '');
   if (!title && !link) return null;
   return {
@@ -317,7 +343,9 @@ function normalizeItem(raw) {
     title,
     link,
     cover,
-    backdrop: String(raw.backdropPath ?? cover),
+    // ⚠️ 原来是 `??`：`backdropPath: ''` 不会回退到 cover，头图直接空
+    backdrop: cleanUrl(raw.backdropPath) || cleanUrl(raw.backdrop) ||
+      cleanUrl(raw.fanart) || cover,
     description: String(raw.description ?? raw.desc ?? ''),
     type: String(raw.type ?? ''),
     mediaType: String(raw.mediaType ?? ''),

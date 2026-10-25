@@ -543,7 +543,9 @@ function normalizePeer(peer) {
 async function getDoc(peer, id, force = false) {
     const key = `${peer}|${id}`;
     const hit = msgCache.get(key);
-    if (hit && !force && now() - hit.ts < MSG_TTL) return hit.doc;
+    // 必须连 msg + doc 一起命中：取流要传 msg.media，封面要用 msg；
+    // 只有 msg 没有 doc 的缓存是 thumbTo 塞的，取流不能直接用（doc 会取到 null）
+    if (hit && !force && now() - hit.ts < MSG_TTL && hit.msg && hit.doc) return hit;
     const c = await ensureConnected();
     const entity = await c.getInputEntity(normalizePeer(peer));
     const arr = await c.getMessages(entity, { ids: [parseInt(String(id), 10)] });
@@ -553,10 +555,11 @@ async function getDoc(peer, id, force = false) {
     if (!(media instanceof Api.MessageMediaDocument)) throw new Error('该消息不是文件');
     const doc = media.document;
     if (!doc || doc.className !== 'Document') throw new Error('文件已被删除');
-    // 顺手把 msg 一起缓存：封面接口要用（原来只存 doc，`hit.msg` 永远是 undefined
-    // ⇒ 每张封面都重新 getMessages 一次，列表一屏就是十几个多余 RPC）
-    msgCache.set(key, { doc, msg: m, ts: now() });
-    return doc;
+    // 顺手把 msg 一起缓存：封面/取流都要用（原来只存 doc，`hit.msg` 永远是
+    // undefined ⇒ 每张封面都重新 getMessages 一次，列表一屏十几个多余 RPC）
+    const entry = { doc, msg: m, ts: now() };
+    msgCache.set(key, entry);
+    return entry;
 }
 
 /**
@@ -574,12 +577,12 @@ export async function streamTo(req, res, peer, id, fileName) {
         }));
         return;
     }
-    let doc;
+    let entry;
     try {
-        doc = await getDoc(peer, id);
+        entry = await getDoc(peer, id);
     } catch (e) {
         // 引用过期 → 强制回源一次
-        try { doc = await getDoc(peer, id, true); }
+        try { entry = await getDoc(peer, id, true); }
         catch (e2) {
             logErr('stream.getDoc', e2);
             res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -587,6 +590,7 @@ export async function streamTo(req, res, peer, id, fileName) {
             return;
         }
     }
+    const doc = entry.doc;
 
     const size = doc.size ? parseInt(doc.size.toString(), 10) : 0;
     const mime = doc.mimeType || 'video/mp4';
@@ -639,12 +643,23 @@ export async function streamTo(req, res, peer, id, fileName) {
         //   直接 `st.client.iterDownload` 会在 client 为 null 时抛 TypeError
         //   （用户日志里 /tg/stream 秒回 500 就是这个）。
         const c = await ensureConnected();
+        // 🔴 2026-10-26 修复（用户报错：Cannot cast Document to any kind of
+        //   InputFileLocation）：`iterDownload` 内部走 `utils.getFileInfo(file)`，
+        //   它只认 InputFileLocation / Message / MessageMediaDocument / Photo ——
+        //   直接丢**裸 Document** 会在这里强转失败，于是点开就报错。
+        //   传 `msg.media`（MessageMediaDocument）才会被拆成
+        //   InputDocumentFileLocation，并且顺带拿到正确的 dcId（跨机房文件）。
         it = c.iterDownload({
-            file: doc,
+            file: entry.msg.media,
             offset: start,
             requestSize: 256 * 1024,
             chunkSize: 256 * 1024,
             fileSize: size || undefined,
+            // 长视频中途 fileReference 会过期：带上 [inputChat, msgId]，
+            // gramjs 能自己重新拉一次消息换取新引用（和 downloadMedia 内部一致）
+            msgData: entry.msg.inputChat
+                ? [entry.msg.inputChat, entry.msg.id]
+                : undefined,
         });
         // 手动 next()：`for await` 里 break 会 close 掉生成器，后面就没得读了
         while (true) {
@@ -754,11 +769,13 @@ export async function thumbTo(res, peer, id) {
                     fileReference: doc.fileReference,
                     thumbSize: String(thumb.type || 'm'),
                 });
+                // 文件可能存放在别的机房（dcId 不同）⇒ 必须指定 dcId，
+                // 否则 upload.GetFile 会回 FILE_MIGRATE_X（invoke 不会自动换机房）
                 const r = await c2.invoke(new Api.upload.GetFile({
                     location: loc,
                     offset: 0,
                     limit: 1024 * 1024,
-                }));
+                }), doc.dcId || undefined);
                 buf = Buffer.from(r.bytes || []);
             } catch (e2) {
                 // 引用过期 / 缩略图不存在 → 给 404，App 显示占位图
