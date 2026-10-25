@@ -702,6 +702,7 @@ export async function streamTo(req, res, peer, id, fileName) {
 /** 封面缩略图（频道列表用）—— 直接吐图片字节 */
 export async function thumbTo(res, peer, id) {
     try {
+        let thumb = null;
         let doc = null;
         let msg = null;
         const hit = msgCache.get(`${peer}|${id}`);
@@ -716,20 +717,55 @@ export async function thumbTo(res, peer, id) {
             if (msg) msgCache.set(`${peer}|${id}`, { doc: hit ? hit.doc : null, msg, ts: now() });
         }
         if (msg && msg.media instanceof Api.MessageMediaDocument) {
-            const d = msg.media.document;
+            doc = msg.media.document;
             // 视频文件有时只有 `videoThumbs`（VideoSize），`thumbs` 为空 ⇒
             // 之前直接 404，列表里就是一片"没有封面"（用户 2026-10-25）
             const cands = [
-                ...(d && Array.isArray(d.thumbs) ? d.thumbs : []),
-                ...(d && Array.isArray(d.videoThumbs) ? d.videoThumbs : []),
+                ...(doc && Array.isArray(doc.thumbs) ? doc.thumbs : []),
+                ...(doc && Array.isArray(doc.videoThumbs) ? doc.videoThumbs : []),
             ];
-            if (cands.length) doc = cands[cands.length - 1];
+            if (cands.length) thumb = cands[cands.length - 1];
         }
-        if (!doc) {
+        if (!thumb) {
             res.writeHead(404); res.end(); return;
         }
+
         const c2 = await ensureConnected();
-        const buf = await c2.downloadMedia(doc, {});
+
+        // 🔴 2026-10-26 修复（用户日志：登录的频道列表封面全空）：
+        //   原来 `downloadMedia(thumb, {})` 传的是**裸 PhotoSize / VideoSize** ——
+        //   它们没有 accessHash / fileReference，gramjs 拿不到文件引用 ⇒ 必然失败
+        //   → 列表封面 404 一片灰。缩略图必须走 Telegram 的**官方路径**：
+        //   `upload.GetFile` + `InputDocumentFileLocation`（thumbSize 用缩略图 type）。
+        let buf = null;
+        // 内联缩略图（CachedSize / Progressive / Stripped）自带字节，零 RPC 直接返回
+        const inline = thumb &&
+            (thumb instanceof Api.PhotoCachedSize ||
+             thumb instanceof Api.PhotoSizeProgressive ||
+             thumb instanceof Api.PhotoStrippedSize) &&
+            thumb.bytes && thumb.bytes.length;
+        if (inline) {
+            buf = Buffer.from(thumb.bytes);
+        } else if (doc) {
+            try {
+                const loc = new Api.InputDocumentFileLocation({
+                    id: doc.id,
+                    accessHash: doc.accessHash,
+                    fileReference: doc.fileReference,
+                    thumbSize: String(thumb.type || 'm'),
+                });
+                const r = await c2.invoke(new Api.upload.GetFile({
+                    location: loc,
+                    offset: 0,
+                    limit: 1024 * 1024,
+                }));
+                buf = Buffer.from(r.bytes || []);
+            } catch (e2) {
+                // 引用过期 / 缩略图不存在 → 给 404，App 显示占位图
+                logErr('thumb.GetFile', e2);
+                res.writeHead(404); res.end(); return;
+            }
+        }
         if (!buf || !buf.length) { res.writeHead(404); res.end(); return; }
         res.writeHead(200, {
             'Content-Type': 'image/jpeg',

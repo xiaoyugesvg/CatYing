@@ -38,6 +38,10 @@ class _PetChatSheetState extends State<PetChatSheet> {
   bool _busy = false;
   bool _ready = false;
 
+  /// 手动拖动偏移（用户 2026-10-25：「对话这个能不能移动一哈呢？」）。
+  /// 初始位置仍按贴宠物/居中自动计算，用户从头部按住拖动后叠加该偏移。
+  Offset _dragOffset = Offset.zero;
+
   static const int _maxMessages = 100;
 
   @override
@@ -146,6 +150,7 @@ class _PetChatSheetState extends State<PetChatSheet> {
     // ── 贴着宠物定位（用户 2026-10-25）──
     //   · 宠物两侧空间够（≥250）→ 放侧边，垂直与宠物居中对齐
     //   · 不够 → 放宠物上方/下方，水平居中
+    // 之后叠加用户手动拖动偏移 [_dragOffset]，并 clamp 在屏幕内。
     final safeTop = MediaQuery.of(context).padding.top;
     const gap = 10.0;
     final maxCardW = min(340.0, size.width - 24);
@@ -177,11 +182,19 @@ class _PetChatSheetState extends State<PetChatSheet> {
       max(safeTop + 8, size.height - bottomInset - 8 - cardMaxH),
     );
 
+    // 手动拖动：叠加偏移后仍限制在可视区内（底部避开键盘）
+    final dragLeft = (left + _dragOffset.dx)
+        .clamp(0.0, max(0.0, size.width - cardW))
+        .toDouble();
+    final dragTop = (top + _dragOffset.dy)
+        .clamp(safeTop, max(safeTop, size.height - bottomInset - cardMaxH))
+        .toDouble();
+
     return Stack(
       children: [
         Positioned(
-          left: left,
-          top: top,
+          left: dragLeft,
+          top: dragTop,
           width: cardW,
           child: ConstrainedBox(
             constraints: BoxConstraints(maxHeight: cardMaxH),
@@ -255,53 +268,64 @@ class _PetChatSheetState extends State<PetChatSheet> {
 
   Widget _header() {
     final p = PetService.instance;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 8, 10),
-      child: Row(
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: AppTheme.backgroundTertiary,
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      // 只有头部可拖（消息列表要滚动，整卡拖会跟滚动手势打架）
+      onPanUpdate: (d) => setState(() => _dragOffset += d.delta),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 8, 10),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppTheme.backgroundTertiary,
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: PetView(
+                species: p.species,
+                outfit: p.equippedOutfit,
+                outfits: p.equippedOutfitsByName,
+                t: 0.5,
+                size: 38,
+                headOnly: true,
+              ),
             ),
-            clipBehavior: Clip.antiAlias,
-            child: PetView(
-              species: p.species,
-              outfit: p.equippedOutfit,
-              outfits: p.equippedOutfitsByName,
-              t: 0.5,
-              size: 38,
-              headOnly: true,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  p.species.name,
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    p.species.name,
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                ),
-                Text(
-                  'Lv.${p.level} · 心情 ${p.mood.round()}',
-                  style: TextStyle(color: AppTheme.textTertiary, fontSize: 11),
-                ),
-              ],
+                  Text(
+                    'Lv.${p.level} · 心情 ${p.mood.round()}',
+                    style: TextStyle(color: AppTheme.textTertiary, fontSize: 11),
+                  ),
+                ],
+              ),
             ),
-          ),
-          IconButton(
-            onPressed: () => Get.back(),
-            icon: Icon(Icons.close_rounded,
-                size: 20, color: AppTheme.textTertiary),
-          ),
-        ],
+            Tooltip(
+              message: '按住头部拖动',
+              child: Icon(Icons.drag_handle_rounded,
+                  size: 18, color: AppTheme.textTertiary),
+            ),
+            const SizedBox(width: 2),
+            IconButton(
+              onPressed: () => Get.back(),
+              icon: Icon(Icons.close_rounded,
+                  size: 20, color: AppTheme.textTertiary),
+            ),
+          ],
+        ),
       ),
     );
   }

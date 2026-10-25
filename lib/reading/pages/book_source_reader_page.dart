@@ -3553,13 +3553,15 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage>
         // 统一规则：开了双页就是 spread 平移，动画样式不叠加。
         if (_dualPageActive && _pages.length > 1) {
           // 把页成对合并：第 0 页单独，之后 (1,2) (3,4) …
-          final spreads = <List<int>>[];
-          for (var i = 0; i < _pages.length; i += 2) {
-            if (i == 0) {
-              spreads.add([0]);
-            } else {
-              spreads.add([i, if (i + 1 < _pages.length) i + 1]);
-            }
+          // 🔴 修复：原来 `i+=2` 从 0 起步 ⇒ spread 是 [0],(2,3),(4,5)…
+          //   ——下标 1 的页永远丢（双页下第 2 页看不见），且成对起点
+          //   是偶数 ⇒ 与 `_appendNextChapter` 的补白页（奇数下标=左页）
+          //   对齐逻辑互相矛盾，横屏双页会出现"左页空白/页缺失"。
+          //   现在从 1 起步成对：[0],(1,2),(3,4)…，每一页都进 spread，
+          //   奇数下标恒为左页，与补白页语义一致。
+          final spreads = <List<int>>[[0]];
+          for (var i = 1; i < _pages.length; i += 2) {
+            spreads.add([i, if (i + 1 < _pages.length) i + 1]);
           }
           return NotificationListener<ScrollNotification>(
             // 章末再滑一次 → 下一章（无缝拼接接不上时的兜底）

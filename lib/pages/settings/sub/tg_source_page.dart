@@ -55,6 +55,10 @@ class _TgSourcePageState extends State<TgSourcePage> {
   Map<String, dynamic> _qr = {};
   List<Map<String, dynamic>> _saved = [];
 
+  /// 登录账号里的**所有**群/频道（最多 150），用户从中勾选要显示的
+  List<Map<String, dynamic>> _allDialogs = [];
+  bool _loadingDialogs = false;
+
   Timer? _pollTimer;
 
   bool get _configured => _st['configured'] == true;
@@ -89,6 +93,21 @@ class _TgSourcePageState extends State<TgSourcePage> {
     _proxyPortCtrl.text = _tg.proxyPort;
     await _tg.pushConfig();
     await _refreshStatus();
+    // 自动真握手（用户 2026-10-25：「切换一次，就是点击测试一次登录」）：
+    // tgStatus 只读缓存，会话有没有真通要 tgPing 才知道。
+    // 这里进页面静默补一次，会话有效就直接进已登录，不用每次手动点「测试连接」。
+    // 握手失败只保留 status 快照（configured/connected 不能丢，否则界面会误跳「未配置」）。
+    if (mounted && _authorized != true) {
+      final r = await _tg.ping();
+      if (!mounted) return;
+      if (r['ok'] == true) {
+        setState(() => _st = r);
+        if (r['authorized'] == true) {
+          _loadSaved();
+          _loadDialogs();
+        }
+      }
+    }
     // 首次进入塞一个内置公开频道（与 TG 分类页共用同一份收藏）
     await _tg.seedDefaults();
     final saved = await _tg.channels();
@@ -98,7 +117,10 @@ class _TgSourcePageState extends State<TgSourcePage> {
         _booting = false;
       });
     }
-    if (_authorized) _loadSaved();
+    if (_authorized) {
+      _loadSaved();
+      _loadDialogs();
+    }
   }
 
   /// 重新读「我添加的频道」（登录/公开两种模式都在这里）
@@ -106,6 +128,21 @@ class _TgSourcePageState extends State<TgSourcePage> {
     final s = await _tg.channels();
     if (!mounted) return;
     setState(() => _saved = s);
+  }
+
+  /// 拉取账号里**所有**群/频道（最多 150），供用户勾选
+  Future<void> _loadDialogs() async {
+    if (!_authorized) return;
+    setState(() => _loadingDialogs = true);
+    final r = await _tg.dialogs();
+    if (!mounted) return;
+    setState(() {
+      _allDialogs = ((r['items'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((e) => e.cast<String, dynamic>())
+          .toList();
+      _loadingDialogs = false;
+    });
   }
 
   Future<void> _refreshStatus() async {
@@ -121,14 +158,19 @@ class _TgSourcePageState extends State<TgSourcePage> {
     if (!mounted) return;
     setState(() {
       _busy = false;
-      _st = r;
+      // 握手失败不覆盖完整状态（configured/connected 还在 status 里，
+      // 否则界面会误跳成「未配置」）
+      if (r['ok'] == true) _st = r;
     });
     if (r['ok'] != true) {
       AppToast.message(r['error']?.toString() ?? '连接失败');
     } else {
       AppToast.message(r['authorized'] == true ? '已登录' : '连接正常，请扫码登录');
     }
-    if (r['authorized'] == true) _loadSaved();
+    if (r['authorized'] == true) {
+      _loadSaved();
+      _loadDialogs();
+    }
   }
 
   Future<void> _saveConfig() async {
@@ -345,6 +387,7 @@ class _TgSourcePageState extends State<TgSourcePage> {
         t.cancel();
         await _refreshStatus();
         await _loadSaved();
+        await _loadDialogs();
         AppToast.message('登录成功');
       } else if (phase == 'error') {
         t.cancel();
@@ -865,48 +908,136 @@ class _TgSourcePageState extends State<TgSourcePage> {
       .where((c) => (c['mode'] ?? 'public').toString() != 'login')
       .toList();
 
+  /// 已选的登录频道 peer 集合（用于 checkbox 回显）
+  Set<String> get _loginPeerSet => _saved
+      .where((c) => (c['mode'] ?? 'public').toString() == 'login')
+      .map((c) => (c['peer'] ?? '').toString())
+      .toSet();
+
+  /// 勾选 / 取消勾选一个群/频道
+  Future<void> _toggleLoginChannel(Map<String, dynamic> d) async {
+    final peer = (d['peer'] ?? '').toString();
+    if (peer.isEmpty) return;
+    final title = (d['title'] ?? peer).toString();
+    if (_loginPeerSet.contains(peer)) {
+      await _tg.removeChannel(peer);
+    } else {
+      await _tg.addChannel(peer, title: title, mode: 'login');
+    }
+    await _loadSaved();
+  }
+
   Widget _channelsCard() {
-    // 只显示**用户自己填过**的登录频道（用户 2026-10-25：
-    // 「登录的，只有我填的才有，不要全部显示」）——
-    // 原来这里把 `tgDialogs` 拉到的 150 个群/频道全铺开，
-    // 跟"我要看的频道"完全无关。
+    // 登录后自动加载账号里所有群/频道，用户勾选要哪些（2026-10-26 改回）
     final mine = _saved
         .where((c) => (c['mode'] ?? 'public').toString() == 'login')
         .toList();
-    if (mine.isEmpty) {
-      return _card(AppCard(
-        dense: true,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 26),
-          child: Center(
-            child: Text('还没有登录频道：在上面填频道名 / -100 ID 添加',
-                style: TextStyle(color: AppTheme.textTertiary, fontSize: 12)),
-          ),
-        ),
-      ));
-    }
     return _card(AppCard(
       dense: true,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 8, 4),
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
             child: Row(
               children: [
                 Expanded(
-                  child: Text('我添加的登录频道',
-                      style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600)),
+                  child: Text(
+                    '我的群 / 频道',
+                    style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600),
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: _loadingDialogs ? null : _loadDialogs,
+                  icon: _loadingDialogs
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh, size: 15),
+                  label: Text('刷新${_allDialogs.isNotEmpty ? '（${_allDialogs.length}）' : ''}',
+                      style: const TextStyle(fontSize: 11)),
                 ),
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-            child: _savedGrid(mine),
-          ),
+          if (_loadingDialogs && _allDialogs.isEmpty) ...[
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+          ] else if (_allDialogs.isEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Center(
+                child: Text('没拉到群/频道，点右上角刷新',
+                    style: TextStyle(color: AppTheme.textTertiary, fontSize: 12)),
+              ),
+            ),
+          ] else ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Text(
+                '勾选要显示的频道（已选 ${mine.length} 个）',
+                style: TextStyle(color: AppTheme.textTertiary, fontSize: 11),
+              ),
+            ),
+            const SizedBox(height: 4),
+            ..._allDialogs.map((d) {
+              final peer = (d['peer'] ?? '').toString();
+              final title = (d['title'] ?? peer).toString();
+              final checked = _loginPeerSet.contains(peer);
+              return CheckboxListTile(
+                dense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                value: checked,
+                onChanged: (_) => _toggleLoginChannel(d),
+                title: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 13,
+                    fontWeight: checked ? FontWeight.w600 : FontWeight.w400,
+                  ),
+                ),
+                subtitle: Text(
+                  '@$peer',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: AppTheme.textTertiary, fontSize: 10.5),
+                ),
+                secondary: Icon(
+                  checked ? Icons.check_circle : Icons.radio_button_unchecked,
+                  size: 18,
+                  color: checked
+                      ? AppTheme.accentOnSurface
+                      : AppTheme.textTertiary,
+                ),
+                controlAffinity: ListTileControlAffinity.trailing,
+              );
+            }),
+          ],
+          if (mine.isNotEmpty) ...[
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
+              child: Text('已选频道（点击播放）',
+                  style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600)),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+              child: _savedGrid(mine),
+            ),
+          ],
         ],
       ),
     ));

@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../common/theme.dart';
 import '../../../reading/services/ai_service.dart';
@@ -94,6 +97,12 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
   String? _msg;
   bool _ok = false;
 
+  /// 每个服务商各自记一份 Key（用户 2026-10-25：
+  /// 「所有的 AI 密码切换后不变吗？」—— 原来只有一个 Key 输入框，
+  /// 切服务商后还留着上一家的 Key，很容易把 A 家的 Key 发给 B 家）。
+  static const _kKeys = 'ai.provider_keys.v1';
+  Map<String, String> _keys = {};
+
   @override
   void initState() {
     super.initState();
@@ -115,6 +124,19 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
     try {
       await _ai.init();
     } catch (_) {}
+    // 先把「每家各自的 Key」读出来
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString(_kKeys);
+      if (raw != null && raw.isNotEmpty) {
+        final m = jsonDecode(raw);
+        if (m is Map) {
+          _keys = {
+            for (final e in m.entries) e.key.toString(): e.value.toString(),
+          };
+        }
+      }
+    } catch (_) {}
     _base.text = _ai.baseUrl;
     _key.text = _ai.apiKey;
     _model.text = _ai.model;
@@ -128,16 +150,39 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
         break;
       }
     }
+    // 当前服务商存过 Key ⇒ 用存过的那份（比全局 Key 更准）
+    final own = _keys[_selected ?? ''];
+    if (own != null && own.isNotEmpty) _key.text = own;
     if (mounted) setState(() {});
   }
 
-  void _pick(_Provider p) {
+  /// 把当前输入框里的 Key 记到当前服务商名下
+  void _rememberKey() {
+    final name = _selected;
+    final k = _key.text.trim();
+    if (name == null || k.isEmpty) return;
+    _keys[name] = k;
+  }
+
+  Future<void> _persistKeys() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setString(_kKeys, jsonEncode(_keys));
+    } catch (_) {}
+  }
+
+  Future<void> _pick(_Provider p) async {
+    _rememberKey();
+    final next = _keys[p.name] ?? '';
     setState(() {
       _selected = p.name;
       _base.text = p.baseUrl;
       _model.text = p.model;
+      // 切服务商：有存过 Key 就自动带出来，没有就清空（不再沿用上一家的）
+      _key.text = next;
       _msg = null;
     });
+    await _persistKeys();
   }
 
   Future<bool> _save() async {
@@ -157,6 +202,10 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
       readerApiKey: _rKey.text,
       readerModel: _rModel.text,
     );
+    if (!mounted) return true;
+    // 保存成功 ⇒ 把这家的 Key 也记进「按服务商」的表里
+    _rememberKey();
+    await _persistKeys();
     if (!mounted) return true;
     setState(() {
       _ok = true;

@@ -609,5 +609,44 @@ class ReaderStyle {
       // 泼墨的仿古观感靠楷体
       fontId: 'builtin:kai',
     ),
+    // ── 古风·夜读（2026-10-25 用户要求"第三张图那种"：深灰山水楼阁 + 全宽）──
+    // 夜间 = 内置「古风」夜间壁纸（深灰山水楼阁插画）+ 浅字，正是目标样式；
+    // 日间 = 干净浅米色纸 + 深字（不铺日版浅色插画，避免浅字浅底看不清）。
+    // 排版全宽：无气泡、无花哨标题，正文直接平铺（对齐用户参考图）。
+    ReaderStyle(
+      id: 'builtin:gufeng',
+      name: '古风·夜读',
+      builtin: true,
+      bgIndex: 0,
+      dayBgIndex: 0,
+      bgColor: 0xFFF5F2EA,
+      bgColorNight: 0xFF1E2224,
+      fgColor: 0xFF323232,
+      fgColorNight: 0xFFFFFCF7,
+      bgImageAsset: null,
+      bgImageAssetNight:
+          'assets/images/reader_bg/reading_bg_gufeng_night.webp',
+      bgImageDark: false,
+      fontSize: 24,
+      lineHeight: 1.625,
+      letterSpacing: 0.2,
+      paraSpacing: 0.333,
+      indent: 2,
+      padLeft: 25,
+      padRight: 25,
+      padTop: 12,
+      padBottom: 12,
+      headerPadH: 0,
+      footerPadH: 0,
+      headerPadTop: 48,
+      footerPadBottom: 17,
+      footerC: 'B',
+      statusItems: [],
+      titleFontSize: 20,
+      titleBold: false,
+      chapterTitleStyle: '',
+      // 古风正文的宋体观感
+      fontId: 'builtin:serif',
+    ),
   ];
 }
