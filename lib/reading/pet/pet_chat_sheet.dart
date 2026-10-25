@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
@@ -16,7 +18,11 @@ import 'pet_view.dart';
 ///   2. 点宠物 = 开这个面板，能打字，也能用系统听写说话（键盘上的麦克风）。
 ///   3. 布局从"一个裸输入框"改成：头像 + 气泡 + 快捷话题 + 胶囊输入条。
 class PetChatSheet extends StatefulWidget {
-  const PetChatSheet({super.key});
+  const PetChatSheet({super.key, this.anchor});
+
+  /// 宠物在屏幕上的矩形（来自悬浮层）。
+  /// 有值时对话卡片**贴着宠物**弹；为空时退回居中（兜底）。
+  final Rect? anchor;
 
   @override
   State<PetChatSheet> createState() => _PetChatSheetState();
@@ -112,79 +118,137 @@ class _PetChatSheetState extends State<PetChatSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final maxH = MediaQuery.of(context).size.height * 0.66;
+    final size = MediaQuery.of(context).size;
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
-    return Center(
-      child: AnimatedPadding(
-        duration: const Duration(milliseconds: 160),
-        curve: Curves.easeOut,
-        // 键盘弹起时整卡片上移，而不是被顶出屏幕
-        padding: EdgeInsets.only(
-          left: 20,
-          right: 20,
-          bottom: bottomInset + 24,
-          top: 24,
-        ),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: 360, maxHeight: maxH),
-          child: Container(
-            decoration: BoxDecoration(
-              color: AppTheme.backgroundSecondary,
-              borderRadius: BorderRadius.circular(22),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.18),
-                  blurRadius: 28,
-                  offset: const Offset(0, 10),
-                ),
-              ],
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _header(),
-                const Divider(height: 1, thickness: 0.5),
-                if (!_ready)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 40),
-                    child: Center(
-                      child: SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    ),
-                  )
-                else if (!_ai.isConfigured)
-                  _needConfig()
-                else ...[
-                  // 用 Flexible + shrinkWrap：卡片按内容长高（不硬撑满 66%），
-                  // 消息多了才封顶到 maxHeight 并可滚动。
-                  Flexible(
-                    child: _messages.isEmpty
-                        ? _emptyHint()
-                        : ListView.builder(
-                            controller: _scroll,
-                            shrinkWrap: true,
-                            padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
-                            itemCount: _messages.length + (_busy ? 1 : 0),
-                            itemBuilder: (context, i) {
-                              if (i == _messages.length) {
-                                return _bubble(false, '…', typing: true);
-                              }
-                              final m = _messages[i];
-                              return _bubble(m.me, m.text);
-                            },
-                          ),
-                  ),
-                  if (_messages.isEmpty) _quickChips(),
-                  _inputBar(),
-                ],
-              ],
-            ),
+    final anchor = widget.anchor;
+
+    // 没有锚点（异常路径）⇒ 还是居中
+    if (anchor == null) {
+      return Center(
+        child: AnimatedPadding(
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOut,
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            bottom: bottomInset + 24,
+            top: 24,
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+                maxWidth: 360, maxHeight: size.height * 0.66),
+            child: _cardBody(),
           ),
         ),
+      );
+    }
+
+    // ── 贴着宠物定位（用户 2026-10-25）──
+    //   · 宠物两侧空间够（≥250）→ 放侧边，垂直与宠物居中对齐
+    //   · 不够 → 放宠物上方/下方，水平居中
+    final safeTop = MediaQuery.of(context).padding.top;
+    const gap = 10.0;
+    final maxCardW = min(340.0, size.width - 24);
+    final spaceRight = size.width - anchor.right - 12;
+    final spaceLeft = anchor.left - 12;
+    final sideSpace = max(spaceRight, spaceLeft);
+    final useSide = sideSpace >= 250;
+    final cardW = useSide ? min(maxCardW, sideSpace - gap) : maxCardW;
+
+    final availH = size.height - bottomInset - safeTop - 16;
+    final cardMaxH = max(180.0, min(availH * 0.72, 430.0));
+
+    double left;
+    double top;
+    if (useSide) {
+      left = spaceRight >= spaceLeft
+          ? anchor.right + gap
+          : anchor.left - cardW - gap;
+      top = anchor.top + anchor.height / 2 - cardMaxH / 2;
+    } else {
+      left = ((size.width - cardW) / 2).clamp(12.0, size.width - cardW - 12);
+      final preferBelow = anchor.center.dy < size.height / 2;
+      top = preferBelow
+          ? anchor.bottom + gap
+          : anchor.top - cardMaxH - gap;
+    }
+    top = top.clamp(
+      safeTop + 8,
+      max(safeTop + 8, size.height - bottomInset - 8 - cardMaxH),
+    );
+
+    return Stack(
+      children: [
+        Positioned(
+          left: left,
+          top: top,
+          width: cardW,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: cardMaxH),
+            child: _cardBody(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 对话卡片本体（定位由外层负责）
+  Widget _cardBody() {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundSecondary,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.18),
+            blurRadius: 28,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _header(),
+          const Divider(height: 1, thickness: 0.5),
+          if (!_ready)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 40),
+              child: Center(
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            )
+          else if (!_ai.isConfigured)
+            _needConfig()
+          else ...[
+            // 用 Flexible + shrinkWrap：卡片按内容长高（不硬撑满 66%），
+            // 消息多了才封顶到 maxHeight 并可滚动。
+            Flexible(
+              child: _messages.isEmpty
+                  ? _emptyHint()
+                  : ListView.builder(
+                      controller: _scroll,
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+                      itemCount: _messages.length + (_busy ? 1 : 0),
+                      itemBuilder: (context, i) {
+                        if (i == _messages.length) {
+                          return _bubble(false, '…', typing: true);
+                        }
+                        final m = _messages[i];
+                        return _bubble(m.me, m.text);
+                      },
+                    ),
+            ),
+            if (_messages.isEmpty) _quickChips(),
+            _inputBar(),
+          ],
+        ],
       ),
     );
   }

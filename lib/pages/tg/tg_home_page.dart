@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../common/theme.dart';
 import '../../miniapp/pages/mini_app_player_page.dart';
 import '../../services/tg_service.dart';
+import '../../services/tg_title_filter.dart';
 import '../../services/translate_service.dart';
 import '../../widgets/app_toast.dart';
 import '../settings/sub/tg_source_page.dart';
@@ -71,6 +72,8 @@ class _TgHomePageState extends State<TgHomePage> {
   @override
   void initState() {
     super.initState();
+    TgTitleFilter.instance.ensureLoaded();
+    TgTitleFilter.instance.addListener(_onFilterChanged);
     _scroll.addListener(() {
       if (_scroll.position.pixels >
           _scroll.position.maxScrollExtent - 400) {
@@ -82,12 +85,19 @@ class _TgHomePageState extends State<TgHomePage> {
 
   @override
   void dispose() {
+    TgTitleFilter.instance.removeListener(_onFilterChanged);
     _bannerTimer?.cancel();
     _bannerCtrl.dispose();
     _scroll.dispose();
     _searchCtrl.dispose();
     _searchFocus.dispose();
     super.dispose();
+  }
+
+  /// 标题筛选规则变了（设置页里加词/关开关）⇒ 重新拉一页
+  void _onFilterChanged() {
+    if (!mounted) return;
+    _reloadItems();
   }
 
   Future<void> _boot() async {
@@ -153,9 +163,10 @@ class _TgHomePageState extends State<TgHomePage> {
         ? await _tg.publicList(_peer, offsetId: _offset)
         : await _tg.videos(_peer, offsetId: _offset, limit: _pageSize);
     if (!mounted) return;
+    // ⚠️ 先解锁再判代次（否则切群组后永远卡在"请求在飞"）
+    _inflight = false;
     // 期间切了群组 / 重新加载 ⇒ 这条结果已经不属于当前列表，直接丢掉
     if (gen != _loadGen) return;
-    _inflight = false;
     if (r['ok'] == true) {
       var list = (r['items'] as List? ?? const [])
           .whereType<Map>()
@@ -164,12 +175,21 @@ class _TgHomePageState extends State<TgHomePage> {
       if (_mode == 'public' && list.length > _pageSize) {
         list = list.sublist(0, _pageSize);
       }
+      // 游标在筛选前取（筛选只影响显示，不该少翻一页）
+      final pageLast =
+          list.isEmpty ? 0 : ((list.last['id'] as num?)?.toInt() ?? 0);
+      list = list
+          .where((it) =>
+              !TgTitleFilter.instance.shouldHide(it['title']?.toString()))
+          .toList();
       setState(() {
         _items.addAll(list);
         _offset = _mode == 'public'
-            ? (list.isEmpty ? 0 : (list.last['id'] as num).toInt())
+            ? pageLast
             : ((r['next'] as num?)?.toInt() ?? 0);
-        _more = list.isNotEmpty && _offset > 0;
+        _more = _mode == 'public'
+            ? pageLast > 0
+            : (list.isNotEmpty && _offset > 0);
         _loading = false;
       });
     } else {
@@ -252,39 +272,78 @@ class _TgHomePageState extends State<TgHomePage> {
   }
 
   Widget _switchSheet(BuildContext c) {
-    Widget row(Map<String, dynamic> d) {
+    // 一行两个的**卡片**（用户 2026-10-25：切换源也要卡片网格）
+    Widget card(Map<String, dynamic> d) {
       final peer = (d['peer'] ?? '').toString();
       final mode = (d['mode'] ?? 'public').toString();
       final on = peer == _peer;
-      return ListTile(
-        dense: true,
-        leading: Icon(mode == 'login' ? Icons.lock_outline : Icons.public,
-            size: 19,
-            color: on ? AppTheme.accentOnSurface : AppTheme.textTertiary),
-        title: Text(
-          (d['title'] ?? peer).toString(),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 13.5,
-            fontWeight: on ? FontWeight.w600 : FontWeight.w400,
-            color: on ? AppTheme.accentOnSurface : AppTheme.textPrimary,
-          ),
-        ),
-        subtitle: Text('@$peer',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 11, color: AppTheme.textTertiary)),
-        trailing: on
-            ? Icon(Icons.check, size: 17, color: AppTheme.accentOnSurface)
-            : null,
+      return InkWell(
+        borderRadius: BorderRadius.circular(12),
         onTap: () => Navigator.pop(c, {
           'peer': peer,
           'title': (d['title'] ?? peer).toString(),
           'mode': mode,
         }),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: on
+                ? AppTheme.accentOnSurface.withValues(alpha: 0.16)
+                : AppTheme.backgroundTertiary,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: on
+                  ? AppTheme.accentOnSurface
+                  : AppTheme.borderLight.withValues(alpha: 0.6),
+              width: on ? 1 : 0.6,
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(mode == 'login' ? Icons.lock_outline : Icons.public,
+                  size: 16,
+                  color: on ? AppTheme.accentOnSurface : AppTheme.textTertiary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      (d['title'] ?? peer).toString(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: on ? FontWeight.w600 : FontWeight.w500,
+                        color:
+                            on ? AppTheme.accentOnSurface : AppTheme.textPrimary,
+                      ),
+                    ),
+                    Text('@$peer',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 10, color: AppTheme.textTertiary)),
+                  ],
+                ),
+              ),
+              if (on)
+                Icon(Icons.check, size: 15, color: AppTheme.accentOnSurface),
+            ],
+          ),
+        ),
       );
     }
+
+    final all = [
+      ..._channels,
+      ..._dialogs.map((d) => {
+            'peer': d['peer'],
+            'title': d['title'],
+            'mode': 'login',
+          }),
+    ];
 
     return SafeArea(
       top: false,
@@ -313,30 +372,15 @@ class _TgHomePageState extends State<TgHomePage> {
                           fontWeight: FontWeight.w700,
                           color: AppTheme.textPrimary)),
                   const Spacer(),
-                  Text('${_channels.length + _dialogs.length} 个',
+                  Text('${all.length} 个',
                       style: TextStyle(
                           fontSize: 11, color: AppTheme.textTertiary)),
                 ],
               ),
             ),
             Flexible(
-              child: ListView(
-                shrinkWrap: true,
-                children: [
-                  if (_channels.isNotEmpty) ...[
-                    _sheetLabel('收藏的频道'),
-                    ..._channels.map(row),
-                  ],
-                  if (_dialogs.isNotEmpty) ...[
-                    _sheetLabel('账号里的群 / 频道'),
-                    ..._dialogs.map((d) => row({
-                          'peer': d['peer'],
-                          'title': d['title'],
-                          'mode': 'login',
-                        })),
-                  ],
-                  if (_channels.isEmpty && _dialogs.isEmpty)
-                    Padding(
+              child: all.isEmpty
+                  ? Padding(
                       padding: const EdgeInsets.symmetric(vertical: 30),
                       child: Center(
                         child: Text('还没有可切换的频道\n去「设置 → TG 设置」里加一个',
@@ -346,22 +390,26 @@ class _TgHomePageState extends State<TgHomePage> {
                                 height: 1.6,
                                 color: AppTheme.textTertiary)),
                       ),
+                    )
+                  : GridView.builder(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.fromLTRB(12, 6, 12, 14),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        mainAxisSpacing: 8,
+                        crossAxisSpacing: 8,
+                        mainAxisExtent: 56,
+                      ),
+                      itemCount: all.length,
+                      itemBuilder: (_, i) => card(all[i]),
                     ),
-                  const SizedBox(height: 10),
-                ],
-              ),
             ),
           ],
         ),
       ),
     );
   }
-
-  Widget _sheetLabel(String t) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-        child: Text(t,
-            style: TextStyle(fontSize: 11, color: AppTheme.textTertiary)),
-      );
 
   // ── 点击条目：操作弹窗 ──────────────────────────────────
   void _itemSheet(Map<String, dynamic> it) {
@@ -396,46 +444,74 @@ class _TgHomePageState extends State<TgHomePage> {
                         fontWeight: FontWeight.w600,
                         color: AppTheme.textPrimary)),
               ),
-              ListTile(
-                dense: true,
-                leading: Icon(Icons.play_circle_outline,
-                    color: AppTheme.accentOnSurface),
-                title: Text('播放', style: TextStyle(color: AppTheme.textPrimary)),
-                onTap: () {
-                  Get.back();
-                  _play(it);
-                },
+              // 操作项也做成**一行两个的卡片**（用户 2026-10-25：
+              // 「切换源以及长按的也是卡片网格式的」）
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 14),
+                child: GridView.count(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 8,
+                  childAspectRatio: 2.6,
+                  children: [
+                    _actionCard(Icons.play_circle_outline, '播放', () {
+                      Get.back();
+                      _play(it);
+                    }),
+                    _actionCard(Icons.bookmark_add_outlined, '收藏当前频道',
+                        () async {
+                      Get.back();
+                      await _tg.addChannel(_peer, title: _title, mode: _mode);
+                      await _reloadGroups();
+                      if (mounted) AppToast.message('已加入 TG 收藏');
+                    }),
+                    _actionCard(Icons.link_rounded, '复制消息链接', () async {
+                      Get.back();
+                      final url = 'https://t.me/$_peer/${it['id']}';
+                      await _copy(url);
+                    }),
+                  ],
+                ),
               ),
-              ListTile(
-                dense: true,
-                leading: Icon(Icons.bookmark_add_outlined,
-                    color: AppTheme.textSecondary),
-                title: Text('收藏当前频道',
-                    style: TextStyle(color: AppTheme.textPrimary)),
-                onTap: () async {
-                  Get.back();
-                  await _tg.addChannel(_peer, title: _title, mode: _mode);
-                  await _reloadGroups();
-                  if (mounted) AppToast.message('已加入 TG 收藏');
-                },
-              ),
-              ListTile(
-                dense: true,
-                leading: Icon(Icons.link_rounded, color: AppTheme.textSecondary),
-                title: Text('复制消息链接',
-                    style: TextStyle(color: AppTheme.textPrimary)),
-                onTap: () async {
-                  Get.back();
-                  final url = 'https://t.me/$_peer/${it['id']}';
-                  await _copy(url);
-                },
-              ),
-              const SizedBox(height: 8),
             ],
           ),
         ),
       ),
       backgroundColor: Colors.transparent,
+    );
+  }
+
+  /// 操作弹窗里的一张动作卡（一行两个）
+  Widget _actionCard(IconData icon, String label, VoidCallback onTap) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: AppTheme.borderLight.withValues(alpha: 0.6), width: 0.6),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: AppTheme.accentOnSurface),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                      color: AppTheme.textPrimary)),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -622,6 +698,10 @@ class _TgHomePageState extends State<TgHomePage> {
       );
     }
     final list = _visibleItems;
+    // 卡片高度 = 16:9 封面 + 6 间距 + 一行名称（名称在卡片外，居中）
+    // 原来写死 194：文字区被算进卡片里 ⇒ 卡片之间空一大截（用户 2026-10-25）
+    final gridW = MediaQuery.of(context).size.width - 12 * 2 - 10;
+    final cardExtent = (gridW / 2) * 9 / 16 + 6 + 19;
     return RefreshIndicator(
       onRefresh: _reloadItems,
       child: CustomScrollView(
@@ -665,11 +745,11 @@ class _TgHomePageState extends State<TgHomePage> {
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
               sliver: SliverGrid(
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 2,
                   mainAxisSpacing: 10,
                   crossAxisSpacing: 10,
-                  mainAxisExtent: 194,
+                  mainAxisExtent: cardExtent,
                 ),
                 delegate: SliverChildBuilderDelegate(
                   (context, i) => _card(list[i]),
@@ -878,20 +958,17 @@ class _TgHomePageState extends State<TgHomePage> {
     final title = (it['title'] ?? '').toString();
     final thumb = (it['thumb'] ?? '').toString();
     final dur = (it['duration'] as num?)?.toInt() ?? 0;
-    final size = (it['size'] as num?)?.toInt() ?? 0;
+    // 用户 2026-10-25：名称**不放进卡片**（卡片只留 16:9 封面），
+    // 否则固定高度的网格里多出一块文字区 ⇒ 卡片之间空一大截。
     return InkWell(
       borderRadius: BorderRadius.circular(12),
       onTap: () => _itemSheet(it),
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppTheme.backgroundCard,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            AspectRatio(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: AspectRatio(
               aspectRatio: 16 / 9,
               child: Stack(
                 fit: StackFit.expand,
@@ -944,38 +1021,24 @@ class _TgHomePageState extends State<TgHomePage> {
                 ],
               ),
             ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () => _toggleZh(it),
-                        child: Text(
-                            (it['_zh'] is String &&
-                                    (it['_zh'] as String).isNotEmpty)
-                                ? it['_zh'] as String
-                                : title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                color: AppTheme.textPrimary,
-                                fontSize: 12.5,
-                                height: 1.3)),
-                      ),
-                    ),
-                    Text(size > 0 ? _size(size) : '',
-                        style: TextStyle(
-                            color: AppTheme.textTertiary, fontSize: 10.5)),
-                  ],
-                ),
-              ),
+          ),
+          const SizedBox(height: 6),
+          // 名称在卡片下方、居中（点一下还是切译文）
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _toggleZh(it),
+            child: Text(
+              (it['_zh'] is String && (it['_zh'] as String).isNotEmpty)
+                  ? it['_zh'] as String
+                  : title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: AppTheme.textPrimary, fontSize: 12.5, height: 1.3),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

@@ -11,7 +11,7 @@
 
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { agentOptions } from './proxypool.js';
+import { agentOptions, currentProxy } from './proxypool.js';
 
 const UA =
     'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) ' +
@@ -123,15 +123,17 @@ export async function listPublic(channel, before = 0, depth = 0) {
             .split('\n')
             .map((s) => s.trim())
             .filter(Boolean)[0] || '';
-        // 标题：只认「《片名》」（用户 2026-10-25）
+        // 标题（2026-10-25 第二轮：不再在 Node 里写死广告词/书名号规则）
         //
-        //   · 带书名号 → 取书名号里的文字当片名
-        //   · 没书名号 → **整条丢掉**（这些频道的广告帖全是 emoji + 贷款/国际/信誉，
-        //     正常片子一律写《片名》，按书名号收比关键词表可靠）
-        //   · 书名号里还带广告词 → 也丢（第二道保险）
-        const title = titleFromGuillemets(rawText) || titleFromGuillemets(docTitle);
-        if (!title) return;
-        if (looksLikeAd(title) || looksLikeAd(firstLine)) return;
+        //   · 有「《片名》」→ 取书名号里的文字（保持之前的命名法）
+        //   · 没有 → 退回帖子第一行 / 文件名，**原样交给 App**
+        //   App 侧有可配置的筛选（默认去掉带 emoji 的名称，用户还能自己加词），
+        //   这样以后想放宽/收紧都不用改代码。
+        const title = titleFromGuillemets(rawText)
+            || titleFromGuillemets(docTitle)
+            || firstLine
+            || docTitle
+            || '视频';
 
         const durText = node.find('.tgme_widget_message_video_duration').first().text().trim();
         const duration = durText ? toSeconds(durText) : 0;
@@ -240,6 +242,38 @@ export function looksLikeAd(s) {
 export function titleFromGuillemets(s) {
     const m = String(s || '').match(/《([^》]{1,60})》/);
     return m ? m[1].replace(/\s+/g, ' ').trim() : '';
+}
+
+/// t.me 连通性自测（用户 2026-10-25：「不能直接用手机自己用的代理吗？」）——
+/// **不改任何配置**，只按当前设置（内置代理开/关 + 系统 VPN）打一次 t.me，
+/// 把耗时/失败原因原样返回给 UI，省得用户靠"转圈"猜。
+export async function probeTme() {
+    const t0 = Date.now();
+    const viaProxy = !!currentProxy();
+    try {
+        const r = await http.get('https://t.me/s/cctv1', {
+            ...agentOptions(),
+            timeout: 12000,
+        });
+        const body = typeof r.data === 'string' ? r.data : String(r.data || '');
+        return {
+            ok: body.includes('tgme_widget_message'),
+            ms: Date.now() - t0,
+            status: r.status,
+            bytes: body.length,
+            proxy: viaProxy,
+            error: body.includes('tgme_widget_message')
+                ? ''
+                : '能连上 t.me，但返回的不是频道页（可能被劫持/需要代理）',
+        };
+    } catch (e) {
+        return {
+            ok: false,
+            ms: Date.now() - t0,
+            proxy: viaProxy,
+            error: (e && e.message) || String(e),
+        };
+    }
 }
 
 function toSeconds(t) {

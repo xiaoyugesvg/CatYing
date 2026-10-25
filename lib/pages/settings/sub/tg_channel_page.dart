@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 import '../../../common/theme.dart';
 import '../../../miniapp/pages/mini_app_player_page.dart';
 import '../../../services/tg_service.dart';
+import '../../../services/tg_title_filter.dart';
 import '../../../services/translate_service.dart';
 import '../../../widgets/app_toast.dart';
 
@@ -60,6 +61,8 @@ class _TgChannelPageState extends State<TgChannelPage> {
   @override
   void initState() {
     super.initState();
+    TgTitleFilter.instance.ensureLoaded();
+    TgTitleFilter.instance.addListener(_onFilterChanged);
     _scroll.addListener(() {
       if (_scroll.position.pixels >
           _scroll.position.maxScrollExtent - 400) {
@@ -71,8 +74,33 @@ class _TgChannelPageState extends State<TgChannelPage> {
 
   @override
   void dispose() {
+    TgTitleFilter.instance.removeListener(_onFilterChanged);
     _scroll.dispose();
     super.dispose();
+  }
+
+  /// 筛选规则改了（设置页里加词/关开关）⇒ 清空重拉，立刻看到效果
+  void _onFilterChanged() {
+    if (!mounted) return;
+    setState(() {
+      _items.clear();
+      _offset = 0;
+      _more = true;
+    });
+    _loadGen++;
+    _reload();
+  }
+
+  /// 有请求在飞时 `_load()` 会被拦掉 ⇒ 等它结束再拉一次
+  Future<void> _reload() async {
+    for (var i = 0; i < 30; i++) {
+      if (!mounted) return;
+      if (!_inflight) {
+        _load();
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
   }
 
   Future<void> _load() async {
@@ -91,8 +119,10 @@ class _TgChannelPageState extends State<TgChannelPage> {
         ? await _tg.publicList(_peer, offsetId: _offset)
         : await _tg.videos(_peer, offsetId: _offset, limit: _pageSize);
     if (!mounted) return;
-    if (gen != _loadGen) return; // 期间换了频道 / 重新加载 → 丢弃
+    // ⚠️ 先解锁再判代次：原来 gen 不匹配时直接 return，`_inflight` 永远为 true
+    //   ⇒ 切频道 / 改筛选后整个列表卡死不加载
     _inflight = false;
+    if (gen != _loadGen) return; // 期间换了频道 / 重新加载 → 丢弃
     if (r['ok'] == true) {
       var list = (r['items'] as List? ?? const [])
           .whereType<Map>()
@@ -103,12 +133,23 @@ class _TgChannelPageState extends State<TgChannelPage> {
       if (_mode == 'public' && list.length > _pageSize) {
         list = list.sublist(0, _pageSize);
       }
+      // 游标要在**筛选前**取：标题筛选只影响"显不显示"，
+      // 不能因为某批被过滤掉就少翻一页（用户 2026-10-25）
+      final pageLast =
+          list.isEmpty ? 0 : ((list.last['id'] as num?)?.toInt() ?? 0);
+      // 标题筛选：内置去 emoji + 用户自定义的排除词（公开/登录都生效）
+      list = list
+          .where((it) =>
+              !TgTitleFilter.instance.shouldHide(it['title']?.toString()))
+          .toList();
       setState(() {
         _items.addAll(list);
         _offset = _mode == 'public'
-            ? ((list.isEmpty ? 0 : (list.last['id'] as num).toInt()))
+            ? pageLast
             : ((r['next'] as num?)?.toInt() ?? 0);
-        _more = list.isNotEmpty && _offset > 0;
+        _more = _mode == 'public'
+            ? pageLast > 0
+            : (list.isNotEmpty && _offset > 0);
         _loading = false;
       });
     } else {

@@ -135,7 +135,8 @@ class BookSourceReaderPage extends StatefulWidget {
   State<BookSourceReaderPage> createState() => _BookSourceReaderPageState();
 }
 
-class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
+class _BookSourceReaderPageState extends State<BookSourceReaderPage>
+    with WidgetsBindingObserver {
   late int _index;
   late final PageController _pageCtrl;
 
@@ -156,8 +157,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   /// 阅读底色索引（见 [_bgs]）。
   ///
-  /// ⚠️ 默认值**按全局明暗取**：全局是深色就默认"夜间"，浅色就默认"白"。
-  int _bgIndex = AppBrightness.isLight.value ? 0 : 5;
+  /// 初始值按**系统**深色模式取；真正的值随后由 `_restorePrefs`
+  /// 从阅读器自己的设置里读回（用户 2026-10-25：阅读器的日夜以阅读器设置为准）。
+  int _bgIndex = WidgetsBinding
+          .instance.platformDispatcher.platformBrightness ==
+      Brightness.dark
+      ? 5
+      : 0;
 
   /// 自定义背景色（主题 tab「自定义」，参考图 IMG_8500；null = 用 _bgs）
   Color? _customBgColor;
@@ -610,13 +616,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       return const Color(0xFFB8B8B8);
     }
     if (_fgOverride != null) return _fgOverride!;
-    // A3：选了壁纸 → 按壁纸明暗决定文字色（深图浅字 / 浅图深字）✓
-    if (_bgImageAsset != null && _bgImageDark != null) {
-      return _bgImageDark! ? const Color(0xFFE2E2E2) : const Color(0xFF1A1A1A);
-    }
-    return _bgTop.computeLuminance() < 0.4
-        ? const Color(0xFFB8B8B8)
-        : _bgs[_bgIndex][1];
+    // 深底（夜间 / 深色壁纸 / 深色自选图）⇒ 一律浅字，
+    // 否则会出现「深图 + 深字」几乎看不见（原来只看内置壁纸的 _bgImageDark）
+    if (_paperIsDark) return const Color(0xFFE2E2E2);
+    return _bgs[_bgIndex][1];
   }
 
   /// 当前模式下真正生效的自选背景图（夜间优先夜图）
@@ -738,7 +741,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       (_customBgColor ?? _bgs[_bgIndex][0]).withValues(alpha: 1.0);
 
   /// 当前背景是否为深色（面板层次色用）
-  bool get _isDarkBg => _bgTop.computeLuminance() < 0.4;
+  ///
+  /// ⚠️ 2026-10-25：原来只看纯色纸 `_bgTop` 的亮度 —— 夜里挂**深色壁纸**
+  /// （泼墨/自定义深图）时纯色纸还是浅色 ⇒ 功能面板一片浅灰、和正文脱节
+  /// （用户：「功能面板的和样式的有点不一样，不统一」）。改用 `_paperIsDark`
+  /// （已包含夜间、壁纸实测亮度、自选图亮度）。
+  bool get _isDarkBg => _paperIsDark;
 
   /// 面板卡片底色：**刻意和阅读背景拉开一档**。
   ///
@@ -749,10 +757,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   ///   · 深底 → 往亮里提一档（炭灰 → 浮起的深灰卡片）
   /// 再配合「背后压一层黑色遮罩 + 向上投影」，层次就出来了 ✓
   Color get _sheetBg {
+    // 深色壁纸 / 夜间：纯色纸可能是浅的（壁纸盖在上面）⇒ 面板用深底
+    final base = _isDarkBg && _bgTop.computeLuminance() > 0.4
+        ? const Color(0xFF20242A)
+        : _bgTop;
     if (_isDarkBg) {
-      return Color.alphaBlend(Colors.white.withValues(alpha: 0.09), _bgTop);
+      return Color.alphaBlend(Colors.white.withValues(alpha: 0.09), base);
     }
-    return Color.alphaBlend(Colors.white.withValues(alpha: 0.78), _bgTop);
+    return Color.alphaBlend(Colors.white.withValues(alpha: 0.78), base);
   }
 
   /// 信息栏可选项（顺序 = 横向滑动的顺序）
@@ -937,8 +949,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     _index = widget.initialIndex.clamp(0, widget.chapters.length - 1);
     _pageCtrl = PageController();
     HardwareKeyboard.instance.addHandler(_onKey);
-    // 跟随系统日夜：全局明暗（设置里的明暗 / 系统深色）一变就跟着换
-    AppBrightness.isLight.addListener(_onAppAppearanceChanged);
+    // 跟随系统日夜：只认**手机系统的深色模式**。
+    // 原来监听的是影视侧的 `AppBrightness`（那是影视模块自己的明暗开关），
+    // 导致阅读器被"影视侧的主题"牵着走（用户 2026-10-25 报的问题）。
+    WidgetsBinding.instance.addObserver(this);
     _restorePrefs();
     _syncDockBrightness();
     _loadChapter(_index);
@@ -1129,7 +1143,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_onKey);
-    AppBrightness.isLight.removeListener(_onAppAppearanceChanged);
+    WidgetsBinding.instance.removeObserver(this);
     // 🆕 **退出阅读器必须停掉朗读** ✓ —— `TtsService` 是**进程单例** ✓，
     //   原来这里既不 `stop()` 也不清 `onFinished` ✗ → 用户点朗读后按返回键
     //   离开阅读器，语音会**继续在书架/首页念** ✗；`onFinished` 闭包还一直
@@ -1597,7 +1611,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       _applyReaderSystemUi();
       // 跟随系统：偏好就绪后按当前全局明暗对齐一次（含绑定样式的自动套用）
       _prefsReady = true;
-      _onAppAppearanceChanged();
+      _syncSystemDayNight();
       _precachePaper();
     } catch (_) {
       // 偏好读不到就用默认值，不影响阅读
@@ -2161,6 +2175,16 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     return TextSelectionToolbar(
       anchorAbove: anchors.primaryAnchor,
       anchorBelow: anchors.secondaryAnchor ?? anchors.primaryAnchor,
+      // 底色跟**阅读器**走（原来用 Material 默认的 surface ⇒ 系统深色时
+      // 阅读器是米黄纸、工具条却是黑块，用户 2026-10-25 要求统一）。
+      // 用 `_sheetBg`（与阅读器各面板同一档），在纸面上有层次又同色系。
+      toolbarBuilder: (context, child) => Material(
+        color: _sheetBg,
+        elevation: 4,
+        borderRadius: BorderRadius.circular(12),
+        clipBehavior: Clip.antiAlias,
+        child: child,
+      ),
       children: [
         item(Icons.copy_rounded, '复制', () {
           final t = _selectedText;
@@ -3933,21 +3957,32 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         key: ValueKey('reader-scroll-$_scrollEpoch'),
         // 上下滚动：整章链一个 SelectionArea —— 可以跨段/跨章选文字，
         // 长按出系统选择手柄 + 我们的浮动小工具条（复制/书签/搜索/净化/更多）
-        child: SelectionArea(
-          key: _selKeyScroll,
-          onSelectionChanged: (c) => _selectedText = c?.plainText ?? '',
-          contextMenuBuilder: _selectionMenu,
-          child: SingleChildScrollView(
-            // 自动阅读（上下模式）要用它滚屏
-            controller: _scrollReadCtrl,
-            padding:
-                EdgeInsets.fromLTRB(_padLeft, _padTop, _padRight, _padBottom),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (var k = 0; k < chain.length; k++)
-                  _scrollChapterBlock(chain[k], fg, first: k == 0),
-              ],
+        // 选区高亮/手柄颜色用**阅读器前景色**（原来跟随系统主题是蓝色，
+        // 与米黄纸不搭 —— 用户 2026-10-25「长按后的颜色要统一阅读器」）
+        child: Theme(
+          data: Theme.of(context).copyWith(
+            textSelectionTheme: TextSelectionThemeData(
+              selectionColor: _fg.withValues(alpha: 0.22),
+              selectionHandleColor: _fg,
+              cursorColor: _fg,
+            ),
+          ),
+          child: SelectionArea(
+            key: _selKeyScroll,
+            onSelectionChanged: (c) => _selectedText = c?.plainText ?? '',
+            contextMenuBuilder: _selectionMenu,
+            child: SingleChildScrollView(
+              // 自动阅读（上下模式）要用它滚屏
+              controller: _scrollReadCtrl,
+              padding:
+                  EdgeInsets.fromLTRB(_padLeft, _padTop, _padRight, _padBottom),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (var k = 0; k < chain.length; k++)
+                    _scrollChapterBlock(chain[k], fg, first: k == 0),
+                ],
+              ),
             ),
           ),
         ),
@@ -5085,7 +5120,16 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         Expanded(
           // 分页模式：每页一个 SelectionArea（换页即清空选择）。
           // 长按 → 系统文字选择手柄，松手出我们的浮动小工具条。
-          child: SelectionArea(
+          child: Theme(
+            data: Theme.of(context).copyWith(
+              // 选区高亮/手柄用阅读器前景色（与纸面配色统一，不跟系统蓝）
+              textSelectionTheme: TextSelectionThemeData(
+                selectionColor: _fg.withValues(alpha: 0.22),
+                selectionHandleColor: _fg,
+                cursorColor: _fg,
+              ),
+            ),
+            child: SelectionArea(
             key: _selKeyPage,
             onSelectionChanged: (c) => _selectedText = c?.plainText ?? '',
             contextMenuBuilder: _selectionMenu,
@@ -5234,6 +5278,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             ),
             ),
           ),
+            ),
         ),
         // ── 页脚 ────────────────────────────────────────────
         if (showFooter) _statusFooter(fg, chapter: pageChapter),
@@ -5571,8 +5616,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// （先切明暗，再套用 —— `_applyReaderStyle` 按当前模式取对应配色）。
   ///
   /// [manual] 为真 = 用户自己点的 ⇒ 关闭「跟随系统」（之后系统翻昼夜不再抢）；
-  /// 由 [AppBrightness] 回调触发时传 false，保持跟随。
-  void _toggleDayNight({bool manual = true}) {
+  /// 系统日夜回调 / 打开页面时的对齐都传 false，保持跟随。
+  void _toggleDayNight({bool manual = true, bool silent = false}) {
     final toNight = _bgIndex != 5;
     setState(() {
       if (!toNight) {
@@ -5595,7 +5640,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     final bound = _styleById(toNight ? _nightStyleId : _dayStyleId);
     if (bound != null) {
       _applyReaderStyle(bound);
-      _toast('已切换到「${bound.name}」');
+      if (!silent) _toast('已切换到「${bound.name}」');
     }
     // 夜间标题 HTML 的高度通常与日间不同（headingFixedHeight），
     // 不重排会让已分好的页按旧高度渲染（标题页底部被裁/留白）
@@ -5604,14 +5649,29 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     _scheduleSavePrefs();
   }
 
-  /// 全局明暗（跟随系统 / 设置里的明暗开关）变化 → 阅读器跟着切。
+  /// **系统**深色模式变化（iOS 设置里切成深色/浅色）→ 阅读器跟着切。
   ///
   /// 只在「跟随系统」且偏好已恢复时生效；手动切过昼夜就不再被覆盖。
-  void _onAppAppearanceChanged() {
+  /// ⚠️ 不再监听 `AppBrightness`：那是**影视模块**自己的明暗开关，
+  ///   和阅读器「跟随系统」根本不是一回事（用户 2026-10-25）。
+  void _syncSystemDayNight({bool silent = true}) {
     if (!mounted || !_prefsReady || !_followSystem) return;
-    final wantNight = !AppBrightness.isLight.value;
+    final wantNight =
+        WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+            Brightness.dark;
     if (wantNight == (_bgIndex == 5)) return;
-    _toggleDayNight(manual: false);
+    _toggleDayNight(manual: false, silent: silent);
+  }
+
+  @override
+  void didChangePlatformBrightness() => _syncSystemDayNight();
+
+  /// 用户手动选了纸色 / 自定义底色 ⇒ 明暗由**阅读器自己的设置**定，
+  /// 不再跟随系统（否则"我选的米黄纸，一开深色模式又变夜间"）。
+  void _markManualDayNight() {
+    if (!_followSystem) return;
+    _followSystem = false;
+    _styleStore.saveFollowSystem(false);
   }
 
   /// 按 id 找样式（内置 + 我的）
@@ -8304,6 +8364,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 _styleBgDay = null;
                 _styleBgNight = null;
                 _bgIndex = i;
+                _markManualDayNight();
               }),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -8343,7 +8404,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 initial: _bgTop,
                 title: '自定义背景',
               );
-              if (picked != null) upd(() => _customBgColor = picked);
+              if (picked != null) {
+                upd(() => _customBgColor = picked);
+                _markManualDayNight();
+              }
             },
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -8614,6 +8678,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                           onTap: () {
                             setSheet(() {});
                             upd(() => _customBgColor = e.$2);
+                            _markManualDayNight();
                             Navigator.pop(ctx);
                             _toast('已应用内置背景「${e.$1}」');
                           },
@@ -10521,8 +10586,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       _nightStyleId = n;
       _followSystem = f;
     });
-    // 刚把「跟随系统」打开 ⇒ 立刻按当前全局明暗对齐一次
-    if (f) _onAppAppearanceChanged();
+    // 刚把「跟随系统」打开 ⇒ 立刻按**系统**日夜对齐一次
+    if (f) _syncSystemDayNight();
   }
 
   /// 一键套用一套样式：配色 / 背景 / 排版 / 边距 / 信息栏 / 翻页动画一次改完。
@@ -10530,10 +10595,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 改完必须**重排**（字号行距边距全变了，旧 `_pages` 是按旧度量切的），
   /// 但用防抖 —— 用户可能连着点好几张卡片对比效果。
   void _applyReaderStyle(ReaderStyle s) {
-    final mode = PageMode.values.firstWhere(
-      (m) => m.name == s.pageMode,
-      orElse: () => PageMode.slide,
-    );
+    // ⚠️ 2026-10-25：样式**不再改翻页方式 / 双页开关**。
+    // 用户：「切换样式后，连翻页方式也变了？」——
+    // 翻页方式（左右/上下/仿真/覆盖）和双页是**阅读偏好**，
+    // 存在 `reading.settings` 里；样式只负责配色/排版/标题。
+    // 否则套一个导入样式就把「左右」变成「覆盖」，还会因为
+    // 章首没有上一页而出现"左滑没内容"。
     // 保持当前昼夜模式（夜间套样式仍是夜间），只换成这套样式的对应配色
     final night = _bgIndex == 5;
     final dayColor = s.bgColor;
@@ -10602,14 +10669,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       _underlineGap = s.underlineGap;
       _underlineFull = s.underlineFull;
       _rs = _rs.copyWith(
-        pageMode: mode,
+        // pageMode / dualPage **刻意不套**（见方法开头说明）
         statusItems: s.statusItems.toSet(),
         hideStatusBar: s.hideStatusBar,
         statusTextScale: s.statusTextScale,
-        dualPage: s.dualPage,
       );
       // 上下滚动模式不分页 ⇒ 和 `_paginate()` 的清理保持一致
-      if (!mode.paginates) _pages = const [];
+      if (!_rs.pageMode.paginates) _pages = const [];
       _activeStyleId = s.id;
     });
     _styleStore.saveActiveId(s.id);
@@ -11561,6 +11627,22 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     setState(() => _myStyles = [..._myStyles, style]);
     await _styleStore.saveCustom(_myStyles);
     _applyReaderStyle(style);
+    // 导入的排版若自带标题 HTML ⇒ 同步存成一条「我的标题样式」，
+    // 之后在「排版 → 标题样式」里能直接点（用户 2026-10-25：
+    // 「标题样式不能新增我导入的吗？」）。按 HTML 去重，避免反复导入堆积。
+    final html = style.chapterTitleHtml.trim();
+    if (html.isNotEmpty) {
+      final exists = _myTitleStyles.any((t) => t.html.trim() == html);
+      if (!exists) {
+        final preset = TitleStylePreset(
+          id: 'title:${DateTime.now().millisecondsSinceEpoch}',
+          name: '${style.name}·标题',
+          html: html,
+        );
+        setState(() => _myTitleStyles = [..._myTitleStyles, preset]);
+        await _styleStore.saveTitleStyles(_myTitleStyles);
+      }
+    }
   }
 
   /// 排版面板里的一行"标签 + 滑块 + 减 + 数值 + 加"

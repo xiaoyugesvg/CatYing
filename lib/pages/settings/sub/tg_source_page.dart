@@ -5,8 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../../../common/theme.dart';
-import '../../../services/app_log.dart';
 import '../../../services/tg_service.dart';
+import '../../../services/tg_title_filter.dart';
 import '../../../widgets/app_toast.dart';
 import '../../../widgets/common_widgets.dart';
 import 'settings_shared.dart';
@@ -38,6 +38,7 @@ class _TgSourcePageState extends State<TgSourcePage> {
   final _proxyPortCtrl = TextEditingController();
   final _peerCtrl = TextEditingController();
   final _pubCtrl = TextEditingController();
+  final _filterCtrl = TextEditingController();
 
   bool _booting = true;
   bool _busy = false;
@@ -47,9 +48,11 @@ class _TgSourcePageState extends State<TgSourcePage> {
   /// 正在跑内置代理测速（30 个 × 8 秒超时、6 并发 ⇒ 十几秒）
   bool _probeBusy = false;
 
+  /// 正在测 t.me 连通（3~12 秒）
+  bool _netTesting = false;
+
   Map<String, dynamic> _st = {};
   Map<String, dynamic> _qr = {};
-  List<Map<String, dynamic>> _dialogs = [];
   List<Map<String, dynamic>> _saved = [];
 
   Timer? _pollTimer;
@@ -73,11 +76,13 @@ class _TgSourcePageState extends State<TgSourcePage> {
     _proxyPortCtrl.dispose();
     _peerCtrl.dispose();
     _pubCtrl.dispose();
+    _filterCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _boot() async {
     await _tg.loadSettings();
+    await TgTitleFilter.instance.ensureLoaded();
     _apiIdCtrl.text = _tg.apiId;
     _apiHashCtrl.text = _tg.apiHash;
     _proxyHostCtrl.text = _tg.proxyHost;
@@ -93,7 +98,14 @@ class _TgSourcePageState extends State<TgSourcePage> {
         _booting = false;
       });
     }
-    if (_authorized) _loadDialogs();
+    if (_authorized) _loadSaved();
+  }
+
+  /// 重新读「我添加的频道」（登录/公开两种模式都在这里）
+  Future<void> _loadSaved() async {
+    final s = await _tg.channels();
+    if (!mounted) return;
+    setState(() => _saved = s);
   }
 
   Future<void> _refreshStatus() async {
@@ -116,7 +128,7 @@ class _TgSourcePageState extends State<TgSourcePage> {
     } else {
       AppToast.message(r['authorized'] == true ? '已登录' : '连接正常，请扫码登录');
     }
-    if (r['authorized'] == true) _loadDialogs();
+    if (r['authorized'] == true) _loadSaved();
   }
 
   Future<void> _saveConfig() async {
@@ -279,8 +291,28 @@ class _TgSourcePageState extends State<TgSourcePage> {
       AppToast.message(r['error']?.toString() ?? '代理没生效');
       return;
     }
-    AppToast.message(host.isEmpty ? '已关闭代理（直连）' : '已启用代理 $host:$port');
+    AppToast.message(host.isEmpty
+        ? '已关闭代理（直连，登录态保留）'
+        : '已启用代理 $host:$port（登录态保留）');
     await _refreshStatus();
+  }
+
+  /// 「测 t.me 连通」：按**当前**设置打一次频道页，直接回答
+  /// 「现在为什么看不了」——比"代理测速通过"更贴近播放链路。
+  Future<void> _testTme() async {
+    setState(() => _netTesting = true);
+    final r = await _tg.netTest();
+    if (!mounted) return;
+    setState(() => _netTesting = false);
+    final viaProxy = r['proxy'] == true;
+    final where = viaProxy ? '内置代理' : '直连（含系统 VPN）';
+    if (r['ok'] == true) {
+      AppToast.message('t.me 可访问（$where）：${r['ms']} ms');
+    } else {
+      final why = (r['error'] ?? '').toString();
+      AppToast.error('t.me 连不上（$where，${r['ms']} ms）：'
+          '${why.isEmpty ? '未知原因' : why}');
+    }
   }
 
   Future<void> _startQr() async {
@@ -312,7 +344,7 @@ class _TgSourcePageState extends State<TgSourcePage> {
       if (phase == 'done') {
         t.cancel();
         await _refreshStatus();
-        _loadDialogs();
+        await _loadSaved();
         AppToast.message('登录成功');
       } else if (phase == 'error') {
         t.cancel();
@@ -323,19 +355,6 @@ class _TgSourcePageState extends State<TgSourcePage> {
   Future<void> _submitPassword(String pw) async {
     final r = await _tg.submitPassword(pw);
     if (r['ok'] != true) AppToast.message(r['error']?.toString() ?? '提交失败');
-  }
-
-  Future<void> _loadDialogs() async {
-    final r = await _tg.dialogs();
-    if (!mounted) return;
-    final items = (r['items'] as List?) ?? const [];
-    setState(() {
-      _dialogs = items
-          .whereType<Map>()
-          .map((e) => e.cast<String, dynamic>())
-          .toList();
-    });
-    if (r['ok'] != true) AppLog.instance.log('[TG] dialogs: ${r['error']}');
   }
 
   Future<void> _logout() async {
@@ -356,7 +375,7 @@ class _TgSourcePageState extends State<TgSourcePage> {
     if (ok != true) return;
     await _tg.logout();
     _qr = {};
-    setState(() => _dialogs = []);
+    setState(() {});
     await _refreshStatus();
   }
 
@@ -381,6 +400,8 @@ class _TgSourcePageState extends State<TgSourcePage> {
           _manualCard(),
           _channelsCard(),
         ],
+        _section('标题筛选'),
+        _filterCard(),
         _section('公开频道'),
         _savedCard(),
         _hintCard(),
@@ -502,8 +523,13 @@ class _TgSourcePageState extends State<TgSourcePage> {
                       keyboard: TextInputType.number)),
             ]),
             const SizedBox(height: 6),
-            Text('若是系统级 VPN，这里留空即可；只开了 HTTP/SOCKS 代理时才需要填。',
-                style: TextStyle(color: AppTheme.textTertiary, fontSize: 11)),
+            Text(
+              '手机开着「全局 VPN」（Shadowrocket / Surge / QuantumultX 的 VPN 模式）时，'
+              '这里留空、开关关闭即可 —— App 和内置 Node 的请求都会自动走系统 VPN；'
+              '只有「Wi-Fi 设置里填的 HTTP 代理」Node 读不到，那种才需要在这里填 SOCKS5。',
+              style: TextStyle(
+                  color: AppTheme.textTertiary, fontSize: 11, height: 1.5),
+            ),
             const SizedBox(height: 10),
             Row(
               children: [
@@ -527,7 +553,24 @@ class _TgSourcePageState extends State<TgSourcePage> {
                 ),
               ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 2),
+            // 直接回答"现在到底能不能看公开频道"：
+            // 按当前设置（内置代理开关 + 系统 VPN）打一次 t.me
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _netTesting ? null : _testTme,
+                icon: _netTesting
+                    ? const SizedBox(
+                        width: 13,
+                        height: 13,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.wifi_tethering_rounded, size: 16),
+                label: Text(_netTesting ? '正在测 t.me…' : '测 t.me 连通（公开频道要用）'),
+              ),
+            ),
+            const SizedBox(height: 2),
             Text(
               '内置列表来自 watchttvv/free-proxy-list（gh-proxy 加速）。选好后：'
               '公开频道的网页抓取、封面、播放中转都会走这个代理。',
@@ -538,6 +581,99 @@ class _TgSourcePageState extends State<TgSourcePage> {
         ),
       ),
     ));
+  }
+
+  /// 标题筛选卡（用户 2026-10-25：「不要写死，加个筛选功能」）——
+  /// 内置一条「去掉带表情符号的名称」，其余排除词由用户自己填；
+  /// 公开频道 / 登录频道共用这一套规则。
+  Widget _filterCard() {
+    return ListenableBuilder(
+      listenable: TgTitleFilter.instance,
+      builder: (context, _) {
+        final f = TgTitleFilter.instance;
+        return _card(AppCard(
+          dense: true,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('去掉带表情符号的名称',
+                              style: TextStyle(
+                                  color: AppTheme.textPrimary,
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 2),
+                          Text('内置规则：标题里带 emoji 的整条隐藏',
+                              style: TextStyle(
+                                  color: AppTheme.textTertiary,
+                                  fontSize: 11,
+                                  height: 1.4)),
+                        ],
+                      ),
+                    ),
+                    Switch(
+                      value: f.blockEmoji,
+                      onChanged: (v) => f.setBlockEmoji(v),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text('自定义排除词（名称包含任一词就隐藏）',
+                    style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _field(_filterCtrl, '例如：贷款 / 博彩 / 国际 / 信誉'),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      onPressed: () async {
+                        await f.addWord(_filterCtrl.text);
+                        _filterCtrl.clear();
+                      },
+                      child: const Text('添加'),
+                    ),
+                  ],
+                ),
+                if (f.words.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      for (final w in f.words)
+                        InputChip(
+                          label: Text(w, style: const TextStyle(fontSize: 12)),
+                          onDeleted: () => f.removeWord(w),
+                          deleteIcon: const Icon(Icons.close, size: 14),
+                          backgroundColor: AppTheme.backgroundTertiary,
+                          side: BorderSide(
+                              color: AppTheme.borderLight, width: 0.6),
+                        ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 8),
+                Text('只影响列表显示，不改动频道里的原帖。',
+                    style: TextStyle(
+                        color: AppTheme.textTertiary, fontSize: 11)),
+              ],
+            ),
+          ),
+        ));
+      },
+    );
   }
 
   Widget _configCard() {
@@ -694,15 +830,23 @@ class _TgSourcePageState extends State<TgSourcePage> {
                 ),
                 const SizedBox(width: 8),
                 FilledButton(
-                  onPressed: () {
-                    final p = _peerCtrl.text.trim();
+                  onPressed: () async {
+                    final p = _normalizePeer(_peerCtrl.text);
                     if (p.isEmpty) {
                       AppToast.message('先填群 ID 或用户名');
                       return;
                     }
-                    Get.to(() => TgChannelPage(peer: p, title: p));
+                    // 存进「我添加的登录频道」—— 用户 2026-10-25：
+                    // 只显示自己填过的，不再把账号里的群全列出来
+                    await _tg.addChannel(p, title: p, mode: 'login');
+                    if (!mounted) return;
+                    _peerCtrl.clear();
+                    final s = await _tg.channels();
+                    if (!mounted) return;
+                    setState(() => _saved = s);
+                    Get.to(() => TgChannelPage(peer: p, title: p, mode: 'login'));
                   },
-                  child: const Text('打开'),
+                  child: const Text('添加'),
                 ),
               ],
             ),
@@ -715,14 +859,27 @@ class _TgSourcePageState extends State<TgSourcePage> {
     ));
   }
 
+  /// 公开频道收藏（登录模式的那批由 [_channelsCard] 单独显示，
+  /// 避免同一个频道在两处重复出现）
+  List<Map<String, dynamic>> get _publicSaved => _saved
+      .where((c) => (c['mode'] ?? 'public').toString() != 'login')
+      .toList();
+
   Widget _channelsCard() {
-    if (_dialogs.isEmpty) {
+    // 只显示**用户自己填过**的登录频道（用户 2026-10-25：
+    // 「登录的，只有我填的才有，不要全部显示」）——
+    // 原来这里把 `tgDialogs` 拉到的 150 个群/频道全铺开，
+    // 跟"我要看的频道"完全无关。
+    final mine = _saved
+        .where((c) => (c['mode'] ?? 'public').toString() == 'login')
+        .toList();
+    if (mine.isEmpty) {
       return _card(AppCard(
         dense: true,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 26),
           child: Center(
-            child: Text('没有读取到频道（或账号未加入任何群）',
+            child: Text('还没有登录频道：在上面填频道名 / -100 ID 添加',
                 style: TextStyle(color: AppTheme.textTertiary, fontSize: 12)),
           ),
         ),
@@ -737,50 +894,19 @@ class _TgSourcePageState extends State<TgSourcePage> {
             child: Row(
               children: [
                 Expanded(
-                  child: Text('我的群 / 频道',
+                  child: Text('我添加的登录频道',
                       style: TextStyle(
                           color: AppTheme.textPrimary,
                           fontSize: 13,
                           fontWeight: FontWeight.w600)),
                 ),
-                IconButton(
-                  onPressed: _loadDialogs,
-                  icon: Icon(Icons.refresh,
-                      size: 18, color: AppTheme.textTertiary),
-                ),
               ],
             ),
           ),
-          for (final d in _dialogs)
-            ListTile(
-              dense: true,
-              leading: Icon(
-                (d['type'] == 'channel') ? Icons.campaign_outlined : Icons.groups_outlined,
-                color: AppTheme.accentOnSurface,
-                size: 20,
-              ),
-              title: Text(
-                (d['title'] ?? '').toString(),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-              ),
-              subtitle: Text(
-                [
-                  if ((d['username'] ?? '').toString().isNotEmpty) '@${d['username']}',
-                  (d['peer'] ?? '').toString(),
-                ].join('  '),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: AppTheme.textTertiary, fontSize: 11),
-              ),
-              trailing: Icon(Icons.chevron_right,
-                  size: 18, color: AppTheme.textTertiary),
-              onTap: () => Get.to(() => TgChannelPage(
-                peer: (d['peer'] ?? '').toString(),
-                title: (d['title'] ?? '').toString(),
-              )),
-            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: _savedGrid(mine),
+          ),
         ],
       ),
     ));
@@ -814,21 +940,19 @@ class _TgSourcePageState extends State<TgSourcePage> {
                     }
                     await _tg.addChannel(p, title: p, mode: 'public');
                     _pubCtrl.clear();
-                    final s = await _tg.channels();
-                    if (!mounted) return;
-                    setState(() => _saved = s);
+                    await _loadSaved();
                   },
                   child: const Text('添加'),
                 ),
               ],
             ),
-            if (_saved.isEmpty) ...[
+            if (_publicSaved.isEmpty) ...[
               const SizedBox(height: 12),
               Text('还没有收藏的频道',
                   style: TextStyle(color: AppTheme.textTertiary, fontSize: 12)),
             ] else ...[
               const SizedBox(height: 8),
-              for (final c in _saved) _savedRow(c),
+              _savedGrid(_publicSaved),
             ],
           ],
         ),
@@ -840,44 +964,82 @@ class _TgSourcePageState extends State<TgSourcePage> {
     final peer = (c['peer'] ?? '').toString();
     final mode = (c['mode'] ?? 'public').toString();
     return InkWell(
-      borderRadius: BorderRadius.circular(8),
-      onTap: () => Get.to(() => TgChannelPage(
-        peer: peer,
-        title: (c['title'] ?? peer).toString(),
-        mode: mode,
-      )),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 9),
-        child: Row(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () {
+        // 登录频道的播放走 MTProto，没扫码时点进去只会转圈（日志里的 500）
+        if (mode == 'login' && !_authorized) {
+          AppToast.message('这是登录频道：先扫码登录再打开');
+          return;
+        }
+        Get.to(() => TgChannelPage(
+          peer: peer,
+          title: (c['title'] ?? peer).toString(),
+          mode: mode,
+        ));
+      },
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: AppTheme.borderLight.withValues(alpha: 0.6), width: 0.6),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(mode == 'login' ? Icons.lock_outline : Icons.public,
-                size: 16, color: AppTheme.textTertiary),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                (c['title'] ?? peer).toString(),
+            Row(
+              children: [
+                Icon(mode == 'login' ? Icons.lock_outline : Icons.public,
+                    size: 14, color: AppTheme.textTertiary),
+                const Spacer(),
+                InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: () async {
+                    await _tg.removeChannel(peer);
+                    await _loadSaved();
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: Icon(Icons.close_rounded,
+                        size: 14, color: AppTheme.textTertiary),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 3),
+            Text(
+              (c['title'] ?? peer).toString(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 1),
+            Text('@$peer',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-              ),
-            ),
-            Text(mode == 'login' ? '登录' : '公开',
-                style: TextStyle(color: AppTheme.textTertiary, fontSize: 10.5)),
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              tooltip: '删除',
-              icon: Icon(Icons.delete_outline,
-                  size: 17, color: AppTheme.textTertiary),
-              onPressed: () async {
-                await _tg.removeChannel(peer);
-                final s = await _tg.channels();
-                if (!mounted) return;
-                setState(() => _saved = s);
-              },
-            ),
+                style: TextStyle(color: AppTheme.textTertiary, fontSize: 10)),
           ],
         ),
       ),
+    );
+  }
+
+  /// 频道收藏的**两列卡片网格**（用户 2026-10-25：「添加源要一行两列网格式」）
+  Widget _savedGrid(List<Map<String, dynamic>> list) {
+    return GridView.count(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
+      crossAxisCount: 2,
+      mainAxisSpacing: 8,
+      crossAxisSpacing: 8,
+      childAspectRatio: 2.35,
+      children: [for (final c in list) _savedRow(c)],
     );
   }
 

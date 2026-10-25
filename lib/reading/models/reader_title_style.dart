@@ -65,32 +65,36 @@ enum ReaderTitleStyle {
 
   /// 青蓝·光晕（山峦插画 + 文字发光 + 半透明药丸）—— 泼墨那套的标题。
   /// 原样式的背景图是网络地址，这里换成随包 asset（离线也能用）。
+  ///
+  /// 2026-10-25 用户反馈：**图要更大、章名文字要更小**——
+  /// 把插画从 `auto 100%` 提到 `auto 160%`，两个标题字号各降一档，
+  /// 同时收紧上下留白（原来 3em 的 margin 把整块撑得很高）。
   static const _qingLan = '''
 <div style="background-image:url('asset:assets/images/reader_title/qinglan.png');
-            background-repeat:no-repeat; background-position:left; background-size:auto 100%;">
+            background-repeat:no-repeat; background-position:left center; background-size:auto 160%;">
   <div style="text-align:left;">
-    <h3 style="color:#236178; text-shadow:0 0 10px #236178; margin:0 0.5em 3em 0;
-               font-weight:200; font-size:1.5em;">章节数</h3>
+    <h3 style="color:#236178; text-shadow:0 0 10px #236178; margin:0 0.5em 1.6em 0;
+               font-weight:200; font-size:1.2em;">章节数</h3>
     <h4 style="box-shadow:0px 15px 10px -15px #000; display:inline-block;
                background-color:rgba(35,97,120,0.5); border-radius:16px;
-               margin:3em 0 2em 0; padding:0.5em 2em; text-align:left;
+               margin:1.6em 0 1.4em 0; padding:0.35em 1.5em; text-align:left;
                color:#f3f7fa; text-shadow:0 0 10px #f3f7fa;
-               font-weight:200; font-size:1em;">章节名</h4>
+               font-weight:200; font-size:0.85em;">章节名</h4>
   </div>
 </div>''';
 
   /// 青蓝·光晕·夜间版（浅青字 + 更淡的药丸，夜间也有"光晕"感）
   static const _qingLanNight = '''
 <div style="background-image:url('asset:assets/images/reader_title/qinglan.png');
-            background-repeat:no-repeat; background-position:left; background-size:auto 100%;">
+            background-repeat:no-repeat; background-position:left center; background-size:auto 160%;">
   <div style="text-align:left;">
-    <h3 style="color:#8FB6C6; text-shadow:0 0 10px #8FB6C6; margin:0 0.5em 3em 0;
-               font-weight:200; font-size:1.5em;">章节数</h3>
+    <h3 style="color:#8FB6C6; text-shadow:0 0 10px #8FB6C6; margin:0 0.5em 1.6em 0;
+               font-weight:200; font-size:1.2em;">章节数</h3>
     <h4 style="box-shadow:0px 15px 10px -15px #000; display:inline-block;
                background-color:rgba(143,182,198,0.35); border-radius:16px;
-               margin:3em 0 2em 0; padding:0.5em 2em; text-align:left;
+               margin:1.6em 0 1.4em 0; padding:0.35em 1.5em; text-align:left;
                color:#EAF3F7; text-shadow:0 0 10px #EAF3F7;
-               font-weight:200; font-size:1em;">章节名</h4>
+               font-weight:200; font-size:0.85em;">章节名</h4>
   </div>
 </div>''';
 }

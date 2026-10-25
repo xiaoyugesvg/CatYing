@@ -87,6 +87,12 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
     });
   }
 
+  /// 点宠物弹出对话：**贴着宠物**弹（用户 2026-10-25：
+  /// 「点击弹出的对话，能不能挨着宠物一些」）——
+  /// 原来用 showDialog 固定居中，宠物在角落时卡片离它很远。
+  /// 这里把宠物当前的屏幕矩形一起带过去，由 [PetChatSheet] 决定放哪一侧。
+  Rect? _petRect;
+
   Future<void> _onTap() async {
     // 互动反馈：先弹一下
     setState(() => _bounce = true);
@@ -108,7 +114,7 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
       context: ctx,
       barrierDismissible: true,
       barrierColor: Colors.black26,
-      builder: (_) => const PetChatSheet(),
+      builder: (_) => PetChatSheet(anchor: _petRect),
     );
   }
 
@@ -268,6 +274,11 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
             //（身体探出屏幕一部分 + 朝屏幕内侧微倾），而不是贴平站在边上。
             final dockLeft = _pet.posX <= 0.001;
             final dockRight = _pet.posX >= 0.999;
+            // 记录宠物**实际可见**的屏幕矩形（贴边姿态有位移）——
+            // 点开对话时用它算"贴着宠物"的位置
+            final dockDx =
+                dockLeft ? -petSize * 0.62 : (dockRight ? petSize * 0.62 : 0.0);
+            _petRect = Rect.fromLTWH(left + dockDx, top, petSize, petSize);
 
             Widget petBody = Column(
               mainAxisSize: MainAxisSize.min,

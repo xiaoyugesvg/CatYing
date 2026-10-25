@@ -22,7 +22,7 @@ import { TelegramClient, Api } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 import { ConnectionTCPFull } from 'telegram/network/index.js';
 import QRCode from 'qrcode';
-import { looksLikeAd, titleFromGuillemets } from './public.js';
+import { titleFromGuillemets } from './public.js';
 
 // ── 全局状态 ────────────────────────────────────────────────
 // 内置应用凭据（Telegram Desktop 公开的一组）：Dart 侧没推配置时也能直接扫码，
@@ -113,6 +113,10 @@ export function configure(cfg = {}) {
             : null;
         // 代理变了 ⇒ 丢掉旧连接（下一次请求按新代理重建）。
         // 否则用户"换了个代理"，已登录的客户端还挂在旧线路上，看起来像没生效。
+        //
+        // ⚠️ **只重建连接，不动登录态**：会话字符串一直在 sessionPath 里，
+        //   下次 ensureConnected 用同一个 StringSession 重新握手 ⇒ 不需要重新扫码。
+        //   只有 logout() 才会删会话文件。
         const changed =
             JSON.stringify(next) !== JSON.stringify(st.proxy);
         st.proxy = next;
@@ -137,6 +141,11 @@ function readSession() {
         const s = fs.readFileSync(st.sessionPath, 'utf8').trim();
         return s || '';
     } catch (_) { return ''; }
+}
+
+/** 有没有本地会话（不发网络请求，给路由层做"能不能走 MTProto"的判断） */
+export function hasSession() {
+    return !!readSession();
 }
 
 function saveSession(str) {
@@ -437,14 +446,19 @@ function isPlayable(doc) {
 }
 
 function titleOf(msg, fallback) {
-    // 只认「《片名》」（与公开频道同一套规则，用户 2026-10-25）：
-    //   带书名号 → 取里头的文字；没有 → 返回空，调用方会跳过这条。
+    // 与公开频道同一套（2026-10-25 第二轮：Node 不再写死广告词）：
+    //   《片名》优先 → 帖子第一行 → 文件名 → '视频'
+    // 广告/表情过滤挪到 App（可配置），这里只负责"尽量给出一个像样的名字"。
     const cap = (msg.message || '').trim();
-    const fromCap = titleFromGuillemets(cap);
-    if (fromCap) return fromCap;
-    const fromFile = titleFromGuillemets(fallback);
-    if (fromFile) return fromFile;
-    return '';
+    const firstLine = cap
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean)[0] || '';
+    return titleFromGuillemets(cap)
+        || titleFromGuillemets(fallback)
+        || firstLine
+        || fallback
+        || '视频';
 }
 
 function toItem(msg, doc) {
@@ -492,11 +506,10 @@ export async function videos(peer, offsetId = 0, limit = 30, depth = 0) {
             if (!(media instanceof Api.MessageMediaDocument)) continue;
             const doc = media.document;
             if (!isPlayable(doc)) continue;
+            // 顺手把消息缓存下来：列表里每张封面都要 getMessages 一次
+            // ⇒ 12 个卡片就是 12 个 RPC，慢且容易 404（"登录的没封面"）
+            msgCache.set(`${peer}|${m.id}`, { doc, msg: m, ts: now() });
             const item = toItem(m, doc);
-            // 只收「《片名》」（没有书名号的整条丢掉），书名号里带广告词也丢
-            // —— 与公开频道同一套规则
-            if (!item.title) continue;
-            if (looksLikeAd(item.title) || looksLikeAd(item.fileName)) continue;
             items.push(item);
         }
         // 整页都被过滤，但可能还有更早的视频 ⇒ 自动再往后翻
@@ -551,6 +564,16 @@ async function getDoc(peer, id, force = false) {
  * @returns {{size:number, mime:string}}
  */
 export async function streamTo(req, res, peer, id, fileName) {
+    // 没登录就别去连了：ensureConnected 会白等 25 秒，播放器只能转圈
+    //（用户 2026-10-25 日志：未登录点登录频道 ⇒ 一直缓冲/500）。
+    if (!readSession()) {
+        res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({
+            ok: false,
+            error: '未登录：登录频道需要先扫码登录；公开频道可不用登录，但要能连上 t.me（可开内置代理）',
+        }));
+        return;
+    }
     let doc;
     try {
         doc = await getDoc(peer, id);
@@ -612,7 +635,11 @@ export async function streamTo(req, res, peer, id, fileName) {
     let it;
     let first = null;
     try {
-        it = st.client.iterDownload({
+        // ⚠️ 这里必须重新 ensureConnected：getDoc 命中 msgCache 时**不会建连**，
+        //   直接 `st.client.iterDownload` 会在 client 为 null 时抛 TypeError
+        //   （用户日志里 /tg/stream 秒回 500 就是这个）。
+        const c = await ensureConnected();
+        it = c.iterDownload({
             file: doc,
             offset: start,
             requestSize: 256 * 1024,
@@ -690,7 +717,13 @@ export async function thumbTo(res, peer, id) {
         }
         if (msg && msg.media instanceof Api.MessageMediaDocument) {
             const d = msg.media.document;
-            if (d && d.thumbs && d.thumbs.length) doc = d.thumbs[d.thumbs.length - 1];
+            // 视频文件有时只有 `videoThumbs`（VideoSize），`thumbs` 为空 ⇒
+            // 之前直接 404，列表里就是一片"没有封面"（用户 2026-10-25）
+            const cands = [
+                ...(d && Array.isArray(d.thumbs) ? d.thumbs : []),
+                ...(d && Array.isArray(d.videoThumbs) ? d.videoThumbs : []),
+            ];
+            if (cands.length) doc = cands[cands.length - 1];
         }
         if (!doc) {
             res.writeHead(404); res.end(); return;

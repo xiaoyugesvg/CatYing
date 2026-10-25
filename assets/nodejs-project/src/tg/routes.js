@@ -157,7 +157,30 @@ export async function handle(req, res, url) {
         const id = url.searchParams.get('id') || '';
         const name = url.searchParams.get('name') || '';
         if (!peer || !id) { json(res, 400, { error: 'missing peer/id' }); return; }
-        await svc.streamTo(req, res, peer, id, name);
+        // 没登录：MTProto 一定失败（原来的 500 / 无限转圈就是这么来的）。
+        // 公开频道还能走网页直链 ⇒ 先试公开解析，再不行给明确的 401。
+        if (!svc.hasSession()) {
+            const rec = await resolveCached(peer, parseInt(id, 10));
+            if (rec) { await proxyStream(req, res, rec.url); return; }
+            json(res, 401, {
+                ok: false,
+                error: '未登录：登录频道要先扫码；公开频道可以不用登录，'
+                    + '但要能连上 t.me（连不上就开内置代理池）',
+            });
+            return;
+        }
+        try {
+            await svc.streamTo(req, res, peer, id, name);
+        } catch (e) {
+            // 任何漏网异常都不能变成裸 500（播放器只会转圈），
+            // 统一给播放器一个能看见的状态码 + 原因
+            try {
+                json(res, 502, {
+                    ok: false,
+                    error: 'TG 取流失败：' + ((e && e.message) || String(e)),
+                });
+            } catch (_) {}
+        }
         return;
     }
 
@@ -195,8 +218,18 @@ export async function handle(req, res, url) {
         const id = url.searchParams.get('id') || '';
         if (!peer || !id) { json(res, 400, { error: 'missing peer/id' }); return; }
         const rec = await resolveCached(peer, parseInt(id, 10));
-        if (!rec) { json(res, 404, { error: '解析不出可播放地址' }); return; }
-        await proxyStream(req, res, rec.url);
+        if (rec) { await proxyStream(req, res, rec.url); return; }
+        // 网页解析不出来时，登录用户还有 MTProto 这一条路
+        //（有些公开频道把视频当文件发，embed 页没有 <video>，但 MTProto 能取）
+        if (svc.hasSession()) {
+            await svc.streamTo(req, res, peer, id, '');
+            return;
+        }
+        json(res, 404, {
+            ok: false,
+            error: '解析不出可播放地址：连不上 t.me 时请开「内置代理池」，'
+                + '或用公开频道/扫码登录后重试',
+        });
         return;
     }
 
@@ -229,6 +262,11 @@ export async function handle(req, res, url) {
                 // 代理同时交给「网页抓取 + 播放中转」用（gramjs 那边由 svc 管）
                 setProxy(data.proxy);
                 json(res, 200, svc.configure(data));
+                return;
+
+            // t.me 连通性自测（不改配置，按当前代理/系统 VPN 打一次）
+            case 'tgNetTest':
+                json(res, 200, await pub.probeTme());
                 return;
 
             // 内置免费代理池：拉列表 + 并发测速，返回按延迟排序的可用项

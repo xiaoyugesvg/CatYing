@@ -265,7 +265,28 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
                 _duplicate(s);
               },
             ),
-            if (!builtin)
+            if (!builtin) ...[
+              ListTile(
+                enabled: _mine.indexWhere((e) => e.id == s.id) > 0,
+                leading: Icon(Icons.arrow_upward_rounded, color: _fg),
+                title: Text('上移', style: TextStyle(color: _fg)),
+                onTap: () {
+                  final i = _mine.indexWhere((e) => e.id == s.id);
+                  Navigator.pop(c);
+                  _move(i, -1);
+                },
+              ),
+              ListTile(
+                enabled: _mine.indexWhere((e) => e.id == s.id) >= 0 &&
+                    _mine.indexWhere((e) => e.id == s.id) < _mine.length - 1,
+                leading: Icon(Icons.arrow_downward_rounded, color: _fg),
+                title: Text('下移', style: TextStyle(color: _fg)),
+                onTap: () {
+                  final i = _mine.indexWhere((e) => e.id == s.id);
+                  Navigator.pop(c);
+                  _move(i, 1);
+                },
+              ),
               ListTile(
                 leading: Icon(
                   Icons.delete_outline,
@@ -277,6 +298,7 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
                   _delete(s);
                 },
               ),
+            ],
             const SizedBox(height: 8),
           ],
         ),
@@ -333,8 +355,22 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
               ),
             )
           else
-            for (var i = 0; i < _mine.length; i++)
-              _row(_mine[i], i, onTap: () => _apply(_mine[i])),
+            // 用户 2026-10-25：「我导入的样式的可视化要和内置一样」
+            //   ⇒ 不再用一行文字列表，改用和内置一样的**小书预览卡**
+            //   （排序/编辑/删除收进长按菜单）。
+            Wrap(
+              spacing: 10,
+              runSpacing: 12,
+              children: [
+                for (final s in _mine)
+                  _card(
+                    s,
+                    width: _cardWidth(context),
+                    onTap: () => _apply(s),
+                    onMore: () => _showActions(s, builtin: false),
+                  ),
+              ],
+            ),
           const SizedBox(height: 18),
           SizedBox(
             width: double.infinity,
@@ -674,71 +710,6 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
           ],
         ),
       ),
-    );
-  }
-
-  Widget _row(ReaderStyle s, int index, {required VoidCallback onTap}) {
-    final selected = _activeId == s.id;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: _fg.withValues(alpha: selected ? 0.10 : 0.05),
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onTap,
-          onLongPress: () => _showActions(s, builtin: false),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            child: Row(
-              children: [
-                SizedBox(width: 48, child: _preview(s, selected: selected)),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        s.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                          color: _fg,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '${s.fontSize.round()} 号 · 行高 ${s.lineHeight.toStringAsFixed(2)} · 段距 ${s.paraSpacing.toStringAsFixed(2)}',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: _fg.withValues(alpha: 0.5),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                _miniBtn(Icons.arrow_upward_rounded, '上移', () => _move(index, -1)),
-                _miniBtn(Icons.arrow_downward_rounded, '下移', () => _move(index, 1)),
-                _miniBtn(Icons.edit_outlined, '编辑', () => _edit(s, builtin: false)),
-                _miniBtn(Icons.delete_outline, '删除', () => _delete(s)),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _miniBtn(IconData icon, String tip, VoidCallback onTap) {
-    return IconButton(
-      visualDensity: VisualDensity.compact,
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-      tooltip: tip,
-      icon: Icon(icon, size: 16, color: _fg.withValues(alpha: 0.72)),
-      onPressed: onTap,
     );
   }
 

@@ -100,13 +100,25 @@ class AiService extends ChangeNotifier {
   /// 另外兼容两种常见写法（各家 baseUrl 差异很大）：
   ///   · 用户直接填了完整地址（以 `/chat/completions` 结尾）⇒ 原样用；
   ///   · 智谱等以 `/v4` 结尾 ⇒ `$b/chat/completions`（不能再塞 `/v1`）。
-  String get _endpoint => _endpointOf(baseUrl);
-
   String _endpointOf(String b0) {
     final b = b0.replaceAll(RegExp(r'/+$'), '');
     if (b.endsWith('/chat/completions')) return b;
     if (b.endsWith('/v1') || b.endsWith('/v4')) return '$b/chat/completions';
     return '$b/v1/chat/completions';
+  }
+
+  /// 取地址里的 `user:pass@`（没有就返回空串）
+  String _userInfoOf(String raw) {
+    final u = Uri.tryParse(raw.trim());
+    return u?.userInfo ?? '';
+  }
+
+  /// 去掉地址里的 `user:pass@`（Dio/URL 里带着它反而不干净）
+  String _stripUserInfo(String raw) {
+    final t = raw.trim();
+    final u = Uri.tryParse(t);
+    if (u == null || u.userInfo.isEmpty) return t;
+    return u.replace(userInfo: '').toString();
   }
 
   /// 发起一次对话，返回助手回复文本。失败抛中文可读错误。
@@ -125,8 +137,19 @@ class AiService extends ChangeNotifier {
     final mdl = useReader && readerModel.trim().isNotEmpty
         ? readerModel.trim()
         : model;
-    final endpoint = useReader ? _endpointOf(readerBaseUrl) : _endpoint;
-    if (key.isEmpty) {
+    final rawBase = useReader ? readerBaseUrl : baseUrl;
+    // 自建网关常见的两种鉴权：
+    //   · nginx Basic 认证 → 把账号密码写进地址 https://u:p@host/v1，
+    //     或 Key 填 `basic:u:p`
+    //   · 普通 OpenAI 网关 → Key 直接是 Bearer
+    final baseUserInfo = _userInfoOf(rawBase);
+    final endpoint = _endpointOf(_stripUserInfo(rawBase));
+    final auth = baseUserInfo.isNotEmpty
+        ? 'Basic ${base64Encode(utf8.encode(baseUserInfo))}'
+        : key.toLowerCase().startsWith('basic:')
+            ? 'Basic ${base64Encode(utf8.encode(key.substring(6).trim()))}'
+            : 'Bearer ${key.toLowerCase().startsWith('bearer:') ? key.substring(7).trim() : key}';
+    if (key.isEmpty && baseUserInfo.isEmpty) {
       throw useReader
           ? '阅读的独立 AI 还没填 Key（设置 → AI 管理 → 阅读使用独立 AI）'
           : '尚未配置 AI 接口（需要 API Key）';
@@ -136,7 +159,7 @@ class AiService extends ChangeNotifier {
       receiveTimeout: timeout,
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer $key',
+        'Authorization': auth,
       },
     ));
     // ✅ **AI 总结 / 问答也走「网络代理」**（本轮接上 ✓）—— 本服务是**每次调用临时建 Dio** ✓

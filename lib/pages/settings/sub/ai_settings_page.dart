@@ -26,25 +26,32 @@ const List<_Provider> _providers = [
   _Provider(
     '智谱',
     'https://open.bigmodel.cn/api/paas/v4',
-    'glm-4-flash',
-    '有免费额度',
+    // 2026-10 官方免费模型：GLM-4.7-Flash（输入/输出/缓存全免费，200K 上下文）
+    'glm-4.7-flash',
+    '免费（glm-4.7-flash）',
   ),
-  // OpenCode Zen：OpenAI 兼容网关，部分模型限时免费。
-  // ⚠️ 免费模型名单与名字会变，以官方为准；这里只是一个可改的起点。
+  // ── 2026-10-25：补几家**真免费**的（都不用绑卡）────────────────
+  // 用户问「有没有免费的 AI」，这三家是当下最省事的：
+  //   · Groq：免费 30 次/分、1000 次/天，速度极快，但需外网；
+  //   · Gemini：Google AI Studio 免费层，需外网（模型名可改成更新的 flash）；
+  //   · 硅基流动：国内直连，站内标了「免费」的小模型可用。
   _Provider(
-    'OpenCode',
-    'https://opencode.ai/zen/v1',
-    'qwen3-coder',
-    '有免费模型',
+    'Groq（免费）',
+    'https://api.groq.com/openai/v1',
+    'openai/gpt-oss-120b',
+    '免费 1000 次/天 · 需外网',
   ),
-  // 自建反代（用户自己的服务器）：地址以你实际的反代/网关为准。
-  // ⚠️ OpenCode 官方面板是**账号密码登录的 Web 端**，不是 OpenAI 兼容 API；
-  //   要在这里用它，得在它前面挂一层兼容网关（one-api / new-api 之类）。
   _Provider(
-    '自建(OpenAI兼容)',
-    'https://opencodeai.cn/v1',
-    'qwen3-coder',
-    '需兼容网关',
+    'Gemini（免费）',
+    'https://generativelanguage.googleapis.com/v1beta/openai',
+    'gemini-2.5-flash',
+    '有免费层 · 需外网',
+  ),
+  _Provider(
+    '硅基流动（免费）',
+    'https://api.siliconflow.cn/v1',
+    'Qwen/Qwen2-7B-Instruct',
+    '国内直连 · 有免费模型',
   ),
   // OpenRouter：聚合网关，带 `:free` 后缀的模型真免费（有限速）。
   _Provider(

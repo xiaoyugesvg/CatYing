@@ -211,6 +211,15 @@ class TgService {
         const Duration(seconds: 90),
       );
 
+  /// t.me 连通性自测：按**当前**设置（内置代理开关 + 手机系统 VPN）打一次
+  /// `t.me/s/cctv1`，返回 {ok, ms, status, bytes, proxy, error}。
+  /// 代理测试只能证明"那个节点通"，这个才是"能不能看公开频道"的直接答案。
+  Future<Map<String, dynamic>> netTest() => post(
+        'tgNetTest',
+        {},
+        const Duration(seconds: 30),
+      );
+
   Future<Map<String, dynamic>> videos(String peer,
           {int offsetId = 0, int limit = 30}) =>
       post('tgVideos', {'peer': peer, 'offsetId': offsetId, 'limit': limit});

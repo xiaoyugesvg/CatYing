@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
@@ -167,30 +168,30 @@ class BookPrefetchedData {
   });
 }
 
-class _BookReaderPageState extends State<BookReaderPage> {
+class _BookReaderPageState extends State<BookReaderPage>
+    with WidgetsBindingObserver {
   /// 顶栏「日夜切换」的本地覆盖：0=跟随全局，1=强制浅色，2=强制夜间。
   /// 必须是**实例**字段：原来的 static 会跨书残留（见文件顶部说明 ✗）。
   int _darkOverride = 0;
 
-  /// 图书阅读器明暗：**跟随全局外观**，顶栏日夜按钮可临时覆盖。
+  /// 图书阅读器明暗：**跟随手机系统**的深色模式，顶栏日夜按钮可临时覆盖。
   ///
-  /// ── 原来写死 `false`（永远浅色），后果是"暗色模式对图书阅读完全无效" ──
-  ///
-  /// 当初写死浅色的理由是"仿真翻页为固定纸张图背景，全局暗色下文字翻白配浅纸
-  /// 看不清"。但实际 `widgets/book_page_curl.dart` 的**翻页背纸本来就按
-  /// `Theme.of(context).brightness` 分了深浅两套**
-  ///（`:367-368` 的 `0xFF1E1E22` / `0xFFFBF6EC`）——
-  /// 也就是说写死浅色反而制造了"深色背纸 + 浅色正文"的错配。
-  /// 跟随全局之后，正文底色与翻页背纸同向，才是自洽的。
-  ///
-  /// ✗ 原来它还是文件级 getter、读 `_ReaderDarkOverride` 的 static 值：
-  ///   那个 static 一旦被点过就再也回不到 0，「跟随全局」形同虚设 ✗。
-  /// ✓ 现在是 State 的**实例** getter：0 档真的落到全局唯一明暗真源
-  ///   `!AppBrightness.isLight.value` 上，不硬写 1/0 ✓。
+  /// ⚠️ 2026-10-25：原来 0 档读的是影视侧的 `AppBrightness`（影视模块自己的
+  ///   明暗开关）⇒ 阅读器被别的模块牵着走。用户要求：阅读器的日夜以阅读器
+  ///   自己的设置为准，而「跟随系统」指的是**手机系统**的日夜。
   bool get _readerIsDark {
     if (_darkOverride == 1) return false;
     if (_darkOverride == 2) return true;
-    return !AppBrightness.isLight.value;
+    return WidgetsBinding
+            .instance.platformDispatcher.platformBrightness ==
+        Brightness.dark;
+  }
+
+  /// 系统深色模式切换 → 重绘（0 档跟随）
+  @override
+  void didChangePlatformBrightness() {
+    if (!mounted) return;
+    setState(() {});
   }
 
   BookContent? _content;
@@ -273,6 +274,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
   @override
   void initState() {
     super.initState();
+    // 0 档（跟随系统）需要监听手机系统的深色模式切换
+    WidgetsBinding.instance.addObserver(this);
     _typo = _typoFromSettings();
     final pf = widget.prefetched;
     if (pf != null) {
@@ -371,6 +374,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     // 退出阅读器必须停掉朗读，否则会在别的页面继续念
     _tts.stop();
     _tts.onFinished = null;
@@ -1036,7 +1040,26 @@ class _BookReaderPageState extends State<BookReaderPage> {
       backgroundColor: bgColor,
       body: Stack(
         children: [
-          _buildBody(isDark, textColor, bgColor),
+          // 选字工具条 / 选区高亮跟**阅读器**的纸面配色走
+          //（iOS 上 Adaptive 工具条还会看 CupertinoTheme 的 brightness，
+          //  这里一起按阅读器的日夜给 —— 用户 2026-10-25）
+          Theme(
+            data: Theme.of(context).copyWith(
+              colorScheme:
+                  Theme.of(context).colorScheme.copyWith(surface: bgColor),
+              textSelectionTheme: TextSelectionThemeData(
+                selectionColor: textColor.withValues(alpha: 0.22),
+                selectionHandleColor: textColor,
+                cursorColor: textColor,
+              ),
+            ),
+            child: CupertinoTheme(
+              data: CupertinoThemeData(
+                brightness: isDark ? Brightness.dark : Brightness.light,
+              ),
+              child: _buildBody(isDark, textColor, bgColor),
+            ),
+          ),
           _buildHud(isDark),
           _buildControls(isDark, textColor),
         ],
