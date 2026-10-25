@@ -51,6 +51,8 @@ class _DiscoverPageState extends State<DiscoverPage>
   ///   · 'source'    —— 网易/QQ/酷狗/喜雅/博看/一五（平台页）
   ///   · 'recommend' —— 推荐（可切换已启用的插件源）
   ///   · 'soda'      —— 汽水（固定用「汽水音乐」MusicFree 插件）
+  ///   · 'migu'      —— 咪咕（固定用「咪咕音乐」MusicFree 插件）
+  ///   · 'bili'      —— B站（固定用「B站」MusicFree 插件）
   /// 插件页不是 SongSource，所以单独用字符串标记，不影响 `_source` 的持久化。
   String _tabMode = 'source';
 
@@ -181,11 +183,11 @@ class _DiscoverPageState extends State<DiscoverPage>
     });
   }
 
-  /// 切到「汽水」Tab：固定用「汽水音乐」插件当内容源
-  void _openSodaTab() {
-    if (_tabMode == 'soda') return;
+  /// 切到「汽水 / 咪咕 / B站」Tab：各自固定用对应的 MusicFree 插件当内容源
+  void _openPluginTab(String mode) {
+    if (_tabMode == mode) return;
     setState(() {
-      _tabMode = 'soda';
+      _tabMode = mode;
       _loading = false;
       _error = '';
     });
@@ -203,10 +205,31 @@ class _DiscoverPageState extends State<DiscoverPage>
       s.id.toLowerCase().contains('qishui') ||
       s.updateUrl.toLowerCase().contains('qishui');
 
+  /// 是不是「咪咕音乐」插件（含 Cookie 版）
+  static bool _isMiguPlugin(ThirdPartySource s) =>
+      s.name.contains('咪咕') ||
+      s.id.toLowerCase().contains('migu') ||
+      s.updateUrl.toLowerCase().contains('migu');
+
+  /// 是不是「B站 / 哔哩哔哩」插件
+  static bool _isBiliPlugin(ThirdPartySource s) =>
+      s.name.contains('B站') ||
+      s.name.contains('哔哩') ||
+      s.id.toLowerCase().contains('bilibili') ||
+      s.updateUrl.toLowerCase().contains('bilibili');
+
   /// 已启用的汽水插件（没有 = 没装 / 被停用）
-  ThirdPartySource? get _sodaPlugin {
+  ThirdPartySource? get _sodaPlugin => _firstPluginWhere(_isSodaPlugin);
+
+  /// 已启用的咪咕插件（Cookie 版排在前面，用户登录态走它）
+  ThirdPartySource? get _miguPlugin => _firstPluginWhere(_isMiguPlugin);
+
+  /// 已启用的 B站插件
+  ThirdPartySource? get _biliPlugin => _firstPluginWhere(_isBiliPlugin);
+
+  ThirdPartySource? _firstPluginWhere(bool Function(ThirdPartySource) test) {
     for (final s in _enabledPlugins) {
-      if (_isSodaPlugin(s)) return s;
+      if (test(s)) return s;
     }
     return null;
   }
@@ -577,23 +600,21 @@ class _DiscoverPageState extends State<DiscoverPage>
     );
   }
 
-  /// 「推荐 / 汽水」Tab 内容：左上角显示应用源名称（推荐可切换）+ 右上角插件管理
+  /// 「推荐 / 汽水 / 咪咕 / B站」Tab 内容：左上角显示应用源名称（推荐可切换）+ 右上角插件管理
   Widget _pluginPane(DiscoverStyle style) {
     return ValueListenableBuilder<int>(
       valueListenable: ThirdPartySourceStore.instance.revision,
       builder: (context, _, __) {
-        // ── 汽水：固定绑定「汽水音乐」插件 ──────────────────────
-        if (_tabMode == 'soda') {
-          final soda = _sodaPlugin;
-          if (soda == null) {
-            return _pluginEmpty(
-              style,
-              icon: Icons.local_drink_outlined,
-              title: '还没有汽水音乐插件',
-              hint: '去插件市场安装「汽水音乐」，或在音源管理里启用',
-            );
-          }
-          return _pluginBody(soda);
+        // ── 汽水 / 咪咕 / B站：各自固定绑定一个插件 ─────────────
+        if (_tabMode != 'recommend') {
+          final bound = switch (_tabMode) {
+            'soda' => _sodaPlugin,
+            'migu' => _miguPlugin,
+            'bili' => _biliPlugin,
+            _ => null,
+          };
+          if (bound == null) return _boundPluginEmpty(style, _tabMode);
+          return _pluginBody(bound);
         }
 
         // ── 推荐：可切换的插件源 ────────────────────────────────
@@ -625,6 +646,21 @@ class _DiscoverPageState extends State<DiscoverPage>
     return PluginExploreView(
       key: ValueKey(source.id),
       source: source,
+    );
+  }
+
+  /// 汽水 / 咪咕 / B站 的空态：按 Tab 给对应的文案
+  Widget _boundPluginEmpty(DiscoverStyle style, String mode) {
+    final (icon, name) = switch (mode) {
+      'migu' => (Icons.music_note_rounded, '咪咕音乐'),
+      'bili' => (Icons.smart_display_outlined, 'B站'),
+      _ => (Icons.local_drink_outlined, '汽水音乐'),
+    };
+    return _pluginEmpty(
+      style,
+      icon: icon,
+      title: '还没有$name插件',
+      hint: '去插件市场安装「$name」，或在音源管理里启用',
     );
   }
 
@@ -884,11 +920,15 @@ class _DiscoverPageState extends State<DiscoverPage>
                   //（原来这里三元两支**完全一样**，是死代码，一并修掉）
                   _tabMode == 'soda'
                       ? '汽水音乐的榜单与推荐歌单'
-                      : _tabMode == 'recommend'
-                          ? '长按「推荐」可切换插件源'
-                          : _source == SongSource.ximalaya
-                              ? '有声书与播客，听点想听的'
-                              : '今天想听点什么？',
+                      : _tabMode == 'migu'
+                          ? '咪咕音乐的榜单与推荐歌单'
+                          : _tabMode == 'bili'
+                              ? 'B站音频：视频音乐与歌单'
+                              : _tabMode == 'recommend'
+                                  ? '长按「推荐」可切换插件源'
+                                  : _source == SongSource.ximalaya
+                                      ? '有声书与播客，听点想听的'
+                                      : '今天想听点什么？',
                   style: TextStyle(
                       color: style.secondary, fontSize: AppTheme.fontSubhead),
                 ),
@@ -986,7 +1026,7 @@ class _DiscoverPageState extends State<DiscoverPage>
     ];
     final isPaper = style.preset == DiscoverPreset.paper;
     return Padding(
-      // 7 个分类（推荐 + 6 个平台）→ 左右留白收一点，保证每个胶囊都放得下
+      // 10 个分类（推荐 + 6 平台 + 汽水/咪咕/B站）→ 左右留白收一点，保证都放得下
       padding: const EdgeInsets.fromLTRB(14, 4, 14, 12),
       child: Container(
         padding: const EdgeInsets.all(4),
@@ -1019,14 +1059,27 @@ class _DiscoverPageState extends State<DiscoverPage>
                 selected: _tabMode == 'source' && _source == t.source,
                 onTap: () => _switchSource(t.source),
               ),
-              // 「汽水」紧挨着酷狗（同为在线音乐平台，内容来自汽水插件）
-              if (t.source == SongSource.kugou)
+              // 「汽水 / 咪咕 / B站」紧挨着酷狗（同为在线音乐平台，内容来自各自插件）
+              if (t.source == SongSource.kugou) ...[
                 _sourceChip(
                   style: style,
                   label: '汽水',
                   selected: _tabMode == 'soda',
-                  onTap: _openSodaTab,
+                  onTap: () => _openPluginTab('soda'),
                 ),
+                _sourceChip(
+                  style: style,
+                  label: '咪咕',
+                  selected: _tabMode == 'migu',
+                  onTap: () => _openPluginTab('migu'),
+                ),
+                _sourceChip(
+                  style: style,
+                  label: 'B站',
+                  selected: _tabMode == 'bili',
+                  onTap: () => _openPluginTab('bili'),
+                ),
+              ],
             ],
           ],
         ),

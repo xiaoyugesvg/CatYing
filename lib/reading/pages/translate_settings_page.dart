@@ -6,7 +6,8 @@ import '../../widgets/app_toast.dart';
 
 /// 「翻译设置」—— 漫画 / 字幕翻译用的引擎与语言配置。
 ///
-/// 两种引擎都保留（用户 2026-10-17 选 C）：
+/// 三种引擎都保留：
+///   · 免 Key（Google 公共端点）—— 零配置，默认
 ///   · AI 翻译（OpenAI 兼容：DeepSeek / 智谱 / 自建…）—— 质量最好
 ///   · 百度翻译开放平台 —— 便宜稳定
 class TranslateSettingsPage extends StatefulWidget {
@@ -17,7 +18,7 @@ class TranslateSettingsPage extends StatefulWidget {
 }
 
 class _TranslateSettingsPageState extends State<TranslateSettingsPage> {
-  String _engine = 'openai';
+  String _engine = 'google';
   String _from = 'auto';
   String _to = 'zh';
   bool _loaded = false;
@@ -123,7 +124,13 @@ class _TranslateSettingsPageState extends State<TranslateSettingsPage> {
                 _section('翻译引擎'),
                 _engineSelector(),
                 const SizedBox(height: 12),
-                if (_engine == 'openai') ..._openAiFields() else ..._baiduFields(),
+                if (_engine == 'google')
+                  _hint('免 Key 引擎走 Google 的公开翻译端点（iOS「Scripting」翻译脚本同款），'
+                      '不需要任何配置；主端点失败会自动试备用端点。')
+                else if (_engine == 'openai')
+                  ..._openAiFields()
+                else
+                  ..._baiduFields(),
                 const SizedBox(height: 18),
                 _section('语言'),
                 _langRow('源语言', _from, const [
@@ -235,6 +242,7 @@ class _TranslateSettingsPageState extends State<TranslateSettingsPage> {
 
     return Row(
       children: [
+        item('google', '免 Key', 'Google 公共接口\n零配置（默认）'),
         item('openai', 'AI 翻译', 'OpenAI 兼容\nDeepSeek / 自建'),
         item('baidu', '百度翻译', '官方 API\n便宜稳定'),
       ],
