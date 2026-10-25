@@ -1,7 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:dio/dio.dart';
+import 'package:flutter/material.dart';
+import '../pages/cf_verify_page.dart';
+import '../widgets/video_player_pip.dart';
 import 'app_log.dart';
+import 'cf_session.dart';
 import 'dio_factory.dart';
 import 'drpy_service.dart';
 import 'nodejs_manager.dart';
@@ -388,17 +392,63 @@ class SpiderService {
   /// 上层（SourceService）现在会把它抛成错误信息显示出来。
   String? lastError;
 
+  /// 从错误文本里提取 `CF_CHALLENGE:<host>`（Python 侧抛的标记）
+  static String? _cfHostOf(String? err) {
+    if (err == null) return null;
+    final i = err.indexOf('CF_CHALLENGE:');
+    if (i < 0) return null;
+    final rest = err.substring(i + 'CF_CHALLENGE:'.length);
+    return RegExp(r'^[A-Za-z0-9.\-]+').firstMatch(rest)?.group(0);
+  }
+
+  /// 弹一次 CF 验证页（用全局 navigator，service 层没有 context）
+  ///
+  /// 走到这里说明"本来就该有缓存却没通过"⇒ 旧 cookie 已失效，先清掉再验。
+  Future<bool> _askCfVerify(String host) async {
+    final nav = VideoPlayerPip.navigatorKey.currentState;
+    if (nav == null) return false;
+    await CfSession.instance.invalidate(host);
+    final ok = await nav.push<bool>(
+      MaterialPageRoute(
+        builder: (_) => CfVerifyPage(url: 'https://$host/', host: host),
+      ),
+    );
+    return ok == true;
+  }
+
   /// 调 Python 引擎执行源方法（module=video.<key>，args 为 kwargs）
+  ///
+  /// 命中 Cloudflare 挑战时：弹一次验证页 → 成功则自动重试一次（不再反复打扰）。
   Future<Map<String, dynamic>?> _pythonCall(
     String moduleKey,
     String action,
-    Map<String, dynamic> args,
-  ) async {
+    Map<String, dynamic> args, {
+    bool retried = false,
+  }) async {
     final r = await PythonManager.instance.call(
       'video.$moduleKey',
       action,
       args,
     );
+    // 取出错误文本（通道错误 / runner 把异常包成 {ok:false, error}）
+    String? errText;
+    if (!r.ok) {
+      errText = r.error;
+    } else {
+      final j = r.json;
+      if (j is Map && j['ok'] == false) {
+        errText = '${j['error'] ?? ''}\n${j['trace'] ?? ''}';
+      }
+    }
+    // Cloudflare 挑战：**弹一次让用户点**，成功后自动重试（只重试一次）
+    final cfHost = _cfHostOf(errText);
+    if (cfHost != null && cfHost.isNotEmpty && !retried) {
+      AppLog.instance.w('[SpiderService] 命中 CF 挑战 $cfHost，弹验证');
+      final ok = await _askCfVerify(cfHost);
+      if (ok) {
+        return _pythonCall(moduleKey, action, args, retried: true);
+      }
+    }
     if (!r.ok) {
       lastError = 'Python 源执行失败: ${r.error}';
       AppLog.instance.w('[SpiderService] $lastError');

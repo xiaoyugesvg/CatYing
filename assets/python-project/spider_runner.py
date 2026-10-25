@@ -125,11 +125,50 @@ try:
         except Exception:
             pass
 
+    class CfChallenge(Exception):
+        """请求被 Cloudflare 人机验证拦截。
+
+        宿主的 Dart 侧识别 `CF_CHALLENGE:<host>` 后弹一次验证页，
+        验证成功再自动重试本次调用 —— 用户只需要点那一次。
+        """
+
+        def __init__(self, host):
+            self.host = host
+            super(CfChallenge, self).__init__('CF_CHALLENGE:%s' % host)
+
+    def _cf_check(resp, url):
+        """403/429/503 + CF 特征 ⇒ 抛 CfChallenge（让宿主弹验证）。"""
+        try:
+            if getattr(resp, 'status_code', 0) not in (403, 429, 503):
+                return
+            headers = getattr(resp, 'headers', {}) or {}
+            server = (headers.get('server') or '').lower()
+            body = ''
+            try:
+                body = (resp.text or '')[:3000]
+            except Exception:
+                pass
+            looks_cf = (
+                'cloudflare' in server
+                or 'Just a moment' in body
+                or 'cf-chl' in body
+                or '__cf_chl' in body
+                or 'enable javascript and cookies' in body.lower()
+            )
+            if looks_cf:
+                raise CfChallenge(_urlparse(url).netloc.lower())
+        except CfChallenge:
+            raise
+        except Exception:
+            pass
+
     def _request_with_default_timeout(self, method, url, **kwargs):
         if kwargs.get('timeout') is None:
             kwargs['timeout'] = _PY_DEFAULT_TIMEOUT
         _cf_inject(url, kwargs)
-        return _orig_session_request(self, method, url, **kwargs)
+        resp = _orig_session_request(self, method, url, **kwargs)
+        _cf_check(resp, url)
+        return resp
 
     _requests.sessions.Session.request = _request_with_default_timeout
 except Exception as _e:  # pragma: no cover - 没有 requests 时静默跳过
