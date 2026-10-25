@@ -36,6 +36,13 @@ const List<_Provider> _providers = [
     'qwen3-coder',
     '有免费模型',
   ),
+  // 自建反代（用户自己的服务器）：路径以你实际的反代配置为准
+  _Provider(
+    'OpenCode(自建)',
+    'https://opencodeai.cn/v1',
+    'qwen3-coder',
+    '自己的服务器',
+  ),
   // OpenRouter：聚合网关，带 `:free` 后缀的模型真免费（有限速）。
   _Provider(
     'OpenRouter',
