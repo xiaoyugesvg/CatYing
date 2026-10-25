@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../models/reader_bg_assets.dart';
 import '../models/reader_style.dart';
 import '../models/reader_title_style.dart';
 import '../services/reader_style_store.dart';
@@ -45,6 +46,23 @@ class _ReaderStyleVisualPageState extends State<ReaderStyleVisualPage> {
   String? _dragHint;
 
   final _store = ReaderStyleStore();
+
+  /// 底色预设（与完整表单一致）
+  static const _bgPresets = <int>[
+    0xFFFFFFFF,
+    0xFFFAF8F3,
+    0xFFF5EFE0,
+    0xFFEBD9BB,
+    0xFFDDC090,
+    0xFFC2D8AA,
+    0xFFABCEE0,
+    0xFFDBB8E2,
+    0xFFD6D5D6,
+    0xFFEEEEEE,
+    0xFF1F232B,
+    0xFF292D37,
+    0xFF000000,
+  ];
 
   @override
   void initState() {
@@ -478,6 +496,7 @@ class _ReaderStyleVisualPageState extends State<ReaderStyleVisualPage> {
       (_Zone.title, '标题'),
       (_Zone.body, '正文'),
       (_Zone.footer, '页脚'),
+      (_Zone.background, '背景'),
     ];
     return Positioned(
       left: 0,
@@ -509,7 +528,7 @@ class _ReaderStyleVisualPageState extends State<ReaderStyleVisualPage> {
                       child: Text(
                         z.$2,
                         textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 12, color: _ink),
+                        style: TextStyle(fontSize: 11.5, color: _ink),
                       ),
                     ),
                   ),
@@ -680,11 +699,155 @@ class _ReaderStyleVisualPageState extends State<ReaderStyleVisualPage> {
           ],
         );
       case _Zone.background:
-        return Text(
-          '底色与壁纸请在「完整表单」里改（那里有日/夜两套配色与壁纸选择）。',
-          style: TextStyle(fontSize: 12.5, height: 1.6, color: _ink),
+        final bgKey = _night ? 'bgColorNight' : 'bgColor';
+        final wpKey = _night ? 'bgImageAssetNight' : 'bgImageAsset';
+        final curBg = (_j[bgKey] as num?)?.toInt();
+        final curWp = _j[wpKey] as String?;
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 日/夜：直接切预览
+            Row(
+              children: [
+                Text(
+                  '预览',
+                  style: TextStyle(fontSize: 12.5, color: _ink),
+                ),
+                const SizedBox(width: 12),
+                for (final n in ['日间', '夜间'])
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: GestureDetector(
+                      onTap: () => apply(() => _night = n == '夜间'),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _night == (n == '夜间')
+                              ? _ink.withValues(alpha: 0.85)
+                              : _ink.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: Text(
+                          n,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: _night == (n == '夜间') ? _paper : _ink,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '底色（${_night ? '夜间' : '日间'}）',
+              style: TextStyle(fontSize: 11.5, color: _ink.withValues(alpha: 0.65)),
+            ),
+            const SizedBox(height: 7),
+            Wrap(
+              spacing: 7,
+              runSpacing: 7,
+              children: [
+                _swatch(
+                  null,
+                  curBg == null,
+                  // 「不设底色」只清颜色，不动壁纸（壁纸在下面单独选）
+                  () => apply(() => _j[bgKey] = null),
+                ),
+                for (final c in _bgPresets)
+                  _swatch(
+                    Color(c),
+                    curBg == c,
+                    () => apply(() => _j[bgKey] = c),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '壁纸',
+              style: TextStyle(fontSize: 11.5, color: _ink.withValues(alpha: 0.65)),
+            ),
+            const SizedBox(height: 7),
+            SizedBox(
+              height: 58,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: ReaderBgAssets.picker.length + 1,
+                separatorBuilder: (_, __) => const SizedBox(width: 7),
+                itemBuilder: (c, i) {
+                  if (i == 0) {
+                    return _wallTile(null, curWp == null, () => apply(() {
+                          _j[wpKey] = null;
+                        }));
+                  }
+                  final asset = ReaderBgAssets.picker[i - 1];
+                  return _wallTile(asset, curWp == asset, () => apply(() {
+                        _j[wpKey] = asset;
+                        // 日间选了成对壁纸 → 顺手补上夜间那张
+                        if (!_night) {
+                          final pair = ReaderBgAssets.pairOf(asset);
+                          if (pair != null) _j['bgImageAssetNight'] = pair;
+                        }
+                      }));
+                },
+              ),
+            ),
+          ],
         );
     }
+  }
+
+  Widget _swatch(Color? color, bool selected, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 26,
+        height: 26,
+        decoration: BoxDecoration(
+          color: color ?? Colors.transparent,
+          borderRadius: BorderRadius.circular(7),
+          border: Border.all(
+            color: selected ? _ink : _ink.withValues(alpha: 0.22),
+            width: selected ? 2 : 1,
+          ),
+        ),
+        child: color == null
+            ? Icon(Icons.block, size: 12, color: _ink.withValues(alpha: 0.6))
+            : null,
+      ),
+    );
+  }
+
+  Widget _wallTile(String? asset, bool selected, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 40,
+        height: 58,
+        decoration: BoxDecoration(
+          color: _ink.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected ? _ink : _ink.withValues(alpha: 0.2),
+            width: selected ? 2 : 1,
+          ),
+          image: asset == null
+              ? null
+              : DecorationImage(
+                  image: AssetImage(asset),
+                  fit: BoxFit.cover,
+                ),
+        ),
+        child: asset == null
+            ? Icon(Icons.block, size: 13, color: _ink.withValues(alpha: 0.6))
+            : null,
+      ),
+    );
   }
 
   Widget _textRow(String label, String key, void Function(VoidCallback) apply) {
