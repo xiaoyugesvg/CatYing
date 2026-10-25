@@ -1,8 +1,10 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../models/reader_bg_assets.dart';
 import '../models/reader_style.dart';
 import '../models/reader_title_style.dart';
+import '../services/reader_font_service.dart';
 import '../services/reader_style_store.dart';
 import '../services/title_html_parser.dart';
 import 'reader_style_edit_page.dart';
@@ -45,6 +47,9 @@ class _ReaderStyleVisualPageState extends State<ReaderStyleVisualPage> {
   /// 拖动页缘时的数值提示（拖动中显示，松手消失）
   String? _dragHint;
 
+  /// 预览用的字体族（跟随样式里的 fontId，异步取）
+  String? _previewFamily;
+
   final _store = ReaderStyleStore();
 
   /// 底色预设（与完整表单一致）
@@ -70,6 +75,18 @@ class _ReaderStyleVisualPageState extends State<ReaderStyleVisualPage> {
     _j = Map<String, dynamic>.from(widget.style.toJson());
     // 默认预览当前 App 明暗（编辑器外壳是深色/浅色跟着走）
     _night = widget.background.computeLuminance() < 0.4;
+    _loadFamily();
+  }
+
+  /// 取当前样式的字体族（预览要立刻看得到效果）
+  Future<void> _loadFamily() async {
+    try {
+      await ReaderFontService.instance.load();
+      final fam = await ReaderFontService.instance.familyOf(
+        _j['fontId'] as String?,
+      );
+      if (mounted) setState(() => _previewFamily = fam);
+    } catch (_) {}
   }
 
   // ── 草稿读取 ────────────────────────────────────────────────
@@ -129,6 +146,80 @@ class _ReaderStyleVisualPageState extends State<ReaderStyleVisualPage> {
     if (out != null && mounted) {
       setState(() => _j = Map<String, dynamic>.from(out.toJson()));
     }
+  }
+
+  /// 当前字体显示名
+  String get _fontLabel {
+    final id = _j['fontId'] as String? ?? '';
+    if (id.isEmpty) return '系统默认';
+    final list = ReaderFontService.instance.fonts;
+    final idx = list.indexWhere((f) => f.id == id);
+    return idx >= 0 ? list[idx].name : '自定义';
+  }
+
+  /// 选字体（含导入）
+  Future<void> _pickFont() async {
+    final svc = ReaderFontService.instance;
+    await svc.load();
+    if (!mounted) return;
+    const importTag = '__import_font__';
+    final picked = await showDialog<String>(
+      context: context,
+      builder: (c) => SimpleDialog(
+        title: const Text('选择字体'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(c, ''),
+            child: const Text('系统默认'),
+          ),
+          for (final f in svc.fonts)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(c, f.id),
+              child: Text(f.name),
+            ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(c, importTag),
+            child: const Row(
+              children: [
+                Icon(Icons.add, size: 16),
+                SizedBox(width: 6),
+                Text('导入字体（ttf / otf / ttc）'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+    if (picked == null) return;
+    if (picked == importTag) {
+      await _importFont();
+      return;
+    }
+    setState(() => _j['fontId'] = picked);
+    await _loadFamily();
+  }
+
+  Future<void> _importFont() async {
+    final files = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['ttf', 'otf', 'ttc'],
+    );
+    if (files.isEmpty) return;
+    final picked = files.first;
+    final base = picked.name.replaceAll(
+      RegExp(r'\.(ttf|otf|ttc)$', caseSensitive: false),
+      '',
+    );
+    try {
+      final bytes = await picked.readAsBytes();
+      final font = await ReaderFontService.instance.importBytes(
+        bytes,
+        name: base,
+      );
+      if (font == null || !mounted) return;
+      setState(() => _j['fontId'] = font.id);
+      await _loadFamily();
+    } catch (_) {}
   }
 
   /// 换标题版式（在「标题」浮层里进入）
@@ -255,17 +346,33 @@ class _ReaderStyleVisualPageState extends State<ReaderStyleVisualPage> {
         '案上的茶还温着，摊开的书页被风掀起一角，露出昨日夹在里面的那枚枯叶。';
     final text = List.filled(indent, '\u3000').join() + demo;
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: _paper,
-        image: _wallpaper == null
-            ? null
-            : DecorationImage(
-                image: AssetImage(_wallpaper!),
-                fit: BoxFit.cover,
+    final dim = _night ? _d('nightDim', 0.45).clamp(0.0, 0.8) : 0.0;
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: _paper,
+              image: _wallpaper == null
+                  ? null
+                  : DecorationImage(
+                      image: AssetImage(_wallpaper!),
+                      fit: BoxFit.cover,
+                    ),
+            ),
+          ),
+        ),
+        // 夜间压暗：只压背景层，不压文字（与阅读器 _nightDim 一致）
+        if (dim > 0.01)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: ColoredBox(
+                color: Colors.black.withValues(alpha: dim),
               ),
-      ),
-      child: Padding(
+            ),
+          ),
+        Positioned.fill(
+          child: Padding(
         padding: EdgeInsets.fromLTRB(
           _d('padLeft', 22).clamp(0, 80),
           _d('padTop', 18).clamp(0, 120),
@@ -293,6 +400,7 @@ class _ReaderStyleVisualPageState extends State<ReaderStyleVisualPage> {
                       height: lh,
                       letterSpacing: ls,
                       fontWeight: fw,
+                      fontFamily: _previewFamily,
                       color: _ink,
                     ),
                   ),
@@ -303,7 +411,9 @@ class _ReaderStyleVisualPageState extends State<ReaderStyleVisualPage> {
             _tap(_Zone.footer, child: _footerRow()),
           ],
         ),
-      ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -663,6 +773,33 @@ class _ReaderStyleVisualPageState extends State<ReaderStyleVisualPage> {
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // 字体（含导入）：改完预览立即换字体
+            Row(
+              children: [
+                SizedBox(
+                  width: 62,
+                  child: Text(
+                    '字体',
+                    style: TextStyle(fontSize: 12, color: _ink),
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    _fontLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _ink.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: _pickFont,
+                  child: const Text('更换'),
+                ),
+              ],
+            ),
             _slider('字号', _d('fontSize', 19), 12, 30, apply,
                 key: 'fontSize'),
             _slider('行高', _d('lineHeight', 1.6), 1.05, 3.0, apply,
@@ -796,6 +933,17 @@ class _ReaderStyleVisualPageState extends State<ReaderStyleVisualPage> {
                       }));
                 },
               ),
+            ),
+            const SizedBox(height: 12),
+            _slider(
+              '夜间压暗',
+              _d('nightDim', 0.45),
+              0,
+              0.8,
+              apply,
+              key: 'nightDim',
+              step: 0.05,
+              fmt: (v) => '${(v * 100).round()}%',
             ),
           ],
         );

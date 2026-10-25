@@ -307,6 +307,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 观感差异很大；给一个统一的「标题间距」让用户把标题往下推、和正文拉开。
   double _titleGap = 0;
 
+  /// 夜间压暗强度（0~0.8）。夜间无专属壁纸时，用这层黑遮罩压暗日间壁纸。
+  /// 原来是写死的 `0x73`（≈45%），现在可调、且随样式保存。
+  double _nightDimOpacity = 0.45;
+
   /// 已保存的排版预设名
   final List<String> _savedPresets = [];
 
@@ -707,11 +711,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// （自选图片没有夜间版，切夜间时永远压暗）。
   Widget _nightDim(Widget child, {bool nightVersionInUse = false}) {
     if (_bgIndex != 5 || nightVersionInUse) return child;
+    if (_nightDimOpacity <= 0.01) return child;
     return Stack(
       fit: StackFit.expand,
       children: [
         child,
-        const ColoredBox(color: Color(0x73000000)),
+        ColoredBox(
+          color: Colors.black.withValues(alpha: _nightDimOpacity.clamp(0.0, 0.8)),
+        ),
       ],
     );
   }
@@ -1324,6 +1331,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         if (tsc != null && tsc >= 0.6 && tsc <= 1.6) _titleScale = tsc;
         final tgp = num2('titleGap');
         if (tgp != null && tgp >= 0 && tgp <= 40) _titleGap = tgp;
+        final nd = num2('nightDim');
+        if (nd != null && nd >= 0 && nd <= 0.8) _nightDimOpacity = nd;
         final tb =
             (ov?['titleBold'] as bool?) ?? p.getBool('reading.titleBold');
         if (tb != null) _titleBold = tb;
@@ -1519,6 +1528,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         }
         await p.setDouble('reading.titleScale', _titleScale);
         await p.setDouble('reading.titleGap', _titleGap);
+        await p.setDouble('reading.nightDim', _nightDimOpacity);
         await p.setBool('reading.titleBold', _titleBold);
         // ✅ 段距 / 字距 / 字重 / 边距 / 缩进也要**落全局**：
         //   原来只写进「独立排版」快照，全局一个键都没有 ⇒ 调完退出再进
@@ -9402,6 +9412,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       titleFontSize: _titleFontSize,
       titleScale: _titleScale,
       titleGap: _titleGap,
+      nightDim: _nightDimOpacity,
       titleBold: _titleBold,
       hideRepeatTitle: _hideRepeatTitle,
       focusBold: _focusBold,
@@ -9540,6 +9551,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       // 标题缩放/间距是样式的组成部分（样式库里可调、可导出）
       _titleScale = s.titleScale.clamp(0.6, 1.6);
       _titleGap = s.titleGap.clamp(0.0, 40.0);
+      _nightDimOpacity = s.nightDim.clamp(0.0, 0.8);
       _titleBold = s.titleBold;
       _bgImageAsset = s.bgImageAsset;
       _bgImageAssetNight = s.bgImageAssetNight;

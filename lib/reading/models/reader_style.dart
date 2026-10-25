@@ -41,6 +41,7 @@ class ReaderStyle {
     this.titleFontSize,
     this.titleScale = 1.0,
     this.titleGap = 0,
+    this.nightDim = 0.45,
     this.titleBold = true,
     this.hideRepeatTitle = true,
     this.focusBold = false,
@@ -151,6 +152,12 @@ class ReaderStyle {
   /// 换屏后间距会变形，用它统一微调标题与正文的距离。
   final double titleGap;
 
+  /// 夜间压暗强度（0~0.8）。
+  ///
+  /// 夜间模式下若没有专属夜间壁纸，就用一层黑遮罩压暗日间壁纸，
+  /// 避免"夜里看白纸"。原来是写死的 0x73（≈45%），现在可调。
+  final double nightDim;
+
   /// 章标题是否加粗。Legado 的 `titleBold < 0` 视为不加粗
   final bool titleBold;
   final bool hideRepeatTitle;
@@ -229,6 +236,7 @@ class ReaderStyle {
     titleFontSize: titleFontSize,
     titleScale: titleScale,
     titleGap: titleGap,
+    nightDim: nightDim,
     titleBold: titleBold,
     hideRepeatTitle: hideRepeatTitle,
     focusBold: focusBold,
@@ -289,6 +297,7 @@ class ReaderStyle {
     'titleFontSize': titleFontSize,
     'titleScale': titleScale,
     'titleGap': titleGap,
+    'nightDim': nightDim,
     'titleBold': titleBold,
     'hideRepeatTitle': hideRepeatTitle,
     'focusBold': focusBold,
@@ -354,6 +363,7 @@ class ReaderStyle {
     titleFontSize: (j['titleFontSize'] as num?)?.toDouble(),
     titleScale: _d(j['titleScale'], 1.0).clamp(0.6, 1.6),
     titleGap: _d(j['titleGap'], 0).clamp(0, 40),
+    nightDim: _d(j['nightDim'], 0.45).clamp(0, 0.8),
     titleBold: j['titleBold'] as bool? ?? true,
     hideRepeatTitle: j['hideRepeatTitle'] as bool? ?? true,
     focusBold: j['focusBold'] as bool? ?? false,
