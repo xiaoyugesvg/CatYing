@@ -9,11 +9,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 import 'pet_models.dart';
-import 'qq_penguin_painter.dart';
+import 'blob_pet_painter.dart';
 
 /// 手绘 Q 版桌宠（CustomPainter，无图片素材依赖）。
 ///
-/// 用户 2026-10-23：桌宠改成**拟人化的 QQ 企鹅**（`QqPenguinPainter`）：
+/// 用户 2026-10-25：QQ 企鹅换成**团子兽**（`BlobPetPainter`）——
+/// 大头小身、全圆角、大眼腮红；旧企鹅被评价"太丑"，已删除。
 /// 黑背白肚 + 橙嘴橙脚 + 红围巾，但给了人形比例（大头、短手、会挥手眨眼）。
 /// 旧的「QQ 秀小人类」画笔已删除；换装部位仍复用 `PetOutfitSlot`。
 ///
@@ -82,7 +83,7 @@ class PetView extends StatelessWidget {
       height: size,
       child: CustomPaint(
         painter: species.qq
-            ? QqPenguinPainter(
+            ? BlobPetPainter(
                 species: species,
                 outfits: _equipped,
                 t: t,
