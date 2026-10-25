@@ -151,6 +151,55 @@ class TgService {
           {int offsetId = 0, int limit = 30}) =>
       post('tgVideos', {'peer': peer, 'offsetId': offsetId, 'limit': limit});
 
+  /// 公开频道列表（不用登录，走 t.me/s 网页）
+  Future<Map<String, dynamic>> publicList(String peer,
+          {int offsetId = 0}) =>
+      post('tgPublicList', {'peer': peer, 'offsetId': offsetId});
+
+  // ── 收藏的频道（本地，跨启动保留）─────────────────────────
+  static const _kChannels = 'tg.channels.v1';
+
+  /// 形如 [{peer, title, mode}]，mode ∈ public / login
+  Future<List<Map<String, dynamic>>> channels() async {
+    final p = await SharedPreferences.getInstance();
+    final raw = p.getString(_kChannels);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final d = jsonDecode(raw);
+      if (d is List) {
+        return d
+            .whereType<Map>()
+            .map((e) => e.cast<String, dynamic>())
+            .toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  Future<void> _saveChannels(List<Map<String, dynamic>> list) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kChannels, jsonEncode(list));
+  }
+
+  /// 添加收藏（同 peer 视为更新标题/模式）
+  Future<void> addChannel(String peer,
+      {String title = '', String mode = 'public'}) async {
+    final list = await channels();
+    list.removeWhere((e) => e['peer'] == peer);
+    list.insert(0, {
+      'peer': peer,
+      'title': title.isEmpty ? peer : title,
+      'mode': mode,
+    });
+    await _saveChannels(list);
+  }
+
+  Future<void> removeChannel(String peer) async {
+    final list = await channels();
+    list.removeWhere((e) => e['peer'] == peer);
+    await _saveChannels(list);
+  }
+
   /// 二维码 data URL → 原始字节（给 Image.memory）
   static List<int>? decodeQr(String dataUrl) {
     final i = dataUrl.indexOf(',');

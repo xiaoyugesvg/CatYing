@@ -23,6 +23,7 @@ import '../rss/pages/rss_page.dart';
 import 'drama/view.dart';
 import '../room/room_home_page.dart';
 import '../rex/rex_home_page.dart';
+import 'tg/tg_home_page.dart';
 import 'settings/view.dart';
 import 'search/view.dart';
 import 'search/controller.dart';
@@ -330,6 +331,9 @@ class _ContentViewState extends State<ContentView>
         // REX（索引 13）—— ForwardWidget / REX 模块宿主（2026-10-22）。
         // 默认不进底栏，用户自行开启。
         const RexHomePage(),
+        // TG（索引 14）—— 公开频道（t.me 网页）+ 自己登录的群（2026-10-25）。
+        // 默认不进底栏，用户在「设置 → 主页页面」打开后才出现。
+        const TgHomePage(),
       ];
     }
     return _tabPagesCache!;

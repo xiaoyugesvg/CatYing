@@ -40,6 +40,9 @@ enum NavFeature {
   // 「REX」分类（2026-10-22）：ForwardWidget / REX 模块宿主。
   // 默认不进底栏，在「设置 → 主页页面」打开。
   rex('rex', 'REX', false, tabIndex: 13),
+  // 「TG」分类（2026-10-25）：公开频道（t.me 网页）+ 自己登录的群。
+  // ⚠️ 默认**不进底栏**，用户在「设置 → 主页页面」打开后才出现。
+  tg('tg', 'TG', false, tabIndex: 14),
   shelf('shelf', '史藏', false, tabIndex: 1),
   settings('settings', '设置', true, tabIndex: 3),
   search('search', '搜索', false, tabIndex: 0);
@@ -72,6 +75,7 @@ enum NavFeature {
         NavFeature.drama => Icons.movie_filter_outlined,
         NavFeature.room => Icons.groups_outlined,
         NavFeature.rex => Icons.extension_outlined,
+        NavFeature.tg => Icons.telegram_outlined,
         NavFeature.shelf => Icons.schedule_outlined,
         NavFeature.settings => Icons.settings_outlined,
         NavFeature.search => Icons.search,
@@ -117,6 +121,7 @@ enum NavFeature {
         NavFeature.drama => Icons.movie_filter,
         NavFeature.room => Icons.groups_rounded,
         NavFeature.rex => Icons.extension_rounded,
+        NavFeature.tg => Icons.telegram,
         NavFeature.shelf => Icons.schedule,
         NavFeature.settings => Icons.settings,
         NavFeature.search => Icons.search,
@@ -153,6 +158,7 @@ class NavFeatureService extends GetxService {
     NavFeature.drama,
     NavFeature.room,
     NavFeature.rex,
+    NavFeature.tg,
   ];
 
   /// 启用中的功能（**顺序即底栏顺序**，不含 search —— 搜索是按钮不是 tab）

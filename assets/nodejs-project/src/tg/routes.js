@@ -8,6 +8,7 @@
 // 为什么流式单独一条路：播放器要 206 + Content-Range，不能塞进 JSON。
 
 import * as svc from './service.js';
+import * as pub from './public.js';
 
 function readJson(req) {
     return new Promise((resolve) => {
@@ -58,6 +59,22 @@ export async function handle(req, res, url) {
         const id = url.searchParams.get('id') || '';
         if (!peer || !id) { res.writeHead(400); res.end(); return; }
         await svc.thumbTo(res, peer, id);
+        return;
+    }
+
+    // ── 公开频道：302 到真实 mp4 ─────────────────────────
+    //
+    // 为什么用 302 而不是把地址塞进 JSON：
+    //   cdn.telesco.pe 的 token 有时效（小时级），一旦被 UI 缓存就会播到 403。
+    //   让播放器每次播放都来这里换一张新票，地址永远新鲜。
+    if (url.pathname === '/tg/embed') {
+        const peer = url.searchParams.get('peer') || '';
+        const id = url.searchParams.get('id') || '';
+        if (!peer || !id) { json(res, 400, { error: 'missing peer/id' }); return; }
+        const r = await pub.resolvePublic(peer, parseInt(id, 10));
+        if (!r.ok) { json(res, 404, { error: r.error }); return; }
+        res.writeHead(302, { Location: r.url, 'Cache-Control': 'no-store' });
+        res.end();
         return;
     }
 
@@ -120,6 +137,25 @@ export async function handle(req, res, url) {
                 json(res, 200, r);
                 return;
             }
+
+            // ── 公开频道（不需要登录）────────────────────
+            // 列表：t.me/s/<频道>?before=<id>
+            case 'tgPublicList': {
+                const r = await pub.listPublic(data.peer, data.offsetId || 0);
+                if (r.ok) {
+                    r.items = r.items.map((it) => ({
+                        ...it,
+                        url: `/tg/embed?peer=${encodeURIComponent(data.peer)}&id=${it.id}`,
+                    }));
+                }
+                json(res, 200, r);
+                return;
+            }
+
+            // 单条解析（给"外面想要直链"的场景；正常播放走 /tg/embed）
+            case 'tgPublicVideo':
+                json(res, 200, await pub.resolvePublic(data.peer, data.id));
+                return;
 
             default:
                 json(res, 200, { ok: false, error: '未知 action: ' + action });

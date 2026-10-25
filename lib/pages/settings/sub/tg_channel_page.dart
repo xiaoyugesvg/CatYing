@@ -11,10 +11,19 @@ import '../../../widgets/app_toast.dart';
 /// 数据来自 `/tg` 的 `tgVideos`；播放地址是**本机回环**的 `/tg/stream`，
 /// 由 Node 侧把 Range 请求翻成 MTProto 分片（所以能拖进度条）。
 class TgChannelPage extends StatefulWidget {
-  const TgChannelPage({super.key, required this.peer, this.title = ''});
+  const TgChannelPage({
+    super.key,
+    required this.peer,
+    this.title = '',
+    this.mode = 'login',
+  });
 
   final String peer;
   final String title;
+
+  /// `login` = MTProto（私有群 / 大文件 / 可拖拽）
+  /// `public` = t.me 网页（公开频道，不需要登录）
+  final String mode;
 
   @override
   State<TgChannelPage> createState() => _TgChannelPageState();
@@ -55,7 +64,9 @@ class _TgChannelPageState extends State<TgChannelPage> {
       _loading = true;
       _error = '';
     });
-    final r = await _tg.videos(widget.peer, offsetId: _offset, limit: 30);
+    final r = widget.mode == 'public'
+        ? await _tg.publicList(widget.peer, offsetId: _offset)
+        : await _tg.videos(widget.peer, offsetId: _offset, limit: 30);
     if (!mounted) return;
     if (r['ok'] == true) {
       final list = (r['items'] as List? ?? const [])
@@ -88,6 +99,21 @@ class _TgChannelPageState extends State<TgChannelPage> {
           style: TextStyle(color: AppTheme.textPrimary, fontSize: 16),
         ),
         iconTheme: IconThemeData(color: AppTheme.textPrimary),
+        actions: [
+          IconButton(
+            tooltip: '收藏这个频道',
+            icon: const Icon(Icons.bookmark_add_outlined),
+            onPressed: () async {
+              await _tg.addChannel(
+                widget.peer,
+                title: widget.title,
+                mode: widget.mode,
+              );
+              if (!mounted) return;
+              AppToast.message('已加入 TG 收藏');
+            },
+          ),
+        ],
       ),
       body: _body(),
     );

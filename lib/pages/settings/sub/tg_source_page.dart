@@ -35,6 +35,7 @@ class _TgSourcePageState extends State<TgSourcePage> {
   final _proxyHostCtrl = TextEditingController();
   final _proxyPortCtrl = TextEditingController();
   final _peerCtrl = TextEditingController();
+  final _pubCtrl = TextEditingController();
 
   bool _booting = true;
   bool _busy = false;
@@ -43,6 +44,7 @@ class _TgSourcePageState extends State<TgSourcePage> {
   Map<String, dynamic> _st = {};
   Map<String, dynamic> _qr = {};
   List<Map<String, dynamic>> _dialogs = [];
+  List<Map<String, dynamic>> _saved = [];
 
   Timer? _pollTimer;
 
@@ -64,6 +66,7 @@ class _TgSourcePageState extends State<TgSourcePage> {
     _proxyHostCtrl.dispose();
     _proxyPortCtrl.dispose();
     _peerCtrl.dispose();
+    _pubCtrl.dispose();
     super.dispose();
   }
 
@@ -75,7 +78,13 @@ class _TgSourcePageState extends State<TgSourcePage> {
     _proxyPortCtrl.text = _tg.proxyPort;
     await _tg.pushConfig();
     await _refreshStatus();
-    if (mounted) setState(() => _booting = false);
+    final saved = await _tg.channels();
+    if (mounted) {
+      setState(() {
+        _saved = saved;
+        _booting = false;
+      });
+    }
     if (_authorized) _loadDialogs();
   }
 
@@ -200,19 +209,32 @@ class _TgSourcePageState extends State<TgSourcePage> {
   @override
   Widget build(BuildContext context) {
     return SettingsSubPage(
-      title: 'Telegram 源',
+      title: 'TG 设置',
       children: [
+        _section('连接'),
         _statusCard(),
         if (!_configured) _configCard(),
-        if (_configured && !_authorized) _loginCard(),
+        if (_configured && !_authorized) ...[
+          _section('登录（可选）'),
+          _loginCard(),
+        ],
         if (_authorized) ...[
+          _section('我的频道'),
           _manualCard(),
           _channelsCard(),
         ],
+        _section('公开频道'),
+        _savedCard(),
         _hintCard(),
       ],
     );
   }
+
+  Widget _section(String t) => Padding(
+        padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
+        child: Text(t,
+            style: TextStyle(color: AppTheme.textTertiary, fontSize: 11.5)),
+      );
 
   Widget _card(Widget child) =>
       Padding(padding: const EdgeInsets.only(bottom: 10), child: child);
@@ -511,6 +533,111 @@ class _TgSourcePageState extends State<TgSourcePage> {
         ],
       ),
     ));
+  }
+
+  /// 公开频道 / 收藏频道管理
+  ///
+  /// 公开频道**不需要登录**：贴 @用户名 就能在「TG」分类里看。
+  /// 这里同时管登录模式收藏（只有标题/删除，不能再改模式）。
+  Widget _savedCard() {
+    return _card(AppCard(
+      dense: true,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('不需要登录，贴频道名即可',
+                style: TextStyle(color: AppTheme.textTertiary, fontSize: 12)),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(child: _field(_pubCtrl, '@频道名 或 t.me/频道名')),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: () async {
+                    final p = _normalizePeer(_pubCtrl.text);
+                    if (p.isEmpty) {
+                      AppToast.message('先填频道名');
+                      return;
+                    }
+                    await _tg.addChannel(p, title: p, mode: 'public');
+                    _pubCtrl.clear();
+                    final s = await _tg.channels();
+                    if (!mounted) return;
+                    setState(() => _saved = s);
+                  },
+                  child: const Text('添加'),
+                ),
+              ],
+            ),
+            if (_saved.isEmpty) ...[
+              const SizedBox(height: 12),
+              Text('还没有收藏的频道',
+                  style: TextStyle(color: AppTheme.textTertiary, fontSize: 12)),
+            ] else ...[
+              const SizedBox(height: 8),
+              for (final c in _saved) _savedRow(c),
+            ],
+          ],
+        ),
+      ),
+    ));
+  }
+
+  Widget _savedRow(Map<String, dynamic> c) {
+    final peer = (c['peer'] ?? '').toString();
+    final mode = (c['mode'] ?? 'public').toString();
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () => Get.to(() => TgChannelPage(
+        peer: peer,
+        title: (c['title'] ?? peer).toString(),
+        mode: mode,
+      )),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 9),
+        child: Row(
+          children: [
+            Icon(mode == 'login' ? Icons.lock_outline : Icons.public,
+                size: 16, color: AppTheme.textTertiary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                (c['title'] ?? peer).toString(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+              ),
+            ),
+            Text(mode == 'login' ? '登录' : '公开',
+                style: TextStyle(color: AppTheme.textTertiary, fontSize: 10.5)),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              tooltip: '删除',
+              icon: Icon(Icons.delete_outline,
+                  size: 17, color: AppTheme.textTertiary),
+              onPressed: () async {
+                await _tg.removeChannel(peer);
+                final s = await _tg.channels();
+                if (!mounted) return;
+                setState(() => _saved = s);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _normalizePeer(String raw) {
+    var p = raw.trim();
+    p = p.replaceAll(RegExp(r'^https?://'), '');
+    p = p.replaceAll(RegExp(r'^(www\.)?(t|telegram)\.me/'), '');
+    p = p.replaceAll(RegExp(r'^s/'), '');
+    p = p.replaceAll(RegExp(r'^@'), '');
+    p = p.replaceAll(RegExp(r'[/?#].*$'), '');
+    return p;
   }
 
   Widget _hintCard() {
