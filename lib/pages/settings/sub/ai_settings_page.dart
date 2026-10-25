@@ -28,6 +28,21 @@ const List<_Provider> _providers = [
     'glm-4-flash',
     '有免费额度',
   ),
+  // OpenCode Zen：OpenAI 兼容网关，部分模型限时免费。
+  // ⚠️ 免费模型名单与名字会变，以官方为准；这里只是一个可改的起点。
+  _Provider(
+    'OpenCode',
+    'https://opencode.ai/zen/v1',
+    'qwen3-coder',
+    '有免费模型',
+  ),
+  // OpenRouter：聚合网关，带 `:free` 后缀的模型真免费（有限速）。
+  _Provider(
+    'OpenRouter',
+    'https://openrouter.ai/api/v1',
+    'deepseek/deepseek-chat-v3-0324:free',
+    '有免费模型',
+  ),
 ];
 
 /// 「AI 管理」——**全 App 唯一的 AI Key 配置入口**。
