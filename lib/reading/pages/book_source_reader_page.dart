@@ -3950,7 +3950,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     bool paper = true,
   }) {
     final body = _pageBody(fg, page, chapter: chapter);
-    if (!paper) return body;
+    // 每页独立成图层：翻页/滑动时只重绘这一页，不会牵连整棵页面树。
+    // 双页模式传 paper:false（纸在 Row 外层），同样隔离。
+    if (!paper) return RepaintBoundary(child: body);
     final content = Stack(
       fit: StackFit.expand,
       children: [_pagePaper(), body],
@@ -3959,9 +3961,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     // 给两页之间一个可见软边界；壁纸纸面画阴影会像"两张一样的图拼在一起"。
     if (_hasImageBg ||
         (_rs.pageMode != PageMode.slide && _rs.pageMode != PageMode.none)) {
-      return content;
+      return RepaintBoundary(child: content);
     }
-    return Stack(
+    return RepaintBoundary(
+      child: Stack(
       fit: StackFit.expand,
       children: [
         content,
@@ -3986,6 +3989,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           ),
         ),
       ],
+      ),
     );
   }
 
