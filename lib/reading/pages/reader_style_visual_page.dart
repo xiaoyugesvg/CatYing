@@ -41,6 +41,9 @@ class _ReaderStyleVisualPageState extends State<ReaderStyleVisualPage> {
   late bool _night;
   _Zone? _active;
 
+  /// 拖动页缘时的数值提示（拖动中显示，松手消失）
+  String? _dragHint;
+
   final _store = ReaderStyleStore();
 
   @override
@@ -144,11 +147,80 @@ class _ReaderStyleVisualPageState extends State<ReaderStyleVisualPage> {
         children: [
           // ① 全屏预览
           Positioned.fill(child: _buildPreview()),
-          // ② 悬浮顶栏
+          // ② 左右页缘：可拖动改边距（实时）
+          _edgeDrag(left: true),
+          _edgeDrag(left: false),
+          // ③ 拖动数值提示
+          if (_dragHint != null)
+            Positioned(
+              top: 64,
+              left: 0,
+              right: 0,
+              child: IgnorePointer(
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _ink.withValues(alpha: 0.82),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      _dragHint!,
+                      style: TextStyle(fontSize: 11.5, color: _paper),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          // ④ 悬浮顶栏
           _topBar(),
-          // ③ 底部区域切换
+          // ⑤ 底部区域切换
           _zoneBar(),
         ],
+      ),
+    );
+  }
+
+  /// 页缘竖线：按住左右拖动直接改边距（所见即所得）。
+  ///
+  /// 拖动时**实时读当前值**再叠加 delta（而不是用 build 时捕获的值），
+  /// 否则连续拖动会因为重建而丢失增量。
+  Widget _edgeDrag({required bool left}) {
+    final key = left ? 'padLeft' : 'padRight';
+    final v = _d(key, 22).clamp(0.0, 80.0).toDouble();
+    final pos = (v - 14).clamp(0.0, 1000.0).toDouble();
+    return Positioned(
+      top: 0,
+      bottom: 0,
+      left: left ? pos : null,
+      right: left ? null : pos,
+      width: 28,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragUpdate: (d) {
+          final cur = _d(key, 22).clamp(0.0, 80.0).toDouble();
+          final next = (cur + (left ? d.delta.dx : -d.delta.dx))
+              .clamp(0.0, 80.0)
+              .toDouble();
+          setState(() {
+            _j[key] = next;
+            _dragHint = '${left ? '左边距' : '右边距'} ${next.round()}';
+          });
+        },
+        onHorizontalDragEnd: (_) => setState(() => _dragHint = null),
+        onHorizontalDragCancel: () => setState(() => _dragHint = null),
+        child: Center(
+          child: Container(
+            width: 3,
+            decoration: BoxDecoration(
+              color: _ink.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        ),
       ),
     );
   }
