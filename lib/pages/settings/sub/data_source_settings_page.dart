@@ -17,6 +17,7 @@ import 'engine_settings_page.dart';
 import 'local_python_sources_page.dart';
 import 'parse_settings_page.dart';
 import 'settings_shared.dart';
+import 'tg_source_page.dart';
 
 /// 设置 → 订阅管理
 ///
@@ -122,6 +123,15 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
             title: 'AI 管理',
             subtitle: '填一次 Key，宠物对话与各模块共用',
             onTap: () => Get.to(() => const AiSettingsPage()),
+          ),
+        ),
+        // Telegram 源：扫码登录后用自己加入的频道当片库（内置 Node 跑 MTProto）
+        _card(
+          SettingsRow(
+            icon: Icons.telegram,
+            title: 'Telegram 源',
+            subtitle: '扫码登录，用自己加入的群 / 频道当片库',
+            onTap: () => Get.to(() => const TgSourcePage()),
           ),
         ),
         // 影视仓转换器：MoonTV / LunaTV 的 video.json → TVBox 站点

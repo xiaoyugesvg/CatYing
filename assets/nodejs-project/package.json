@@ -20,6 +20,7 @@
         "cheerio": "1.0.0-rc.12",
         "crypto-js": "^4.2.0",
         "dayjs": "^1.11.10",
+        "domelementtype": "^3.0.0",
         "fastify": "^4.26.0",
         "hls-parser": "^0.10.8",
         "iconv-lite": "^0.6.3",
@@ -29,6 +30,7 @@
         "node-rsa": "^1.1.1",
         "pako": "^2.1.0",
         "qrcode": "^1.5.4",
+        "telegram": "^2.26.16",
         "xmldom": "^0.6.0",
         "xpath": "^0.0.34"
     }

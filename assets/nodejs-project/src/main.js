@@ -933,6 +933,30 @@ const mgmtServer = createServer((req, res) => {
         return;
     }
 
+    // ── Telegram 源（MTProto / gramjs）────────────────────────
+    //
+    // /tg          POST { action }  → JSON（配置 / 扫码登录 / 列表）
+    // /tg/stream   GET  ?peer&id    → 支持 Range 的二进制流（播放器用）
+    // /tg/thumb    GET  ?peer&id    → 封面字节
+    //
+    // 惰性加载：gramjs 依赖树很大（含 socks / big-integer），
+    // 只有真正打开 TG 功能才求值，启动路径零风险。
+    if (url.pathname === '/tg' || url.pathname.startsWith('/tg/')) {
+        (async () => {
+            try {
+                const tg = await import('./tg/routes.js');
+                await tg.handle(req, res, url);
+            } catch (e) {
+                console.error('[tg] load fail:', (e && e.stack) || e);
+                try {
+                    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+                    res.end(JSON.stringify({ ok: false, error: 'TG 模块加载失败：' + ((e && e.message) || String(e)) }));
+                } catch (_) {}
+            }
+        })();
+        return;
+    }
+
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'not found' }));
 });
