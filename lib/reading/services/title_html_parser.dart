@@ -259,9 +259,12 @@ class TitleHtml {
         continue;
       }
       final css = _applyDecls(parent, node.attributes['style'], tag);
-      // 「章节名」所在的盒子整体缩到 0.8：
-      //   用户要的是"章节名称 + 外框一起小一号"，所以缩放必须作用在**盒子**
-      //   的 fontScale 上 —— 内衬/圆角都是 em 推导的，跟着字号一起缩才协调。
+      // 「章节名」只把**文字**缩到 0.8。
+      //
+      // ⚠️ 之前把 `fontScale` 改在盒子自己身上 ⇒ 药丸的 em 内衬、圆角、边框
+      //   全都跟着缩，整块标题小一号（用户 2026-10-25 截图：「不是让你将标题
+      //   样式整体缩小了 0.8 倍」）。现在只给**子节点**换个缩过的字号，
+      //   盒子仍按它自己的字号算内衬 —— 药丸保持原尺寸，文字更"透气"。
       final ownText = node.nodes
           .whereType<dom.Text>()
           .map((t) => t.text)
@@ -272,11 +275,13 @@ class TitleHtml {
           ownText.replaceAll('章节数', '').trim().isEmpty) {
         continue;
       }
+      var childStyle = css;
       if (ownText.contains('章节名')) {
-        css.fontScale = css.fontScale * 0.8;
-        if (css.fontPx != null) css.fontPx = css.fontPx! * 0.8;
+        childStyle = css.inheritFromParent()
+          ..fontScale = css.fontScale * 0.8
+          ..fontPx = css.fontPx == null ? null : css.fontPx! * 0.8;
       }
-      final kids = _buildChildren(node.nodes, css, number, name);
+      final kids = _buildChildren(node.nodes, childStyle, number, name);
       if (!_allowedTags.contains(tag)) {
         // 不认识的标签：拍平（只保留子节点），不让样式丢失
         out.addAll(kids);

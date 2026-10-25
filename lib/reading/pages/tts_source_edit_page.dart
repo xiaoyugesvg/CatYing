@@ -328,7 +328,8 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
               _switchRow(
                   'AI 智能推荐配音',
                   'EasyVoice 用大模型自动给文本分角色、推荐音色/语速/音调'
-                  '（多角色有声书效果，慢一些）。关闭后固定用下方音色直接合成。',
+                  '（多角色有声书效果，慢一些）。关闭后固定用下方音色直接合成。'
+                  '服务端没有 AI 接口时会自动回退普通合成。',
                   _s.useAiVoice,
                   (v) => setState(() => _s = _s.copyWith(useAiVoice: v))),
               _row('音色', _voice,

@@ -166,18 +166,37 @@ class ReadingSettings {
     );
   }
 
-  /// 默认点击区域：左=上一页，中=菜单，右=下一页（截图里的三列）
+  /// 默认点击分区：**按列**（和 Legado 一致）。
+  ///
+  /// 左列=上一页 / 中列=功能面板 / 右列=下一页。
+  ///
+  /// ⚠️ 2026-10-25 修：原来写的是「上中=上一页、中间一整行=菜单、下中=下一页」，
+  /// 于是手指点在**中间偏上/偏下**都会翻页（很常见的落点），用户会以为
+  /// "单击根本呼不出功能面板"。改成按列之后，竖直方向随便点中间那 1/3 都出面板。
   static Map<int, TapAction> defaultZones() => {
         0: TapAction.prev,
-        1: TapAction.prev,
-        2: TapAction.menu,
-        3: TapAction.menu,
+        1: TapAction.menu,
+        2: TapAction.next,
+        3: TapAction.prev,
         4: TapAction.menu,
-        5: TapAction.menu,
-        6: TapAction.next,
-        7: TapAction.next,
+        5: TapAction.next,
+        6: TapAction.prev,
+        7: TapAction.menu,
         8: TapAction.next,
       };
+
+  /// 旧版默认分区（用于把老用户的存档自动升级成上面的按列分区）
+  static const Map<int, TapAction> _legacyDefaultZones = {
+    0: TapAction.prev,
+    1: TapAction.prev,
+    2: TapAction.menu,
+    3: TapAction.menu,
+    4: TapAction.menu,
+    5: TapAction.menu,
+    6: TapAction.next,
+    7: TapAction.next,
+    8: TapAction.next,
+  };
 
   Map<String, dynamic> toJson() => {
         'pageMode': pageMode.name,
@@ -244,6 +263,15 @@ class ReadingSettings {
           if (a.name == v) zones[i] = a;
         }
       });
+    }
+    // 老存档里存的是**旧默认**（上中=上一页 / 中间一整行=菜单 / 下中=下一页）。
+    // 那不是用户手改的，只是当时写死的默认值 ⇒ 自动升级成"按列"，
+    // 否则改了默认也没用（老用户读到的还是旧存档）。
+    if (zones.length == 9 &&
+        _legacyDefaultZones.entries.every((e) => zones[e.key] == e.value)) {
+      zones
+        ..clear()
+        ..addAll(defaultZones());
     }
     return ReadingSettings(
       pageMode: pm,
@@ -430,9 +458,31 @@ String applyPurifyRules(String raw, List<PurifyRule> rules) {
       text = text.replaceAll(rule.pattern, rule.replacement);
       continue;
     }
+    var pattern = rule.pattern;
+    var caseSensitive = true;
+    var dotAll = false;
+    // Legado（Java 正则）允许内联标志 `(?i)` / `(?m)` / `(?s)`，Dart 的 RegExp
+    // 会直接报 `Invalid group` ⇒ 整条规则被静默跳过（实测 Downloadclouds 那套
+    // 20 条里有 9 条是这么废掉的）。
+    // 这里把**所有**内联标志剥掉、合并成全局参数：
+    //   i = 不区分大小写（全局近似，比整条失效强）
+    //   s = 点匹配换行
+    //   m = 我们已经全局 multiLine: true，直接丢掉即可
+    //   x/u 之类 Dart 没有对应项，丢掉标志本身（保留正则体）
+    pattern = pattern.replaceAllMapped(RegExp(r'\(\?([a-zA-Z]+)\)'), (m) {
+      final f = m.group(1)!.toLowerCase();
+      if (f.contains('i')) caseSensitive = false;
+      if (f.contains('s')) dotAll = true;
+      return '';
+    });
     try {
       text = text.replaceAll(
-        RegExp(rule.pattern, multiLine: true),
+        RegExp(
+          pattern,
+          multiLine: true,
+          caseSensitive: caseSensitive,
+          dotAll: dotAll,
+        ),
         rule.replacement,
       );
     } catch (_) {
@@ -445,19 +495,39 @@ String applyPurifyRules(String raw, List<PurifyRule> rules) {
 /// 解析 legado 的「替换净化」JSON：单条对象或数组都接受。
 /// 字段：name / group / pattern / replacement / isRegex / isEnabled
 /// 也兼容 `legado://import/replaceRule?src=...` 里的 rule 字段写法。
-List<PurifyRule> parseLegadoReplaceRules(dynamic json) {
+///
+/// ⚠️ 会**跳过**两类规则（[skipped] 里记下名字，方便告诉用户导入了多少）：
+///   1. `replacement` 以 `@js:` 开头 —— 那是 Legado 内置 JS 脚本，
+///      我们这边跑不了；**绝不能原样导入**，否则匹配到的正文会被替换成
+///      一整段 JS 源码（比不净化还糟）。
+///   2. `scopeContent == false` 且 `scopeTitle == true` —— 只作用于章节标题，
+///      正文净化套上去会误删正文。
+List<PurifyRule> parseLegadoReplaceRules(dynamic json, {List<String>? skipped}) {
   final list = json is List ? json : (json is Map ? [json] : const []);
   final out = <PurifyRule>[];
   for (final e in list) {
     if (e is! Map) continue;
     final pattern = (e['pattern'] ?? e['rule'] ?? '').toString();
+    final name = (e['name'] ?? '').toString();
     if (pattern.trim().isEmpty) continue;
+    final replacement = (e['replacement'] ?? '').toString();
+    if (replacement.trimLeft().startsWith('@js:') ||
+        replacement.trimLeft().startsWith('@JavaScript:')) {
+      skipped?.add(name);
+      continue;
+    }
+    final scopeContent = e['scopeContent'];
+    final scopeTitle = e['scopeTitle'];
+    if (scopeContent == false && scopeTitle == true) {
+      skipped?.add(name);
+      continue;
+    }
     out.add(
       PurifyRule(
-        name: (e['name'] ?? '').toString(),
+        name: name,
         group: (e['group'] ?? '').toString(),
         pattern: pattern,
-        replacement: (e['replacement'] ?? '').toString(),
+        replacement: replacement,
         enabled: e['isEnabled'] as bool? ?? true,
         isRegex: e['isRegex'] as bool? ?? true,
       ),

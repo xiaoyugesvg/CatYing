@@ -11,6 +11,7 @@
 
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import { agentOptions } from './proxypool.js';
 
 const UA =
     'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) ' +
@@ -47,15 +48,18 @@ function pick(text, re) {
  * 频道帖子列表
  * @param {string} channel 频道名
  * @param {number} before  上一页最后一条的 id（首页传 0）
+ * @param {number} depth   内部用：整页都被过滤时自动往后翻的次数（最多 3 次）
  */
-export async function listPublic(channel, before = 0) {
+export async function listPublic(channel, before = 0, depth = 0) {
     const ch = normalizeChannel(channel);
     if (!ch) return { ok: false, error: '缺少频道名', items: [], next: 0 };
     const url = `https://t.me/s/${encodeURIComponent(ch)}` +
         (before > 0 ? `?before=${before}` : '');
     let html;
     try {
-        const r = await http.get(url);
+        // 走当前代理（没配就是直连）—— 国内直连 t.me 基本不通，
+        // 公开频道"列表出不来 / 很慢"多半是这里超时
+        const r = await http.get(url, agentOptions());
         html = r.data;
     } catch (e) {
         const code = e && e.response && e.response.status;
@@ -82,13 +86,21 @@ export async function listPublic(channel, before = 0) {
         const idStr = post.split('/').pop() || '';
         const id = parseInt(idStr, 10);
         if (!id) return;
+        // 游标按**全部**帖子记（不是只记留下的）—— 否则整页都是广告时
+        // minId 会是 0，"自动往后翻"和"下一页"都会失效。
+        if (!minId || id < minId) minId = id;
 
-        // 只保留"能播"的：视频播放器 / 文档附件
+        // 只保留"能播的"：视频播放器 / 视频类文档
+        //
+        // ⚠️ 2026-10-25 收紧：原来"任何文档"都收（hasDoc = 文档标题非空），
+        //   公开频道里大量是 .apk / .zip / .pdf 的推广附件 ⇒ 列表被广告刷满
+        //   （用户：「TG 不要他么的获取那么多广告」）。现在只认视频扩展名；
+        //   纯图片帖、纯文字+链接的广告帖本来就被排除在外。
         const hasVideo = node.find('.tgme_widget_message_video_player').length > 0 ||
             node.find('.tgme_widget_message_roundvideo_player').length > 0 ||
             node.find('video').length > 0;
         const docTitle = node.find('.tgme_widget_message_document_title').first().text().trim();
-        const hasDoc = docTitle.length > 0;
+        const hasDoc = /\.(mp4|mkv|mov|m4v|webm|avi|flv|ts|m3u8)$/i.test(docTitle);
         if (!hasVideo && !hasDoc) return;
 
         // 封面：优先视频缩略图，其次文档图标背景
@@ -125,11 +137,16 @@ export async function listPublic(channel, before = 0) {
         const date = dateStr ? Math.floor(Date.parse(dateStr) / 1000) || 0 : 0;
 
         items.push({ id, title, fileName: docTitle, size, duration, date, thumb });
-        if (!minId || id < minId) minId = id;
     });
 
     // t.me/s 是「从新到旧」，统一按 id 倒序更稳
     items.sort((a, b) => b.id - a.id);
+
+    // 整页都是广告/图片帖（全被过滤掉）却不等于没有更早的视频 ⇒ 自动再往下翻
+    // 一两页，否则客户端会以为"到底了"（收紧过滤后这种情况变多了）。
+    if (items.length === 0 && minId > 0 && depth < 3) {
+        return listPublic(ch, minId, depth + 1);
+    }
 
     return {
         ok: true,
@@ -149,7 +166,7 @@ export async function resolvePublic(channel, id) {
     const url = `https://t.me/${encodeURIComponent(ch)}/${id}?embed=1&mode=tme`;
     let html;
     try {
-        const r = await http.get(url);
+        const r = await http.get(url, agentOptions());
         html = r.data;
     } catch (e) {
         return { ok: false, error: '解析失败：' + ((e && e.message) || String(e)) };

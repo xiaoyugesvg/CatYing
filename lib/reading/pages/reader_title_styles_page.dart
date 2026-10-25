@@ -47,13 +47,10 @@ class _ReaderTitleStylesPageState extends State<ReaderTitleStylesPage> {
   Color get _fg => widget.foreground;
   Color get _bg => widget.background;
 
+  /// 用户 2026-10-25：标题样式只留跟两套阅读样式配套的这两个（+ 默认）
   static const _builtin = <ReaderTitleStyle>[
     ReaderTitleStyle.none,
-    ReaderTitleStyle.xianheDay,
-    ReaderTitleStyle.xianheNight,
-    ReaderTitleStyle.xianhePad,
     ReaderTitleStyle.weRead,
-    ReaderTitleStyle.guFeng,
     ReaderTitleStyle.qingLan,
   ];
 

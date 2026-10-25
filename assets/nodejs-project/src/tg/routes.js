@@ -9,6 +9,66 @@
 
 import * as svc from './service.js';
 import * as pub from './public.js';
+import { agentOptions, currentProxy, refreshPool, setProxy } from './proxypool.js';
+import axios from 'axios';
+
+/** peer/id → 已解析的 mp4 直链（token 有时效，10 分钟就作废重取） */
+const resolvedCache = new Map(); // key → { url, at }
+const RESOLVE_TTL = 10 * 60 * 1000;
+
+async function resolveCached(peer, id) {
+    const key = `${peer}/${id}`;
+    const hit = resolvedCache.get(key);
+    if (hit && Date.now() - hit.at < RESOLVE_TTL) return hit;
+    const r = await pub.resolvePublic(peer, id);
+    if (!r.ok) return null;
+    const rec = { url: r.url, at: Date.now() };
+    if (resolvedCache.size > 200) resolvedCache.clear();
+    resolvedCache.set(key, rec);
+    return rec;
+}
+
+/** 把上游（cdn）的字节按 Range 透传给播放器；走代理时才用 */
+async function proxyStream(req, res, targetUrl) {
+    const headers = {
+        'User-Agent':
+            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) ' +
+            'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+        ...(req.headers.range ? { Range: req.headers.range } : {}),
+    };
+    let r;
+    try {
+        r = await axios.get(targetUrl, {
+            ...agentOptions(),
+            responseType: 'stream',
+            timeout: 30000,
+            maxRedirects: 5,
+            validateStatus: () => true,
+            headers,
+        });
+    } catch (e) {
+        json(res, 502, { ok: false, error: '上游拉流失败：' + ((e && e.message) || e) });
+        return;
+    }
+    const out = {};
+    const ct = r.headers['content-type'];
+    const cl = r.headers['content-length'];
+    const cr = r.headers['content-range'];
+    const ar = r.headers['accept-ranges'];
+    if (ct) out['Content-Type'] = ct;
+    if (cl) out['Content-Length'] = cl;
+    if (cr) out['Content-Range'] = cr;
+    out['Accept-Ranges'] = ar || 'bytes';
+    out['Cache-Control'] = 'no-store';
+    try {
+        res.writeHead(r.status, out);
+    } catch (_) {
+        return;
+    }
+    r.data.pipe(res);
+    r.data.on('error', () => { try { res.end(); } catch (_) {} });
+    req.on('close', () => { try { r.data.destroy(); } catch (_) {} });
+}
 
 function readJson(req) {
     return new Promise((resolve) => {
@@ -67,14 +127,44 @@ export async function handle(req, res, url) {
     // 为什么用 302 而不是把地址塞进 JSON：
     //   cdn.telesco.pe 的 token 有时效（小时级），一旦被 UI 缓存就会播到 403。
     //   让播放器每次播放都来这里换一张新票，地址永远新鲜。
+    //
+    // 配了代理时**不直连 cdn**（国内基本连不上）：改成 302 到自己的
+    // `/tg/pubstream`，由 Node 通过代理拉流并按 Range 透传。
     if (url.pathname === '/tg/embed') {
         const peer = url.searchParams.get('peer') || '';
         const id = url.searchParams.get('id') || '';
         if (!peer || !id) { json(res, 400, { error: 'missing peer/id' }); return; }
+        if (currentProxy()) {
+            res.writeHead(302, {
+                Location: `/tg/pubstream?peer=${encodeURIComponent(peer)}&id=${encodeURIComponent(id)}`,
+                'Cache-Control': 'no-store',
+            });
+            res.end();
+            return;
+        }
         const r = await pub.resolvePublic(peer, parseInt(id, 10));
         if (!r.ok) { json(res, 404, { error: r.error }); return; }
         res.writeHead(302, { Location: r.url, 'Cache-Control': 'no-store' });
         res.end();
+        return;
+    }
+
+    // ── 公开频道：经代理中转的播放流（支持 Range）──────────
+    if (url.pathname === '/tg/pubstream') {
+        const peer = url.searchParams.get('peer') || '';
+        const id = url.searchParams.get('id') || '';
+        if (!peer || !id) { json(res, 400, { error: 'missing peer/id' }); return; }
+        const rec = await resolveCached(peer, parseInt(id, 10));
+        if (!rec) { json(res, 404, { error: '解析不出可播放地址' }); return; }
+        await proxyStream(req, res, rec.url);
+        return;
+    }
+
+    // ── 公开频道：封面中转（t.me 的图国内也常常拉不下来）──
+    if (url.pathname === '/tg/pubimg') {
+        const u = url.searchParams.get('u') || '';
+        if (!u) { res.writeHead(400); res.end(); return; }
+        await proxyStream(req, res, u);
         return;
     }
 
@@ -87,8 +177,27 @@ export async function handle(req, res, url) {
         switch (action) {
             // 保存 api_id / api_hash / 代理 / session 路径
             case 'tgConfig':
+                // 代理同时交给「网页抓取 + 播放中转」用（gramjs 那边由 svc 管）
+                setProxy(data.proxy);
                 json(res, 200, svc.configure(data));
                 return;
+
+            // 内置免费代理池：拉列表 + 并发测速，返回按延迟排序的可用项
+            case 'tgProxyProbe': {
+                try {
+                    const list = await refreshPool({
+                        timeoutMs: parseInt(data.timeoutMs || 10000, 10),
+                    });
+                    json(res, 200, { ok: true, items: list, total: list.length });
+                } catch (e) {
+                    json(res, 200, {
+                        ok: false,
+                        error: (e && e.message) || String(e),
+                        items: [],
+                    });
+                }
+                return;
+            }
 
             // 冷启动秒回（不发网络请求）
             case 'tgStatus':
@@ -143,9 +252,14 @@ export async function handle(req, res, url) {
             case 'tgPublicList': {
                 const r = await pub.listPublic(data.peer, data.offsetId || 0);
                 if (r.ok) {
+                    const viaProxy = !!currentProxy();
                     r.items = r.items.map((it) => ({
                         ...it,
                         url: `/tg/embed?peer=${encodeURIComponent(data.peer)}&id=${it.id}`,
+                        // 封面也走本机中转：t.me 的图国内常常拉不下来（且会卡列表）
+                        thumb: it.thumb && viaProxy
+                            ? `/tg/pubimg?u=${encodeURIComponent(it.thumb)}`
+                            : it.thumb,
                     }));
                 }
                 json(res, 200, r);

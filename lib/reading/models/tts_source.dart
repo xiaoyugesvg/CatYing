@@ -181,7 +181,10 @@ class TtsSource {
           endpoint: 'http://192.168.1.100:3000',
           voice: 'zh-CN-XiaoxiaoNeural',
           audioFormat: 'mp3',
-          useAiVoice: true, // 默认打开 AI 智能推荐配音（多角色有声书）
+          // 默认**关**：新版 EasyVoice 把 AI 推荐并进了 `/api/v1/tts/*`，
+          // 旧的 `/api/v1/create` 任务接口不一定还在 ⇒ 先走稳的 generateJson。
+          // 想要多角色再自己打开（打不开会自动回退普通合成，见 tts_service）。
+          useAiVoice: false,
           maxRetries: 2,
         );
       case 'http':

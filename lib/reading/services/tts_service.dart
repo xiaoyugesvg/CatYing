@@ -521,8 +521,16 @@ class TtsService extends GetxService {
   Future<List<int>?> _synthesizeEasyVoice(TtsSource src, String text,
       {String? voiceOverride}) async {
     if (src.useAiVoice && src.aiVoiceAvailable) {
-      return _synthesizeEasyVoiceAi(src, text,
-          voiceOverride: voiceOverride);
+      try {
+        return await _synthesizeEasyVoiceAi(src, text,
+            voiceOverride: voiceOverride);
+      } catch (e) {
+        // 新版 EasyVoice 把「AI 推荐」并进了 `/api/v1/tts/*`，旧的
+        // `/api/v1/create` + `/api/v1/task/{id}` 任务接口不一定还在
+        // （404 就会走到这里）。**自动回退普通合成**，至少能出声，
+        // 而不是整段失败再掉回系统朗读。
+        lastError.value = 'AI 推荐配音不可用，已改用普通合成：$e';
+      }
     }
     final base = src.endpoint.trim().replaceAll(RegExp(r'/+$'), '');
     if (base.isEmpty) throw '接口地址为空';

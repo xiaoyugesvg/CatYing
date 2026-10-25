@@ -39,7 +39,11 @@ class _TgSourcePageState extends State<TgSourcePage> {
 
   bool _booting = true;
   bool _busy = false;
-  bool _showAdvanced = false;
+  /// 默认展开：代理（含内置代理测速）藏起来用户根本找不到
+  bool _showAdvanced = true;
+
+  /// 正在跑内置代理测速（30 个 × 8 秒超时、6 并发 ⇒ 十几秒）
+  bool _probeBusy = false;
 
   Map<String, dynamic> _st = {};
   Map<String, dynamic> _qr = {};
@@ -128,6 +132,156 @@ class _TgSourcePageState extends State<TgSourcePage> {
     await _tg.pushConfig();
     await _refreshStatus();
     if (mounted) setState(() => _busy = false);
+  }
+
+  /// 内置代理池：拉列表 + 测速（Node 侧做），选一个写进上面的 SOCKS5 两栏
+  ///
+  /// [autoPick] 为真时直接取最快的那个（开关刚打开、还没选过节点）。
+  Future<void> _probeProxy({bool autoPick = false}) async {
+    setState(() => _probeBusy = true);
+    final r = await _tg.probeProxies();
+    if (!mounted) return;
+    setState(() => _probeBusy = false);
+    final items = ((r['items'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((e) => e.cast<String, dynamic>())
+        .toList();
+    if (items.isEmpty) {
+      AppToast.message('没测到可用代理：${r['error'] ?? '全部超时，稍后再试'}');
+      // 没有可用节点 ⇒ 开关回落到关，别让用户以为"开了却没生效"
+      await _tg.setProxyOn(false);
+      if (mounted) setState(() {});
+      return;
+    }
+    if (autoPick) {
+      await _applyProxy('${items.first['host']}', '${items.first['port']}');
+      return;
+    }
+    final picked = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (c) => SafeArea(
+        top: false,
+        child: ConstrainedBox(
+          constraints:
+              BoxConstraints(maxHeight: MediaQuery.of(c).size.height * 0.7),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+                child: Row(
+                  children: [
+                    Text('可用代理（${items.length}）',
+                        style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.textPrimary)),
+                    const Spacer(),
+                    Text('按延迟排序',
+                        style: TextStyle(
+                            fontSize: 11, color: AppTheme.textTertiary)),
+                  ],
+                ),
+              ),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: items.length,
+                  itemBuilder: (_, i) {
+                    final p = items[i];
+                    final host = '${p['host'] ?? ''}';
+                    final port = '${p['port'] ?? ''}';
+                    final ms = (p['ms'] as num?)?.toInt() ?? 0;
+                    final note = '${p['note'] ?? ''}';
+                    return ListTile(
+                      dense: true,
+                      leading: Icon(
+                        ms <= 400
+                            ? Icons.network_ping
+                            : Icons.signal_cellular_alt_2_bar,
+                        size: 18,
+                        color: ms <= 400
+                            ? AppTheme.accentOnSurface
+                            : AppTheme.textTertiary,
+                      ),
+                      title: Text('$host:$port',
+                          style: TextStyle(
+                              fontSize: 13, color: AppTheme.textPrimary)),
+                      subtitle: Text(
+                        note.isEmpty ? 'socks5' : note,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 11, color: AppTheme.textTertiary),
+                      ),
+                      trailing: Text('${ms}ms',
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.textSecondary)),
+                      onTap: () => Navigator.pop(c, p),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 6),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked == null) return;
+    await _applyProxy('${picked['host']}', '${picked['port']}');
+  }
+
+  /// 「内置代理池」开关：打开才启用代理；关掉立即回到直连
+  Future<void> _togglePool(bool on) async {
+    await _tg.setProxyOn(on);
+    if (!mounted) return;
+    setState(() {});
+    if (!on) {
+      await _applyProxy('', ''); // 清节点 + 推 null ⇒ Node 直连
+      return;
+    }
+    final host = _proxyHostCtrl.text.trim();
+    final port = _proxyPortCtrl.text.trim();
+    if (host.isNotEmpty && port.isNotEmpty) {
+      // 之前选过节点 ⇒ 直接复用
+      await _applyProxy(host, port);
+      return;
+    }
+    // 还没节点 ⇒ 自动测速挑最快的一个
+    await _probeProxy(autoPick: true);
+  }
+
+  /// 写入代理并推给 Node（不要求先填 api_id —— 只刷公开频道也能用代理）
+  Future<void> _applyProxy(String host, String port) async {
+    if (!mounted) return;
+    // 选了节点就自动把开关打开；清空则关掉（避免"填了但不生效"的糊涂账）
+    await _tg.setProxyOn(host.isNotEmpty);
+    setState(() {
+      _proxyHostCtrl.text = host;
+      _proxyPortCtrl.text = port;
+    });
+    await _tg.saveSettings(
+      apiId: _apiIdCtrl.text,
+      apiHash: _apiHashCtrl.text,
+      proxyHost: host,
+      proxyPort: port,
+    );
+    final r = await _tg.pushConfig();
+    if (!mounted) return;
+    if (r['ok'] != true) {
+      AppToast.message(r['error']?.toString() ?? '代理没生效');
+      return;
+    }
+    AppToast.message(host.isEmpty ? '已关闭代理（直连）' : '已启用代理 $host:$port');
+    await _refreshStatus();
   }
 
   Future<void> _startQr() async {
@@ -322,6 +476,36 @@ class _TgSourcePageState extends State<TgSourcePage> {
             _field(_apiHashCtrl, 'api_hash（32 位）'),
             if (_showAdvanced) ...[
               const SizedBox(height: 12),
+              // ── 代理总开关（默认关：填了地址不等于启用）──────────
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('内置代理池',
+                            style: TextStyle(
+                                color: AppTheme.textPrimary,
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 2),
+                        Text(
+                          '打开才走代理（自动挑最快的节点）；关闭一律直连',
+                          style: TextStyle(
+                              color: AppTheme.textTertiary,
+                              fontSize: 11,
+                              height: 1.4),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Switch(
+                    value: _tg.proxyOn,
+                    onChanged: _probeBusy ? null : _togglePool,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
               Row(children: [
                 Expanded(child: _field(_proxyHostCtrl, 'SOCKS5 地址（可空）')),
                 const SizedBox(width: 8),
@@ -330,6 +514,36 @@ class _TgSourcePageState extends State<TgSourcePage> {
               const SizedBox(height: 6),
               Text('若是系统级 VPN，这里留空即可；只开了 HTTP/SOCKS 代理时才需要填。',
                   style: TextStyle(color: AppTheme.textTertiary, fontSize: 11)),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _probeBusy ? null : () => _probeProxy(),
+                      icon: _probeBusy
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.bolt_rounded, size: 16),
+                      label: Text(_probeBusy ? '测速中，约 20 秒…' : '内置代理 · 自动测速'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: _probeBusy ? null : () => _applyProxy('', ''),
+                    child: const Text('不用代理'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '内置列表来自 watchttvv/free-proxy-list（gh-proxy 加速）。选好后：'
+                '公开频道的网页抓取、封面、播放中转都会走这个代理。',
+                style: TextStyle(
+                    color: AppTheme.textTertiary, fontSize: 11, height: 1.5),
+              ),
             ],
             const SizedBox(height: 12),
             Align(

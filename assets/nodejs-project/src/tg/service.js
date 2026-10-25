@@ -95,7 +95,7 @@ export function configure(cfg = {}) {
     }
     if (cfg.proxy !== undefined) {
         const p = cfg.proxy;
-        st.proxy = (p && p.host && p.port)
+        const next = (p && p.host && p.port)
             ? {
                 socksType: 5,
                 ip: String(p.host),
@@ -105,6 +105,16 @@ export function configure(cfg = {}) {
                 timeout: 15,
             }
             : null;
+        // 代理变了 ⇒ 丢掉旧连接（下一次请求按新代理重建）。
+        // 否则用户"换了个代理"，已登录的客户端还挂在旧线路上，看起来像没生效。
+        const changed =
+            JSON.stringify(next) !== JSON.stringify(st.proxy);
+        st.proxy = next;
+        if (changed && st.client) {
+            try { st.client.disconnect().catch(() => {}); } catch (_) {}
+            st.client = null;
+            st.me = null;
+        }
     }
     return {
         ok: true,

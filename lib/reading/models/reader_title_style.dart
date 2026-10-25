@@ -1,16 +1,13 @@
 /// 「标题样式」= 章标题的版式。
 ///
-/// 用户提供的三套是「源阅读」的 HTML 标题样式，这里内置成模板（图片换成
-/// 随包 asset），由 `TitleHtml`（HTML/CSS 子集解析器）解析成 Widget 并度量。
-/// 用户还可以选「自定义」，直接粘贴源阅读的标题 HTML（支持 http 图片 /
-/// data URI / asset:）。
+/// 用户 2026-10-25：**只保留两套**（跟阅读样式一一对应）——
+///   · 青蓝·光晕 → 配「泼墨山水·退堂鼓·改」
+///   · 微信读书 → 配「真·微信读书」
+/// 其余（仙鹤日间/夜间/平板、古风蓝章）全部去掉。
+/// 想加回来照现在的写法补一个枚举值 + 一段 HTML 即可。
 enum ReaderTitleStyle {
   none('默认', ''),
-  xianheDay('仙鹤·日间', 'xianhe_day'),
-  xianheNight('仙鹤·夜间', 'xianhe_night'),
-  xianhePad('仙鹤·平板', 'xianhe_pad'),
   weRead('微信读书', 'weread'),
-  guFeng('古风·蓝章', 'gufeng'),
   qingLan('青蓝·光晕', 'qinglan'),
   custom('自定义', 'custom');
 
@@ -26,11 +23,7 @@ enum ReaderTitleStyle {
 
   /// 内置模板（custom 返回空串，用用户自己存的那份）
   String get html => switch (this) {
-    ReaderTitleStyle.xianheDay => _xianheDay,
-    ReaderTitleStyle.xianheNight => _xianheNight,
-    ReaderTitleStyle.xianhePad => _xianhePad,
     ReaderTitleStyle.weRead => _weRead,
-    ReaderTitleStyle.guFeng => _guFeng,
     ReaderTitleStyle.qingLan => _qingLan,
     _ => '',
   };
@@ -39,11 +32,7 @@ enum ReaderTitleStyle {
   ///
   /// 内置模板的颜色是写死的：不换一套，夜间深底上就是深色标题（几乎看不见）。
   String get nightHtml => switch (this) {
-    ReaderTitleStyle.xianheDay => _xianheNight,
-    ReaderTitleStyle.xianheNight => _xianheNight,
-    ReaderTitleStyle.xianhePad => _xianhePadNight,
     ReaderTitleStyle.weRead => _weReadNight,
-    ReaderTitleStyle.guFeng => _guFengNight,
     ReaderTitleStyle.qingLan => _qingLanNight,
     _ => '',
   };
@@ -56,61 +45,10 @@ enum ReaderTitleStyle {
     return none;
   }
 
-  /// 自定义编辑框的初始模板（用户没存过时给仙鹤日间，方便改颜色/换图）
-  static String get starterTemplate => _xianheDay;
+  /// 自定义编辑框的初始模板（用户没存过时给青蓝光晕，方便改颜色/换图）
+  static String get starterTemplate => _qingLan;
 
-  // ── 内置模板（参数来自用户提供的源阅读样式，图片改成本地 asset）──
-
-  static const _xianheDay = '''
-<div style="background-image:url('asset:assets/images/reader_title/xianhe.png');
-            background-repeat:no-repeat; background-position:left; background-size:auto 100%;">
-  <div style="text-align:right;">
-    <h3 style="color:#3a4654; margin:0.5em 0.5em 3em 0; font-size:1.5em; font-weight:200;">章节数</h3>
-    <h4 style="box-shadow:0px 15px 10px -15px #000; display:inline-block;
-               background-color:rgba(58,70,84,0.8); border-radius:16px;
-               margin:0 0 5em 0; padding:0.5em 2em; text-align:right;
-               color:#cbba75; font-weight:200; font-size:1em;">章节名</h4>
-  </div>
-</div>''';
-
-  static const _xianheNight = '''
-<div style="background-image:url('asset:assets/images/reader_title/xianhe.png');
-            background-repeat:no-repeat; background-position:left; background-size:auto 100%;">
-  <div style="text-align:right;">
-    <h3 style="color:#97897a; margin:0.5em 0.5em 3em 0; font-size:1.5em; font-weight:200;">章节数</h3>
-    <h4 style="box-shadow:0px 15px 10px -15px #000; display:inline-block;
-               background-color:rgba(151,137,122,0.8); border-radius:16px;
-               margin:0 0 5em 0; padding:0.5em 2em; text-align:right;
-               color:#2d3b6c; font-weight:200; font-size:1em;">章节名</h4>
-  </div>
-</div>''';
-
-  /// 用户 2026 提供的「仙鹤·平板」：与手机版同图，但章节数下方留白更大
-  /// （10em）、药丸用实色 #3a4654 且左侧内衬 5em（平板宽度下更好看）。
-  static const _xianhePad = '''
-<div style="background-image:url('asset:assets/images/reader_title/xianhe.png');
-            background-repeat:no-repeat; background-position:left; background-size:auto 100%;">
-  <div style="text-align:right;">
-    <h3 style="color:#3a4654; margin:0.5em 0.5em 10em 0; font-weight:Light; font-size:1.5em;">章节数</h3>
-    <h4 style="box-shadow:0px 15px 10px -15px #000; display:inline-block;
-               background-color:#3a4654; border-radius:16px;
-               margin:0 0 5em 0; padding:0.5em 0.5em 0.5em 5em; text-align:right;
-               color:#cbba75; font-weight:Light; font-size:1.5em;">章节名</h4>
-  </div>
-</div>''';
-
-  /// 仙鹤·平板的夜间版（版式不变，配色换成夜间那套）
-  static const _xianhePadNight = '''
-<div style="background-image:url('asset:assets/images/reader_title/xianhe.png');
-            background-repeat:no-repeat; background-position:left; background-size:auto 100%;">
-  <div style="text-align:right;">
-    <h3 style="color:#97897a; margin:0.5em 0.5em 10em 0; font-weight:Light; font-size:1.5em;">章节数</h3>
-    <h4 style="box-shadow:0px 15px 10px -15px #000; display:inline-block;
-               background-color:rgba(151,137,122,0.8); border-radius:16px;
-               margin:0 0 5em 0; padding:0.5em 0.5em 0.5em 5em; text-align:right;
-               color:#2d3b6c; font-weight:Light; font-size:1.5em;">章节名</h4>
-  </div>
-</div>''';
+  // ── 内置模板 ────────────────────────────────────────────────
 
   static const _weRead = '''
 <p style="text-align:left; color:#386068; font-size:1.5em; margin-top:2em;
@@ -125,30 +63,7 @@ enum ReaderTitleStyle {
 <p style="text-align:left; font-weight:bold; color:#C9D2DB; font-size:2em;
           padding-bottom:4em;">章节名</p>''';
 
-  /// 用户 2026 提供的「古风·完美版」（蓝底白字章节数 + 蓝色大标题）
-  ///
-  /// 与原文的差异：补了 `padding:0.1em 0.5em`（原文没有内衬，字会顶到圆角；
-  /// 截图里明显有内衬），其余参数原样。
-  static const _guFeng = '''
-<h3 style="border-bottom:2px solid #D8D2C1; text-align:center; color:#ffffff;
-           float:left; display:inline-block; background-color:#485F8B;
-           border-radius:5px; font-weight:Light; font-size:2.6em;
-           margin:0; padding:0.1em 0.5em;">章节数</h3>
-<h3 style="border-bottom:1px solid #485F8B; text-align:center; color:#485F8B;
-           font-weight:Light; font-size:2.3em; margin:0.3em 0 0.5em 0;
-           padding-bottom:0.15em;">章节名</h3>''';
-
-  /// 古风·蓝章·夜间版：药丸换成深蓝灰、文字换米白，边框换暗金
-  static const _guFengNight = '''
-<h3 style="border-bottom:2px solid #5A5346; text-align:center; color:#E8E3D6;
-           float:left; display:inline-block; background-color:#3B4658;
-           border-radius:5px; font-weight:Light; font-size:2.6em;
-           margin:0; padding:0.1em 0.5em;">章节数</h3>
-<h3 style="border-bottom:1px solid #5A5346; text-align:center; color:#D8C48A;
-           font-weight:Light; font-size:2.3em; margin:0.3em 0 0.5em 0;
-           padding-bottom:0.15em;">章节名</h3>''';
-
-  /// 用户 2026 提供的「青蓝·光晕」（山峦插画 + 文字发光 + 半透明药丸）。
+  /// 青蓝·光晕（山峦插画 + 文字发光 + 半透明药丸）—— 泼墨那套的标题。
   /// 原样式的背景图是网络地址，这里换成随包 asset（离线也能用）。
   static const _qingLan = '''
 <div style="background-image:url('asset:assets/images/reader_title/qinglan.png');

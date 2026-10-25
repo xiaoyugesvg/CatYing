@@ -22,6 +22,9 @@ class TgService {
   static const _kProxyUser = 'tg.proxy.user';
   static const _kProxyPass = 'tg.proxy.pass';
 
+  /// 代理总开关（默认关：**填了地址不等于启用**，用户 2026-10-25 要求）
+  static const _kProxyOn = 'tg.proxy.on';
+
   final Dio _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 5),
     receiveTimeout: const Duration(seconds: 45),
@@ -57,6 +60,13 @@ class TgService {
   String proxyUser = '';
   String proxyPass = '';
 
+  /// 代理总开关：关着时**一律直连**（哪怕上面填了地址）
+  bool proxyOn = false;
+
+  /// 代理是否真的可用（开关开 + 地址端口都填了）
+  bool get proxyActive =>
+      proxyOn && proxyHost.trim().isNotEmpty && proxyPort.trim().isNotEmpty;
+
   Future<void> loadSettings() async {
     final p = await SharedPreferences.getInstance();
     apiId = p.getString(_kApiId) ?? '';
@@ -65,6 +75,14 @@ class TgService {
     proxyPort = p.getString(_kProxyPort) ?? '';
     proxyUser = p.getString(_kProxyUser) ?? '';
     proxyPass = p.getString(_kProxyPass) ?? '';
+    proxyOn = p.getBool(_kProxyOn) ?? false;
+  }
+
+  /// 「内置代理池」开关：打开才启用上方填的节点（默认关）
+  Future<void> setProxyOn(bool v) async {
+    proxyOn = v;
+    final p = await SharedPreferences.getInstance();
+    await p.setBool(_kProxyOn, v);
   }
 
   Future<void> saveSettings({
@@ -108,9 +126,10 @@ class TgService {
       'apiId': int.tryParse(apiId) ?? 0,
       'apiHash': apiHash,
       if (!remote) 'sessionPath': sessionPath,
-      if (proxyHost.isNotEmpty && proxyPort.isNotEmpty)
+      // 开关关着 ⇒ 明确发 null，让 Node 直连（不能"填了地址就偷偷走代理"）
+      if (proxyActive)
         'proxy': {
-          'host': proxyHost,
+          'host': proxyHost.trim(),
           'port': int.tryParse(proxyPort) ?? 1080,
           if (proxyUser.isNotEmpty) 'username': proxyUser,
           if (proxyPass.isNotEmpty) 'password': proxyPass,
@@ -124,6 +143,7 @@ class TgService {
   Future<Map<String, dynamic>> post(
     String action, [
     Map<String, dynamic>? extra,
+    Duration? timeout,
   ]) async {
     if (!ready) {
       return {'ok': false, 'error': '后台服务未就绪，请稍后重试'};
@@ -134,6 +154,7 @@ class TgService {
         data: {'action': action, ...?extra},
         options: Options(
           contentType: Headers.jsonContentType,
+          receiveTimeout: timeout,
           headers: _remote != null ? RemoteEngine.instance.headers : null,
         ),
       );
@@ -168,6 +189,14 @@ class TgService {
       post('tgPassword', {'password': pw});
   Future<Map<String, dynamic>> logout() => post('tgLogout');
   Future<Map<String, dynamic>> dialogs() => post('tgDialogs', {'limit': 150});
+
+  /// 内置免费代理池：Node 侧拉列表 + 并发测速，返回按延迟排序的可用项。
+  /// 可能要 15~30 秒（30 个代理 × 10 秒超时，8 并发），UI 要给进度。
+  Future<Map<String, dynamic>> probeProxies() => post(
+        'tgProxyProbe',
+        {'timeoutMs': 10000},
+        const Duration(seconds: 90),
+      );
 
   Future<Map<String, dynamic>> videos(String peer,
           {int offsetId = 0, int limit = 30}) =>

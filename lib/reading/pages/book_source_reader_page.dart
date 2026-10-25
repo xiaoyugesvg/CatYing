@@ -589,12 +589,6 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   bool _bookmarkNoAsk = false;
   int _bookmarkLastColor = 0;
 
-  /// 按住下滑一键书签（Cmbok 同款手势）：长按触发后本次拖动是否待消费
-  bool _bookmarkPressArmed = false;
-
-  /// 长按触发时的起始 Y（判定"向下拖过阈值"用）
-  double _bookmarkPressStartDy = 0;
-
   /// 当前背景下的前景色（正文/图标用）。
   /// 「主题」tab 选了自定义字色就以它为准；
   /// 自定义/内置背景为深色时自动换浅色文字，避免深底黑字。
@@ -763,6 +757,120 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     '页码',
     '进度',
   ];
+
+  /// 用户手动改「信息栏」开关时，把样式自带的页眉/页脚格式串清掉。
+  ///
+  /// 为什么必须清：套用样式会把样式的 6 条格式串一起写进来，而渲染时
+  /// **格式串优先**（`_statusHeader` 里的 `_hasHeaderFormat`）。
+  /// 于是用户在设置里勾/关「信息栏」，页面上显示的还是样式那一套
+  /// —— 用户 2026-10-25：「我打开了阅读设置里面的信息栏为啥还是阅读样式
+  /// 的信息栏？」。清空后退回「信息栏项目」开关驱动：改什么就显示什么。
+  void _clearHeaderFooterFormats() {
+    if (_headerL.isEmpty &&
+        _headerC.isEmpty &&
+        _headerR.isEmpty &&
+        _footerL.isEmpty &&
+        _footerC.isEmpty &&
+        _footerR.isEmpty) {
+      return;
+    }
+    _headerL = '';
+    _headerC = '';
+    _headerR = '';
+    _footerL = '';
+    _footerC = '';
+    _footerR = '';
+    _scheduleSavePrefs();
+  }
+
+  /// 顶部 / 底部功能面板的位置（屏幕坐标）。
+  ///
+  /// 用来把**壁纸在面板位置上的那一块**裁出来当面板背景 —— 所以必须知道
+  /// 面板真实落在屏幕哪个位置。build 结束后量一次，位置变了才 setState。
+  final GlobalKey _topBarKey = GlobalKey();
+  final GlobalKey _bottomBarKey = GlobalKey();
+  Rect? _topBarRect;
+  Rect? _bottomBarRect;
+
+  void _scheduleBarRectMeasure() {
+    if (!_showBar) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Rect? rectOf(GlobalKey key) {
+        final ro = key.currentContext?.findRenderObject();
+        if (ro is! RenderBox || !ro.hasSize) return null;
+        return ro.localToGlobal(Offset.zero) & ro.size;
+      }
+
+      final t = rectOf(_topBarKey);
+      final b = rectOf(_bottomBarKey);
+      if (t == _topBarRect && b == _bottomBarRect) return;
+      setState(() {
+        _topBarRect = t;
+        _bottomBarRect = b;
+      });
+    });
+  }
+
+  /// 全屏壁纸（没有壁纸 → null，面板退回纯色）
+  Widget? _barBackdropImage() {
+    final path = _activeFileBgPath;
+    if (path != null && File(path).existsSync()) {
+      return Image.file(
+        File(path),
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+      );
+    }
+    final asset = _activeBgAsset;
+    if (asset != null) {
+      return Image.asset(asset, fit: BoxFit.cover, gaplessPlayback: true);
+    }
+    return null;
+  }
+
+  /// 面板底衬：有壁纸时，把壁纸**在面板位置上的那块**裁出来铺在面板里
+  /// （用户 2026-10-25：「截取的就是背景图片在面板的位置作为面板的背景」）。
+  ///
+  /// 做法：`ClipRRect` 裁面板圆角 → 放一张**整屏大小**的壁纸，按
+  /// `-rect.left / -rect.top` 平移到面板位置 → 再压一层纸色保证文字可读。
+  /// 没有壁纸（纯色纸）就只铺 [fallbackColor]。
+  Widget _barBackdrop(
+    Rect? rect, {
+    required Widget child,
+    required BorderRadius radius,
+    required Color fallbackColor,
+    List<BoxShadow>? shadow,
+  }) {
+    final img = _barBackdropImage();
+    final screen = MediaQuery.sizeOf(context);
+    final veil = _paperIsDark
+        ? Colors.black.withValues(alpha: 0.42)
+        : _bgTop.withValues(alpha: 0.80);
+    return Container(
+      decoration: BoxDecoration(borderRadius: radius, boxShadow: shadow),
+      child: ClipRRect(
+        borderRadius: radius,
+        child: Stack(
+          fit: StackFit.passthrough,
+          children: [
+            if (img != null && rect != null) ...[
+              Positioned(
+                left: -rect.left,
+                top: -rect.top,
+                width: screen.width,
+                height: screen.height,
+                child: img,
+              ),
+              Positioned.fill(child: ColoredBox(color: veil)),
+            ] else
+              Positioned.fill(child: ColoredBox(color: fallbackColor)),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
 
   /// 底部面板顶部的拖动条（视觉锚点，纯装饰）✓
   Widget _sheetHandle() => Padding(
@@ -1890,8 +1998,157 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     }
   }
 
+  /// SelectionArea 当前选中的纯文本（浮动工具条的动作都读它）
+  String _selectedText = '';
+
+  /// 长按选中后的浮动工具条 —— 对齐 Legado：一排小图标，贴着选区弹，不铺满底部。
+  ///
+  /// 用 [TextSelectionToolbar] 是为了拿系统算好的锚点（选区上方/下方）。
+  Widget _selectionMenu(BuildContext ctx, SelectableRegionState state) {
+    final anchors = state.contextMenuAnchors;
+    void close() {
+      state.hideToolbar();
+      state.clearSelection();
+    }
+
+    Widget item(IconData icon, String label, VoidCallback onTap) {
+      return InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 18, color: _fg),
+              const SizedBox(height: 2),
+              Text(label, style: TextStyle(fontSize: 11, color: _fg)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return TextSelectionToolbar(
+      anchorAbove: anchors.primaryAnchor,
+      anchorBelow: anchors.secondaryAnchor ?? anchors.primaryAnchor,
+      children: [
+        item(Icons.copy_rounded, '复制', () {
+          final t = _selectedText;
+          close();
+          if (t.trim().isEmpty) return;
+          Clipboard.setData(ClipboardData(text: t));
+          _toast('已复制');
+        }),
+        item(Icons.bookmark_add_outlined, '书签', () {
+          final t = _selectedText;
+          close();
+          final pi = _paragraphIndexForSelection(t);
+          _showAddBookmark(pi < 0 ? 0 : pi);
+        }),
+        item(Icons.search_rounded, '搜索', () {
+          final t = _selectedText;
+          close();
+          if (t.trim().isEmpty) return;
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) =>
+                  BookSourceSearchPage(initialKeyword: _searchSeed(t)),
+            ),
+          );
+        }),
+        item(Icons.cleaning_services_outlined, '净化', () {
+          final t = _selectedText;
+          close();
+          _addPurifyFromSelection(t);
+        }),
+        item(Icons.more_horiz_rounded, '更多', () {
+          final t = _selectedText;
+          close();
+          final pi = _paragraphIndexForSelection(t);
+          if (pi < 0) {
+            _toast('没定位到段落');
+            return;
+          }
+          _onParagraphLongPress(pi);
+        }),
+      ],
+    );
+  }
+
+  /// 选区 → 段落下标（找不到返回 -1）
+  int _paragraphIndexForSelection(String sel) {
+    final s = sel.trim();
+    if (s.isEmpty) return -1;
+    for (var i = 0; i < _paragraphs.length; i++) {
+      if (_paragraphs[i].contains(s)) return i;
+    }
+    return -1;
+  }
+
+  /// 把选中的文字变成一条净化规则（正则转义后精确匹配 → 替换为空）。
+  ///
+  /// 立即对当前章生效：内存里先跑一遍新规则（空段落顺手删掉），
+  /// 再丢掉本章缓存 —— 下次进入按完整规则集重来。
+  Future<void> _addPurifyFromSelection(String raw) async {
+    final t = raw.trim();
+    if (t.isEmpty) {
+      _toast('先选中要净化的文字');
+      return;
+    }
+    if (t.length > 80) {
+      _toast('选中的文字太长（最多 80 字），净化会误伤');
+      return;
+    }
+    final pattern = RegExp.escape(t);
+    if (_rs.purifyRules.any((r) => r.pattern == pattern)) {
+      _toast('这条已经在净化规则里了');
+      return;
+    }
+    final rule = PurifyRule(
+      name: '选区净化',
+      group: '手动',
+      pattern: pattern,
+      replacement: '',
+      isRegex: true,
+    );
+    setState(() {
+      _rs = _rs.copyWith(purifyRules: [..._rs.purifyRules, rule]);
+      _paragraphs = _paragraphs
+          .map((p) => applyPurifyRules(p, [rule]))
+          .where((p) => p.trim().isNotEmpty)
+          .toList();
+    });
+    _scheduleSavePrefs();
+    _invalidateTtsSegs();
+    _cache.remove(_index); // 下次进本章按新规则重新净化
+    _repaginateLayout();
+    _toast('已加入净化（共 ${_rs.purifyRules.length} 条）');
+  }
+
   /// C9：正文净化（正则/纯文本替换）。坏正则跳过，不打断阅读。
   String _applyPurify(String raw) => applyPurifyRules(raw, _rs.purifyRules);
+
+  /// 拉一个远程文本（净化规则 JSON 这种小文件）。
+  ///
+  /// 用 dart:io 的 HttpClient 而不是 App 的 Dio：规则集是第三方静态文件，
+  /// 不该被 API 配置/重试策略牵连；超时也自己定（15s 连接 / 30s 读完）。
+  Future<String> _fetchText(String url) async {
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 15);
+    try {
+      final req = await client.getUrl(Uri.parse(url));
+      req.headers.set(HttpHeaders.userAgentHeader, 'Mozilla/5.0');
+      final res = await req.close().timeout(const Duration(seconds: 30));
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        throw 'HTTP ${res.statusCode}';
+      }
+      final bytes = await res.fold<List<int>>(<int>[], (a, b) => a..addAll(b));
+      return utf8.decode(bytes, allowMalformed: true);
+    } finally {
+      client.close(force: true);
+    }
+  }
 
   /// C9：正文净化设置弹窗。规则列表 + 启停开关 + 删除自定义规则 +
   /// 新增规则（正则替换），改完即时重排当前章（从净化后原文缓存重转）。
@@ -1984,7 +2241,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                 style: TextStyle(color: _fg, fontSize: 13),
                                 decoration: InputDecoration(
                                   hintText:
-                                      '粘贴 legado 的 replaceRule JSON（数组），\n'
+                                      '粘贴 legado 的 replaceRule JSON，\n'
+                                      '或直接填 JSON 的 http(s) 链接，\n'
                                       '或 legado://import/replaceRule?src=...',
                                   hintStyle: TextStyle(
                                     color: _fgMuted,
@@ -2023,12 +2281,27 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                             }
                             raw = Uri.decodeComponent(raw);
                           }
+                          // 远程规则集：直接填 http(s) 链接（用户 2026-10-25 要的）
+                          if (raw.startsWith('http://') ||
+                              raw.startsWith('https://')) {
+                            _toast('正在下载规则…');
+                            try {
+                              raw = await _fetchText(raw);
+                            } catch (e) {
+                              _toast('下载失败：$e');
+                              return;
+                            }
+                          }
                           try {
+                            final skipped = <String>[];
                             final parsed = parseLegadoReplaceRules(
                               jsonDecode(raw),
+                              skipped: skipped,
                             );
                             if (parsed.isEmpty) {
-                              _toast('没有解析到规则');
+                              _toast(skipped.isEmpty
+                                  ? '没有解析到规则'
+                                  : '解析到 ${skipped.length} 条，但都是 JS 脚本/仅标题规则，无法使用');
                               return;
                             }
                             var added = 0;
@@ -2040,9 +2313,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                               }
                             }
                             commit();
-                            _toast('已导入 $added 条（重复 ${parsed.length - added} 条已跳过）');
+                            _toast(
+                              '已导入 $added 条'
+                              '${skipped.isEmpty ? '' : '，跳过 ${skipped.length} 条（@js 脚本/仅标题）'}',
+                            );
                           } catch (e) {
-                            _toast('导入失败：$e（若是远程链接，请先打开它把内容复制过来）');
+                            _toast('导入失败：$e');
                           }
                         },
                       ),
@@ -2330,6 +2606,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               statusBarColor: Colors.transparent,
               systemNavigationBarColor: Colors.transparent,
             );
+    // 顶栏 / 底栏的屏幕位置（用于裁壁纸对应区域当面板背景）—— 帧后量一次
+    _scheduleBarRectMeasure();
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: overlayStyle,
       child: Scaffold(
@@ -2783,9 +3061,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           //   （触发路径都是日常操作：仿真模式读到大页号点「下一章」/ 旋屏 ✓）。
           //   统一走 [_safePageIndex]：越界就夹回合法范围 + 记一条日志 ✓，**不 throw** ✓
           final pi = _safePageIndex();
-          // 与覆盖模式一致：按住下滑一键书签（原来仿真模式漏了这层包装）
-          return withPressDownBookmark(
-            BookPageCurl(
+          // ⚠️ 不再包 `withPressDownBookmark`：长按现在用于**选字**，
+          //   那个「按住下滑加书签」的 LongPress 手势会和 SelectionArea 抢，
+          //   抢输时书签不生效、抢赢时选不了字。书签改从选区工具条/顶栏加。
+          return BookPageCurl(
             page: _pageContent(fg, _pages[pi], chapter: _chapterOfPage(pi)),
             nextPage: pi + 1 < _pages.length
                 ? _pageContent(
@@ -2823,7 +3102,6 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               }
             },
             onTapCenter: _toggleBar,
-            ),
           );
         }
 
@@ -2833,8 +3111,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         //    一模一样（仍是整页平移），用户实测"翻页样式太丑、还重叠" ✗
         if (_rs.pageMode == PageMode.cover) {
           final pi = _safePageIndex();
-          return withPressDownBookmark(
-            BookPageCover(
+          // 同上：长按留给选字，不再包「按住下滑加书签」
+          return BookPageCover(
               // 页自己已经铺了纸（含壁纸）⇒ 滑动页不再需要垫色
               backgroundColor: Colors.transparent,
               // 前沿投影随纸面明暗（深色纸用浅投影，否则黑投影隐形）
@@ -2871,15 +3149,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 }
               },
               onTapCenter: _toggleBar,
-            ),
-          );
+            );
         }
 
         // 其余模式（左右 / 无动画）走 PageView
         return Stack(
           children: [
-            withPressDownBookmark(
-              NotificationListener<ScrollNotification>(
+            NotificationListener<ScrollNotification>(
                 // 章末再滑一次 → 下一章（无缝拼接接不上时的兜底）
                 onNotification: _onPageScrollNotification,
                 child: PageView.builder(
@@ -2900,7 +3176,6 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                       _pageContent(fg, _pages[i], chapter: _chapterOfPage(i)),
                 ),
               ),
-            ),
             if (_paginating)
               Positioned(
                 left: 0,
@@ -3087,16 +3362,23 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       //    代次变化时滚动位置就"回不到章首"了。
       child: KeyedSubtree(
         key: ValueKey('reader-scroll-$_scrollEpoch'),
-        child: SingleChildScrollView(
-          // 自动阅读（上下模式）要用它滚屏
-          controller: _scrollReadCtrl,
-          padding: EdgeInsets.fromLTRB(_padLeft, _padTop, _padRight, _padBottom),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (var k = 0; k < chain.length; k++)
-                _scrollChapterBlock(chain[k], fg, first: k == 0),
-            ],
+        // 上下滚动：整章链一个 SelectionArea —— 可以跨段/跨章选文字，
+        // 长按出系统选择手柄 + 我们的浮动小工具条（复制/书签/搜索/净化/更多）
+        child: SelectionArea(
+          onSelectionChanged: (c) => _selectedText = c?.plainText ?? '',
+          contextMenuBuilder: _selectionMenu,
+          child: SingleChildScrollView(
+            // 自动阅读（上下模式）要用它滚屏
+            controller: _scrollReadCtrl,
+            padding:
+                EdgeInsets.fromLTRB(_padLeft, _padTop, _padRight, _padBottom),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var k = 0; k < chain.length; k++)
+                  _scrollChapterBlock(chain[k], fg, first: k == 0),
+              ],
+            ),
           ),
         ),
       ),
@@ -3293,12 +3575,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     final bookmark = (_bookmarksChapter == ch) ? _bookmarks[pi] : null;
     return Padding(
       padding: EdgeInsets.only(bottom: _fontSize * _paraSpacing),
+      // 长按由外层 SelectionArea 接管（系统选字手柄 + 浮动工具条）；
+      // 这里只保留「有笔记的段落点一下看气泡」。
       child: GestureDetector(
-        onLongPress: () {
-          // 下一章的段落：先切过去（书签/笔记/划线都按章存），再弹菜单
-          if (!current) _syncChapterFromScroll(ch);
-          _onParagraphLongPress(pi);
-        },
         // 有笔记/划线的段落：点一下弹「笔记气泡」，可直接改批注或删除
         onTap: note == null ? null : () => _showNoteBubble(note),
         child: Container(
@@ -4234,7 +4513,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         if (showHeader) _statusHeader(fg, chapter: pageChapter),
         // ── 正文 ────────────────────────────────────────────
         Expanded(
-          child: Padding(
+          // 分页模式：每页一个 SelectionArea（换页即清空选择）。
+          // 长按 → 系统文字选择手柄，松手出我们的浮动小工具条。
+          child: SelectionArea(
+            onSelectionChanged: (c) => _selectedText = c?.plainText ?? '',
+            contextMenuBuilder: _selectionMenu,
+            child: Padding(
             padding: EdgeInsets.symmetric(horizontal: 0),
             child: ListView.builder(
               physics: const NeverScrollableScrollPhysics(),
@@ -4369,14 +4653,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   }
                   return Padding(
                     padding: EdgeInsets.only(bottom: _fontSize * _paraSpacing),
-                    child: GestureDetector(
-                      onLongPress: () => _onParagraphLongPress(pi),
-                      child: _wrapWithHighlight(pi, body),
-                    ),
+                    // 长按交给外层 SelectionArea（系统选择手柄 + 浮动工具条）；
+                    // 原来这里挂的 onLongPress 会和选择手势抢，已移除
+                    child: _wrapWithHighlight(pi, body),
                   );
                 }
                 return const SizedBox.shrink();
               },
+            ),
             ),
           ),
         ),
@@ -4570,7 +4854,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       _lastTapAt = null;
       _lastTapPos = null;
       _tapTimer?.cancel();
-      _toggleBar();
+      // 仿真/覆盖：单击已经被组件自己处理成"开/关面板"，这里再 toggle 一次
+      // 会互相抵消（双击＝连关两次）。
+      if (_rs.pageMode != PageMode.curl && _rs.pageMode != PageMode.cover) {
+        _toggleBar();
+      }
       return;
     }
     _lastTapAt = now;
@@ -4639,12 +4927,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       }
       return;
     }
-    // 仿真/覆盖（仅文字模式）：左右两边的翻页交给组件自己处理；
-    // 但**中间 1/3 必须能呼出功能面板** —— 原来这里直接 return，
-    // 导致这两种翻页模式下单击永远弹不出面板（用户 2026-10-25）。
+    // 仿真 / 覆盖（仅文字模式）：**这里什么都别做**。
+    //
+    // ⚠️ 2026-10-25 回退：上一版在这里补了一句 `_toggleBar()`，
+    //   但 `BookPageCurl` / `BookPageCover` 自己就带 `onTapCenter: _toggleBar`
+    //   （见 `_contentArea` 里的构造）⇒ 点中间会**连关两次**（开了又立刻关上），
+    //   用户看到的就是"仿真模式下单击永远出不来功能面板"。
+    //   点击、左右翻页全交给这两个组件处理。
     if (_rs.pageMode == PageMode.curl || _rs.pageMode == PageMode.cover) {
-      final w = size.width;
-      if (pos.dx >= w / 3 && pos.dx <= w * 2 / 3) _toggleBar();
       return;
     }
     // 文字模式：3×3 分区 + 「点击区域」配置；menu 动作由双击/双指承担
@@ -4747,21 +5037,23 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   Widget _topBarCard(Color fg) {
     return Padding(
+      key: _topBarKey,
       // 悬浮卡片外观保留（四周留白 + 圆角 + 投影），但它是**布局内**的，
       // 占掉的高度由正文让出 ⇒ 永远不会压住文字 ✓
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      child: Container(
-        decoration: BoxDecoration(
-          color: _bgTop.withValues(alpha: 0.97),
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.16),
-              blurRadius: 20,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
+      // 底色交给 `_barBackdrop`：有壁纸时裁壁纸在顶栏位置的那一块
+      child: _barBackdrop(
+        _topBarRect,
+        radius: BorderRadius.circular(18),
+        fallbackColor: _bgTop.withValues(alpha: 0.97),
+        shadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.16),
+            blurRadius: 20,
+            offset: const Offset(0, 6),
+          ),
+        ],
+        child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
         child: Row(
           children: [
@@ -4821,6 +5113,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             // ⚠️ 语音朗读**不放顶栏**（用户 2026-10-21 纠正）：
             //   它在右侧竖栏的最上面（`_sideDock` 第一个按钮）✓。
           ],
+        ),
         ),
       ),
     );
@@ -5262,21 +5555,25 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     // 文字分页模式：进度条显示本章页码（IMG_8487「< 1 ●──── 6 >」）
     final pageMode =
         _rs.pageMode.paginates && _pages.isNotEmpty && _images.isEmpty;
-    return Container(
-      // ✅ 用户 2026-10-07：「书源的功能栏改成这种**悬浮**的」——
-      //   原来：整条**贴边**（`BorderRadius.vertical(top:…)` 只有上两角是圆角，
-      //         左右/下都顶到屏幕边）⇒ 看着就是"底部工具条" ✗
-      //   现在：四周留白 + **四角全圆** + 向下投影 ⇒ 一张**悬浮卡片** ✓
-      //   ⚠️ 用 `margin`（而不是改成 `Positioned` 覆盖）：本页这个功能栏是
-      //     **常驻**的（不随 `_showBar` 一起收起），若改成覆盖式，
-      //     正文最后几行会被**永久压在面板下面** ✗ —— 留白式同样有悬浮观感，
-      //     又不吃正文 ✓
-      margin: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-      decoration: BoxDecoration(
-        color: bgTop.withValues(alpha: 0.97),
-        // 四角全圆（原来是 `BorderRadius.vertical(top: …)`，只有上两角）
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
+    // ✅ 用户 2026-10-07：「书源的功能栏改成这种**悬浮**的」——
+    //   原来：整条**贴边**（`BorderRadius.vertical(top:…)` 只有上两角是圆角，
+    //         左右/下都顶到屏幕边）⇒ 看着就是"底部工具条" ✗
+    //   现在：四周留白 + **四角全圆** + 向下投影 ⇒ 一张**悬浮卡片** ✓
+    //   ⚠️ 用留白（而不是改成 `Positioned` 覆盖）：本页这个功能栏是
+    //     **常驻**的（不随 `_showBar` 一起收起），若改成覆盖式，
+    //     正文最后几行会被**永久压在面板下面** ✗ —— 留白式同样有悬浮观感，
+    //     又不吃正文 ✓
+    //
+    // 底色交给 `_barBackdrop`：有壁纸时裁壁纸在面板位置的那一块，
+    // 没有壁纸才用 `bgTop` 纯色（用户 2026-10-25 要求）。
+    return Padding(
+      key: _bottomBarKey,
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+      child: _barBackdrop(
+        _bottomBarRect,
+        radius: BorderRadius.circular(18),
+        fallbackColor: bgTop.withValues(alpha: 0.97),
+        shadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.16),
             blurRadius: 20,
@@ -5284,9 +5581,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             offset: const Offset(0, 6),
           ),
         ],
-      ),
-      padding: const EdgeInsets.fromLTRB(8, 10, 8, 6),
-      child: Column(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 10, 8, 6),
+          child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           // ── 进度条：分页模式 = 本章页码；否则 = 章节进度 ─────
@@ -5468,6 +5765,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           ),
           const SizedBox(height: 4),
         ],
+          ),
+        ),
       ),
     );
   }
@@ -8361,53 +8660,6 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       ),
     ),
   );
-
-  /// 当前页首段下标（按住下滑书签的锚点 ✓）：blocks = [章标题?, ...段落] ⇒
-  /// 段落下标 = blockIndex - [_blockOffset]（隐藏重复标题时没有标题块 ⇒ 偏移 0）。
-  /// 空页 / 漫画回退 0。
-  int _currentPageAnchorParagraph() {
-    if (_images.isNotEmpty || _pages.isEmpty) return 0;
-    final p = _pages[_safePageIndex()];
-    if (p.entries.isEmpty) return 0;
-    final e = p.entries.first;
-    final bi = e.blockIndex >= 0 ? e.blockIndex : p.firstBlockIndex;
-    final pi = bi - _blockOffset;
-    return pi > 0 ? pi : 0;
-  }
-
-  /// 按住下滑一键书签（对齐 Cmbok）：当前页已有书签 → 直接取消；
-  /// 没有 → 走「添加书签」流程（未勾"不再提示"时先弹选色面板 ✓）。
-  Future<void> _gestureToggleBookmark() async {
-    final anchor = _currentPageAnchorParagraph();
-    if (_bookmarks.containsKey(anchor)) {
-      setState(() => _bookmarks.remove(anchor));
-      await _savePrefs();
-      _toast('已取消书签');
-    } else {
-      await _showAddBookmark(anchor);
-    }
-  }
-
-  /// 包一层「按住稍作停顿再向下拖」手势 → 一键书签（Cmbok 同款 ✓）。
-  /// 仅包裹分页平移 / 覆盖 / 无动画三种模式；上下滚动 / 仿真翻页禁用 ✓。
-  Widget withPressDownBookmark(Widget child) {
-    return GestureDetector(
-      onLongPressStart: (d) {
-        _bookmarkPressArmed = true;
-        _bookmarkPressStartDy = d.globalPosition.dy;
-      },
-      onLongPressMoveUpdate: (d) {
-        if (_bookmarkPressArmed &&
-            d.globalPosition.dy - _bookmarkPressStartDy > 56) {
-          _bookmarkPressArmed = false;
-          _gestureToggleBookmark();
-        }
-      },
-      onLongPressEnd: (_) => _bookmarkPressArmed = false,
-      onLongPressCancel: () => _bookmarkPressArmed = false,
-      child: child,
-    );
-  }
 
   /// 「添加书签」弹层（截图 IMG_8100）：
   ///   标题「添加书签」+ 6 个颜色圆点 + 「不再提示」勾选框
@@ -12745,6 +12997,21 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     }),
                     // ── 信息栏（6 项逐项开关）──────────────────
                     _sectionLabel('信息栏'),
+                    // 说明当前信息栏由谁驱动：样式套用时会带上它自己的页眉页脚
+                    // 格式串（渲染优先），不说明的话用户会以为这里的开关坏了。
+                    if (_hasHeaderFormat || _hasFooterFormat)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Text(
+                          '当前页眉页脚用的是「样式自带」的格式；'
+                          '动一下下面的开关就切回你在这里的选择。',
+                          style: TextStyle(
+                            fontSize: AppTheme.fontCaption,
+                            color: _fgMuted,
+                            height: 1.5,
+                          ),
+                        ),
+                      ),
                     Padding(
                       padding: const EdgeInsets.only(top: 8, bottom: 6),
                       child: Row(
@@ -12770,13 +13037,15 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                           Switch(
                             value: _rs.statusItems.isNotEmpty,
                             onChanged: (v) {
-                              setState(
-                                () => _rs = _rs.copyWith(
+                              setState(() {
+                                _rs = _rs.copyWith(
                                   statusItems: v
                                       ? const {'章节', '页码', '进度'}
                                       : <String>{},
-                                ),
-                              );
+                                );
+                                // 用户的开关要能覆盖样式自带的那套格式串
+                                _clearHeaderFooterFormats();
+                              });
                               _scheduleSavePrefs();
                               _repaginateLayout();
                             },
@@ -12799,9 +13068,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                             child: _chip(k, _rs.statusItems.contains(k), () {
                               final next = Set<String>.of(_rs.statusItems);
                               if (!next.remove(k)) next.add(k);
-                              setState(
-                                () => _rs = _rs.copyWith(statusItems: next),
-                              );
+                              setState(() {
+                                _rs = _rs.copyWith(statusItems: next);
+                                _clearHeaderFooterFormats();
+                              });
                               _scheduleSavePrefs();
                             }),
                           );
