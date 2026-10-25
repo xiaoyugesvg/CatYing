@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/reader_style.dart';
-import '../models/reader_title_style.dart';
 import '../services/reader_style_store.dart';
-import 'reader_style_edit_page.dart';
-import 'reader_title_styles_page.dart';
+import 'reader_style_visual_page.dart';
 
 /// 「阅读样式」库：内置样式 + 我的样式 + 管理（复制/编辑/删除/排序）。
 ///
@@ -132,7 +129,8 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
         : s;
     final edited = await Navigator.of(context).push<ReaderStyle>(
       MaterialPageRoute(
-        builder: (_) => ReaderStyleEditPage(
+        // 可视化编辑（全屏预览 + 点哪调哪）；完整表单从页内右上角进
+        builder: (_) => ReaderStyleVisualPage(
           style: base,
           background: _bg,
           foreground: _fg,
@@ -201,27 +199,6 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
     final item = list.removeAt(index);
     list.insert(target, item);
     await _setMine(list);
-  }
-
-  /// 打开「标题样式」库（内置模板 + 我的 HTML）
-  Future<void> _openTitleStyles() async {
-    final titles = await _store.loadTitleStyles();
-    final p = await SharedPreferences.getInstance();
-    final id = p.getString('reading.chapterTitleStyle') ?? '';
-    final html = p.getString('reading.chapterTitleHtml') ?? '';
-    if (!mounted) return;
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => ReaderTitleStylesPage(
-          mine: titles,
-          current: ReaderTitleStyle.fromId(id),
-          currentHtml: html,
-          background: _bg,
-          foreground: _fg,
-          standalone: true,
-        ),
-      ),
-    );
   }
 
   Future<void> _saveCurrentAsCopy() async {
@@ -320,15 +297,8 @@ class _ReaderStylesPageState extends State<ReaderStylesPage> {
           '阅读样式',
           style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: _fg),
         ),
-        actions: [
-          TextButton(
-            onPressed: _openTitleStyles,
-            child: Text(
-              '标题样式',
-              style: TextStyle(color: _fg, fontSize: 13),
-            ),
-          ),
-        ],
+        // 「标题样式」不再单独开入口：它已经是每套样式里的一个区域，
+        // 在样式编辑页点「标题」就能换版式（避免两处改、越改越乱）。
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
