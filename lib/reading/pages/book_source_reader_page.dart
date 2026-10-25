@@ -5595,8 +5595,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     if (chapter < 0 || chapter >= widget.chapters.length) return null;
     final doc = TitleHtml.compile(
       src,
-      // 「章节数」占位符传空 ⇒ 那一段（含盒子）不会渲染，右上角不再有孤立的 1、2
-      chapterNumber: '',
+      // 章号按"全书第几章"传真实值（1 起）。
+      // 原来传空串是为了消掉某些样式里孤立的「1、2」，但那会让「第{n}章」
+      // 这类版式整块消失（参考图里左上角是有的）。现在传真值：
+      // 样式写了「第…章」就正常显示，只写占位符的也至少是"第几章"而不是空。
+      chapterNumber: '${chapter + 1}',
       chapterName: widget.chapters[chapter].name,
     );
     return doc.isEmpty ? null : doc;

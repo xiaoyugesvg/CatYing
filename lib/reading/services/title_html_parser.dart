@@ -782,14 +782,26 @@ class TitleHtml {
             : Alignment.centerRight,
         child: child,
       );
-    } else if (!st.inlineBox && b is TitleBoxBlock) {
+    } else if (!st.inlineBox && !_looksPill(st) && b is TitleBoxBlock) {
       // 块级元素（div / p / h1~h6 默认值）占满整行 ⇒ 底部边框、居中对齐才正确；
       // inline-block / float 才收缩到文字宽度。
+      //
+      // 例外：**带圆角的实心盒子**（胶囊/药丸）即便没写 display:inline-block，
+      // 也按收缩处理 —— 中文标题样式里大量用 `<h4 style="background:...;
+      // border-radius:16px">章节名</h4>` 做药丸，撑满整行会变成一条长条
+      // （用户 2026-10-25 截图对比：参考图是收缩胶囊，我们这边被拉成整行）。
       child = SizedBox(width: double.infinity, child: child);
     }
     if (mar != EdgeInsets.zero) child = Padding(padding: mar, child: child);
     return child;
   }
+
+  /// 是否是"圆角实心胶囊"（章节名药丸）。
+  ///
+  /// 判据：有圆角 + 有背景（色或图）。这类盒子按内容收缩才像药丸；
+  /// 撑满整行会变成一条通栏色带（参考图 vs 实际截图的核心差异）。
+  static bool _looksPill(TitleCss st) =>
+      st.borderRadius > 0 && (st.background != null || st.backgroundImage != null);
 
   /// 按边生成边框；颜色缺省 = currentColor（文字颜色）
   static Border? _border(TitleCss st, {required Color fallback}) {
