@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import '../../services/nodejs_manager.dart';
+import '../../services/remote_engine.dart';
 
 import 'dart:typed_data';
 
@@ -451,8 +452,9 @@ class BookSourceService {
     // 仍然保留的删除（那两处是真冗余，已验证无副作用）：
     //   · 云端壳模式 QreadApi（规则在服务端执行）✗
     //   · config 转换引擎 ConfigBookSource/legadoToConfig ✗
+    final remote = RemoteEngine.instance.baseFor(RemoteKind.book);
     final port = NodeJSManager.instance.managementPort;
-    if (port <= 0) {
+    if (remote == null && port <= 0) {
       if (!_portWarned) {
         _portWarned = true;
         debugPrint('[BookSource] Node 管理端口未就绪');
@@ -461,9 +463,14 @@ class BookSourceService {
     }
     try {
       final res = await _localDio.post(
-        'http://127.0.0.1:$port/book/source',
+        remote != null
+            ? '$remote/book/source'
+            : 'http://127.0.0.1:$port/book/source',
         data: body,
-        options: Options(contentType: Headers.jsonContentType),
+        options: Options(
+          contentType: Headers.jsonContentType,
+          headers: remote != null ? RemoteEngine.instance.headers : null,
+        ),
       );
       return res.data;
     } catch (e) {

@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 import '../../../common/theme.dart';
 import '../../../miniapp/pages/mini_app_player_page.dart';
 import '../../../services/tg_service.dart';
+import '../../../services/translate_service.dart';
 import '../../../widgets/app_toast.dart';
 
 /// 某个频道内的视频列表
@@ -441,14 +442,21 @@ class _TgChannelPageState extends State<TgChannelPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
-                      child: Text(
-                        title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 12.5,
-                          height: 1.3,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => _toggleZh(it),
+                        child: Text(
+                          (it['_zh'] is String &&
+                                  (it['_zh'] as String).isNotEmpty)
+                              ? it['_zh'] as String
+                              : title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 12.5,
+                            height: 1.3,
+                          ),
                         ),
                       ),
                     ),
@@ -465,6 +473,28 @@ class _TgChannelPageState extends State<TgChannelPage> {
         ),
       ),
     );
+  }
+
+  /// 点标题翻译 / 再点还原（外语频道）
+  Future<void> _toggleZh(Map<String, dynamic> it) async {
+    final zh = it['_zh'];
+    if (zh is String && zh.isNotEmpty) {
+      setState(() => it.remove('_zh'));
+      return;
+    }
+    final raw = (it['title'] ?? '').toString();
+    if (!TranslateService.needsTranslation(raw)) {
+      AppToast.message('这条本来就是中文');
+      return;
+    }
+    AppToast.message('翻译中…');
+    try {
+      final t = await TranslateService.instance.toZh(raw);
+      if (!mounted) return;
+      setState(() => it['_zh'] = t);
+    } catch (e) {
+      if (mounted) AppToast.message('翻译失败：$e');
+    }
   }
 
   void _play(Map<String, dynamic> it) {

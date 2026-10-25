@@ -154,6 +154,72 @@ class CfSession {
     return _cache[host.toLowerCase()]?.ua ?? defaultUa;
   }
 
+  /// 探测一次：用已保存的 cookie 请求站点首页，判断通行证还活不活。
+  ///
+  /// 判据（用户 2026-10-25 要求加"测试"）：
+  ///   · HTTP 200 且正文不含挑战特征 ⇒ 有效
+  ///   · HTTP 200 但正文是 "Just a moment..." / challenge-platform ⇒ 被 CF 作废
+  ///   · 403 / 429 / 503 ⇒ 失效，需要重新验证
+  ///   · 其他状态码 ⇒ 站点可达，但不一定是 CF 的问题（如实说明，不误报）
+  Future<({bool ok, String msg})> probe(String host) async {
+    final h = hostOf(host);
+    if (h.isEmpty) return (ok: false, msg: '站点地址不合法');
+    final ck = await cookieHeader(h);
+    if (ck.isEmpty) return (ok: false, msg: '没有已保存的验证信息');
+    final ua = await userAgent(h);
+
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 10)
+      ..userAgent = ua;
+    try {
+      final req = await client
+          .getUrl(Uri.parse('https://$h/'))
+          .timeout(const Duration(seconds: 12));
+      req.headers.set(HttpHeaders.userAgentHeader, ua);
+      req.headers.set(HttpHeaders.cookieHeader, ck);
+      req.headers.set(HttpHeaders.acceptHeader,
+          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8');
+      req.followRedirects = true;
+
+      final res = await req.close().timeout(const Duration(seconds: 15));
+      final code = res.statusCode;
+
+      // 只读前 8KB：足够判断是不是挑战页，又不会把整页拉下来
+      final chunks = <int>[];
+      await for (final c in res) {
+        chunks.addAll(c);
+        if (chunks.length >= 8192) break;
+      }
+      final body = utf8.decode(
+        chunks.length > 8192 ? chunks.sublist(0, 8192) : chunks,
+        allowMalformed: true,
+      );
+      final challenged = body.contains('Just a moment') ||
+          body.contains('cf-challenge') ||
+          body.contains('challenge-platform') ||
+          body.contains('_cf_chl_opt');
+
+      if (code == 403 || code == 429 || code == 503) {
+        return (ok: false, msg: '失效（HTTP $code），需要重新验证');
+      }
+      if (challenged) {
+        return (ok: false, msg: '仍是验证页（通行证已失效）');
+      }
+      if (code >= 200 && code < 400) {
+        return (ok: true, msg: '有效（HTTP $code）');
+      }
+      return (ok: true, msg: '站点可达（HTTP $code），不一定是 CF 问题');
+    } catch (e) {
+      final s = '$e';
+      if (s.contains('Timeout') || s.contains('timed out')) {
+        return (ok: false, msg: '超时：站点不通或被墙');
+      }
+      return (ok: false, msg: '连不上：$s');
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   /// 保存一次用户验证结果
   Future<void> save(
     String host,

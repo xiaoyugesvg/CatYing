@@ -17,6 +17,7 @@ import 'pages/settings/controller.dart' show SettingsController;
 import 'models/subscription.dart';
 import 'services/api_config.dart';
 import 'services/nav_feature_service.dart';
+import 'services/remote_engine.dart';
 import 'services/app_log.dart';
 import 'services/prefs_mirror.dart';
 import 'services/app_state.dart';
@@ -353,6 +354,9 @@ void main() async {
 
   // 首页导航栏功能开关与顺序（设置 → 主页页面）
   await NavFeatureService.instance.load();
+
+  // 远程引擎（默认关）：必须先加载，否则各源服务读不到开关状态
+  await RemoteEngine.instance.load();
 
   // 「程序」模块：重启后把已装程序的 CMS 影视源重新注册进视频源列表
   // （这样不进程序页也能在搜索/首页搜到这些源）

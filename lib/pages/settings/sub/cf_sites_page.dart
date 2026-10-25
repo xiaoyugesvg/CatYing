@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../services/cf_session.dart';
+import '../../../widgets/app_toast.dart';
 import '../../cf_verify_page.dart';
 
 /// 「Cloudflare 站点验证」管理页。
@@ -20,6 +21,12 @@ class _CfSitesPageState extends State<CfSitesPage> {
   List<String> _hosts = const [];
   final Map<String, DateTime?> _times = {};
   bool _loading = true;
+
+  /// 正在测试的站点（显示小转圈）
+  final Set<String> _testing = {};
+
+  /// 每个站点的最近一次测试结论
+  final Map<String, ({bool ok, String msg})> _results = {};
 
   @override
   void initState() {
@@ -112,12 +119,46 @@ class _CfSitesPageState extends State<CfSitesPage> {
     await _reload();
   }
 
+  /// 测一个站点：用已保存的 cookie 真发一次请求
+  Future<void> _test(String h) async {
+    if (_testing.contains(h)) return;
+    setState(() => _testing.add(h));
+    final r = await CfSession.instance.probe(h);
+    if (!mounted) return;
+    setState(() {
+      _testing.remove(h);
+      _results[h] = r;
+    });
+  }
+
+  /// 全部测试（逐个串行，避免瞬时并发把站点打成 429）
+  Future<void> _testAll() async {
+    final hosts = List<String>.from(_hosts);
+    for (final h in hosts) {
+      if (!mounted) return;
+      await _test(h);
+    }
+    if (!mounted) return;
+    final bad = hosts.where((h) => _results[h]?.ok == false).toList();
+    if (bad.isEmpty) {
+      AppToast.message('全部有效（${hosts.length} 个）');
+    } else {
+      AppToast.message('${bad.length} 个已失效：${bad.join('、')}');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Cloudflare 验证'),
         actions: [
+          if (_hosts.isNotEmpty)
+            IconButton(
+              tooltip: '全部测试',
+              onPressed: _testing.isEmpty ? _testAll : null,
+              icon: const Icon(Icons.network_check),
+            ),
           if (_hosts.isNotEmpty)
             IconButton(
               tooltip: '清除全部',
@@ -142,7 +183,8 @@ class _CfSitesPageState extends State<CfSitesPage> {
                     child: Text(
                       '这些站点已经完成过人机验证，之后所有模块（视频源 / 网页 / 图片）'
                       '都会自动复用，不会再反复要求你操作。\n\n'
-                      '如果某个站点又开始 403，说明验证过期，重新验证一次即可。',
+                      '如果某个站点又开始 403，说明验证过期，重新验证一次即可。'
+                      '右上角可以「全部测试」，逐条试一遍还活不活。',
                       style: TextStyle(
                         fontSize: 12.5,
                         height: 1.55,
@@ -167,12 +209,50 @@ class _CfSitesPageState extends State<CfSitesPage> {
                 for (final h in _hosts)
                   Card(
                     child: ListTile(
-                      leading: const Icon(Icons.verified_user_outlined),
+                      leading: Icon(
+                        _results[h] == null
+                            ? Icons.verified_user_outlined
+                            : (_results[h]!.ok
+                                ? Icons.verified_user
+                                : Icons.gpp_bad_outlined),
+                        color: _results[h] == null
+                            ? null
+                            : (_results[h]!.ok ? Colors.green : Colors.orange),
+                      ),
                       title: Text(h),
-                      subtitle: Text(_ago(_times[h])),
+                      subtitle: Text(
+                        _results[h] == null
+                            ? _ago(_times[h])
+                            : '${_results[h]!.msg}\n${_ago(_times[h])}',
+                        style: TextStyle(
+                          color: _results[h] == null
+                              ? null
+                              : (_results[h]!.ok
+                                  ? Colors.green
+                                  : Colors.orange),
+                          fontSize: 12,
+                        ),
+                      ),
+                      isThreeLine: _results[h] != null,
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          if (_testing.contains(h))
+                            const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 12),
+                              child: SizedBox(
+                                width: 16,
+                                height: 16,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                            )
+                          else
+                            IconButton(
+                              tooltip: '测试',
+                              onPressed: () => _test(h),
+                              icon: const Icon(Icons.network_check, size: 19),
+                            ),
                           TextButton(
                             onPressed: () => _verify(h),
                             child: const Text('重新验证'),

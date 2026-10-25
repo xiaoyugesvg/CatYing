@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 import '../../../common/theme.dart';
 import '../../../models/source_bean.dart';
 import '../../../services/api_config.dart';
+import '../../../services/remote_engine.dart';
 import '../../../services/source_kind.dart';
 import '../../subscription/view.dart';
 import '../../subscription/moontv_converter_page.dart';
@@ -42,6 +43,218 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
   SettingsController get controller => Get.isRegistered<SettingsController>()
       ? Get.find<SettingsController>()
       : Get.put(SettingsController());
+
+  // ── 远程引擎（默认关；开才显示这些字段）─────────────────
+  final RemoteEngine _remote = RemoteEngine.instance;
+  final TextEditingController _remoteBaseCtrl = TextEditingController();
+  final TextEditingController _remoteTokenCtrl = TextEditingController();
+  bool _remoteBusy = false;
+  String? _remoteMsg;
+  bool _remoteOk = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _remote.load().then((_) {
+      if (!mounted) return;
+      _remoteBaseCtrl.text = _remote.baseUrl;
+      _remoteTokenCtrl.text = _remote.token;
+      setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _remoteBaseCtrl.dispose();
+    _remoteTokenCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _setRemote({
+    bool? enabled,
+    bool? useTg,
+    bool? usePy,
+    bool? useBook,
+  }) async {
+    await _remote.save(
+      enabled: enabled,
+      baseUrl: _remoteBaseCtrl.text,
+      token: _remoteTokenCtrl.text,
+      useTg: useTg,
+      usePy: usePy,
+      useBook: useBook,
+    );
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _testRemote() async {
+    setState(() {
+      _remoteBusy = true;
+      _remoteMsg = '正在连接…';
+      _remoteOk = false;
+    });
+    // 先落盘地址/Token，再测（测的就是即将使用的那一套）
+    await _remote.save(
+      baseUrl: _remoteBaseCtrl.text,
+      token: _remoteTokenCtrl.text,
+    );
+    final r = await _remote.test();
+    if (!mounted) return;
+    setState(() {
+      _remoteBusy = false;
+      _remoteOk = r.ok;
+      _remoteMsg = r.msg;
+    });
+  }
+
+  // ── 远程引擎卡片（总开关关掉时只显示一行）────────────────
+  Widget _remoteCard() {
+    return AppCard(
+      dense: true,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 10, 10, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.cloud_outlined,
+                    size: 20, color: AppTheme.textSecondary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('远程引擎',
+                          style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.textPrimary)),
+                      const SizedBox(height: 2),
+                      Text('把源脚本放自己服务器跑；不开就一直用本机',
+                          style: TextStyle(
+                              fontSize: 11, color: AppTheme.textTertiary)),
+                    ],
+                  ),
+                ),
+                Switch.adaptive(
+                  value: _remote.enabled,
+                  onChanged: (v) => _setRemote(enabled: v),
+                ),
+              ],
+            ),
+            if (_remote.enabled) ...[
+              const SizedBox(height: 10),
+              _remoteField(_remoteBaseCtrl, '地址', 'http://192.168.1.10:8080'),
+              const SizedBox(height: 8),
+              _remoteField(_remoteTokenCtrl, 'Token（可空）', 'X-Token'),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _remoteBusy ? null : _testRemote,
+                  icon: const Icon(Icons.wifi_tethering, size: 17),
+                  label: Text(_remoteBusy ? '测试中…' : '测试连接'),
+                ),
+              ),
+              if (_remoteMsg != null) ...[
+                const SizedBox(height: 8),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      _remoteOk
+                          ? Icons.check_circle_outline
+                          : Icons.error_outline,
+                      size: 15,
+                      color: _remoteOk ? Colors.green : Colors.orangeAccent,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        _remoteMsg!,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          height: 1.5,
+                          color: _remoteOk
+                              ? AppTheme.textSecondary
+                              : Colors.orangeAccent,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 10),
+              _remoteSwitch('TG', '频道列表与播放都指向服务器', _remote.useTg,
+                  (v) => _setRemote(useTg: v)),
+              _remoteSwitch('书源', 'Legado 规则在服务器上执行', _remote.useBook,
+                  (v) => _setRemote(useBook: v)),
+              _remoteSwitch('py 源', '需服务端带 Python 桥（本版只保存开关）',
+                  _remote.usePy, (v) => _setRemote(usePy: v)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _remoteField(TextEditingController c, String label, String hint) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 2, bottom: 4),
+          child: Text(label,
+              style: TextStyle(fontSize: 10.5, color: AppTheme.textTertiary)),
+        ),
+        Container(
+          decoration: BoxDecoration(
+            color: AppTheme.backgroundTertiary,
+            borderRadius: BorderRadius.circular(11),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          child: TextField(
+            controller: c,
+            style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle:
+                  TextStyle(fontSize: 12, color: AppTheme.textTertiary),
+              border: InputBorder.none,
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(vertical: 11),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _remoteSwitch(
+    String title,
+    String sub,
+    bool value,
+    ValueChanged<bool> onChanged,
+  ) {
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title,
+                  style: TextStyle(fontSize: 13, color: AppTheme.textPrimary)),
+              Text(sub,
+                  style:
+                      TextStyle(fontSize: 10.5, color: AppTheme.textTertiary)),
+            ],
+          ),
+        ),
+        Switch.adaptive(value: value, onChanged: onChanged),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -106,6 +319,8 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
             onTap: () => Get.to(() => const EngineSettingsPage()),
           ),
         ),
+        // 远程引擎：默认关，开了才展开地址/Token/分开关
+        _card(_remoteCard()),
         // Cloudflare 站点验证：用户手动点一次，之后所有模块自动复用
         _card(
           SettingsRow(

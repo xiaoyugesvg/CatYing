@@ -30,6 +30,7 @@ import '../services/chapter_alignment.dart';
 import '../services/reader_font_service.dart';
 import '../services/reader_notes_service.dart';
 import '../services/reader_style_store.dart';
+import '../../services/translate_service.dart';
 import 'reader_styles_page.dart';
 import 'reader_title_styles_page.dart';
 import '../services/srs_style_importer.dart';
@@ -8607,6 +8608,19 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                // 第三行：翻译（走 Google 免 Key 端点，见 TranslateService）
+                Row(
+                  children: [
+                    Expanded(
+                      child: _longPressAction(
+                        Icons.translate_rounded,
+                        '翻译这段',
+                        () => Navigator.pop(ctx, 'translate'),
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -8658,6 +8672,53 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       case 'tts':
         await _tts.speak(text);
         _toast('正在朗读这一段');
+      case 'translate':
+        await _translateParagraph(text);
+    }
+  }
+
+  /// 翻译整段（阅读器长按菜单 →「翻译这段」）
+  ///
+  /// 用 Google 免 Key 端点，不需要在 AI 里配 Key；翻完可一键复制。
+  Future<void> _translateParagraph(String text) async {
+    _toast('翻译中…');
+    try {
+      final zh = await TranslateService.instance.toZh(text);
+      if (!mounted) return;
+      if (zh.trim() == text.trim()) {
+        _toast('这段已经是中文 / 无需翻译');
+        return;
+      }
+      await showDialog(
+        context: context,
+        builder: (c) => AlertDialog(
+          backgroundColor: _bgTop,
+          title: Text('译文',
+              style: TextStyle(fontSize: 15, color: _fg)),
+          content: SingleChildScrollView(
+            child: Text(
+              zh,
+              style: TextStyle(fontSize: 14, height: 1.75, color: _fg),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: zh));
+                if (c.mounted) Navigator.pop(c);
+                _toast('译文已复制');
+              },
+              child: Text('复制', style: TextStyle(color: _fgMuted)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(c),
+              child: Text('关闭', style: TextStyle(color: _fg)),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) _toast('翻译失败：$e');
     }
   }
 

@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'nodejs_manager.dart';
+import 'remote_engine.dart';
 
 /// Telegram 源的 Dart 侧门面
 ///
@@ -28,12 +29,23 @@ class TgService {
 
   /// 内置 Node 的管理端口（0 = 还没起来）
   int get port => NodeJSManager.instance.managementPort;
-  bool get ready => port > 0;
-  String get _base => 'http://127.0.0.1:$port/tg';
+
+  /// 远程引擎基址（总开关 + TG 分开关都开才有值，否则 null = 走本机）
+  String? get _remote => RemoteEngine.instance.baseFor(RemoteKind.tg);
+
+  bool get ready => _remote != null || port > 0;
+
+  String get _base =>
+      _remote != null ? '$_remote/tg' : 'http://127.0.0.1:$port/tg';
 
   /// 相对地址 → 可给播放器/图片组件用的绝对地址
-  String absolute(String rel) =>
-      rel.startsWith('http') ? rel : 'http://127.0.0.1:$port$rel';
+  ///
+  /// 走远程时缩略图/流也指向服务器（同一份契约）；否则回落到本机回环。
+  String absolute(String rel) {
+    if (rel.startsWith('http')) return rel;
+    final r = _remote;
+    return r != null ? '$r$rel' : 'http://127.0.0.1:$port$rel';
+  }
 
   // ── 配置 ─────────────────────────────────────────────────
   String apiId = '';
@@ -113,7 +125,10 @@ class TgService {
       final res = await _dio.post(
         _base,
         data: {'action': action, ...?extra},
-        options: Options(contentType: Headers.jsonContentType),
+        options: Options(
+          contentType: Headers.jsonContentType,
+          headers: _remote != null ? RemoteEngine.instance.headers : null,
+        ),
       );
       final d = res.data;
       if (d is Map) return d.cast<String, dynamic>();
