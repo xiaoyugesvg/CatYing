@@ -32,8 +32,20 @@ class SourceCoverImage extends StatelessWidget {
     this.errorWidget,
   });
 
+  /// 自动降采样宽度：显示宽度 × 屏幕倍率（最多 3 倍），再夹到合理区间。
+  int? _autoCacheWidth(BuildContext context) {
+    final w = width;
+    if (w == null || w <= 0) return null;
+    final dpr = (MediaQuery.maybeDevicePixelRatioOf(context) ?? 2.0)
+        .clamp(1.0, 3.0);
+    return (w * dpr).round().clamp(48, 1600);
+  }
+
   @override
   Widget build(BuildContext context) {
+    // 降采样宽度：调用方没显式传时，按"显示宽度 × 屏幕倍率"自动算
+    // （多解码的像素本来就看不见，只省内存，观感不变）。
+    final cacheW = memCacheWidth ?? _autoCacheWidth(context);
     // 本地路径（绝对路径无 "://"，或 file://）：落地缓存封面走 Image.file
     if (url.startsWith('file://') || !url.contains('://')) {
       final file = File(
@@ -44,7 +56,7 @@ class SourceCoverImage extends StatelessWidget {
         width: width,
         height: height,
         fit: fit,
-        cacheWidth: memCacheWidth,
+        cacheWidth: cacheW,
         frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
           if (wasSynchronouslyLoaded || frame != null) return child;
           return placeholder?.call(context, url) ??
@@ -69,7 +81,7 @@ class SourceCoverImage extends StatelessWidget {
         width: width,
         height: height,
         fit: fit,
-        cacheWidth: memCacheWidth,
+        cacheWidth: cacheW,
         errorBuilder: (context, error, stackTrace) =>
             errorWidget?.call(context, url, error) ??
             Icon(Icons.broken_image, size: 40, color: JellyTheme.textSecondary),
@@ -81,7 +93,7 @@ class SourceCoverImage extends StatelessWidget {
       width: width,
       height: height,
       fit: fit,
-      memCacheWidth: memCacheWidth,
+      memCacheWidth: cacheW,
       placeholder: placeholder,
       errorWidget: (context, url, error) =>
           errorWidget?.call(context, url, error) ??

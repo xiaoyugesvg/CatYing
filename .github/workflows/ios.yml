@@ -382,6 +382,27 @@ jobs:
             python3 -c "import requests, httpx, bs4, flask; from lxml import etree; from Crypto.Cipher import AES; from pyquery import PyQuery; print('✅ requests/httpx/bs4/flask/lxml/Crypto/pyquery 导入 OK')"
           echo "✅ python-home ready"
 
+      - name: Trim python-home (删掉运行时用不到的 stdlib 目录)
+        # 纯体积优化，不影响任何功能：
+        #   test/        Python 自测用例（上千个 .py）
+        #   ensurepip/   自带 pip 安装包（含两个 ~1.5MB 的 whl）
+        #   idlelib/     自带 IDE
+        #   lib2to3/     2→3 代码转换器
+        #   turtledemo/  turtle 示例
+        # ⚠️ 保留 lib-dynload（_ssl/_hashlib 等 C 扩展真在用）与 unittest
+        #    （site-packages 里的库可能 import 它）。
+        run: |
+          set +e
+          ROOT=build/python-home/lib/python3.12
+          if [ ! -d "$ROOT" ]; then echo "跳过：$ROOT 不存在"; exit 0; fi
+          BEFORE=$(du -sm build/python-home | cut -f1)
+          for d in test ensurepip idlelib lib2to3 turtledemo; do
+            rm -rf "$ROOT/$d"
+          done
+          AFTER=$(du -sm build/python-home | cut -f1)
+          echo "python-home: ${BEFORE}MB -> ${AFTER}MB"
+          ls "$ROOT" | head -20
+
       - name: Install ruby + xcodeproj gem
         # 网络步骤：gem install 走 rubygems，卡住会干等到 job 超时（实测 1 秒）
         timeout-minutes: 10

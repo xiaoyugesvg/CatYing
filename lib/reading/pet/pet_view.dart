@@ -81,23 +81,27 @@ class PetView extends StatelessWidget {
     return SizedBox(
       width: size,
       height: size,
-      child: CustomPaint(
-        painter: species.qq
-            ? BlobPetPainter(
-                species: species,
-                outfits: _equipped,
-                t: t,
-                mood: mood,
-                headOnly: headOnly,
-              )
-            : _InkPetPainter(
-                species: species,
-                outfit: outfit,
-                outfits: _equipped,
-                t: t,
-                mood: mood,
-                headOnly: headOnly,
-              ),
+      // 宠物每帧都在呼吸/眨眼，独立成图层后只重绘这一块，
+      // 不会连带周边列表/文字一起重绘（视觉完全一致，纯性能）。
+      child: RepaintBoundary(
+        child: CustomPaint(
+          painter: species.qq
+              ? BlobPetPainter(
+                  species: species,
+                  outfits: _equipped,
+                  t: t,
+                  mood: mood,
+                  headOnly: headOnly,
+                )
+              : _InkPetPainter(
+                  species: species,
+                  outfit: outfit,
+                  outfits: _equipped,
+                  t: t,
+                  mood: mood,
+                  headOnly: headOnly,
+                ),
+        ),
       ),
     );
   }

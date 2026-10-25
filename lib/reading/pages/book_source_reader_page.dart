@@ -5618,9 +5618,36 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 章标题块的固定高度（null = 用默认标题，按文本度量）。
   ///
   /// 用解析器的**离线度量**（TextPainter + 同一套样式/宽度）⇒ 分页与渲染一致。
+  ///
+  /// **带缓存**：翻页/重排时同一章会被反复问高度，而 `TitleHtml.measure`
+  /// 要做完整的 compile + TextPainter 布局，开销不小。
+  /// key 覆盖**所有影响高度的变量**（任一变化即整体失效），所以结果与现算等价。
+  final Map<int, double?> _titleHeightCache = <int, double?>{};
+  String _titleHeightKey = '';
+
+  String _titleHeightSignature() {
+    final w = _dualPageActive ? _viewport.width / 2 : _viewport.width;
+    return '${_fontSize}|${_titleScale}|${_titleGap}|${_padLeft}|${_padRight}'
+        '|${w.toStringAsFixed(1)}|$_dualPageActive|${_fontFamily ?? ''}'
+        '|${_titleFontSize?.toStringAsFixed(1) ?? '-'}'
+        '|${MediaQuery.textScalerOf(context).scale(1.0).toStringAsFixed(3)}'
+        '|${_chapterTitleSource.hashCode}';
+  }
+
   double? _titleHeightFor(int chapter) {
+    final sig = _titleHeightSignature();
+    if (sig != _titleHeightKey) {
+      _titleHeightKey = sig;
+      _titleHeightCache.clear();
+    }
+    if (_titleHeightCache.containsKey(chapter)) {
+      return _titleHeightCache[chapter];
+    }
     final doc = _titleDoc(chapter);
-    if (doc == null) return null;
+    if (doc == null) {
+      _titleHeightCache[chapter] = null;
+      return null;
+    }
     // 双页模式下每页只有半屏宽 ⇒ 度量也必须用半宽（原来用全宽，
     // 标题在并排页里会多折行、高度被低估，底部被 ClipRect 裁掉）
     final pageW = _dualPageActive ? _viewport.width / 2 : _viewport.width;
@@ -5637,7 +5664,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       pxScale: _titlePxScale,
     );
     // 标题再大也不能吃掉半页（否则正文没地方放；分页器会把它挤到下一页）
-    return (h + _titleGap).clamp(0.0, _textAreaHeight * 0.55);
+    final result = (h + _titleGap).clamp(0.0, _textAreaHeight * 0.55);
+    _titleHeightCache[chapter] = result;
+    return result;
   }
 
   /// 渲染某一章的标题。
