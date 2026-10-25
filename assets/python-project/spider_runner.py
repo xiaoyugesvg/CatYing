@@ -17,9 +17,12 @@ spider_runner.py —— Python spider 源适配层标准入口
 
 import importlib
 import json
+import json as _json
 import os
+import os as _os
 import sys
 import traceback
+from urllib.parse import urlparse as _urlparse
 
 # pylib 目录直接挂进 sys.path：源脚本写 `from pyquery import PyQuery` /
 # `from lxml import etree`（不带 pylib 前缀）时，命中 pylib 里的纯 Python 垫片
@@ -54,9 +57,78 @@ try:
 
     _orig_session_request = _requests.sessions.Session.request
 
+    # ---- Cloudflare 会话注入（用户 2026-10-25：验证一次，之后不再重复）----
+    #
+    # 宿主（Dart CfSession）在用户手动通过 CF 人机验证后，把 cookie 落盘到
+    #   ~/Documents/nodejs-project/runtime/cf_cookies.json
+    # 这里在每次请求前读同一份文件，按 host 注入 Cookie + 统一 UA。
+    #
+    # 为什么 UA 也一起注入：`cf_clearance` 与 UA 绑定，requests 默认 UA
+    # (`python-requests/x.y`) 与验证时浏览器不一致 ⇒ 拿到 cookie 也会 403。
+    #
+    # 为什么要缓存 mtime：每次请求都 read+json.load 会很慢（源脚本动辄几十个
+    # 请求）；文件只在用户重新验证时变，用 mtime 判断即可，开销可忽略。
+    _CF_FILE = _os.path.join(
+        _os.path.expanduser('~'), 'Documents',
+        'nodejs-project', 'runtime', 'cf_cookies.json')
+    _CF_STATE = {'mtime': None, 'ua': '', 'hosts': {}}
+
+    def _cf_state():
+        try:
+            st = _os.stat(_CF_FILE)
+        except OSError:
+            if _CF_STATE['mtime'] is not None:
+                _CF_STATE.update({'mtime': None, 'ua': '', 'hosts': {}})
+            return _CF_STATE
+        if st.st_mtime != _CF_STATE['mtime']:
+            try:
+                with open(_CF_FILE, 'r', encoding='utf-8') as f:
+                    data = _json.load(f)
+                hosts = data.get('hosts') or {}
+                _CF_STATE['hosts'] = hosts
+                # 各站 UA 一般相同，取第一个非空值兜底
+                _CF_STATE['ua'] = next(
+                    (v.get('ua') for v in hosts.values() if v.get('ua')), '')
+                _CF_STATE['mtime'] = st.st_mtime
+            except Exception:
+                pass
+        return _CF_STATE
+
+    def _cf_inject(url, kwargs):
+        """按 host 注入 CF cookie + 统一 UA（不改请求其他部分）。"""
+        try:
+            host = _urlparse(url).netloc.lower()
+            if not host:
+                return
+            st = _cf_state()
+            ent = (st['hosts'] or {}).get(host) or {}
+            cookies = ent.get('cookies') or {}
+            ua = ent.get('ua') or st['ua']
+            h = dict(kwargs.get('headers') or {})
+            lower = {k.lower(): k for k in h}
+            # UA：脚本自己设了就尊重（有些源需要特定 UA），否则用验证时的
+            if ua and 'user-agent' not in lower:
+                h['User-Agent'] = ua
+            # Cookie：与脚本自带合并；同名以脚本为准，其余补上 CF 的
+            if cookies:
+                key = lower.get('cookie', 'Cookie')
+                cur = h.get(key, '')
+                parts = [p.strip() for p in cur.split(';') if p.strip()]
+                names = {p.split('=', 1)[0].strip() for p in parts}
+                for k, v in cookies.items():
+                    if k not in names:
+                        parts.append('%s=%s' % (k, v))
+                if parts:
+                    h['Cookie'] = '; '.join(parts)
+            if h:
+                kwargs['headers'] = h
+        except Exception:
+            pass
+
     def _request_with_default_timeout(self, method, url, **kwargs):
         if kwargs.get('timeout') is None:
             kwargs['timeout'] = _PY_DEFAULT_TIMEOUT
+        _cf_inject(url, kwargs)
         return _orig_session_request(self, method, url, **kwargs)
 
     _requests.sessions.Session.request = _request_with_default_timeout

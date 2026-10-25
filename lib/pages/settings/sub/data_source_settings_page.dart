@@ -11,6 +11,7 @@ import '../../../widgets/app_toast.dart';
 import '../../../widgets/common_widgets.dart';
 import '../../../widgets/source_kind_badge.dart';
 import '../controller.dart';
+import 'cf_sites_page.dart';
 import 'engine_settings_page.dart';
 import 'local_python_sources_page.dart';
 import 'parse_settings_page.dart';
@@ -102,6 +103,15 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
             title: '引擎管理',
             value: 'Node / Python',
             onTap: () => Get.to(() => const EngineSettingsPage()),
+          ),
+        ),
+        // Cloudflare 站点验证：用户手动点一次，之后所有模块自动复用
+        _card(
+          SettingsRow(
+            icon: Icons.shield_outlined,
+            title: 'Cloudflare 验证',
+            subtitle: '验证一次后自动复用，不再重复弹窗',
+            onTap: () => Get.to(() => const CfSitesPage()),
           ),
         ),
         // 影视仓转换器：MoonTV / LunaTV 的 video.json → TVBox 站点

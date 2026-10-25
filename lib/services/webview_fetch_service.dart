@@ -23,6 +23,7 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import 'app_log.dart';
+import 'cf_session.dart';
 import '../widgets/video_player_pip.dart';
 
 /// 一次抓页的结果
@@ -223,7 +224,15 @@ class WebViewFetchService {
   }
 
   /// 拼成 `Cookie:` 请求头的值（空 → 空串）
+  ///
+  /// 优先读 [CfSession] 的持久缓存：用户验证过一次的站直接返回，
+  /// **不再启动一次 WebView**（原来每次都现取，慢且会重复触发挑战页）。
   Future<String> cookieHeaderFor(String url) async {
+    final host = CfSession.hostOf(url);
+    if (host.isNotEmpty) {
+      final cached = await CfSession.instance.cookieHeader(host);
+      if (cached.isNotEmpty) return cached;
+    }
     final m = await cookiesFor(url);
     return m.entries.map((e) => '${e.key}=${e.value}').join('; ');
   }
