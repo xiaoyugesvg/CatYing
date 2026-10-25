@@ -183,6 +183,19 @@ const tokenIdx = process.argv.indexOf('--native-token');
 if (tokenIdx !== -1 && process.argv[tokenIdx + 1]) {
     nativeToken = process.argv[tokenIdx + 1];
 }
+
+// ── 远程访问口令（可选）────────────────────────────────────
+// 本机内置 Node 不配 ⇒ 不校验，行为和以前完全一致；
+// 部署到自己的服务器时配上（`--auth-token xxx` 或环境变量
+// CATPAW_TOKEN / NODE_TOKEN），App 里「远程引擎」填同一个 token 即可。
+const authTokenIdx = process.argv.indexOf('--auth-token');
+const authToken = (() => {
+    if (authTokenIdx !== -1 && process.argv[authTokenIdx + 1]) {
+        return String(process.argv[authTokenIdx + 1]).trim();
+    }
+    return String(process.env.CATPAW_TOKEN || process.env.NODE_TOKEN || '').trim();
+})();
+if (authToken) console.log('=== mgmtServer auth enabled (token in use) ===');
 console.log('=== main.js nativeServerPort resolved: ' + nativeServerPort + ' ===');
 
 // token goes in header, never in URL query (queries land in logs)
@@ -471,12 +484,33 @@ const mgmtServer = createServer((req, res) => {
     }
 
     const url = new URL(req.url, `http://127.0.0.1`);
-    // 鉴权已移除：mgmtServer 只监听 127.0.0.1，本机任意进程可调（用户要求）。
-    //
-    // 背景：Dart 侧 NodeJSManager 的 _localHttpDio 会带 x-auth-token，但
-    // IOSNodeJSPlatform 自己那个纯 Dio（用于 /source/loadPath）不带 →
-    // 强制校验会 403 掉自己 App 的源加载请求 → 源 JS 永不加载 →
-    // spider 端口永不出现 → 首页永久空白。移除后两条路径都能通。
+
+    // ── 远程访问口令（可选）─────────────────────────────────
+    // 只在服务端配了 authToken 时生效；本机不配 ⇒ 与以前一样放行。
+    // 两种带法都收：
+    //   · 请求头 `X-Token` —— Dart 的 Dio 请求（`RemoteEngine.headers`）
+    //   · 查询参数 `?token=` —— 播放器 / Image.network 不会带自定义头，
+    //     地址由 Dart 侧 `RemoteEngine.withToken` 拼好
+    // `/check` 免校验：给 Docker healthcheck / 探活用，只返回 run/ready。
+    if (authToken && url.pathname !== '/check') {
+        const given = String(
+            req.headers['x-token'] ||
+            req.headers['x-auth-token'] ||
+            url.searchParams.get('token') ||
+            ''
+        ).trim();
+        if (given !== authToken) {
+            res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: 'unauthorized：需要 X-Token 头或 ?token=' }));
+            return;
+        }
+    }
+
+    // 鉴权说明（历史）：
+    // 本机模式下 mgmtServer 只监听 127.0.0.1，所以不校验 —— 任意本机进程都能调
+    // （用户要求）。曾经加过强制校验，但 IOSNodeJSPlatform 自己那个纯 Dio
+    // 不带 x-auth-token，会把 App 自己的 /source/loadPath 403 掉 → 源永不加载。
+    // 因此**本机一律不校验**；要用 token 就往服务端配 authToken（见上）。
     //
     // 注意：nativeToken 仍用于「本进程 → Dart HTTP server」方向的通知头
     // （见 nativeNotifyHeaders），Dart 侧那条通道仍在做真实校验，不能删。

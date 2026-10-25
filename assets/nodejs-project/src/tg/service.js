@@ -86,6 +86,13 @@ export function configure(cfg = {}) {
     if (id > 0) st.apiId = id;
     if (typeof cfg.apiHash === 'string' && cfg.apiHash.trim()) st.apiHash = cfg.apiHash.trim();
     if (typeof cfg.sessionPath === 'string' && cfg.sessionPath.trim()) st.sessionPath = cfg.sessionPath.trim();
+    // 没给路径（远程引擎 / Docker 部署时 Dart 不会传）→ 落到进程工作目录，
+    // 保证登录态能持久化；本地运行时 Dart 一定会传 Documents 下的路径。
+    if (!st.sessionPath) {
+        try {
+            st.sessionPath = path.join(process.cwd(), '.tg-session.txt');
+        } catch (_) {}
+    }
     if (cfg.proxy !== undefined) {
         const p = cfg.proxy;
         st.proxy = (p && p.host && p.port)

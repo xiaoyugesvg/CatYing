@@ -62,6 +62,23 @@ class RemoteEngine extends ChangeNotifier {
   Map<String, String> get headers =>
       token.trim().isEmpty ? const {} : {'X-Token': token.trim()};
 
+  /// 给「播放器 / 图片组件」这种**不会带自定义请求头**的地址补 token。
+  ///
+  /// 服务端（`CATPAW_TOKEN` / `--auth-token`）同时接受 `X-Token` 头和
+  /// `?token=` 查询参数；Dio 请求走头，AVPlayer / Image.network 只能走查询参数。
+  /// 未启用远程、没填 token、或地址里已有 token 时原样返回。
+  String withToken(String url) {
+    final t = token.trim();
+    if (!enabled || t.isEmpty) return url;
+    final u = Uri.tryParse(url);
+    if (u == null || !u.hasScheme || u.queryParameters.containsKey('token')) {
+      return url;
+    }
+    return u
+        .replace(queryParameters: {...u.queryParameters, 'token': t})
+        .toString();
+  }
+
   Future<void> load() async {
     try {
       final p = await SharedPreferences.getInstance();
@@ -130,6 +147,11 @@ class RemoteEngine extends ChangeNotifier {
         ),
       );
       final body = r.data?.toString() ?? '';
+      // 服务端若开了鉴权，(401/403) 和"协议不匹配"要分开说，
+      // 否则用户会一直以为是自己地址填错了
+      if (r.statusCode == 401 || r.statusCode == 403) {
+        return (ok: false, msg: '鉴权失败（HTTP ${r.statusCode}）：Token 不对或没带上');
+      }
       if (r.statusCode == 200) {
         try {
           final m = jsonDecode(body);

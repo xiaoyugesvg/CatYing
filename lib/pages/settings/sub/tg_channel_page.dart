@@ -53,6 +53,10 @@ class _TgChannelPageState extends State<TgChannelPage> {
   /// 每批条数（用户要求：一次 12 个）
   static const int _pageSize = 12;
 
+  /// 请求是否在飞 + 代次号（不加会重复首批 + 切频道串台，见 `_load`）
+  bool _inflight = false;
+  int _loadGen = 0;
+
   @override
   void initState() {
     super.initState();
@@ -72,8 +76,13 @@ class _TgChannelPageState extends State<TgChannelPage> {
   }
 
   Future<void> _load() async {
-    if (_loading && _items.isNotEmpty) return;
-    if (!_more) return;
+    // ⚠️ 原来用 `if (_loading && _items.isNotEmpty) return;` 当锁：
+    //   空列表时滚动监听（`pixels > maxScrollExtent - 400` 恒成立）会再进来一次
+    //   ⇒ 同 offset 并发两次，首批 24 条重复；且切频道后旧请求回来仍 addAll
+    //   ⇒ 两个频道的内容混在一起。改成「在飞标记 + 代次号」。
+    if (_inflight || !_more) return;
+    _inflight = true;
+    final gen = _loadGen;
     setState(() {
       _loading = true;
       _error = '';
@@ -82,6 +91,8 @@ class _TgChannelPageState extends State<TgChannelPage> {
         ? await _tg.publicList(_peer, offsetId: _offset)
         : await _tg.videos(_peer, offsetId: _offset, limit: _pageSize);
     if (!mounted) return;
+    if (gen != _loadGen) return; // 期间换了频道 / 重新加载 → 丢弃
+    _inflight = false;
     if (r['ok'] == true) {
       var list = (r['items'] as List? ?? const [])
           .whereType<Map>()
@@ -252,6 +263,9 @@ class _TgChannelPageState extends State<TgChannelPage> {
       _more = true;
       _error = '';
     });
+    // 作废旧频道的在飞请求（结果回来会被代次号挡掉），再拉新频道
+    _loadGen++;
+    _inflight = false;
     _load();
   }
 

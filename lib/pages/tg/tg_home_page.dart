@@ -55,6 +55,15 @@ class _TgHomePageState extends State<TgHomePage> {
   String _error = '';
   int _offset = 0;
 
+  /// 请求是否在飞 + 代次号。
+  ///
+  /// ⚠️ 不加这两个会有两个真 bug：
+  ///   1. 空列表时 `pixels > maxScrollExtent - 400` 恒成立 ⇒ 滚动监听在首屏
+  ///      连发两次同 offset 请求，**首批 24 条重复/乱序**；
+  ///   2. 拉取途中切群组，旧请求回来仍 `addAll` 到新群的列表里 ⇒ **串台**。
+  bool _inflight = false;
+  int _loadGen = 0;
+
   Timer? _bannerTimer;
   final PageController _bannerCtrl = PageController(viewportFraction: 0.92);
   int _bannerIndex = 0;
@@ -116,27 +125,37 @@ class _TgHomePageState extends State<TgHomePage> {
   }
 
   Future<void> _reloadItems() async {
+    // 作废在飞的旧请求（结果回来会因代次号不符被丢弃），并把锁放开
+    _loadGen++;
+    _inflight = false;
     _items = [];
     _offset = 0;
     _more = true;
     _error = '';
+    _bannerIndex = 0;
     if (mounted) setState(() => _loading = true);
     if (_peer.isEmpty) {
       if (mounted) setState(() => _loading = false);
       return;
     }
     await _loadMore();
+    // 换了群组 ⇒ 幻灯片回到第一张（否则会停在旧群的页码上跳一下）
+    if (_bannerCtrl.hasClients) _bannerCtrl.jumpToPage(0);
     _startBanner();
   }
 
   Future<void> _loadMore() async {
-    if (_loading && _items.isNotEmpty) return;
-    if (!_more || _peer.isEmpty) return;
+    if (_inflight || !_more || _peer.isEmpty) return;
+    _inflight = true;
+    final gen = _loadGen;
     setState(() => _loading = true);
     final r = _mode == 'public'
         ? await _tg.publicList(_peer, offsetId: _offset)
         : await _tg.videos(_peer, offsetId: _offset, limit: _pageSize);
     if (!mounted) return;
+    // 期间切了群组 / 重新加载 ⇒ 这条结果已经不属于当前列表，直接丢掉
+    if (gen != _loadGen) return;
+    _inflight = false;
     if (r['ok'] == true) {
       var list = (r['items'] as List? ?? const [])
           .whereType<Map>()

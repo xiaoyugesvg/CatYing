@@ -41,10 +41,12 @@ class TgService {
   /// 相对地址 → 可给播放器/图片组件用的绝对地址
   ///
   /// 走远程时缩略图/流也指向服务器（同一份契约）；否则回落到本机回环。
+  /// 远程还要补 `?token=` —— 播放器和 Image.network 不会带 `X-Token` 头。
   String absolute(String rel) {
     if (rel.startsWith('http')) return rel;
     final r = _remote;
-    return r != null ? '$r$rel' : 'http://127.0.0.1:$port$rel';
+    if (r != null) return RemoteEngine.instance.withToken('$r$rel');
+    return 'http://127.0.0.1:$port$rel';
   }
 
   // ── 配置 ─────────────────────────────────────────────────
@@ -97,10 +99,15 @@ class TgService {
     //     交给系统备份反而会把凭据同步出去，所以 Dart 侧刻意不放 Library）
     //   · 文件名固定，Node 负责原子写
     final sessionPath = '${dir.path}/tg/session.txt';
+    // ⚠️ 走远程时**不能**把手机上的这个路径发过去：服务器上没有
+    //    `/var/mobile/.../Documents/tg`，旧实现会让 Node 按这个鬼路径建目录，
+    //    非 root 直接写失败 ⇒ 登录态存不下来，每次重启都得重新扫码。
+    //    不传时 Node 用自己工作目录下的默认路径。
+    final remote = _remote != null;
     return post('tgConfig', {
       'apiId': int.tryParse(apiId) ?? 0,
       'apiHash': apiHash,
-      'sessionPath': sessionPath,
+      if (!remote) 'sessionPath': sessionPath,
       if (proxyHost.isNotEmpty && proxyPort.isNotEmpty)
         'proxy': {
           'host': proxyHost,

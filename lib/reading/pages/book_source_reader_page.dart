@@ -8580,7 +8580,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                // 第二行：对齐 Legado 的选中菜单（复制 / 搜索 / 朗读）
+                // 第二行：对齐 Legado 的选中菜单（复制 / 搜索 / 朗读 / 翻译）
+                //
+                // 「翻译这段」原来单独占一行、还只有一个 Expanded ⇒ 会被拉成
+                // 一整条超宽按钮，和上面三列完全不齐（看着像坏了）。并到这一行。
                 Row(
                   children: [
                     Expanded(
@@ -8602,20 +8605,16 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     Expanded(
                       child: _longPressAction(
                         Icons.headphones_rounded,
-                        '朗读这段',
+                        '朗读',
                         () => Navigator.pop(ctx, 'tts'),
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                // 第三行：翻译（走 Google 免 Key 端点，见 TranslateService）
-                Row(
-                  children: [
+                    const SizedBox(width: 10),
+                    // 走 Google 免 Key 端点，见 TranslateService
                     Expanded(
                       child: _longPressAction(
                         Icons.translate_rounded,
-                        '翻译这段',
+                        '翻译',
                         () => Navigator.pop(ctx, 'translate'),
                       ),
                     ),

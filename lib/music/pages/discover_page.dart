@@ -998,23 +998,16 @@ class _DiscoverPageState extends State<DiscoverPage>
     );
   }
 
-  /// 平台切换胶囊（和搜索页同款）
-  /// 平台切换器 —— **等宽分段胶囊**（对齐 Beans 的 providerPicker）。
+  /// 平台切换器 —— **可横滑的胶囊条**（原来是等宽分段，照 Beans 的 providerPicker）。
   ///
-  /// ── 与旧版的差别（照 Beans 规格抄的）─────────────────────────
-  /// 旧版：一排不定宽的小胶囊，选中项填 `MusicTheme.tint` 纯色。
-  /// Beans：**外层一个大胶囊**，里面各平台**等宽分段**，
-  ///        选中段填**实心胶囊**（Beans 用平台品牌色）。
+  /// ── 配色：**不用平台品牌色**（这是与 Beans 的刻意偏离）──────────
+  /// Beans 给网易云红 / QQ 绿 / 酷狗蓝，那会让"切到 QQ 时整个选择器是绿的、
+  /// 而页面其它地方还是主题色"。用户要求整体外观和主题系统统一，
+  /// 所以统一用 `style.accent`（全局主题主色），靠实心胶囊 + 白字表示选中。
   ///
-  /// ── 🔴 我**故意没用平台品牌色**（这是与 Beans 的唯一偏离）──────
-  /// Beans 给网易云红 / QQ 绿 / 酷狗蓝。但那意味着
-  /// **切到 QQ 时整个选择器是绿的，而页面其它地方还是主题色** ——
-  /// 用户明确要求"整体外观和主题系统统一"，三个品牌色会直接破坏它
-  ///（尤其全局主题换成紫色系时，红/绿/蓝三色并排会很花）。
-  ///
-  /// 所以这里**统一用 `style.accent`（= 全局主题主色）**，
-  /// 靠**等宽分段 + 实心胶囊 + 白字**来体现"选中"，
-  /// 不引入任何写死的色值。
+  /// ── 布局：2026-10-25 改成可横滑 ──────────────────────────────
+  /// 分类从 7 个涨到 10 个（加汽水/咪咕/B站）后，等宽分段在 375dp 上每个只剩
+  /// ~34dp，字挤在一起 ⇒ 改成**固定宽度 62 + 横向滚动**，不再均分屏宽。
   Widget _sourceTabs(DiscoverStyle style) {
     final tabs = const [
       _SourceTab(source: SongSource.netease, label: '网易'),
@@ -1026,7 +1019,6 @@ class _DiscoverPageState extends State<DiscoverPage>
     ];
     final isPaper = style.preset == DiscoverPreset.paper;
     return Padding(
-      // 10 个分类（推荐 + 6 平台 + 汽水/咪咕/B站）→ 左右留白收一点，保证都放得下
       padding: const EdgeInsets.fromLTRB(14, 4, 14, 12),
       child: Container(
         padding: const EdgeInsets.all(4),
@@ -1041,47 +1033,52 @@ class _DiscoverPageState extends State<DiscoverPage>
             width: 0.8,
           ),
         ),
-        child: Row(
-          children: [
-            // 「推荐」（2026-10-21）：内容是已启用插件的榜单/歌单
-            //   长按 → 中间弹窗切换插件源（原来顶部那个胶囊已去掉）
-            _sourceChip(
-              style: style,
-              label: '推荐',
-              selected: _tabMode == 'recommend',
-              onTap: _openRecommendTab,
-              onLongPress: _openRecommendSourcePicker,
-            ),
-            for (final t in tabs) ...[
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          // 胶囊条本身要吃掉多余的高度，避免带动整个头部跳动
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 「推荐」（2026-10-21）：内容是已启用插件的榜单/歌单
+              //   长按 → 中间弹窗切换插件源（原来顶部那个胶囊已去掉）
               _sourceChip(
                 style: style,
-                label: t.label,
-                selected: _tabMode == 'source' && _source == t.source,
-                onTap: () => _switchSource(t.source),
+                label: '推荐',
+                selected: _tabMode == 'recommend',
+                onTap: _openRecommendTab,
+                onLongPress: _openRecommendSourcePicker,
               ),
-              // 「汽水 / 咪咕 / B站」紧挨着酷狗（同为在线音乐平台，内容来自各自插件）
-              if (t.source == SongSource.kugou) ...[
+              for (final t in tabs) ...[
                 _sourceChip(
                   style: style,
-                  label: '汽水',
-                  selected: _tabMode == 'soda',
-                  onTap: () => _openPluginTab('soda'),
+                  label: t.label,
+                  selected: _tabMode == 'source' && _source == t.source,
+                  onTap: () => _switchSource(t.source),
                 ),
-                _sourceChip(
-                  style: style,
-                  label: '咪咕',
-                  selected: _tabMode == 'migu',
-                  onTap: () => _openPluginTab('migu'),
-                ),
-                _sourceChip(
-                  style: style,
-                  label: 'B站',
-                  selected: _tabMode == 'bili',
-                  onTap: () => _openPluginTab('bili'),
-                ),
+                // 「汽水 / 咪咕 / B站」紧挨着酷狗（同为在线音乐平台，内容来自各自插件）
+                if (t.source == SongSource.kugou) ...[
+                  _sourceChip(
+                    style: style,
+                    label: '汽水',
+                    selected: _tabMode == 'soda',
+                    onTap: () => _openPluginTab('soda'),
+                  ),
+                  _sourceChip(
+                    style: style,
+                    label: '咪咕',
+                    selected: _tabMode == 'migu',
+                    onTap: () => _openPluginTab('migu'),
+                  ),
+                  _sourceChip(
+                    style: style,
+                    label: 'B站',
+                    selected: _tabMode == 'bili',
+                    onTap: () => _openPluginTab('bili'),
+                  ),
+                ],
               ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -1094,41 +1091,41 @@ class _DiscoverPageState extends State<DiscoverPage>
     required VoidCallback onTap,
     VoidCallback? onLongPress,
   }) {
-    return Expanded(
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onTap,
-        onLongPress: onLongPress,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
-          alignment: Alignment.center,
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          decoration: BoxDecoration(
-            // 选中 = 实心主题色胶囊；未选 = 透明
-            color: selected ? style.accent : Colors.transparent,
-            borderRadius: BorderRadius.circular(999),
-            // 选中胶囊给一点柔和投影，层级更清楚（不引入新色值）
-            boxShadow: selected
-                ? [
-                    BoxShadow(
-                      color: style.accent.withValues(alpha: 0.28),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ]
-                : null,
-          ),
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: selected ? Colors.white : style.secondary,
-              fontSize: AppTheme.fontSubhead,
-              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-            ),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      onLongPress: onLongPress,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        alignment: Alignment.center,
+        // 固定宽度（不再均分屏宽）：10 个分类横向滚动，字距才不会挤
+        width: 62,
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(
+          // 选中 = 实心主题色胶囊；未选 = 透明
+          color: selected ? style.accent : Colors.transparent,
+          borderRadius: BorderRadius.circular(999),
+          // 选中胶囊给一点柔和投影，层级更清楚（不引入新色值）
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                    color: style.accent.withValues(alpha: 0.28),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : null,
+        ),
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: selected ? Colors.white : style.secondary,
+            fontSize: AppTheme.fontSubhead,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
           ),
         ),
       ),
