@@ -71,6 +71,7 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                   ),
                 ),
                 for (final t in [
+                  'edge',
                   'network',
                   'azure',
                   'mimo',
@@ -345,7 +346,7 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                               fontWeight: FontWeight.w600,
                               color: label)),
                       const Spacer(),
-                      Text('网络导入 / Azure / OpenAI / EasyVoice',
+                      Text('Edge 内置 / 网络导入 / Azure / EasyVoice',
                           style: TextStyle(
                               fontSize: AppTheme.fontFootnote,
                               color: JellyTheme.textSecondary)),

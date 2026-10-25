@@ -3,9 +3,11 @@ import '../source/global_proxy.dart';
 import 'package:flutter/material.dart';
 
 import '../models/tts_source.dart';
+import '../services/tts_service.dart';
 import '../services/tts_source_store.dart';
 import '../theme/jelly_theme.dart';
 import '../../common/theme.dart';
+import '../../services/nodejs_manager.dart';
 
 /// 添加 / 编辑朗读源（截图 IMG_8102~8110）。
 ///
@@ -125,13 +127,44 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
     }
     if (_apiKey.text.trim().isEmpty &&
         _s.type != 'easyvoice' &&
-        _s.type != 'http') {
+        _s.type != 'http' &&
+        _s.type != 'edge') {
       problems.add('API Key 没填');
     }
     if (problems.isNotEmpty) {
       setState(() {
         _testResult = '还差这些：\n· ${problems.join('\n· ')}';
       });
+      return;
+    }
+
+    // edge：打本机 Node 的 /tts/edge，真合成一句并校验 mp3 魔数
+    if (_s.type == 'edge') {
+      setState(() {
+        _busy = true;
+        _testResult = '正在请求内置合成…';
+      });
+      try {
+        final bytes = await _requestEdge('这是一个测试。');
+        final okMagic = bytes.length > 4 &&
+            ((bytes[0] == 0x49 && bytes[1] == 0x44 && bytes[2] == 0x33) ||
+                (bytes[0] == 0xFF && (bytes[1] & 0xE0) == 0xE0));
+        if (!mounted) return;
+        setState(() {
+          _busy = false;
+          _testResult = okMagic
+              ? '连通：返回 ${(bytes.length / 1024).toStringAsFixed(0)} KB mp3，'
+                  '音色 ${_voice.text.trim()}。'
+              : '返回了内容但不是音频（${bytes.length} 字节）。'
+                  '多半是没联网，或微软接口暂时不可达。';
+        });
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _busy = false;
+          _testResult = '请求失败：$e\n\n检查：手机是否能上网（国内网络可能需要代理）。';
+        });
+      }
       return;
     }
 
@@ -175,11 +208,40 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
     });
   }
 
+  /// 内置 Edge 合成：打本机 Node 的 `/tts/edge`（不走全局代理）
+  Future<List<int>> _requestEdge(String text) async {
+    final port = NodeJSManager.instance.managementPort;
+    if (port <= 0) throw '内置服务未就绪（Node 还没起来）';
+    final uri = Uri.parse('http://127.0.0.1:$port/tts/edge').replace(
+      queryParameters: {
+        'text': text,
+        'voice': _voice.text.trim().isEmpty
+            ? 'zh-CN-XiaoxiaoNeural'
+            : _voice.text.trim(),
+      },
+    );
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 25),
+        responseType: ResponseType.bytes,
+        validateStatus: (c) => c != null && c < 400,
+      ),
+    );
+    try {
+      final r = await dio.get<List<int>>(uri.toString());
+      return r.data ?? const [];
+    } finally {
+      dio.close(force: true);
+    }
+  }
+
   /// EasyVoice 合成：POST /api/v1/tts/generateJson → mp3 字节。
   /// 返回 null 表示响应为空。
   Future<List<int>?> _requestEasyVoice(String text,
       {int? timeoutSec}) async {
-    final base = _endpoint.text.trim().replaceAll(RegExp(r'/+$'), '');
+    // 与运行时同一套归一化：填 ip:3000 / …/api/v1 / …/api/v1/tts 都行
+    final base = TtsService.easyVoiceBase(_endpoint.text);
     final dio = Dio(BaseOptions(
       connectTimeout: const Duration(seconds: 8),
       receiveTimeout: Duration(seconds: timeoutSec ?? 20),
@@ -255,8 +317,10 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
                   '服务返回音频字节即可（mp3/wav），对齐 legado 的 httpTTS。'),
             ] else if (_s.type == 'easyvoice') ...[
               _row('接口地址', _endpoint,
-                  hint: 'http://ip:3000（自部署）或公共实例地址'),
+                  hint: 'http://ip:3000（带不带 /api/v1 都行）'),
               _row('音色', _voice, hint: 'zh-CN-XiaoxiaoNeural'),
+            ] else if (_s.type == 'edge') ...[
+              // 内置：不需要任何地址 / Key
             ] else ...[
               _row('接口地址', _endpoint,
                   hint: _s.type == 'mimo'
@@ -265,7 +329,11 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
               _row('模型 ID', _modelId,
                   hint: _s.type == 'mimo' ? 'mimo-v2.5-tts' : '如 tts-1'),
             ],
-            if (_s.type == 'easyvoice')
+            if (_s.type == 'edge')
+              _note('内置 Edge 朗读：合成走 App 自带的 Node 服务直连微软朗读接口，'
+                  '不用填地址、不要 Key。⚠️ 这条链路**不走 App 的代理设置**：'
+                  '如果必须挂代理才能连微软，请改用 EasyVoice 类型。')
+            else if (_s.type == 'easyvoice')
               _note('EasyVoice 是免费的 Edge-TTS 服务，无需 API Key。'
                   '自部署：docker run -d -p 3000:3000 cosincox/easyvoice:latest。'
                   '保存后自动设为「当前使用」，朗读面板点播放即走本源。')
@@ -322,6 +390,14 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
                   'model/input/voice/speed/response_format）。若某家服务返回 404，'
                   '多半是它并不提供这个接口 —— 小米 MiMo 就属于这种，'
                   '请改用「小米 MiMo」类型。'),
+            ])
+          else if (_s.type == 'edge')
+            _card(isDark, '音色', [
+              _row('音色', _voice, hint: 'zh-CN-XiaoxiaoNeural'),
+              _action('常用音色'),
+              _note('音色表随 App 内置：晓晓 / 晓伊 / 云希 / 云健 / 云扬 / '
+                  '东北话 / 陕西话 / 粤语 / 台湾腔。朗读面板的语速、音调滑杆'
+                  '会映射成请求里的 rate / pitch。'),
             ])
           else if (_s.type == 'easyvoice')
             _card(isDark, '音色', [
@@ -610,6 +686,14 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
     final type = _s.type;
     if (type == 'easyvoice') {
       await _pullEasyVoiceVoices();
+    } else if (type == 'edge') {
+      await _pickVoice([
+        'zh-CN-XiaoxiaoNeural', 'zh-CN-XiaoyiNeural',
+        'zh-CN-YunxiNeural', 'zh-CN-YunjianNeural',
+        'zh-CN-YunyangNeural', 'zh-CN-YunxiaNeural',
+        'zh-CN-liaoning-XiaobeiNeural', 'zh-CN-shaanxi-XiaoniNeural',
+        'zh-HK-HiuMaanNeural', 'zh-TW-HsiaoChenNeural',
+      ], '内置音色（也可手填）');
     } else if (type == 'openai') {
       await _pickVoice([
         'alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer',
@@ -627,10 +711,10 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
     }
   }
 
-  /// easyvoice：GET {base}/api/v1/voiceList（失败依次试 /api/v1/voices、
-  /// /api/voices），解析 {code,data:[{Name,...}],success} 结构。
+  /// easyvoice：GET {base}/api/v1/tts/voiceList（老版本再试 /api/v1/voiceList、
+  /// /api/v1/voices），解析 {code,data:[{Name,...}],success} 结构。
   Future<void> _pullEasyVoiceVoices() async {
-    final base = _endpoint.text.trim().replaceAll(RegExp(r'/+$'), '');
+    final base = TtsService.easyVoiceBase(_endpoint.text);
     if (base.isEmpty) {
       _toast('先填接口地址');
       return;
@@ -646,7 +730,12 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
       //   ℹ️ 安全依据 ✓：同样是**纯构造** ✗✓（无自定义适配器 / UA ✓）→ 直接挂安全 ✓
       applyGlobalProxy(dio);
       List<String> names = [];
-      for (final path in ['/api/v1/voiceList', '/api/v1/voices', '/api/voices']) {
+      for (final path in [
+        '/api/v1/tts/voiceList',
+        '/api/v1/voiceList',
+        '/api/v1/tts/voices',
+        '/api/v1/voices',
+      ]) {
         try {
           final r = await dio.get<dynamic>('$base$path');
           final data = r.data;

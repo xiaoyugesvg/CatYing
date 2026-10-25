@@ -22,11 +22,17 @@ import { TelegramClient, Api } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 import { ConnectionTCPFull } from 'telegram/network/index.js';
 import QRCode from 'qrcode';
+import { looksLikeAd } from './public.js';
 
 // ── 全局状态 ────────────────────────────────────────────────
+// 内置应用凭据（Telegram Desktop 公开的一组）：Dart 侧没推配置时也能直接扫码，
+// 免得"没进过设置页 ⇒ 提示未配置"。
+const DEFAULT_API_ID = 2040;
+const DEFAULT_API_HASH = 'b18441a1ff607e10a989891a5462e627';
+
 const st = {
-    apiId: 0,
-    apiHash: '',
+    apiId: DEFAULT_API_ID,
+    apiHash: DEFAULT_API_HASH,
     proxy: null,
     sessionPath: '',
     client: null,
@@ -165,6 +171,9 @@ function buildClient() {
         systemVersion: 'iOS',
         appVersion: '1.0.0',
         langCode: 'zh',
+        // 播放器经常一次发多个 Range 请求，容易撞 FLOOD_WAIT。
+        // 让 gramjs 自己等（60s 以内），而不是直接把 404 甩给播放器（那就是转圈）。
+        floodSleepThreshold: 60,
     };
     if (st.proxy) opts.proxy = st.proxy;
     return new TelegramClient(session, st.apiId, st.apiHash, opts);
@@ -177,7 +186,7 @@ const CONNECT_TIMEOUT = 25000;
 export async function ensureConnected() {
     if (!st.apiId || !st.apiHash) {
         const e = new Error('未配置 api_id / api_hash');
-        e.friendly = '请先填写 api_id / api_hash（my.telegram.org 免费申请）';
+        e.friendly = '应用凭据缺失（内置凭据异常，去高级设置里填一组）';
         throw e;
     }
     if (st.client && st.client.connected) return st.client;
@@ -459,8 +468,9 @@ function toItem(msg, doc) {
  * 拉取频道内视频列表（按消息从新到旧）
  * @param {string} peer  频道：@username / -100xxx / https://t.me/xxx
  * @param {number} offsetId 上一页最后一条消息 id（首页传 0）
+ * @param {number} depth 内部用：整页都被过滤时自动往后翻的次数（最多 3 次）
  */
-export async function videos(peer, offsetId = 0, limit = 30) {
+export async function videos(peer, offsetId = 0, limit = 30, depth = 0) {
     try {
         if (!peer) return { ok: false, error: '缺少 peer（频道地址或 ID）', items: [], next: 0 };
         const c = await ensureConnected();
@@ -476,20 +486,28 @@ export async function videos(peer, offsetId = 0, limit = 30) {
             hash: 0,
         }));
         const items = [];
-        let lastId = 0;
+        let minId = 0;
         for (const m of (res.messages || [])) {
             if (m.className !== 'Message') continue;
+            // 游标按**全部**消息记：整页都是广告时也要能继续往下翻
+            if (!minId || m.id < minId) minId = m.id;
             const media = m.media;
             if (!(media instanceof Api.MessageMediaDocument)) continue;
             const doc = media.document;
             if (!isPlayable(doc)) continue;
-            items.push(toItem(m, doc));
-            lastId = Math.min(lastId || m.id, m.id);
+            const item = toItem(m, doc);
+            // 标题带广告词的一律不要（与公开频道同一套规则）
+            if (looksLikeAd(item.title) || looksLikeAd(item.fileName)) continue;
+            items.push(item);
+        }
+        // 整页都被过滤，但可能还有更早的视频 ⇒ 自动再往后翻
+        if (items.length === 0 && minId > 0 && depth < 3) {
+            return videos(peer, minId, limit, depth + 1);
         }
         return {
             ok: true,
             items,
-            next: items.length >= 1 ? lastId : 0,   // 传给下一页
+            next: items.length > 0 ? minId : 0,   // 传给下一页
             total: res.count || 0,
         };
     } catch (e) {
@@ -523,7 +541,9 @@ async function getDoc(peer, id, force = false) {
     if (!(media instanceof Api.MessageMediaDocument)) throw new Error('该消息不是文件');
     const doc = media.document;
     if (!doc || doc.className !== 'Document') throw new Error('文件已被删除');
-    msgCache.set(key, { doc, ts: now() });
+    // 顺手把 msg 一起缓存：封面接口要用（原来只存 doc，`hit.msg` 永远是 undefined
+    // ⇒ 每张封面都重新 getMessages 一次，列表一屏就是十几个多余 RPC）
+    msgCache.set(key, { doc, msg: m, ts: now() });
     return doc;
 }
 
@@ -580,35 +600,70 @@ export async function streamTo(req, res, peer, id, fileName) {
         headers['Content-Length'] = String(len);
         if (partial) headers['Content-Range'] = `bytes ${start}-${end}/${size}`;
     }
-    res.writeHead(partial ? 206 : 200, headers);
+    if (req.method === 'HEAD') {
+        res.writeHead(partial ? 206 : 200, headers);
+        res.end();
+        return;
+    }
 
-    if (req.method === 'HEAD') { res.end(); return; }
-
+    // ⚠️ 先抓到第一块再写响应头。
+    //   否则「FLOOD_WAIT / 无权访问 / 文件被删」这类错误是在 **200 已发出之后**
+    //   才发生的 ⇒ 播放器收到一个 Content-Length 正常的空响应，然后一直转圈。
+    //   先抓一块，失败就返回 502 + 错误 JSON，播放器立刻能报错。
+    let it;
+    let first = null;
     try {
-        // gramjs 的 iterDownload 支持 offset，但一次只吐 chunkSize；
-        // 我们按需累加，凑够 len 就停（不把整个文件读进内存）。
-        const it = st.client.iterDownload({
+        it = st.client.iterDownload({
             file: doc,
             offset: start,
             requestSize: 256 * 1024,
             chunkSize: 256 * 1024,
             fileSize: size || undefined,
         });
-        let sent = 0;
-        let closed = false;
-        res.on('close', () => { closed = true; });
-        for await (const chunk of it) {
-            if (closed) break;
+        // 手动 next()：`for await` 里 break 会 close 掉生成器，后面就没得读了
+        while (true) {
+            const r = await it.next();
+            if (r.done) break;
+            if (r.value && r.value.length) {
+                first = r.value;
+                break;
+            }
+        }
+    } catch (e) {
+        logErr('stream.first', e);
+        res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: friendly(e) }));
+        return;
+    }
+    if (!first) {
+        res.writeHead(200, headers);
+        res.end();
+        return;
+    }
+
+    res.writeHead(partial ? 206 : 200, headers);
+    let sent = 0;
+    let closed = false;
+    res.on('close', () => { closed = true; });
+    try {
+        const head = len > 0 && first.length > len ? first.subarray(0, len) : first;
+        res.write(head);
+        sent += head.length;
+        // gramjs 的 iterDownload 支持 offset，但一次只吐 chunkSize；
+        // 我们按需累加，凑够 len 就停（不把整个文件读进内存）。
+        while (!closed && !(len > 0 && sent >= len)) {
+            const r = await it.next();
+            if (r.done) break;
+            const chunk = r.value;
             if (!chunk || !chunk.length) continue;
             const take = len > 0 ? Math.min(chunk.length, len - sent) : chunk.length;
             if (take <= 0) break;
             const buf = take === chunk.length ? chunk : chunk.subarray(0, take);
             const okWrite = res.write(buf);
             sent += take;
-            if (len > 0 && sent >= len) break;
             if (!okWrite) {
                 // 背压：等 drain，避免内存暴涨
-                await new Promise((r) => res.once('drain', r));
+                await new Promise((r2) => res.once('drain', r2));
             }
         }
         res.end();
@@ -624,12 +679,15 @@ export async function thumbTo(res, peer, id) {
         let doc = null;
         let msg = null;
         const hit = msgCache.get(`${peer}|${id}`);
+        // ⚠️ 只用缓存里的 msg，别拿 hit.doc —— 那是**完整视频**文档，
+        //   一旦走到 downloadMedia 就会把整个视频拉下来当封面。
         if (hit) msg = hit.msg;
         if (!msg) {
             const c = await ensureConnected();
             const entity = await c.getInputEntity(normalizePeer(peer));
             const arr = await c.getMessages(entity, { ids: [parseInt(String(id), 10)] });
             msg = arr && arr[0];
+            if (msg) msgCache.set(`${peer}|${id}`, { doc: hit ? hit.doc : null, msg, ts: now() });
         }
         if (msg && msg.media instanceof Api.MessageMediaDocument) {
             const d = msg.media.document;
@@ -638,7 +696,8 @@ export async function thumbTo(res, peer, id) {
         if (!doc) {
             res.writeHead(404); res.end(); return;
         }
-        const buf = await st.client.downloadMedia(doc, {});
+        const c2 = await ensureConnected();
+        const buf = await c2.downloadMedia(doc, {});
         if (!buf || !buf.length) { res.writeHead(404); res.end(); return; }
         res.writeHead(200, {
             'Content-Type': 'image/jpeg',

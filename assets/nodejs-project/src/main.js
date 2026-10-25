@@ -967,6 +967,27 @@ const mgmtServer = createServer((req, res) => {
         return;
     }
 
+    // ── 内置语音合成（Edge-TTS）────────────────────────────────
+    //
+    // GET /tts/edge?text=&voice=&rate=&pitch=  → audio/mpeg
+    //
+    // 惰性加载：只有真正朗读时才求值，启动路径零风险。
+    if (url.pathname === '/tts/edge') {
+        (async () => {
+            try {
+                const tts = await import('./tts/edge.js');
+                await tts.handle(req, res, url);
+            } catch (e) {
+                console.error('[tts] load fail:', (e && e.stack) || e);
+                try {
+                    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+                    res.end(JSON.stringify({ ok: false, error: '朗读模块加载失败：' + ((e && e.message) || String(e)) }));
+                } catch (_) {}
+            }
+        })();
+        return;
+    }
+
     // ── Telegram 源（MTProto / gramjs）────────────────────────
     //
     // /tg          POST { action }  → JSON（配置 / 扫码登录 / 列表）

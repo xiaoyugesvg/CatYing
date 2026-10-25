@@ -27,11 +27,14 @@ import '../novel_source/novel_chinese_converter.dart';
 import '../services/book_paginator.dart';
 import '../services/book_source_service.dart';
 import '../services/chapter_alignment.dart';
+import '../services/chapter_text_cache.dart';
 import '../services/reader_font_service.dart';
 import '../services/reader_notes_service.dart';
 import '../services/reader_style_store.dart';
 import '../../services/translate_service.dart';
+import '../../services/file_export_service.dart';
 import 'reader_styles_page.dart';
+import 'webview_page.dart';
 import 'reader_title_styles_page.dart';
 import '../services/srs_style_importer.dart';
 import '../services/title_html_parser.dart';
@@ -577,6 +580,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   /// 本章书签：段落下标 → 颜色
   final Map<int, Color> _bookmarks = {};
+
+  /// 书签备注：段落下标 → 备注文字（用户 2026-10-25：加书签要能写备注，
+  /// 默认填「章节名 + 正文片段」）。与颜色分开存，老存档照样能读。
+  final Map<int, String> _bookmarkNotes = {};
 
   /// `_bookmarks` 当前反映的章节下标（-1 = 尚未加载）。
   /// 修复「书签串章」：`_go` / `_jumpTo` / 目录跳转都是**先** `_index = next`
@@ -1226,6 +1233,42 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 避免"整本只存一份、重进时把上次那章的书签装到当前章"的串章。
   String _bookmarksKey(int chapter) => 'bsr.bookmarks.$_progressKey.$chapter';
 
+  /// 书签备注的存储键（同样按章存）
+  String _bookmarkNotesKey(int chapter) =>
+      'bsr.bookmarknotes.$_progressKey.$chapter';
+
+  /// 解析书签备注 JSON（`{段落下标: 备注}`）
+  Map<int, String> _decodeNotes(String? raw) {
+    final m = <int, String>{};
+    if (raw == null || raw.isEmpty) return m;
+    try {
+      final d = jsonDecode(raw);
+      if (d is Map) {
+        d.forEach((k, v) {
+          final idx = int.tryParse('$k');
+          if (idx != null) m[idx] = '$v';
+        });
+      }
+    } catch (_) {}
+    return m;
+  }
+
+  /// 书签的默认备注：章节名 + 该段正文前 30 字（Legado 同款）
+  String _defaultBookmarkNote(int paraIndex) {
+    final title = (widget.chapters.isEmpty ||
+            _index < 0 ||
+            _index >= widget.chapters.length)
+        ? ''
+        : widget.chapters[_index].name;
+    final body = (paraIndex >= 0 && paraIndex < _paragraphs.length)
+        ? _paragraphs[paraIndex]
+        : '';
+    final snippet = body.length > 30 ? '${body.substring(0, 30)}…' : body;
+    if (title.isEmpty) return snippet;
+    if (snippet.isEmpty) return title;
+    return '$title\n$snippet';
+  }
+
   /// ✅ **「独立排版」的身份键**（本会话新增 ✓）—— 与**进度 / 书签 / 笔记**用**同一个身份** ✓
   /// （`source.id` + `bookName` ✓）⇒ 用户视角"同一本书"处处一致 ✓（不会出现"进度算一本、排版算另一本"✗）
   String get _indepKey => '${widget.source.id}.${widget.bookName}';
@@ -1315,7 +1358,23 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       // 自定义字体：把 family 注册到引擎（分页度量必须用同一个 family）
       await ReaderFontService.instance.load();
       final fontId = p.getString('reading.fontId');
-      final fontFamily = await ReaderFontService.instance.familyOf(fontId);
+      // ⚠️ 只做**同步**查询：打开一本书不该卡在一个 10MB 的字体下载上。
+      //   已下载过的字体启动时 `load()` 已注册，这里直接命中；
+      //   没装过的（缓存被清过）后台补装完再重排，不影响正文先出来。
+      final fontFamily = ReaderFontService.instance.familyOfSync(fontId);
+      if (fontFamily == null &&
+          fontId != null &&
+          ReaderFontService.catalogById(fontId) != null) {
+        unawaited(() async {
+          final fam = await ReaderFontService.instance.familyOf(fontId);
+          if (!mounted || fam == null) return;
+          setState(() {
+            _fontId = fontId;
+            _fontFamily = fam;
+          });
+          _scheduleRepaginate();
+        }());
+      }
       if (!mounted) return;
       _myStyles = myStyles;
       _activeStyleId = activeStyle;
@@ -1399,6 +1458,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             }
           } catch (_) {}
         }
+        // 书签备注（老存档没有这个键 ⇒ 空表，不影响颜色）
+        _bookmarkNotes
+          ..clear()
+          ..addAll(_decodeNotes(p.getString(_bookmarkNotesKey(bmIdx))));
+        // 本书净化开关：没存过 = 关（老用户升级后突然被净化会以为正文坏了）
+        _purifyOn = p.getBool(_purifyKey) ?? false;
         // ✅ 第 4 轮 ✓：这 5 项也**覆盖优先、逐项回退全局** ✓（与上面 3 项同一写法 ✓）
         final uc =
             (ov?['underlineColor'] as num?)?.toInt() ??
@@ -1662,8 +1727,19 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           _bookmarksKey(_bookmarksChapter),
           jsonEncode(_bookmarks.map((k, v) => MapEntry('$k', v.toARGB32()))),
         );
+        // 备注跟着书签一起落盘（同一个"所属章节"窗口内）
+        if (_bookmarkNotes.isEmpty) {
+          await p.remove(_bookmarkNotesKey(_bookmarksChapter));
+        } else {
+          await p.setString(
+            _bookmarkNotesKey(_bookmarksChapter),
+            jsonEncode(_bookmarkNotes.map((k, v) => MapEntry('$k', v))),
+          );
+        }
       }
       await p.setBool('reading.hideRepeatTitle', _hideRepeatTitle);
+      // 本书净化开关（默认关，按书单独记）
+      await p.setBool(_purifyKey, _purifyOn);
       await p.setString('reading.chapterTitleStyle', _chapterTitleStyle.id);
       await p.setString('reading.chapterTitleHtml', _chapterTitleHtml);
       await p.setString(
@@ -1737,11 +1813,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     if (!mounted) return;
     setState(() {
       _bookmarks.clear();
+      _bookmarkNotes.clear();
       _bookmarksChapter = -1;
     });
-    final raw = (await SharedPreferences.getInstance()).getString(
-      _bookmarksKey(chapter),
-    );
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_bookmarksKey(chapter));
+    final notesRaw = prefs.getString(_bookmarkNotesKey(chapter));
     final m = <int, Color>{};
     if (raw != null && raw.isNotEmpty) {
       try {
@@ -1759,6 +1836,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       _bookmarks
         ..clear()
         ..addAll(m);
+      _bookmarkNotes
+        ..clear()
+        ..addAll(_decodeNotes(notesRaw));
       _bookmarksChapter = chapter;
     });
   }
@@ -1769,7 +1849,45 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 用来丢弃**过期响应** ✓ —— 见 [_loadChapter] 里 await 之后的校验 ✓
   int _loadSeq = 0;
 
-  Future<void> _loadChapter(int i, {bool prefetchOnly = false}) async {
+  /// 正文加载：先看**磁盘**缓存（10 分钟），命中就不再打网络。
+  ///
+  /// 内存里 `_cache` 只活一个进程，杀进程后再点开书架要重新抓正文
+  /// （用户 2026-10-25：「点开那么慢，一点都不缓存吗」）。
+  /// 只缓存**纯文字章**：带图的章图片 URL 会过期，缓存下来反而更糟。
+  /// [force] = 刷新本章：先删缓存再抓。
+  Future<
+      ({
+        bool ok,
+        String? error,
+        String content,
+        List<String> images,
+        Map<String, String> headers,
+      })> _contentWithCache(String url, {bool force = false}) async {
+    final key = '${widget.source.id}|$url';
+    final cache = ChapterTextCache.instance;
+    if (force) {
+      await cache.remove(key);
+    } else {
+      final hit = await cache.get(key);
+      if (hit != null) {
+        return (
+          ok: true,
+          error: null,
+          content: hit.$1,
+          images: const <String>[],
+          headers: hit.$2,
+        );
+      }
+    }
+    final r = await BookSourceService.instance.content(widget.source, url);
+    if (r.ok && r.images.isEmpty && r.content.trim().isNotEmpty) {
+      unawaited(cache.put(key, r.content, r.headers));
+    }
+    return r;
+  }
+
+  Future<void> _loadChapter(int i,
+      {bool prefetchOnly = false, bool force = false}) async {
     if (i < 0 || i >= widget.chapters.length) return;
     // 🔴 **代次守卫** ✓：快速连点换章时，**先发的请求可能后回来** ✗ →
     // 会把旧章的正文盖到新章上 ✓（章号/标题已经变了、正文还是上一章 ✓，
@@ -1845,7 +1963,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
     final ch = widget.chapters[i];
     try {
-      final r = await BookSourceService.instance.content(widget.source, ch.url);
+      final r = await _contentWithCache(ch.url, force: force);
       if (!mounted) return;
       // ✅ 响应回来时确认"我还是最新那次**可见**加载" ✓ —— 否则直接丢弃 ✓
       //（`seq == -1` 表示这是后台预取 ✓，它本来就不该影响界面 ✓）
@@ -2065,12 +2183,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         item(Icons.more_horiz_rounded, '更多', () {
           final t = _selectedText;
           close();
-          final pi = _paragraphIndexForSelection(t);
-          if (pi < 0) {
-            _toast('没定位到段落');
-            return;
-          }
-          _onParagraphLongPress(pi);
+          _showSelectionTools(t);
         }),
       ],
     );
@@ -2086,48 +2199,487 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     return -1;
   }
 
-  /// 把选中的文字变成一条净化规则（正则转义后精确匹配 → 替换为空）。
-  ///
-  /// 立即对当前章生效：内存里先跑一遍新规则（空段落顺手删掉），
-  /// 再丢掉本章缓存 —— 下次进入按完整规则集重来。
+  /// 选区 → 打开「创建替换规则」面板（预填选中的文字）
   Future<void> _addPurifyFromSelection(String raw) async {
     final t = raw.trim();
     if (t.isEmpty) {
       _toast('先选中要净化的文字');
       return;
     }
-    if (t.length > 80) {
-      _toast('选中的文字太长（最多 80 字），净化会误伤');
+    if (t.length > 200) {
+      _toast('选中的文字太长（最多 200 字），净化会误伤');
       return;
     }
-    final pattern = RegExp.escape(t);
-    if (_rs.purifyRules.any((r) => r.pattern == pattern)) {
-      _toast('这条已经在净化规则里了');
-      return;
-    }
-    final rule = PurifyRule(
-      name: '选区净化',
-      group: '手动',
-      pattern: pattern,
-      replacement: '',
-      isRegex: true,
+    await _showPurifyRuleEditor(seedPattern: t);
+  }
+
+  /// 「创建替换规则」面板（对齐 Legado 的逐项编辑，用户 2026-10-25 要求）。
+  ///
+  /// 字段：名称 / 替换规则 / 替换为 / 范围 / 排除范围 /
+  ///       用于标题 / 用于正文 / 使用正则表达式 / 组 / 可用
+  Future<void> _showPurifyRuleEditor({
+    String seedPattern = '',
+    String seedName = '',
+  }) async {
+    final nameCtrl = TextEditingController(
+      text: seedName.isEmpty ? (seedPattern.isEmpty ? '' : '选区净化') : seedName,
     );
+    final patternCtrl = TextEditingController(text: seedPattern);
+    final replaceCtrl = TextEditingController();
+    final scopeCtrl = TextEditingController(text: widget.bookName);
+    final excludeCtrl = TextEditingController();
+    final groupCtrl = TextEditingController(text: '手动');
+
+    // 选中文字默认按**纯文本**匹配（更安全）；自己写规则时默认开正则
+    var isRegex = seedPattern.isEmpty;
+    var useTitle = false;
+    var useContent = true;
+    var enabled = true;
+
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          InputDecoration dec(String hint) => InputDecoration(
+            hintText: hint,
+            hintStyle: TextStyle(color: _fgMuted, fontSize: 13),
+            isDense: true,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            filled: true,
+            fillColor: _fg.withValues(alpha: 0.05),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide.none,
+            ),
+          );
+          Widget label(String s) => Padding(
+            padding: const EdgeInsets.only(top: 14, bottom: 6),
+            child: Text(s,
+                style: TextStyle(
+                    fontSize: 12, color: _fgMuted, fontWeight: FontWeight.w600)),
+          );
+          Widget switchRow(String title, String sub, bool v, ValueChanged<bool> on) =>
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(title,
+                              style: TextStyle(fontSize: 13.5, color: _fg)),
+                          if (sub.isNotEmpty)
+                            Text(sub,
+                                style: TextStyle(
+                                    fontSize: 11, color: _fgMuted, height: 1.4)),
+                        ],
+                      ),
+                    ),
+                    Switch(value: v, onChanged: on),
+                  ],
+                ),
+              );
+
+          return Container(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.9,
+            ),
+            decoration: BoxDecoration(
+              color: _bgTop,
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: 18,
+                  right: 18,
+                  bottom: 12 + MediaQuery.of(ctx).viewInsets.bottom,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(0, 14, 0, 4),
+                      child: Row(
+                        children: [
+                          Text('取消',
+                              style: TextStyle(
+                                  fontSize: 14,
+                                  color: _fgMuted,
+                                  fontWeight: FontWeight.w600)),
+                          const Spacer(),
+                          Text('创建替换规则',
+                              style: TextStyle(
+                                  fontSize: 15,
+                                  color: _fg,
+                                  fontWeight: FontWeight.w700)),
+                          const Spacer(),
+                          GestureDetector(
+                            onTap: () {
+                              if (patternCtrl.text.trim().isEmpty) {
+                                _toast('替换规则不能为空');
+                                return;
+                              }
+                              Navigator.pop(ctx, true);
+                            },
+                            child: Text('完成',
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    color: Theme.of(context).colorScheme.primary,
+                                    fontWeight: FontWeight.w700)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Flexible(
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: [
+                          label('名称'),
+                          TextField(
+                            controller: nameCtrl,
+                            style: TextStyle(fontSize: 14, color: _fg),
+                            decoration: dec('给这条规则起个名字'),
+                          ),
+                          label('替换规则'),
+                          TextField(
+                            controller: patternCtrl,
+                            minLines: 2,
+                            maxLines: 5,
+                            style: TextStyle(fontSize: 14, color: _fg),
+                            decoration: dec('要删掉/替换的文字或正则'),
+                          ),
+                          label('替换为'),
+                          TextField(
+                            controller: replaceCtrl,
+                            style: TextStyle(fontSize: 14, color: _fg),
+                            decoration: dec('留空 = 直接删掉'),
+                          ),
+                          label('范围'),
+                          TextField(
+                            controller: scopeCtrl,
+                            style: TextStyle(fontSize: 14, color: _fg),
+                            decoration: dec('书名包含这个词才生效，留空 = 所有书'),
+                          ),
+                          label('排除范围'),
+                          TextField(
+                            controller: excludeCtrl,
+                            style: TextStyle(fontSize: 14, color: _fg),
+                            decoration: dec('书名包含这个词就跳过，留空 = 不排除'),
+                          ),
+                          const SizedBox(height: 6),
+                          switchRow('用于标题', '作用于章节名', useTitle,
+                              (v) => setSheet(() => useTitle = v)),
+                          switchRow('用于正文', '作用于正文段落', useContent,
+                              (v) => setSheet(() => useContent = v)),
+                          switchRow('使用正则表达式', '关 = 按纯文本精确匹配（选中文字默认关）',
+                              isRegex, (v) => setSheet(() => isRegex = v)),
+                          label('组'),
+                          TextField(
+                            controller: groupCtrl,
+                            style: TextStyle(fontSize: 14, color: _fg),
+                            decoration: dec('规则分组，便于管理'),
+                          ),
+                          switchRow('可用', '关掉等于临时禁用这条规则', enabled,
+                              (v) => setSheet(() => enabled = v)),
+                          const SizedBox(height: 8),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+
+    final pattern = patternCtrl.text.trim();
+    final replacement = replaceCtrl.text;
+    final rule = PurifyRule(
+      name: nameCtrl.text.trim().isEmpty ? '替换规则' : nameCtrl.text.trim(),
+      group: groupCtrl.text.trim(),
+      pattern: pattern,
+      replacement: replacement,
+      enabled: enabled,
+      isRegex: isRegex,
+      bookScope: scopeCtrl.text.trim(),
+      excludeScope: excludeCtrl.text.trim(),
+      applyToTitle: useTitle,
+      applyToContent: useContent,
+    );
+    nameCtrl.dispose();
+    patternCtrl.dispose();
+    replaceCtrl.dispose();
+    scopeCtrl.dispose();
+    excludeCtrl.dispose();
+    groupCtrl.dispose();
+    if (ok != true || pattern.isEmpty) return;
+    if (_rs.purifyRules.any((r) =>
+        r.pattern == rule.pattern &&
+        r.replacement == rule.replacement &&
+        r.isRegex == rule.isRegex)) {
+      _toast('这条规则已经有了');
+      return;
+    }
     setState(() {
       _rs = _rs.copyWith(purifyRules: [..._rs.purifyRules, rule]);
-      _paragraphs = _paragraphs
-          .map((p) => applyPurifyRules(p, [rule]))
-          .where((p) => p.trim().isNotEmpty)
-          .toList();
+      // 刚加完规则却因为"本书净化没开"看不到效果，用户会以为白加了 ⇒ 顺手打开
+      if (rule.applyToContent) _purifyOn = true;
+      if (rule.applyToContent) {
+        _paragraphs = _paragraphs
+            .map((p) => applyPurifyRules(p, [rule], bookName: widget.bookName))
+            .where((p) => p.trim().isNotEmpty)
+            .toList();
+      }
     });
     _scheduleSavePrefs();
     _invalidateTtsSegs();
     _cache.remove(_index); // 下次进本章按新规则重新净化
     _repaginateLayout();
-    _toast('已加入净化（共 ${_rs.purifyRules.length} 条）');
+    if (rule.applyToContent) {
+      _toast('已保存并开启本书净化（共 ${_rs.purifyRules.length} 条）');
+    } else {
+      _toast('已保存规则（仅作用于标题，共 ${_rs.purifyRules.length} 条）');
+    }
+  }
+
+  /// 选区「更多」→ 分词与工具页（对齐 Legado 截图 IMG_9420）。
+  ///
+  /// 上面是词格（点词查词典），下面一排：净化 / 复制 / 词典 / 朗读 / 百科 / 分享。
+  Future<void> _showSelectionTools(String sel) async {
+    final text = sel.trim();
+    if (text.isEmpty) {
+      _toast('先选中文字');
+      return;
+    }
+    final words = _segmentWords(text);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(ctx).size.height * 0.75,
+        ),
+        decoration: BoxDecoration(
+          color: _bgTop,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 14, 18, 6),
+                child: Text('分词',
+                    style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: _fg)),
+              ),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final w in words)
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _openWebPage(
+                              'https://dict.youdao.com/result?word=${Uri.encodeComponent(w)}&lang=en',
+                              '$w · 词典',
+                            );
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 7),
+                            decoration: BoxDecoration(
+                              color: _fg.withValues(alpha: 0.06),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(w,
+                                style: TextStyle(fontSize: 14, color: _fg)),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              Divider(height: 1, color: _fg.withValues(alpha: 0.08)),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 10),
+                child: Row(
+                  children: [
+                    // 标注：加书签 / 划线 / 划线+批注（长按段落那套菜单，
+                    // 之前重构长按选字时丢了入口，这里补回到工具条里）
+                    _toolBtn(Icons.edit_note_rounded, '标注', () {
+                      Navigator.pop(ctx);
+                      final pi = _paragraphIndexForSelection(text);
+                      if (pi < 0) {
+                        _toast('没定位到段落，换个短一点的选区试试');
+                        return;
+                      }
+                      _onParagraphLongPress(pi);
+                    }),
+                    _toolBtn(Icons.cleaning_services_outlined, '净化', () {
+                      Navigator.pop(ctx);
+                      _addPurifyFromSelection(text);
+                    }),
+                    _toolBtn(Icons.copy_rounded, '复制', () {
+                      Navigator.pop(ctx);
+                      Clipboard.setData(ClipboardData(text: text));
+                      _toast('已复制');
+                    }),
+                    _toolBtn(Icons.menu_book_outlined, '词典', () {
+                      Navigator.pop(ctx);
+                      _openWebPage(
+                        'https://dict.youdao.com/result?word=${Uri.encodeComponent(text)}&lang=en',
+                        '词典',
+                      );
+                    }),
+                    _toolBtn(Icons.volume_up_outlined, '朗读', () {
+                      Navigator.pop(ctx);
+                      unawaited(_tts.speak(text));
+                    }),
+                    _toolBtn(Icons.public_rounded, '百科', () {
+                      Navigator.pop(ctx);
+                      _openWebPage(
+                        'https://baike.baidu.com/item/${Uri.encodeComponent(text)}',
+                        '百科',
+                      );
+                    }),
+                    _toolBtn(Icons.ios_share_rounded, '分享', () async {
+                      Navigator.pop(ctx);
+                      await _shareText(text);
+                    }),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _toolBtn(IconData icon, String label, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 22, color: _fg),
+            const SizedBox(height: 4),
+            Text(label, style: TextStyle(fontSize: 11, color: _fg)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 极简分词：按标点/空白切段，纯中文长串再按 2 字一组。
+  ///
+  /// 没有引词典库（几 MB 起步，且离线词库维护成本高），
+  /// 只为复刻 Legado 那种「词格」观感；点词查词典不受影响。
+  List<String> _segmentWords(String text) {
+    final parts = text
+        .replaceAll(RegExp(r'[，。！？、；：“”‘’（）《》【】…—\-,.!?;:\s]+'), ' ')
+        .split(' ')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty);
+    final out = <String>[];
+    for (final p in parts) {
+      if (p.length <= 4) {
+        out.add(p);
+        continue;
+      }
+      for (var i = 0; i < p.length; i += 2) {
+        out.add(p.substring(i, i + 2 > p.length ? p.length : i + 2));
+      }
+    }
+    return out;
+  }
+
+  /// 内置浏览器打开（词典 / 百科）
+  void _openWebPage(String url, String title) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => OnlineReaderPage(url: url, title: title),
+      ),
+    );
+  }
+
+  /// 分享选中的文字：写成临时 txt 走系统分享面板（项目已有的通道）
+  Future<void> _shareText(String text) async {
+    try {
+      final f = File(
+        '${Directory.systemTemp.path}/share_${DateTime.now().millisecondsSinceEpoch}.txt',
+      );
+      await f.writeAsString(text, flush: true);
+      final ok = await FileExportService.shareFiles([f.path]);
+      if (!ok) {
+        Clipboard.setData(ClipboardData(text: text));
+        _toast('没有分享面板，已复制到剪贴板');
+      }
+    } catch (_) {
+      Clipboard.setData(ClipboardData(text: text));
+      _toast('已复制到剪贴板');
+    }
   }
 
   /// C9：正文净化（正则/纯文本替换）。坏正则跳过，不打断阅读。
-  String _applyPurify(String raw) => applyPurifyRules(raw, _rs.purifyRules);
+  ///
+  /// 2026-10-25：改成**按书开关**（顶栏那枚清洁刷图标）——默认关，
+  /// 关着就原样返回，规则再也不会在用户不知情时改正文。
+  String _applyPurify(String raw) => _purifyOn
+      ? applyPurifyRules(raw, _rs.purifyRules, bookName: widget.bookName)
+      : raw;
+
+  /// 当前章节名（已按「用于标题」的规则净化）—— 顶栏 / 目录 / 听书面板统一用它
+  String get _displayChapterName {
+    if (widget.chapters.isEmpty || _index < 0 || _index >= widget.chapters.length) {
+      return '';
+    }
+    final n = widget.chapters[_index].name;
+    if (n.isEmpty || !_purifyOn) return n;
+    return applyPurifyTitleRules(
+      n,
+      _rs.purifyRules,
+      bookName: widget.bookName,
+    );
+  }
+
+  /// 本书是否开启净化（默认关，按书单独记）
+  bool _purifyOn = false;
+
+  String get _purifyKey => 'bsr.purify.$_progressKey';
+
+  /// 顶栏净化开关：打开/关闭后本章要按新状态重排一遍
+  Future<void> _togglePurify() async {
+    setState(() => _purifyOn = !_purifyOn);
+    _scheduleSavePrefs();
+    _cache.remove(_index);
+    _invalidateTtsSegs();
+    await _loadChapter(_index);
+    _toast(_purifyOn ? '本书已开启净化' : '本书已关闭净化');
+  }
 
   /// 拉一个远程文本（净化规则 JSON 这种小文件）。
   ///
@@ -5082,7 +5634,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   Text(
                     widget.chapters.isEmpty
                         ? widget.source.name
-                        : widget.chapters[_index].name,
+                        : _displayChapterName,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -5093,13 +5645,24 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 ],
               ),
             ),
-            // 顶栏只留：搜索 / 刷新 / 书签
+            // 顶栏只留：净化 / 搜索 / 刷新 / 书签
             //（朗读 / 亮度 / 白夜 / 编辑 已挪到右侧竖向悬浮栏 —— 用户要求，顶栏放 8 个太挤）
+            //
+            // 净化：按书开关，默认关；亮着的刷子才表示"这本书正在净化"
+            _topIcon(
+              _purifyOn
+                  ? Icons.cleaning_services_rounded
+                  : Icons.cleaning_services_outlined,
+              _purifyOn ? '净化：已开启（本书）' : '净化：已关闭（本书）',
+              () => _togglePurify(),
+              fg,
+            ),
             _topIcon(Icons.search_rounded, '搜索全书', _showBookSearch, fg),
             _topIcon(
               Icons.refresh_rounded,
               '刷新本章',
-              () => _loadChapter(_index),
+              // force：跳过磁盘缓存，拿源站最新正文
+              () => _loadChapter(_index, force: true),
               fg,
             ),
             _topIcon(
@@ -5394,7 +5957,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             children: [
               Expanded(
                 child: Text(
-                  '${widget.chapters[_index].name}·${i + 1}/$n句',
+                  '${_displayChapterName}·${i + 1}/$n句',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -5521,7 +6084,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         builder: (_) => TtsFullPlayerPage(
           bookName: widget.bookName,
           author: widget.author,
-          chapterName: widget.chapters[_index].name,
+          chapterName: _displayChapterName,
           segments: _ttsSegments,
           // ✅ 优先用**调用方传进来的**封面 ✓ —— 原来只读 `raw['coverUrl']` ✗，
           //   而那个键**从不被写入**（224 个内置 Legado 源顶层没有它 ✓；
@@ -5712,7 +6275,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                             builder: (_) => TtsFullPlayerPage(
                               bookName: widget.bookName,
                               author: widget.author,
-                              chapterName: widget.chapters[_index].name,
+                              chapterName: _displayChapterName,
                               segments: _ttsSegments,
                               coverUrl:
                                   widget.coverUrl ??
@@ -8177,7 +8740,19 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     },
                     compact: true,
                   ),
-                  for (final f in ReaderFontService.instance.fonts)
+                  // 字体库：系统自带（苹方/楷体/隶书…）+ 可下载（思源宋体/黑体…）
+                  _chip(
+                    '字体库',
+                    false,
+                    () async {
+                      await _showFontLibrary();
+                      upd(() {});
+                    },
+                    compact: true,
+                  ),
+                  // 已装的可下载字体（点一下直接用，长按删除的不在这里）
+                  for (final f in ReaderFontService.instance.fonts
+                      .where((e) => ReaderFontService.catalogById(e.id) == null))
                     GestureDetector(
                       onLongPress: () async {
                         await _deleteFont(f);
@@ -8661,23 +9236,26 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     ),
   );
 
-  /// 「添加书签」弹层（截图 IMG_8100）：
-  ///   标题「添加书签」+ 6 个颜色圆点 + 「不再提示」勾选框
+  /// 「添加书签」弹层（截图 IMG_8100 / 9417）：
+  ///   标题「添加书签」+ 6 个颜色圆点 + 备注框 + 「不再提示」勾选框
   ///
-  /// 「不再提示」勾上后，下次加书签**不再弹这个框**，直接用上次的颜色 ——
-  /// 这正是截图里那行说明的意思（"下次直接使用上次选择的颜色"）。
+  /// 备注默认填「章节名 + 正文片段」（Legado 同款），可以直接改成自己的话。
+  /// 「不再提示」勾上后，下次加书签**不再弹这个框**，直接用上次的颜色。
   Future<void> _showAddBookmark(int paraIndex) async {
     if (_bookmarkNoAsk) {
       setState(() {
         _bookmarks[paraIndex] = _bookmarkColors[_bookmarkLastColor];
+        _bookmarkNotes[paraIndex] = _defaultBookmarkNote(paraIndex);
       });
       _toast('已用${_bookmarkColorName(_bookmarkLastColor)}加书签');
       await _savePrefs();
       return;
     }
+    final noteCtrl = TextEditingController(text: _defaultBookmarkNote(paraIndex));
     var noAsk = false;
-    final picked = await showModalBottomSheet<Color>(
+    final picked = await showModalBottomSheet<(Color, String)>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) => Container(
@@ -8688,7 +9266,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           child: SafeArea(
             top: false,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+              padding: EdgeInsets.fromLTRB(
+                20,
+                18,
+                20,
+                18 + MediaQuery.of(ctx).viewInsets.bottom,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -8701,12 +9284,35 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                       color: _fg,
                     ),
                   ),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 14),
+                  // 备注（默认已填好，直接点完成也行）
+                  TextField(
+                    controller: noteCtrl,
+                    minLines: 2,
+                    maxLines: 4,
+                    style: TextStyle(fontSize: 14, color: _fg),
+                    decoration: InputDecoration(
+                      hintText: '备注（可留空）',
+                      hintStyle: TextStyle(fontSize: 13, color: _fgMuted),
+                      filled: true,
+                      fillColor: _fg.withValues(alpha: 0.05),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
                   Row(
                     children: [
                       for (var i = 0; i < _bookmarkColors.length; i++)
                         GestureDetector(
-                          onTap: () => Navigator.pop(ctx, _bookmarkColors[i]),
+                          onTap: () => Navigator.pop(
+                            ctx,
+                            (_bookmarkColors[i], noteCtrl.text.trim()),
+                          ),
                           child: Container(
                             width: 38,
                             height: 38,
@@ -8722,7 +9328,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                         ),
                     ],
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
                   // 「不再提示」
                   GestureDetector(
                     onTap: () => setSheet(() => noAsk = !noAsk),
@@ -8749,7 +9355,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                 ],
               ),
             ),
@@ -8757,12 +9363,19 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         ),
       ),
     );
+    final note = noteCtrl.text.trim();
+    noteCtrl.dispose();
     if (picked == null) return;
     setState(() {
-      _bookmarks[paraIndex] = picked;
+      _bookmarks[paraIndex] = picked.$1;
+      if (note.isEmpty) {
+        _bookmarkNotes.remove(paraIndex);
+      } else {
+        _bookmarkNotes[paraIndex] = note;
+      }
       if (noAsk) {
         _bookmarkNoAsk = true;
-        _bookmarkLastColor = _bookmarkColors.indexOf(picked);
+        _bookmarkLastColor = _bookmarkColors.indexOf(picked.$1);
       }
     });
     await _savePrefs();
@@ -8888,7 +9501,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           sourceName: widget.source.name,
           bookName: widget.bookName,
           chapterIndex: _index,
-          chapterName: widget.chapters[_index].name,
+          chapterName: _displayChapterName,
           paragraphIndex: i,
           text: text,
         );
@@ -8903,7 +9516,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           sourceName: widget.source.name,
           bookName: widget.bookName,
           chapterIndex: _index,
-          chapterName: widget.chapters[_index].name,
+          chapterName: _displayChapterName,
           paragraphIndex: i,
           text: text,
           note: note,
@@ -9986,6 +10599,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       _scheduleRepaginate();
       return;
     }
+    // 字体库字体不在包里：首次要下载（10MB 上下），先说一声，别让人以为卡死
+    final needDownload = ReaderFontService.catalogById(id) != null &&
+        !ReaderFontService.instance.isInstalled(id);
+    if (needDownload) _toast('首次使用，正在下载字体…');
     unawaited(() async {
       final fam = await ReaderFontService.instance.familyOf(id);
       if (!mounted) return;
@@ -9994,7 +10611,199 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         _fontFamily = fam;
       });
       _scheduleRepaginate();
+      if (needDownload) {
+        _toast(fam == null ? '字体下载失败，已回落系统字体' : '字体已就绪');
+      }
     }());
+  }
+
+  /// 「字体库」弹层：系统自带（不用下载）+ 可下载字体（点一下就装）。
+  ///
+  /// 用户 2026-10-25：「系统分组（华文隶书、黑体、苹方…）和思源宋体/霞鹜文楷，
+  /// 能不能点一下就装上？」——系统字体按 family 名直接引用，可下载的走
+  /// `ReaderFontService.install`（下载 → 注册 → 落盘）。
+  Future<void> _showFontLibrary() async {
+    var busyId = '';
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          Widget sectionTitle(String t) => Padding(
+            padding: const EdgeInsets.fromLTRB(4, 14, 4, 6),
+            child: Text(t,
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: _fgMuted)),
+          );
+          Widget row({
+            required String name,
+            required String sub,
+            required bool selected,
+            required String trailing,
+            required VoidCallback? onTap,
+          }) =>
+              InkWell(
+                onTap: onTap,
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 4, vertical: 7),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(name,
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    color: onTap == null ? _fgMuted : _fg,
+                                    fontWeight: selected
+                                        ? FontWeight.w700
+                                        : FontWeight.w400)),
+                            if (sub.isNotEmpty)
+                              Text(sub,
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      height: 1.4,
+                                      color: _fgMuted)),
+                          ],
+                        ),
+                      ),
+                      if (trailing.isNotEmpty)
+                        Text(trailing,
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: selected
+                                    ? Theme.of(context).colorScheme.primary
+                                    : _fgMuted)),
+                    ],
+                  ),
+                ),
+              );
+
+          Future<void> pickSystem(String id) async {
+            final fam = await ReaderFontService.instance.familyOf(id);
+            if (!mounted || !ctx.mounted) return;
+            Navigator.pop(ctx);
+            if (fam == null) {
+              _toast('这个系统字体不可用');
+              return;
+            }
+            setState(() {
+              _fontId = id;
+              _fontFamily = fam;
+            });
+            _scheduleSavePrefs();
+            _scheduleRepaginate();
+          }
+
+          Future<void> pickCatalog(String id) async {
+            final installed = ReaderFontService.instance.isInstalled(id);
+            setSheet(() => busyId = id);
+            final fam = await ReaderFontService.instance.familyOf(id);
+            if (!mounted) return;
+            // 下载期间用户可能已经把弹层关掉了 —— 再 setSheet 会踩到已 dispose 的 State
+            if (!ctx.mounted) return;
+            setSheet(() => busyId = '');
+            if (fam == null) {
+              _toast('下载失败，换个网络再试');
+              return;
+            }
+            Navigator.pop(ctx);
+            setState(() {
+              _fontId = id;
+              _fontFamily = fam;
+            });
+            _scheduleSavePrefs();
+            _scheduleRepaginate();
+            _toast(installed ? '已切换字体' : '已安装并应用');
+          }
+
+          return Container(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.8,
+            ),
+            decoration: BoxDecoration(
+              color: _bgTop,
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 14, 18, 2),
+                    child: Row(
+                      children: [
+                        Text('选择字体',
+                            style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: _fg)),
+                        const Spacer(),
+                        Text('长按正文可随时改',
+                            style:
+                                TextStyle(fontSize: 11, color: _fgMuted)),
+                      ],
+                    ),
+                  ),
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                      children: [
+                        sectionTitle('系统自带（无需下载）'),
+                        for (final f in ReaderFontService.systemFonts)
+                          row(
+                            name: f.name,
+                            sub: f.family,
+                            selected: _fontId == f.id,
+                            trailing: _fontId == f.id ? '当前' : '',
+                            onTap: () => pickSystem(f.id),
+                          ),
+                        sectionTitle('可下载字体（点一下安装）'),
+                        for (final c in ReaderFontService.catalog)
+                          row(
+                            name: c.name,
+                            sub: '${c.desc} · ${c.sizeMb.toStringAsFixed(1)}MB',
+                            selected: _fontId == c.id,
+                            trailing: busyId == c.id
+                                ? '下载中…'
+                                : (ReaderFontService.instance.isInstalled(c.id)
+                                    ? (_fontId == c.id ? '当前' : '已安装')
+                                    : '安装'),
+                            onTap: busyId.isEmpty
+                                ? () => pickCatalog(c.id)
+                                : null,
+                          ),
+                        sectionTitle('本地导入'),
+                        row(
+                          name: '从文件导入字体',
+                          sub: '支持 ttf / otf / ttc，导入后一直可用（长按字体行可删除）',
+                          selected: false,
+                          trailing: '选择文件',
+                          onTap: () async {
+                            // 先关掉弹层再拉系统文件选择器：两个模态叠在一起
+                            // 在 iOS 上会互相抢焦点
+                            Navigator.pop(ctx);
+                            await _importFont();
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   /// 导入自定义字体（ttf / otf / ttc）并立即应用
@@ -11072,7 +11881,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     };
     // TtsService 自己切段（splitSegments 会按标点再切过长段）
     // A4 双音色：逐段音色覆盖（对话段 → 对话音色，其余 → 旁白音色）✓
-    _tts.setNowPlayingMeta(widget.bookName, widget.chapters[_index].name);
+    _tts.setNowPlayingMeta(widget.bookName, _displayChapterName);
     await _tts.speak(text, segmentVoices: _buildSegmentVoices());
     if (mounted) setState(() {});
   }
@@ -14312,7 +15121,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                           final t = _paragraphs.length > e.key
                               ? _paragraphs[e.key]
                               : '';
-                          return t.toLowerCase().contains(kw2);
+                          final note = _bookmarkNotes[e.key] ?? '';
+                          return t.toLowerCase().contains(kw2) ||
+                              note.toLowerCase().contains(kw2);
                         }).toList();
                         if (entries.isEmpty) {
                           return Center(
@@ -14355,6 +15166,18 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                   color: _fg,
                                 ),
                               ),
+                              // 有备注就显示出来（默认备注 = 章节名 + 正文片段）
+                              subtitle: (_bookmarkNotes[e.key] ?? '').isEmpty
+                                  ? null
+                                  : Text(
+                                      _bookmarkNotes[e.key]!,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: AppTheme.fontFootnote,
+                                        color: _fgMuted,
+                                      ),
+                                    ),
                               trailing: IconButton(
                                 icon: Icon(
                                   Icons.delete_outline,
@@ -14362,7 +15185,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                   color: _fgMuted,
                                 ),
                                 onPressed: () => setSheet(() {
-                                  setState(() => _bookmarks.remove(e.key));
+                                  setState(() {
+                                    _bookmarks.remove(e.key);
+                                    _bookmarkNotes.remove(e.key);
+                                  });
                                   _scheduleSavePrefs();
                                 }),
                               ),

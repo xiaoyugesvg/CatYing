@@ -1,4 +1,5 @@
 import 'dart:math' show min;
+import 'dart:async';
 import 'dart:convert';
 import '../../widgets/common_widgets.dart';
 import 'dart:io';
@@ -16,6 +17,7 @@ import '../models/bookshelf.dart';
 import '../models/comic.dart';
 import '../services/book_download_service.dart';
 import '../services/book_source_service.dart';
+import '../services/book_toc_cache.dart';
 import '../services/chapter_alignment.dart';
 import '../services/sync_service.dart';
 import '../services/book_favorites_service.dart';
@@ -4482,6 +4484,26 @@ class _BookShelfTab extends StatelessWidget {
     if (_openingSourceBook) return; // 防连点弹出两个加载框
     _openingSourceBook = true;
 
+    final cacheKey = '${src.id}|$bookUrl';
+    final cached = await BookTocCache.instance.load(cacheKey);
+
+    // ① 有磁盘目录 ⇒ **立刻**进阅读器（不弹加载框），后台再刷目录。
+    //    这是「书架点开很慢」的主因：原来每次都要先抓详情页拿 tocUrl、
+    //    再抓目录页，两个网络往返期间用户对着一个转圈。
+    if (cached != null && cached.chapters.isNotEmpty) {
+      final initial =
+          await _savedChapterIndex(src, book.title, cached.chapters.length);
+      if (!context.mounted) {
+        _openingSourceBook = false;
+        return;
+      }
+      _pushReader(context, src, book, cached.chapters, initial);
+      // 推完再解锁：否则连点两下会开出两个阅读器
+      _openingSourceBook = false;
+      unawaited(_refreshTocInBackground(src, book, bookUrl, cacheKey, cached));
+      return;
+    }
+
     final rootNav = Navigator.of(context, rootNavigator: true);
     showDialog<void>(
       context: context,
@@ -4496,9 +4518,10 @@ class _BookShelfTab extends StatelessWidget {
     );
 
     List<BookSourceChapter> chapters = const [];
+    var tocUrl = '';
     try {
       final info = await BookSourceService.instance.bookInfo(src, bookUrl);
-      final tocUrl = (info?['tocUrl'] ?? '').toString().trim();
+      tocUrl = (info?['tocUrl'] ?? '').toString().trim();
       final t = await BookSourceService.instance.toc(
         src,
         tocUrl.isEmpty ? bookUrl : tocUrl,
@@ -4532,18 +4555,39 @@ class _BookShelfTab extends StatelessWidget {
       return;
     }
 
-    // 恢复上次读到哪一章（阅读器自己的进度键）
+    // 目录落盘：下次点开可以秒进
+    unawaited(BookTocCache.instance.save(cacheKey, tocUrl, chapters));
+
+    final initial =
+        await _savedChapterIndex(src, book.title, chapters.length);
+    if (!context.mounted) return;
+    _pushReader(context, src, book, chapters, initial);
+  }
+
+  /// 上次读到第几章（越界/读不到就回 0）
+  static Future<int> _savedChapterIndex(
+    BookSource src,
+    String title,
+    int count,
+  ) async {
     var initial = 0;
     try {
       final p = await SharedPreferences.getInstance();
-      final saved = p.getInt(ChapterAlignment.progressKey(src.id, book.title));
-      if (saved != null && saved >= 0 && saved < chapters.length) {
-        initial = saved;
-      }
+      final saved = p.getInt(ChapterAlignment.progressKey(src.id, title));
+      if (saved != null && saved >= 0 && saved < count) initial = saved;
     } catch (_) {
       /* 读不到就从第一章开始 */
     }
-    if (!context.mounted) return;
+    return initial;
+  }
+
+  static void _pushReader(
+    BuildContext context,
+    BookSource src,
+    Book book,
+    List<BookSourceChapter> chapters,
+    int initial,
+  ) {
     Navigator.push(
       context,
       // 用 CupertinoPageRoute：只有它带 iOS 的「左边缘右滑返回」手势。
@@ -4560,6 +4604,38 @@ class _BookShelfTab extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// 后台刷目录：只在缓存超过 10 分钟时才打网络，章节数/末章名变了才提示
+  static Future<void> _refreshTocInBackground(
+    BookSource src,
+    Book book,
+    String bookUrl,
+    String cacheKey,
+    CachedToc cached,
+  ) async {
+    if (cached.ageMinutes < 10) return;
+    try {
+      var tocUrl = cached.tocUrl;
+      if (tocUrl.isEmpty) {
+        final info = await BookSourceService.instance.bookInfo(src, bookUrl);
+        tocUrl = (info?['tocUrl'] ?? '').toString().trim();
+      }
+      final t = await BookSourceService.instance.toc(
+        src,
+        tocUrl.isEmpty ? bookUrl : tocUrl,
+      );
+      if (!t.ok || t.list.isEmpty) return;
+      final oldN = cached.chapters.length;
+      final newN = t.list.length;
+      final same =
+          oldN == newN && t.list.last.name == cached.chapters.last.name;
+      if (same) return;
+      await BookTocCache.instance.save(cacheKey, tocUrl, t.list);
+      // 不打扰正在读书的用户：只更新磁盘，下次点开就是新目录
+    } catch (_) {
+      // 后台刷新失败不影响阅读
+    }
   }
 
   /// 按存的 sourceId 找回书源（兼容旧书架数据：sourceId 缺失时按源名匹配）

@@ -391,6 +391,21 @@ enum SleepMode {
   }
 }
 
+/// 宽松布尔解析：`true` / `1` / `"true"` 都算 true；
+/// 不是布尔/数字/可识别字符串时用 [fallback]（当"没配置"）。
+///
+/// 为什么需要：净化规则是**第三方 JSON**（Legado 规则集、别人导出的文件），
+/// 里面 `"scopeContent": "false"` 这种写法很常见，`as bool?` 会直接抛 TypeError。
+bool _boolOr(dynamic v, bool fallback) {
+  if (v == null) return fallback;
+  if (v is bool) return v;
+  if (v is num) return v != 0;
+  final s = v.toString().trim().toLowerCase();
+  if (s == 'true' || s == '1' || s == 'yes') return true;
+  if (s == 'false' || s == '0' || s == 'no') return false;
+  return fallback;
+}
+
 /// 正文净化规则（C9）：正则替换，enabled=false 时跳过。
 /// pattern 用 RegExp 语义（默认 multiLine），坏正则会被阅读器 try/catch 跳过。
 /// 2026-10-22：兼容 legado 的 replaceRule（name/group/isRegex/isEnabled），
@@ -403,6 +418,16 @@ class PurifyRule {
   final bool enabled;
   final bool isRegex;
 
+  /// 生效范围（书名关键词，空 = 所有书）。对应 Legado 的「范围」。
+  final String bookScope;
+
+  /// 排除范围（书名关键词，空 = 不排除）。对应 Legado 的「排除范围」。
+  final String excludeScope;
+
+  /// 用于标题 / 用于正文（Legado 的两个开关）。
+  final bool applyToTitle;
+  final bool applyToContent;
+
   const PurifyRule({
     this.name = '',
     this.group = '',
@@ -410,6 +435,10 @@ class PurifyRule {
     this.replacement = '',
     this.enabled = true,
     this.isRegex = true,
+    this.bookScope = '',
+    this.excludeScope = '',
+    this.applyToTitle = false,
+    this.applyToContent = true,
   });
 
   factory PurifyRule.fromJson(Map<String, dynamic> j) => PurifyRule(
@@ -419,6 +448,14 @@ class PurifyRule {
         replacement: j['replacement'] as String? ?? '',
         enabled: j['enabled'] as bool? ?? j['isEnabled'] as bool? ?? true,
         isRegex: j['isRegex'] as bool? ?? true,
+        bookScope: j['bookScope'] as String? ?? j['scope'] as String? ?? '',
+        excludeScope:
+            j['excludeScope'] as String? ?? j['exclude'] as String? ?? '',
+        // ⚠️ 别写成 `as bool?`：第三方 JSON 里可能是 "true"/1，
+        //   强转会抛 TypeError，整条导入就废了。这里用宽松判断。
+        applyToTitle: _boolOr(j['applyToTitle'], _boolOr(j['scopeTitle'], false)),
+        applyToContent:
+            _boolOr(j['applyToContent'], _boolOr(j['scopeContent'], true)),
       );
 
   Map<String, dynamic> toJson() => {
@@ -428,6 +465,10 @@ class PurifyRule {
         'replacement': replacement,
         'enabled': enabled,
         'isRegex': isRegex,
+        'bookScope': bookScope,
+        'excludeScope': excludeScope,
+        'applyToTitle': applyToTitle,
+        'applyToContent': applyToContent,
       };
 
   PurifyRule copyWith({
@@ -437,6 +478,10 @@ class PurifyRule {
     String? replacement,
     bool? enabled,
     bool? isRegex,
+    String? bookScope,
+    String? excludeScope,
+    bool? applyToTitle,
+    bool? applyToContent,
   }) =>
       PurifyRule(
         name: name ?? this.name,
@@ -445,49 +490,90 @@ class PurifyRule {
         replacement: replacement ?? this.replacement,
         enabled: enabled ?? this.enabled,
         isRegex: isRegex ?? this.isRegex,
+        bookScope: bookScope ?? this.bookScope,
+        excludeScope: excludeScope ?? this.excludeScope,
+        applyToTitle: applyToTitle ?? this.applyToTitle,
+        applyToContent: applyToContent ?? this.applyToContent,
       );
+
+  /// 这本书是否适用（范围/排除范围都是「书名包含关键词」）
+  bool matchesBook(String bookName) {
+    final b = bookName.trim();
+    if (bookScope.trim().isNotEmpty && !b.contains(bookScope.trim())) {
+      return false;
+    }
+    if (excludeScope.trim().isNotEmpty && b.contains(excludeScope.trim())) {
+      return false;
+    }
+    return true;
+  }
+}
+
+/// 对一段文本应用**一条**规则（纯文本 / 正则都支持）。
+/// 坏正则 → 原样返回（不打断阅读）。
+String _applyOneRule(String text, PurifyRule rule) {
+  if (!rule.isRegex) {
+    return text.replaceAll(rule.pattern, rule.replacement);
+  }
+  var pattern = rule.pattern;
+  var caseSensitive = true;
+  var dotAll = false;
+  // Legado（Java 正则）允许内联标志 `(?i)` / `(?m)` / `(?s)`，Dart 的 RegExp
+  // 会直接报 `Invalid group` ⇒ 整条规则被静默跳过（实测 Downloadclouds 那套
+  // 20 条里有 9 条是这么废掉的）。
+  // 这里把**所有**内联标志剥掉、合并成全局参数：
+  //   i = 不区分大小写（全局近似，比整条失效强）
+  //   s = 点匹配换行
+  //   m = 我们已经全局 multiLine: true，直接丢掉即可
+  //   x/u 之类 Dart 没有对应项，丢掉标志本身（保留正则体）
+  pattern = pattern.replaceAllMapped(RegExp(r'\(\?([a-zA-Z]+)\)'), (m) {
+    final f = m.group(1)!.toLowerCase();
+    if (f.contains('i')) caseSensitive = false;
+    if (f.contains('s')) dotAll = true;
+    return '';
+  });
+  try {
+    return text.replaceAll(
+      RegExp(
+        pattern,
+        multiLine: true,
+        caseSensitive: caseSensitive,
+        dotAll: dotAll,
+      ),
+      rule.replacement,
+    );
+  } catch (_) {
+    // 用户自定义正则不合法 → 跳过该条
+    return text;
+  }
 }
 
 /// 应用一组净化规则（书源阅读器 / 本地阅读器共用）。
 /// 坏正则跳过，不打断阅读。
-String applyPurifyRules(String raw, List<PurifyRule> rules) {
+///
+/// [bookName] 传入时按规则的「范围 / 排除范围」筛选；不传则不做范围判断
+/// （老调用点行为不变）。只作用于标题的规则在这里一律跳过（正文不该被它改）。
+String applyPurifyRules(String raw, List<PurifyRule> rules, {String? bookName}) {
   var text = raw;
   for (final rule in rules) {
     if (!rule.enabled || rule.pattern.trim().isEmpty) continue;
-    if (!rule.isRegex) {
-      text = text.replaceAll(rule.pattern, rule.replacement);
-      continue;
-    }
-    var pattern = rule.pattern;
-    var caseSensitive = true;
-    var dotAll = false;
-    // Legado（Java 正则）允许内联标志 `(?i)` / `(?m)` / `(?s)`，Dart 的 RegExp
-    // 会直接报 `Invalid group` ⇒ 整条规则被静默跳过（实测 Downloadclouds 那套
-    // 20 条里有 9 条是这么废掉的）。
-    // 这里把**所有**内联标志剥掉、合并成全局参数：
-    //   i = 不区分大小写（全局近似，比整条失效强）
-    //   s = 点匹配换行
-    //   m = 我们已经全局 multiLine: true，直接丢掉即可
-    //   x/u 之类 Dart 没有对应项，丢掉标志本身（保留正则体）
-    pattern = pattern.replaceAllMapped(RegExp(r'\(\?([a-zA-Z]+)\)'), (m) {
-      final f = m.group(1)!.toLowerCase();
-      if (f.contains('i')) caseSensitive = false;
-      if (f.contains('s')) dotAll = true;
-      return '';
-    });
-    try {
-      text = text.replaceAll(
-        RegExp(
-          pattern,
-          multiLine: true,
-          caseSensitive: caseSensitive,
-          dotAll: dotAll,
-        ),
-        rule.replacement,
-      );
-    } catch (_) {
-      // 用户自定义正则不合法 → 跳过该条
-    }
+    if (!rule.applyToContent) continue;
+    if (bookName != null && !rule.matchesBook(bookName)) continue;
+    text = _applyOneRule(text, rule);
+  }
+  return text;
+}
+
+/// 只对**标题**生效的规则（Legado 的「用于标题」）。
+/// 正文不受影响；用在章节目录名 / 顶栏章节名上。
+String applyPurifyTitleRules(String raw, List<PurifyRule> rules,
+    {String? bookName}) {
+  var text = raw;
+  for (final rule in rules) {
+    if (!rule.enabled || rule.pattern.trim().isEmpty) continue;
+    if (!rule.applyToTitle) continue;
+    if (bookName != null && !rule.matchesBook(bookName)) continue;
+    text = _applyOneRule(text, rule);
   }
   return text;
 }
@@ -496,12 +582,12 @@ String applyPurifyRules(String raw, List<PurifyRule> rules) {
 /// 字段：name / group / pattern / replacement / isRegex / isEnabled
 /// 也兼容 `legado://import/replaceRule?src=...` 里的 rule 字段写法。
 ///
-/// ⚠️ 会**跳过**两类规则（[skipped] 里记下名字，方便告诉用户导入了多少）：
-///   1. `replacement` 以 `@js:` 开头 —— 那是 Legado 内置 JS 脚本，
-///      我们这边跑不了；**绝不能原样导入**，否则匹配到的正文会被替换成
-///      一整段 JS 源码（比不净化还糟）。
-///   2. `scopeContent == false` 且 `scopeTitle == true` —— 只作用于章节标题，
-///      正文净化套上去会误删正文。
+/// ⚠️ 只会**跳过**一类规则（[skipped] 里记下名字，方便告诉用户导入了多少）：
+///   `replacement` 以 `@js:` 开头 —— 那是 Legado 内置 JS 脚本，我们这边跑不了；
+///   **绝不能原样导入**，否则匹配到的正文会被替换成一整段 JS 源码。
+///
+/// 「范围 / 排除范围 / 用于标题 / 用于正文」现在都支持了，所以**不再跳过**
+/// 只作用于标题的规则（2026-10-25 加了 [applyPurifyTitleRules]）。
 List<PurifyRule> parseLegadoReplaceRules(dynamic json, {List<String>? skipped}) {
   final list = json is List ? json : (json is Map ? [json] : const []);
   final out = <PurifyRule>[];
@@ -516,20 +602,19 @@ List<PurifyRule> parseLegadoReplaceRules(dynamic json, {List<String>? skipped}) 
       skipped?.add(name);
       continue;
     }
-    final scopeContent = e['scopeContent'];
-    final scopeTitle = e['scopeTitle'];
-    if (scopeContent == false && scopeTitle == true) {
-      skipped?.add(name);
-      continue;
-    }
     out.add(
       PurifyRule(
         name: name,
         group: (e['group'] ?? '').toString(),
         pattern: pattern,
         replacement: replacement,
-        enabled: e['isEnabled'] as bool? ?? true,
-        isRegex: e['isRegex'] as bool? ?? true,
+        enabled: _boolOr(e['isEnabled'], true),
+        isRegex: _boolOr(e['isRegex'], true),
+        bookScope: (e['scope'] ?? '').toString(),
+        excludeScope: (e['excludeScope'] ?? '').toString(),
+        applyToTitle: _boolOr(e['scopeTitle'], false),
+        // Legado 的 scopeContent 默认是 true
+        applyToContent: _boolOr(e['scopeContent'], true),
       ),
     );
   }

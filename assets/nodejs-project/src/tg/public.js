@@ -127,6 +127,9 @@ export async function listPublic(channel, before = 0, depth = 0) {
             shorten(docTitle, 60) ||
             `消息 ${id}`;
 
+        // 标题里带广告词的一律不要（用户 2026-10-25：「名称带有广告的那种就去掉」）
+        if (looksLikeAd(title) || looksLikeAd(docTitle)) return;
+
         const durText = node.find('.tgme_widget_message_video_duration').first().text().trim();
         const duration = durText ? toSeconds(durText) : 0;
 
@@ -176,10 +179,51 @@ export async function resolvePublic(channel, id) {
     // 直接把 <video src> 抓出来；mp4 与 m3u8 都可能是这个位置
     const src = pick(s, /<video[^>]+src="([^"]+)"/i)
         || pick(s, /<source[^>]+src="([^"]+)"/i);
-    if (!src) {
-        return { ok: false, error: '该帖子没有可直接播放的视频（可能是文档或超大文件）' };
+    if (src) return { ok: true, url: src.replace(/&amp;/g, '&') };
+
+    // 文档形态的视频（频道把 mp4 当文件发时没有 <video>，只有一个下载链接）。
+    // 列表里已经放行了 .mp4 文档，这里必须同样认出它的 href，否则点播直接 404。
+    const docHref = pick(
+        s,
+        /class="[^"]*tgme_widget_message_document_wrap[^"]*"[^>]*href="([^"]+)"/i,
+    ) || pick(
+        s,
+        /href="([^"]+\.(?:mp4|mkv|mov|m4v|webm|m3u8)(?:\?[^"]*)?)"/i,
+    );
+    if (docHref) return { ok: true, url: docHref.replace(/&amp;/g, '&') };
+
+    return { ok: false, error: '该帖子没有可直接播放的视频（可能是文档或超大文件）' };
+}
+
+/// 广告标题关键词（用户 2026-10-25：「名称带有广告的那种就去掉」）
+///
+/// 只看**标题**（帖子第一行 / 文件名），不看正文 —— 正文里偶尔出现的
+/// 「广告位招租」之类不至于把整条视频丢掉。
+/// 想加词直接往数组里补，不必改逻辑。
+const AD_WORDS = [
+    // 明说自己是广告（注意别放光秃秃的「商务」，会误伤「商务英语」这类正片）
+    '广告', '推广', '赞助', '商务合作', '招商', '合作洽谈',
+    // 拉人 / 引流
+    '加群', '入群', '进群', '交流群', '粉丝群', '福利群', '资源群', '私聊', '私信',
+    '引流', '加微信', '加微', '微信号', 'vx', 'v信', 'qq群', '企鹅群', '飞机号', '电报号',
+    // 灰产 / 博彩
+    '百家乐', '时时彩', '六合彩', '彩票', '娱乐城', '棋牌', '博彩', '真人荷官', '稳赚',
+    '兼职', '日赚', '刷单', '返利', '注册送', '首存', '充值优惠', '优惠券',
+    // 渠道类
+    '总代理', '招代理', '代理加盟', '招募', '客服', '官网',
+];
+
+/// 标题看起来是不是广告
+export function looksLikeAd(s) {
+    const t = String(s || '').trim();
+    if (!t) return false;
+    const low = t.toLowerCase();
+    for (const w of AD_WORDS) {
+        if (low.includes(w)) return true;
     }
-    return { ok: true, url: src.replace(/&amp;/g, '&') };
+    // 纯链接标题（整条只有一个 t.me / http 链接）也算广告位
+    if (/^(https?:\/\/|t\.me\/|@)/i.test(t) && t.length < 60) return true;
+    return false;
 }
 
 /// 标题压缩：优先切到第一个句号/问号，其次按空格断词，最后暴力截断。

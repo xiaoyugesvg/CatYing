@@ -53,8 +53,17 @@ class TgService {
   }
 
   // ── 配置 ─────────────────────────────────────────────────
-  String apiId = '';
-  String apiHash = '';
+  /// 内置应用凭据（Telegram Desktop 公开的一组 api_id / api_hash）。
+  ///
+  /// 用户 2026-10-25：「不是扫码登录吗？为啥还要这个？」——
+  /// gramjs 的二维码登录必须先有应用身份，但**没必要让用户去
+  /// my.telegram.org 自己申请**。这里预置一组，开箱即可扫码；
+  /// 高级设置里仍可覆盖成自己的。
+  static const defaultApiId = '2040';
+  static const defaultApiHash = 'b18441a1ff607e10a989891a5462e627';
+
+  String apiId = defaultApiId;
+  String apiHash = defaultApiHash;
   String proxyHost = '';
   String proxyPort = '';
   String proxyUser = '';
@@ -69,8 +78,11 @@ class TgService {
 
   Future<void> loadSettings() async {
     final p = await SharedPreferences.getInstance();
-    apiId = p.getString(_kApiId) ?? '';
-    apiHash = p.getString(_kApiHash) ?? '';
+    // 没存过 / 存的是空串 ⇒ 用内置凭据（老用户升级后也不用再填）
+    final id = (p.getString(_kApiId) ?? '').trim();
+    final hash = (p.getString(_kApiHash) ?? '').trim();
+    apiId = id.isEmpty ? defaultApiId : id;
+    apiHash = hash.isEmpty ? defaultApiHash : hash;
     proxyHost = p.getString(_kProxyHost) ?? '';
     proxyPort = p.getString(_kProxyPort) ?? '';
     proxyUser = p.getString(_kProxyUser) ?? '';
@@ -94,8 +106,9 @@ class TgService {
     String proxyPass = '',
   }) async {
     final p = await SharedPreferences.getInstance();
-    this.apiId = apiId.trim();
-    this.apiHash = apiHash.trim();
+    // 留空 = 用内置凭据（不写空串，免得下次又变成"没配置"）
+    this.apiId = apiId.trim().isEmpty ? defaultApiId : apiId.trim();
+    this.apiHash = apiHash.trim().isEmpty ? defaultApiHash : apiHash.trim();
     this.proxyHost = proxyHost.trim();
     this.proxyPort = proxyPort.trim();
     this.proxyUser = proxyUser.trim();

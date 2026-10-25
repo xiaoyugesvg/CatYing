@@ -9,6 +9,8 @@ import '../../hiker/services/hiker_builtin.dart';
 import '../../hiker/services/hiker_files.dart';
 import '../../reading/services/book_content_cache_service.dart';
 import '../../reading/services/book_page_cache_service.dart';
+import '../../reading/services/book_toc_cache.dart';
+import '../../reading/services/chapter_text_cache.dart';
 import '../../music/services/music_api.dart';
 import '../../rss/services/rss_reader.dart';
 import '../models/cache_store.dart';
@@ -199,6 +201,48 @@ class CacheManagerService {
         clear: () async {
           try {
             await BookPageCacheService.instance.clear();
+          } catch (_) {}
+        },
+      ),
+    );
+    onSize?.call();
+
+    // 目录缓存（书架的“秒开”靠它）
+    var tocBytes = 0;
+    try {
+      tocBytes = await BookTocCache.instance.sizeBytes();
+    } catch (_) {}
+    out.add(
+      CacheEntryInfo(
+        id: 'reading_toc',
+        label: '目录缓存',
+        hint: '书架点书秒开用的章节列表；清了下次点开会重新联网取目录',
+        module: CacheModule.reading,
+        size: tocBytes,
+        clear: () async {
+          try {
+            await BookTocCache.instance.clear();
+          } catch (_) {}
+        },
+      ),
+    );
+    onSize?.call();
+
+    // 章节正文缓存（纯文字章，10 分钟内有效）
+    var textBytes = 0;
+    try {
+      textBytes = await ChapterTextCache.instance.sizeBytes();
+    } catch (_) {}
+    out.add(
+      CacheEntryInfo(
+        id: 'reading_chapter_text',
+        label: '章节正文缓存',
+        hint: '最近读过的纯文字章节（10 分钟内有效），清了下次要重新联网取正文',
+        module: CacheModule.reading,
+        size: textBytes,
+        clear: () async {
+          try {
+            await ChapterTextCache.instance.clear();
           } catch (_) {}
         },
       ),

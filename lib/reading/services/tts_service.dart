@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -11,6 +11,7 @@ import '../models/tts_source.dart';
 import '../source/global_proxy.dart';
 import 'tts_now_playing.dart';
 import 'tts_source_store.dart';
+import '../../services/nodejs_manager.dart';
 
 /// 语音朗读（听书）。
 ///
@@ -227,7 +228,9 @@ class TtsService extends GetxService {
     await TtsSourceStore.instance.init();
     final active = TtsSourceStore.instance.active;
     _netSource = (active != null &&
-            (active.type == 'easyvoice' || active.type == 'http'))
+            (active.type == 'easyvoice' ||
+                active.type == 'http' ||
+                active.type == 'edge'))
         ? active
         : null;
     var segs = splitSegments(text);
@@ -444,7 +447,9 @@ class TtsService extends GetxService {
               : null;
       final bytes = src.type == 'http'
           ? await _synthesizeHttp(src, seg, rate.value)
-          : await _synthesizeEasyVoice(src, seg, voiceOverride: segVoice);
+          : src.type == 'edge'
+              ? await _synthesizeEdge(src, seg)
+              : await _synthesizeEasyVoice(src, seg, voiceOverride: segVoice);
       _netSynthesizing = false;
       if (_stopRequested) return;
       if (bytes == null || bytes.isEmpty) throw '服务返回空音频';
@@ -455,7 +460,8 @@ class TtsService extends GetxService {
       if (_stopRequested) return;
       if (src.fallbackToSystem) {
         // 合成失败 → 按源开关切回系统朗读继续读，提示一次
-        lastError.value = 'EasyVoice 合成失败，已切回系统朗读：$e';
+        lastError.value =
+            '${src.type == 'edge' ? '内置朗读' : '网络朗读'}失败，已切回系统朗读：$e';
         isSpeaking.value = true;
         isPaused.value = false;
         await _speakCurrent();
@@ -463,6 +469,42 @@ class TtsService extends GetxService {
         lastError.value = '合成失败：$e';
         isSpeaking.value = false;
       }
+    }
+  }
+
+  /// 内置 Edge 朗读：直接打 App 自带的 Node（`/tts/edge`）。
+  ///
+  /// 不用填地址、不要 Key —— 协议和 DRM 令牌都在 Node 侧
+  /// （`assets/nodejs-project/src/tts/`）。**不能挂全局代理**：
+  /// 这是本机回环地址，走代理只会连不上。
+  Future<List<int>?> _synthesizeEdge(TtsSource src, String text) async {
+    final port = NodeJSManager.instance.managementPort;
+    if (port <= 0) throw '内置服务未就绪，请稍后重试';
+    final uri = Uri.parse('http://127.0.0.1:$port/tts/edge').replace(
+      queryParameters: {
+        'text': text,
+        'voice': src.voice.trim().isEmpty
+            ? 'zh-CN-XiaoxiaoNeural'
+            : src.voice.trim(),
+        'rate': _signedPct(((rate.value - 0.5) / 0.5 * 100).round()),
+        'pitch': _signedHz(((pitch.value - 1.0) * 10).round()),
+      },
+    );
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: Duration(seconds: src.timeoutSec),
+        receiveTimeout: Duration(seconds: src.timeoutSec),
+        responseType: ResponseType.bytes,
+        validateStatus: (c) => c != null && c < 400,
+      ),
+    );
+    try {
+      final r = await dio.get<List<int>>(uri.toString());
+      return r.data;
+    } on DioException catch (e) {
+      throw '内置合成失败：HTTP ${e.response?.statusCode ?? ''} ${e.message ?? e}';
+    } finally {
+      dio.close(force: true);
     }
   }
 
@@ -516,6 +558,53 @@ class TtsService extends GetxService {
     }
   }
 
+  /// EasyVoice 地址归一化：用户可能填
+  /// `http://ip:3000`、`http://ip:3000/api/v1`、`http://ip:3000/api/v1/tts`
+  /// 甚至完整复制到 `…/generateJson` —— 一律收敛成纯主机部分。
+  ///
+  /// 为什么要这个：EasyVoice 的路由现在**全部**在 `/api/v1/tts` 下
+  /// （`routes/index.ts` 里 `app.use('/api/v1/tts', ttsRoutes)`），
+  /// 用户按 README 填了带 `/api/v1` 的地址就会拼成 `/api/v1/api/v1/...`。
+  static String easyVoiceBase(String raw) {
+    var b = raw.trim().replaceAll(RegExp(r'/+$'), '');
+    const suffixes = ['/api/v1/tts/generateJson', '/api/v1/tts', '/api/v1'];
+    for (final s in suffixes) {
+      if (b.toLowerCase().endsWith(s)) {
+        b = b.substring(0, b.length - s.length);
+        break;
+      }
+    }
+    return b.replaceAll(RegExp(r'/+$'), '');
+  }
+
+  /// 语速必须是**带符号**的百分比（EasyVoice / Edge 都按这个解析）：
+  /// `+20%` / `-40%` / `+0%`。原来发的是 `20%`，会被拒。
+  static String _signedPct(int v) => '${v > 0 ? '+' : ''}$v%';
+
+  /// 音调同理：`+10Hz` / `-20Hz` / `+0Hz`
+  static String _signedHz(int v) => '${v > 0 ? '+' : ''}${v}Hz';
+
+  /// 把 DioException 里的**服务端错误正文**带出来
+  /// （EasyVoice 用 zod 校验，400 会返回 {errors:[{message,path}]}，
+  ///  只显示 "status code of 400" 等于什么都没说）。
+  static String _dioMsg(Object e) {
+    if (e is DioException) {
+      final d = e.response?.data;
+      var body = '';
+      if (d is List<int>) {
+        body = utf8.decode(d, allowMalformed: true);
+      } else if (d != null) {
+        body = d.toString();
+      }
+      body = body.replaceAll(RegExp(r'\s+'), ' ').trim();
+      if (body.length > 300) body = '${body.substring(0, 300)}…';
+      final code = e.response?.statusCode;
+      if (body.isEmpty) return 'HTTP ${code ?? ''} ${e.message ?? ''}'.trim();
+      return 'HTTP ${code ?? ''} · $body';
+    }
+    return '$e';
+  }
+
   /// EasyVoice 合成：AI 推荐配音走任务接口，否则走 generateJson 直出 mp3
   /// [voiceOverride]（A4）：本段指定的音色（对话/旁白），非空时优先于源默认。
   Future<List<int>?> _synthesizeEasyVoice(TtsSource src, String text,
@@ -525,52 +614,73 @@ class TtsService extends GetxService {
         return await _synthesizeEasyVoiceAi(src, text,
             voiceOverride: voiceOverride);
       } catch (e) {
-        // 新版 EasyVoice 把「AI 推荐」并进了 `/api/v1/tts/*`，旧的
-        // `/api/v1/create` + `/api/v1/task/{id}` 任务接口不一定还在
-        // （404 就会走到这里）。**自动回退普通合成**，至少能出声，
-        // 而不是整段失败再掉回系统朗读。
-        lastError.value = 'AI 推荐配音不可用，已改用普通合成：$e';
+        // AI 推荐要服务端配 OPENAI_BASE_URL / OPENAI_API_KEY / MODEL_NAME；
+        // 没配或接口不可用就**自动回退普通合成**，至少能出声。
+        lastError.value = 'AI 推荐配音不可用，已改用普通合成：${_dioMsg(e)}';
       }
     }
-    final base = src.endpoint.trim().replaceAll(RegExp(r'/+$'), '');
+    final base = easyVoiceBase(src.endpoint);
     if (base.isEmpty) throw '接口地址为空';
-    final ratePct = '${(((rate.value - 0.5) / 0.5) * 100).round()}%';
-    final pitchHz = '${((pitch.value - 1.0) * 10).round()}Hz';
+    final ratePct = _signedPct(((rate.value - 0.5) / 0.5 * 100).round());
+    final pitchHz = _signedHz(((pitch.value - 1.0) * 10).round());
     final voice = (voiceOverride != null && voiceOverride.trim().isNotEmpty)
         ? voiceOverride.trim()
         : (src.voice.trim().isEmpty ? 'zh-CN-XiaoxiaoNeural' : src.voice.trim());
-    final r = await _dio.post<List<int>>(
-      '$base/api/v1/tts/generateJson',
-      data: {
-        'data': [
-          {
-            // A4 双音色：有覆盖标「对话」，否则「旁白」（EasyVoice 语义）✓
-            'desc': voiceOverride == null ? '旁白' : '对话',
-            'text': text,
-            'voice': voice,
-            'rate': ratePct,
-            'pitch': pitchHz,
-            'volume': '0%',
-          },
-        ],
-      },
-      options: Options(
-        responseType: ResponseType.bytes,
-        headers: {'Content-Type': 'application/json'},
-        sendTimeout: Duration(seconds: src.timeoutSec),
-        receiveTimeout: Duration(seconds: src.timeoutSec + 10),
-      ),
-    );
-    return r.data;
+    try {
+      final r = await _dio.post<List<int>>(
+        '$base/api/v1/tts/generateJson',
+        data: {
+          'data': [
+            {
+              // A4 双音色：有覆盖标「对话」，否则「旁白」（EasyVoice 语义）
+              'desc': voiceOverride == null ? '旁白' : '对话',
+              'text': text,
+              'voice': voice,
+              'rate': ratePct,
+              'pitch': pitchHz,
+              'volume': '+0%',
+            },
+          ],
+        },
+        options: Options(
+          responseType: ResponseType.bytes,
+          headers: {'Content-Type': 'application/json'},
+          sendTimeout: Duration(seconds: src.timeoutSec),
+          receiveTimeout: Duration(seconds: src.timeoutSec + 10),
+        ),
+      );
+      return r.data;
+    } catch (e) {
+      throw _dioMsg(e);
+    }
   }
 
   /// EasyVoice「AI 智能推荐配音」（useLLM=true）：
-  /// POST /api/v1/create 建任务 → 轮询 /api/v1/task/{id} →
-  /// 完成后 GET /api/v1/download/{file} 取整段 mp3（多角色有声书）。
+  /// GET  /api/v1/tts/llmConfig 探服务端有没有配大模型 →
+  /// POST /api/v1/tts/create 建任务 → 轮询 /api/v1/tts/task/{id} →
+  /// 完成后 GET /api/v1/tts/download/{file} 取整段 mp3（多角色有声书）。
   Future<List<int>?> _synthesizeEasyVoiceAi(TtsSource src, String text,
       {String? voiceOverride}) async {
-    final base = src.endpoint.trim().replaceAll(RegExp(r'/+$'), '');
+    final base = easyVoiceBase(src.endpoint);
     if (base.isEmpty) throw '接口地址为空';
+
+    // 先探一下服务端的大模型配置：没配的话 /create 必然 400，
+    // 直接给出人话，省得用户对着一串 zod 报错发愣。
+    try {
+      final cfg = await _dio.get<Map<String, dynamic>>(
+        '$base/api/v1/tts/llmConfig',
+        options: Options(receiveTimeout: const Duration(seconds: 10)),
+      );
+      final data = cfg.data?['data'];
+      if (data is Map && data['available'] == false) {
+        throw '自建实例没有配置大模型（需要环境变量 OPENAI_BASE_URL / '
+            'OPENAI_API_KEY / MODEL_NAME）';
+      }
+    } catch (e) {
+      if (e is String) rethrow;
+      // 老版本没有 /llmConfig 接口 → 忽略探测，照旧试 /create
+    }
+
     final body = <String, dynamic>{
       'text': text,
       'useLLM': true,
@@ -583,7 +693,7 @@ class TtsService extends GetxService {
     if (v.isNotEmpty) body['voice'] = v;
 
     final create = await _dio.post<Map<String, dynamic>>(
-      '$base/api/v1/create',
+      '$base/api/v1/tts/create',
       data: body,
       options: Options(
         headers: {'Content-Type': 'application/json'},
@@ -603,7 +713,7 @@ class TtsService extends GetxService {
       if (_stopRequested) throw '已停止朗读';
       await Future.delayed(const Duration(seconds: 2));
       final r = await _dio.get<Map<String, dynamic>>(
-        '$base/api/v1/task/$taskId',
+        '$base/api/v1/tts/task/$taskId',
         options: Options(receiveTimeout: const Duration(seconds: 20)),
       );
       final d = r.data?['data'];
@@ -616,7 +726,7 @@ class TtsService extends GetxService {
             '';
         if (file.isNotEmpty) {
           final dl = await _dio.get<List<int>>(
-            '$base/api/v1/download/$file',
+            '$base/api/v1/tts/download/$file',
             options: Options(
               responseType: ResponseType.bytes,
               receiveTimeout: const Duration(seconds: 90),

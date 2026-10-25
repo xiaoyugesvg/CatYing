@@ -28,12 +28,27 @@ async function resolveCached(peer, id) {
     return rec;
 }
 
-/** 把上游（cdn）的字节按 Range 透传给播放器；走代理时才用 */
+/** telegram 的 CDN 域名白名单（`/tg/raw` 只放行这些，避免变成任意 URL 代理） */
+function isTgCdn(u) {
+    try {
+        const h = new URL(u).hostname.toLowerCase();
+        return /(^|\.)(telesco\.pe|telegram\.org|telegram-cdn\.org|cdn-telegram\.org|t\.me)$/.test(h);
+    } catch (_) {
+        return false;
+    }
+}
+
+/** 把上游（cdn）的字节按 Range 透传给播放器 */
 async function proxyStream(req, res, targetUrl) {
     const headers = {
         'User-Agent':
             'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) ' +
             'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+        // telesco 的直链会校验来源页；少了这个 Referer 常见 403
+        Referer: 'https://t.me/',
+        Accept: '*/*',
+        // 让上游别压缩：Range 播放要求字节偏移一一对应
+        'Accept-Encoding': 'identity',
         ...(req.headers.range ? { Range: req.headers.range } : {}),
     };
     let r;
@@ -50,12 +65,45 @@ async function proxyStream(req, res, targetUrl) {
         json(res, 502, { ok: false, error: '上游拉流失败：' + ((e && e.message) || e) });
         return;
     }
+    const ct = String(r.headers['content-type'] || '');
+    const isPlaylist = /mpegurl|m3u8/i.test(ct) || /\.m3u8(\?|$)/i.test(targetUrl);
+
+    if (isPlaylist) {
+        // 播放列表很小（几 KB），整块读进来改写没问题
+        const chunks = [];
+        try {
+            for await (const c of r.data) chunks.push(Buffer.from(c));
+        } catch (_) {}
+        const base = targetUrl.split('?')[0];
+        const baseDir = base.slice(0, base.lastIndexOf('/') + 1);
+        const text = Buffer.concat(chunks).toString('utf8').split('\n').map((line) => {
+            const t = line.trim();
+            if (!t) return line;
+            if (t.startsWith('#')) {
+                // #EXT-X-KEY:URI="..."
+                return line.replace(/URI="([^"]+)"/, (m, u) => {
+                    const abs = u.startsWith('http') ? u : new URL(u, baseDir).toString();
+                    return `URI="/tg/raw?u=${encodeURIComponent(abs)}"`;
+                });
+            }
+            const abs = t.startsWith('http') ? t : new URL(t, baseDir).toString();
+            return `/tg/raw?u=${encodeURIComponent(abs)}`;
+        }).join('\n');
+        const out = Buffer.from(text, 'utf8');
+        res.writeHead(r.status, {
+            'Content-Type': 'application/vnd.apple.mpegurl',
+            'Content-Length': out.length,
+            'Cache-Control': 'no-store',
+        });
+        res.end(out);
+        return;
+    }
+
     const out = {};
-    const ct = r.headers['content-type'];
+    if (ct) out['Content-Type'] = ct;
     const cl = r.headers['content-length'];
     const cr = r.headers['content-range'];
     const ar = r.headers['accept-ranges'];
-    if (ct) out['Content-Type'] = ct;
     if (cl) out['Content-Length'] = cl;
     if (cr) out['Content-Range'] = cr;
     out['Accept-Ranges'] = ar || 'bytes';
@@ -122,29 +170,21 @@ export async function handle(req, res, url) {
         return;
     }
 
-    // ── 公开频道：302 到真实 mp4 ─────────────────────────
+    // ── 公开频道：一律由本机中转播放 ─────────────────────
     //
-    // 为什么用 302 而不是把地址塞进 JSON：
-    //   cdn.telesco.pe 的 token 有时效（小时级），一旦被 UI 缓存就会播到 403。
-    //   让播放器每次播放都来这里换一张新票，地址永远新鲜。
-    //
-    // 配了代理时**不直连 cdn**（国内基本连不上）：改成 302 到自己的
-    // `/tg/pubstream`，由 Node 通过代理拉流并按 Range 透传。
+    // 为什么不再 302 到 cdn（2026-10-25 修「能进播放器但一直转圈」）：
+    //   · cdn*.telesco.pe 会挑 UA / Referer，AVPlayer 直接拉多半 403 或挂住；
+    //   · 国内网络对 CDN 域名常常连不上，但 t.me 页面本身能打开（差异在域名）；
+    //   · 走本机中转还有一个好处：mp4 的 token 由 Node 现取，播放器永远拿到新鲜的。
+    // 本机这一跳只剩内存拷贝，代价远小于"打不开"。
     if (url.pathname === '/tg/embed') {
         const peer = url.searchParams.get('peer') || '';
         const id = url.searchParams.get('id') || '';
         if (!peer || !id) { json(res, 400, { error: 'missing peer/id' }); return; }
-        if (currentProxy()) {
-            res.writeHead(302, {
-                Location: `/tg/pubstream?peer=${encodeURIComponent(peer)}&id=${encodeURIComponent(id)}`,
-                'Cache-Control': 'no-store',
-            });
-            res.end();
-            return;
-        }
-        const r = await pub.resolvePublic(peer, parseInt(id, 10));
-        if (!r.ok) { json(res, 404, { error: r.error }); return; }
-        res.writeHead(302, { Location: r.url, 'Cache-Control': 'no-store' });
+        res.writeHead(302, {
+            Location: `/tg/pubstream?peer=${encodeURIComponent(peer)}&id=${encodeURIComponent(id)}`,
+            'Cache-Control': 'no-store',
+        });
         res.end();
         return;
     }
@@ -164,6 +204,15 @@ export async function handle(req, res, url) {
     if (url.pathname === '/tg/pubimg') {
         const u = url.searchParams.get('u') || '';
         if (!u) { res.writeHead(400); res.end(); return; }
+        await proxyStream(req, res, u);
+        return;
+    }
+
+    // ── HLS 分片 / 密钥中转（m3u8 被上面改写后会指到这里）──
+    if (url.pathname === '/tg/raw') {
+        const u = url.searchParams.get('u') || '';
+        if (!u) { res.writeHead(400); res.end(); return; }
+        if (!isTgCdn(u)) { json(res, 403, { error: '只允许 telegram 的 CDN 域名' }); return; }
         await proxyStream(req, res, u);
         return;
     }

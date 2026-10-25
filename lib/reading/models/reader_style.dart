@@ -542,8 +542,14 @@ class ReaderStyle {
       dayBgIndex: 0,
       bgColor: 0xFFD6D5D6,
       bgColorNight: 0xFF292D37,
+      // 微信读书的「朔望」壁纸（用户 2026-10-25：切到微信读书只剩纯色，
+      // 要带壁纸）。日间浅蓝 + 夜间深蓝各一张，纯色只作加载兜底。
+      bgImageAsset: 'assets/images/reader_bg/reading_bg_moon_white.jpg',
+      bgImageAssetNight: 'assets/images/reader_bg/reading_bg_moon_dark.jpg',
+      bgImageDark: false,
       fgColor: 0xFF000000,
-      fgColorNight: 0xFF616B7A,
+      // 夜间原来是 #616B7A（配纯色深底），压在深蓝壁纸上几乎看不清 ⇒ 提亮
+      fgColorNight: 0xFFC9CFD8,
       fontSize: 20,
       lineHeight: 1.6,
       letterSpacing: 0.1,
@@ -564,6 +570,8 @@ class ReaderStyle {
       titleFontSize: 19,
       titleBold: false,
       chapterTitleStyle: 'weread',
+      // 微信读书的观感靠宋体（用户 2026-10-25：字体也要内置）
+      fontId: 'builtin:serif',
     ),
     ReaderStyle(
       id: 'builtin:pomo',
@@ -598,6 +606,8 @@ class ReaderStyle {
       titleFontSize: 20,
       titleBold: false,
       chapterTitleStyle: 'qinglan',
+      // 泼墨的仿古观感靠楷体
+      fontId: 'builtin:kai',
     ),
   ];
 }

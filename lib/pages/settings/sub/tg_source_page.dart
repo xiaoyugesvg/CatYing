@@ -14,10 +14,12 @@ import 'tg_channel_page.dart';
 
 /// 设置 → 订阅管理 → Telegram 源
 ///
-/// 流程只有三步：
-///   1. 填 api_id / api_hash（my.telegram.org 免费申请）
-///   2. 手机 Telegram 扫码（不需要验证码）
-///   3. 选频道 / 手填群 ID → 出片
+/// 流程只有两步：
+///   1. 点「生成二维码」，手机 Telegram 扫码（**不需要验证码**）
+///   2. 选频道 / 手填群 ID → 出片
+///
+/// 应用凭据（api_id / api_hash）已内置，不用申请；只有想换成自己的
+/// 身份时才在「高级设置」里填。
 ///
 /// 这里**不碰协议**：数据全由内置 Node 的 `/tg` 返回。
 class TgSourcePage extends StatefulWidget {
@@ -118,10 +120,7 @@ class _TgSourcePageState extends State<TgSourcePage> {
   }
 
   Future<void> _saveConfig() async {
-    if (_apiIdCtrl.text.trim().isEmpty || _apiHashCtrl.text.trim().isEmpty) {
-      AppToast.message('api_id 和 api_hash 都要填');
-      return;
-    }
+    // 凭据已内置：留空就走内置那组，不再拦着用户
     setState(() => _busy = true);
     await _tg.saveSettings(
       apiId: _apiIdCtrl.text,
@@ -459,22 +458,36 @@ class _TgSourcePageState extends State<TgSourcePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('第 1 步：填写应用凭据',
+            Text('扫码登录',
                 style: TextStyle(
                     color: AppTheme.textPrimary,
                     fontSize: 14,
                     fontWeight: FontWeight.w600)),
             const SizedBox(height: 6),
             Text(
-              '打开 my.telegram.org → API development tools，'
-              '创建一个应用，把 api_id 和 api_hash 填到下面（免费，只需一次）。',
+              '直接点下面的「生成二维码」，用手机 Telegram 扫一下就登录，'
+              '不需要验证码、也不需要自己申请应用。',
               style: TextStyle(color: AppTheme.textTertiary, fontSize: 12, height: 1.5),
             ),
-            const SizedBox(height: 12),
-            _field(_apiIdCtrl, 'api_id（纯数字）', keyboard: TextInputType.number),
-            const SizedBox(height: 8),
-            _field(_apiHashCtrl, 'api_hash（32 位）'),
             if (_showAdvanced) ...[
+              const SizedBox(height: 14),
+              Text('应用凭据（已内置，可留空）',
+                  style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600)),
+              const SizedBox(height: 4),
+              Text(
+                '只有想把登录身份换成自己的才需要填：'
+                'my.telegram.org → API development tools 创建应用。',
+                style: TextStyle(
+                    color: AppTheme.textTertiary, fontSize: 11, height: 1.5),
+              ),
+              const SizedBox(height: 8),
+              _field(_apiIdCtrl, 'api_id（纯数字，留空用内置）',
+                  keyboard: TextInputType.number),
+              const SizedBox(height: 8),
+              _field(_apiHashCtrl, 'api_hash（32 位，留空用内置）'),
               const SizedBox(height: 12),
               // ── 代理总开关（默认关：填了地址不等于启用）──────────
               Row(
@@ -572,7 +585,7 @@ class _TgSourcePageState extends State<TgSourcePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('第 2 步：手机扫码登录',
+            Text('手机扫码登录',
                 style: TextStyle(
                     color: AppTheme.textPrimary,
                     fontSize: 14,

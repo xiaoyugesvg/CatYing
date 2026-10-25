@@ -209,6 +209,9 @@ flutter:
     - family: MiSans
       fonts:
         - asset: assets/fonts/MiSans.ttf
+    # 两套内置阅读样式的字体（思源宋体 / 霞鹜文楷）改成**用时下载**：
+    #   两个 CJK 全字库 ≈24MB，塞进包里不划算（用户 2026-10-25）。
+    #   下载与缓存见 lib/reading/services/reader_font_service.dart（catalog）。
 
 dependency_overrides:
   media_kit_libs_windows_video:
