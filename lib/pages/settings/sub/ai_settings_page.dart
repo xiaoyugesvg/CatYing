@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../reading/services/ai_service.dart';
+import 'log_diagnosis_page.dart';
 
 /// 一家 AI 服务商的预设（都是 OpenAI 兼容接口）
 class _Provider {
@@ -271,6 +272,21 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
               fontSize: 11.5,
               height: 1.6,
               color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
+            ),
+          ),
+          const SizedBox(height: 20),
+          // AI 底座之上的第一个实际用途：日志诊断
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.troubleshoot),
+              title: const Text('日志诊断'),
+              subtitle: const Text('读运行日志，让 AI 给出优化建议'),
+              trailing: const Icon(Icons.chevron_right, size: 18),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const LogDiagnosisPage(),
+                ),
+              ),
             ),
           ),
         ],
