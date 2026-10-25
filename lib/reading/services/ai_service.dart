@@ -67,10 +67,15 @@ class AiService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 兼容拼接：base 不带 /v1 时补上（DeepSeek 等要求 /v1/chat/completions）。
+  /// 兼容拼接：base 不带 `/v1` 时补上（DeepSeek 等要求 /v1/chat/completions）。
+  ///
+  /// 另外兼容两种常见写法（各家 baseUrl 差异很大）：
+  ///   · 用户直接填了完整地址（以 `/chat/completions` 结尾）⇒ 原样用；
+  ///   · 智谱等以 `/v4` 结尾 ⇒ `$b/chat/completions`（不能再塞 `/v1`）。
   String get _endpoint {
     final b = baseUrl.replaceAll(RegExp(r'/+$'), '');
-    if (b.endsWith('/v1')) return '$b/chat/completions';
+    if (b.endsWith('/chat/completions')) return b;
+    if (b.endsWith('/v1') || b.endsWith('/v4')) return '$b/chat/completions';
     return '$b/v1/chat/completions';
   }
 
