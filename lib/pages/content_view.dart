@@ -539,6 +539,12 @@ class _ContentViewState extends State<ContentView>
                             features.isEmpty ? 0 : features.length - 1,
                           ),
                       floating: true,
+                      // 影视底栏（用户 2026-10-26）：
+                      //   · 首页 / 设置 两端固定，不跟着滑
+                      //   · 一屏按 8 个定基准宽度：≤8 项按实际数量均分铺满，
+                      //     >8 项就每项固定 1/8 宽，中间那段静默横向滑动
+                      pinEnds: true,
+                      maxSlots: 8,
                       items: [
                         for (final f in features)
                           JellyNavItem(

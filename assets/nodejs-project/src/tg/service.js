@@ -18,6 +18,9 @@
 
 import fs from 'fs';
 import path from 'path';
+// gramjs 的 iterDownload 对 offset / fileSize 做的是 big-integer 运算
+//（.add / .divide / .subtract），传普通 number 会抛 "o.add is not a function"
+import bigInt from 'big-integer';
 import { TelegramClient, Api } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 import { ConnectionTCPFull } from 'telegram/network/index.js';
@@ -651,10 +654,12 @@ export async function streamTo(req, res, peer, id, fileName) {
         //   InputDocumentFileLocation，并且顺带拿到正确的 dcId（跨机房文件）。
         it = c.iterDownload({
             file: entry.msg.media,
-            offset: start,
+            // ⚠️ 这两个必须是 big-integer：gramjs 内部对它们调 .add/.divide，
+            //   传 number 就是 "o.add is not a function"（用户 2026-10-26）
+            offset: bigInt(start),
             requestSize: 256 * 1024,
             chunkSize: 256 * 1024,
-            fileSize: size || undefined,
+            fileSize: size > 0 ? bigInt(size) : undefined,
             // 长视频中途 fileReference 会过期：带上 [inputChat, msgId]，
             // gramjs 能自己重新拉一次消息换取新引用（和 downloadMedia 内部一致）
             msgData: entry.msg.inputChat
