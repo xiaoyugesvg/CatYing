@@ -2,17 +2,19 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import 'pet_models.dart';
+import 'package:tvbox/reading/pet/pet_models.dart';
 
-/// 「熊猫」桌宠（2026-10-25 重绘，替换上一版蓝色团子兽）。
+/// 「QQ 红围巾企鹅」桌宠（2026-10-26 重绘，替换上一版熊猫团子兽）。
 ///
-/// 用户参照物是**熊猫**：黑耳朵、黑眼罩、白脸白身、黑手脚。
-/// 为了保留「图鉴里每只不一样」，墨色不写死成黑，而是取
-/// `species.palette[2]`（小Q 深蓝 / 小秀 玫红 / 书呆 墨绿），
-/// 白色身体用 `palette[1]` 提亮 —— 于是每只都是"同款版型、不同配色"的熊猫。
+/// 物种设定从一开始就是企鹅（小Q 红围巾 / 小秀 / 书呆），
+/// 上一版临时换成了熊猫、且头用外部 GIF，与设定脱节 —— 这里改回矢量企鹅。
 ///
-/// 动效克制：呼吸缩放 + 上下浮动 + 轻微摇摆 + 每 4 秒眨眼，
-/// 心情低时眼罩下垂、嘴变成倒弧。
+/// 造型：圆胖身子 + 大头 + 白肚皮 + 橙嘴橙脚 + 红围巾，
+/// 配色取自 `species.palette`（小Q 蓝 / 小秀 粉 / 书呆 绿），
+/// 于是每只都是"同款版型、不同配色"的企鹅。
+///
+/// 动效克制：呼吸缩放 + 上下浮动 + 轻微摇摆 + 每 4 秒眨眼；
+/// 心情低时眼皮下垂、嘴变成倒弧。
 ///
 /// 兼容原签名（`outfits` 暂不参与绘制，保持接口稳定）。
 class BlobPetPainter extends CustomPainter {
@@ -40,14 +42,13 @@ class BlobPetPainter extends CustomPainter {
 
   /// 是否自己画头。
   ///
-  /// 2026-10-25：桌宠的头改用 GIF（用户指定的熊猫动图），身体仍用矢量，
-  /// 这时传 `false` —— 只留身体/四肢，头由 `PetView` 叠上去。
+  /// 默认 `true`：整只企鹅（含头）由本画笔一次画完。
+  /// 当上层想自己叠其它头部素材时可传 `false`，只留身体/四肢。
   final bool drawHead;
 
   /// 是否由画笔自己做呼吸/浮动/摇摆。
   ///
-  /// 叠 GIF 头时必须是 `false`：否则身体晃、头不晃，会错位。
-  /// 改由 `PetView` 把整只（身体 + GIF 头）一起做同一个变换。
+  /// 外层已经做了同一套变换时传 `false`，避免双重位移。
   final bool animate;
 
   @override
@@ -57,17 +58,20 @@ class BlobPetPainter extends CustomPainter {
     final cy = size.height / 2;
     final cycle = t * 2 * math.pi;
 
-    // 墨色（耳朵/眼罩/手脚）与毛色（脸/身）
-    final ink = species.palette[2];
-    final fur = Color.lerp(species.palette[1], Colors.white, 0.72)!;
+    // 身子/头的主色（深）与肚皮/脸的浅色，取自物种调色板
+    final body = species.palette[2];
+    final belly = Color.lerp(species.palette[1], Colors.white, 0.55)!;
+    final face = Color.lerp(species.palette[1], Colors.white, 0.82)!;
+    final beak = const Color(0xFFFF9A3D); // 橙嘴橙脚，跨物种一致
+    final scarf = const Color(0xFFE74C3C); // 红围巾，QQ 企鹅招牌
+    final scarfShade = const Color(0xFFC0392B);
 
     final bob = animate ? math.sin(cycle) * 1.7 * s : 0.0;
-    final breathe = animate ? 1 + math.sin(cycle * 2) * 0.011 : 1.0;
+    final breathe = animate ? 1 + math.sin(cycle * 2) * 0.012 : 1.0;
     final sway = animate ? math.sin(cycle + 0.8) * 0.02 : 0.0;
 
     final blinkPhase = (t / 4.0) % 1.0;
     final blink = blinkPhase > 0.955;
-    final happy = mood >= 65;
     final sad = mood < 38;
 
     canvas.save();
@@ -75,12 +79,16 @@ class BlobPetPainter extends CustomPainter {
     canvas.rotate(sway);
     canvas.scale(breathe);
 
-    final inkPaint = Paint()..color = ink;
-    final furPaint = Paint()..color = fur;
+    final bodyPaint = Paint()..color = body;
+    final bellyPaint = Paint()..color = belly;
+    final facePaint = Paint()..color = face;
+    final beakPaint = Paint()..color = beak;
+    final scarfPaint = Paint()..color = scarf;
+    final scarfShadePaint = Paint()..color = scarfShade;
     final outline = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 0.8 * s
-      ..color = ink.withValues(alpha: 0.18);
+      ..color = body.withValues(alpha: 0.16);
 
     void oval(
       double dx,
@@ -106,133 +114,118 @@ class BlobPetPainter extends CustomPainter {
 
     // ── 地面阴影 ──────────────────────────────────────────
     if (!headOnly) {
-      oval(0, 43, 44, 8,
-          Paint()
-            ..color = Colors.black.withValues(alpha: 0.09)
-            ..maskFilter = MaskFilter.blur(BlurStyle.normal, 3.0 * s));
+      oval(
+        0,
+        47,
+        46,
+        8,
+        Paint()
+          ..color = Colors.black.withValues(alpha: 0.09)
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, 3.0 * s),
+      );
     }
 
-    // ── 身体（白）─────────────────────────────────────────
+    // ── 脚（橙）─────────────────────────────────────────
     if (!headOnly) {
-      // 后腿
       for (final side in const [-1.0, 1.0]) {
-        oval(side * 14, 36, 21, 13, inkPaint);
+        oval(side * 11, 45, 13, 7, beakPaint);
       }
-      // 肚子
-      oval(0, 17, 52, 45, furPaint, stroked: true);
-      // 手臂（随呼吸轻摆，稍微包住身体）
+    }
+
+    // ── 身体 + 翅膀 ─────────────────────────────────────
+    if (!headOnly) {
       final swing = math.sin(cycle * 2) * 0.9;
       for (final side in const [-1.0, 1.0]) {
         oval(
-          side * 22,
-          18 + swing * side,
-          12,
-          17,
-          inkPaint,
-          rotate: side * 0.30,
+          side * 27,
+          14 + swing * side * 0.25,
+          11,
+          22,
+          bodyPaint,
+          rotate: side * 0.22,
         );
       }
+      oval(0, 14, 54, 64, bodyPaint, stroked: true);
+      oval(0, 20, 36, 48, bellyPaint);
     }
 
     // ── 头 ────────────────────────────────────────────────
-    // 用 GIF 头时到此为止：身体已经画完，头由上层叠上去。
+    // drawHead=false 时到此为止：身体已画完，头由上层叠上去。
     if (!drawHead) {
       canvas.restore();
       return;
     }
-    final headY = headOnly ? 4.0 : -14.0;
-    final r = headOnly ? 31.0 : 26.0;
+    final headY = headOnly ? 2.0 : -14.0;
+    final r = headOnly ? 33.0 : 26.0;
 
-    // 耳朵（黑，压在头后面）
+    // 头（深色）
+    oval(0, headY, r * 2.0, r * 1.9, bodyPaint, stroked: true);
+    // 白脸（QQ 企鹅标志性白斑）
+    oval(0, headY + r * 0.08, r * 1.5, r * 1.32, facePaint);
+
+    // ── 眼睛 ─────────────────────────────────────────────
+    final eyeY = headY - r * 0.05;
+    final eyeDx = r * 0.42;
+    final eyeR = r * 0.30;
     for (final side in const [-1.0, 1.0]) {
-      oval(side * r * 0.66, headY - r * 0.70, r * 0.72, r * 0.70, inkPaint);
-    }
-    // 脸（白）
-    oval(0, headY, r * 2.0, r * 1.84, furPaint, stroked: true);
-
-    // ── 眼罩（熊猫标志）───────────────────────────────────
-    // 角度只给 ±10°：太斜会变成浣熊。宽度收窄、高度拉长，靠近鼻梁。
-    final eyeY = headY + r * 0.14;
-    final eyeDx = r * 0.36;
-    final patchW = r * 0.54;
-    final patchH = sad ? r * 0.56 : r * 0.80;
-
-    for (final side in const [-1.0, 1.0]) {
-      oval(
-        side * eyeDx,
-        eyeY,
-        patchW,
-        patchH,
-        inkPaint,
-        rotate: side * 0.18,
-      );
-
-      // 眼睛：睁开 = 白点 + 黑瞳；闭眼 = 一道弧
       if (blink || sad) {
         final p = Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.3 * s
+          ..strokeWidth = 1.4 * s
           ..strokeCap = StrokeCap.round
-          ..color = fur;
+          ..color = body;
         final path = Path()
-          ..moveTo((side * eyeDx - 3.2) * s, eyeY * s)
+          ..moveTo((side * eyeDx - 3.4) * s, eyeY * s)
           ..quadraticBezierTo(
             side * eyeDx * s,
             (eyeY + (sad ? 1.8 : -1.8)) * s,
-            (side * eyeDx + 3.2) * s,
+            (side * eyeDx + 3.4) * s,
             eyeY * s,
           );
         canvas.drawPath(path, p);
       } else {
-        oval(side * eyeDx, eyeY, 5.4, 5.8,
-            Paint()..color = Colors.white.withValues(alpha: 0.96));
-        oval(side * eyeDx, eyeY + 0.4, 3.6, 4.0, Paint()..color = ink);
+        oval(side * eyeDx, eyeY, eyeR * 1.05, eyeR * 1.2,
+            Paint()..color = Colors.white.withValues(alpha: 0.98));
+        oval(side * eyeDx, eyeY + 0.4, eyeR * 0.62, eyeR * 0.72,
+            Paint()..color = body);
         // 高光
-        oval(side * eyeDx - 0.9, eyeY - 1.1, 1.4, 1.4,
+        oval(side * eyeDx - 0.9, eyeY - 1.1, eyeR * 0.28, eyeR * 0.28,
             Paint()..color = Colors.white);
       }
     }
 
-    // ── 腮红（固定暖粉，不跟配色走，否则蓝宠会出来两块"白斑"）──
+    // ── 腮红（固定暖粉，不跟配色走，否则蓝宠会出两块"白斑"）──
     for (final side in const [-1.0, 1.0]) {
       oval(
-        side * (r * 0.78),
-        eyeY + r * 0.46,
+        side * (r * 0.85),
+        eyeY + r * 0.50,
         r * 0.30,
         r * 0.17,
         Paint()..color = const Color(0xFFF2A0B4).withValues(alpha: 0.34),
       );
     }
 
-    // ── 鼻子（压在眼罩下缘之下，别被盖住）─────────────────
-    final noseY = headY + r * 0.60;
-    oval(0, noseY, r * 0.24, r * 0.16, inkPaint);
+    // ── 嘴（橙，小三角）──────────────────────────────────
+    final beakY = headY + r * 0.44;
+    final beakPath = Path()
+      ..moveTo(-3.4 * s, beakY * s)
+      ..lineTo(3.4 * s, beakY * s)
+      ..lineTo(0, (beakY + 3.0) * s)
+      ..close();
+    canvas.drawPath(beakPath, beakPaint);
 
-    // ── 嘴：鼻下一个短竖 + 两段弧（熊猫经典 w 形）──────────
-    final mouth = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.15 * s
-      ..strokeCap = StrokeCap.round
-      ..color = ink.withValues(alpha: 0.85);
-    final my = noseY + r * 0.16;
-    final path = Path();
-    if (happy) {
-      path
-        ..moveTo(-0.1 * s, (noseY + r * 0.07) * s)
-        ..lineTo(-0.1 * s, my * s)
-        ..moveTo(-3.0 * s, my * s)
-        ..quadraticBezierTo(-1.4 * s, (my + 2.4) * s, 0, my * s)
-        ..quadraticBezierTo(1.4 * s, (my + 2.4) * s, 3.0 * s, my * s);
-    } else if (sad) {
-      path
-        ..moveTo(-2.6 * s, (my + 1.6) * s)
-        ..quadraticBezierTo(0, (my - 1.2) * s, 2.6 * s, (my + 1.6) * s);
-    } else {
-      path
-        ..moveTo(-2.4 * s, my * s)
-        ..quadraticBezierTo(0, (my + 1.4) * s, 2.4 * s, my * s);
+    // ── 红围巾（脖子处一圈 + 垂下的一截）─────────────────
+    if (!headOnly) {
+      final scarfY = headY + r * 1.15;
+      oval(0, scarfY, r * 1.6, r * 0.5, scarfPaint);
+      final drop = Path()
+        ..moveTo((r * 0.65) * s, scarfY * s)
+        ..lineTo((r * 1.1) * s, scarfY * s)
+        ..lineTo((r * 0.92) * s, (scarfY + 11) * s)
+        ..lineTo((r * 0.5) * s, (scarfY + 9) * s)
+        ..close();
+      canvas.drawPath(drop, scarfShadePaint);
     }
-    canvas.drawPath(path, mouth);
 
     canvas.restore();
   }
@@ -242,5 +235,6 @@ class BlobPetPainter extends CustomPainter {
       old.t != t ||
       old.mood != mood ||
       old.headOnly != headOnly ||
+      old.drawHead != drawHead ||
       old.species.id != species.id;
 }

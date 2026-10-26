@@ -2,16 +2,16 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../../services/app_log.dart';
-import '../../widgets/app_toast.dart';
-import '../models/hiker_source.dart';
-import '../services/hiker_engine.dart';
-import '../services/hiker_prefs.dart';
-import '../services/hiker_store.dart';
-import '../widgets/hiker_richtext.dart';
-import '../widgets/hiker_widgets.dart';
-import 'hiker_detail_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/hiker/models/hiker_source.dart';
+import 'package:tvbox/hiker/services/hiker_engine.dart';
+import 'package:tvbox/hiker/services/hiker_prefs.dart';
+import 'package:tvbox/hiker/services/hiker_store.dart';
+import 'package:tvbox/hiker/widgets/hiker_richtext.dart';
+import 'package:tvbox/hiker/widgets/hiker_widgets.dart';
+import 'package:tvbox/hiker/pages/hiker_detail_page.dart';
 
 /// 海阔搜索页（独立页：主页顶栏的搜索按钮进来）。
 ///

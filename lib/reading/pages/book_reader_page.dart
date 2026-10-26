@@ -1,5 +1,5 @@
 import 'dart:async';
-import '../../widgets/common_widgets.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -13,35 +13,35 @@ import 'package:screen_brightness/screen_brightness.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/book.dart';
-import '../models/book_content.dart';
-import '../models/reading_settings.dart';
-import '../models/bookshelf.dart';
-import '../services/book_download_service.dart';
-import '../services/book_font_service.dart';
-import '../services/book_paginator.dart';
-import '../services/book_page_cache_service.dart';
-import '../services/reader_notes_service.dart';
-import '../services/book_parser.dart';
-import '../utils/file_browser.dart';
-import '../services/gbk_txt_parser.dart';
-import '../services/book_reading_progress_service.dart';
-import '../services/reader_override_service.dart';
-import '../services/bookshelf_service.dart';
-import '../services/platform_service.dart';
-import '../services/settings_service.dart';
-import '../services/tts_service.dart';
-import '../services/reading_time_service.dart';
-import '../theme/jelly_theme.dart';
-import '../widgets/book_page_cover.dart';
-import '../widgets/book_page_curl.dart';
-import '../widgets/jelly_mode_picker.dart';
-import '../widgets/pomodoro_button.dart';
-import '../widgets/wavy_underline.dart';
-import 'book_prefetch_page.dart';
-import 'book_notes_page.dart';
-import '../../common/theme.dart';
-import '../../common/system_ui.dart';
+import 'package:tvbox/reading/models/book.dart';
+import 'package:tvbox/reading/models/book_content.dart';
+import 'package:tvbox/reading/models/reading_settings.dart';
+import 'package:tvbox/reading/models/bookshelf.dart';
+import 'package:tvbox/reading/services/book_download_service.dart';
+import 'package:tvbox/reading/services/book_font_service.dart';
+import 'package:tvbox/reading/services/book_paginator.dart';
+import 'package:tvbox/reading/services/book_page_cache_service.dart';
+import 'package:tvbox/reading/services/reader_notes_service.dart';
+import 'package:tvbox/reading/services/book_parser.dart';
+import 'package:tvbox/reading/utils/file_browser.dart';
+import 'package:tvbox/reading/services/gbk_txt_parser.dart';
+import 'package:tvbox/reading/services/book_reading_progress_service.dart';
+import 'package:tvbox/reading/services/reader_override_service.dart';
+import 'package:tvbox/reading/services/bookshelf_service.dart';
+import 'package:tvbox/reading/services/platform_service.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/services/tts_service.dart';
+import 'package:tvbox/reading/services/reading_time_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/widgets/book_page_cover.dart';
+import 'package:tvbox/reading/widgets/book_page_curl.dart';
+import 'package:tvbox/reading/widgets/jelly_mode_picker.dart';
+import 'package:tvbox/reading/widgets/pomodoro_button.dart';
+import 'package:tvbox/reading/widgets/wavy_underline.dart';
+import 'package:tvbox/reading/pages/book_prefetch_page.dart';
+import 'package:tvbox/reading/pages/book_notes_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/common/system_ui.dart';
 
 // ── 顶栏「日夜切换」的本地覆盖（0=跟随全局，1=强制浅色，2=强制夜间）──
 // ✗ 原来放在静态类 `_ReaderDarkOverride.value` 里：static 属于整个进程而非
@@ -3630,7 +3630,7 @@ class _BookReaderPageState extends State<BookReaderPage>
                         ),
                         Switch(
                           value: draftIndependent,
-                          activeColor: JellyTheme.primary,
+                          activeThumbColor: JellyTheme.primary,
                           onChanged: (v) =>
                               setSheet(() => draftIndependent = v),
                         ),
@@ -3739,7 +3739,7 @@ class _BookReaderPageState extends State<BookReaderPage>
                         ),
                         Switch(
                           value: draftReverseTap,
-                          activeColor: JellyTheme.primary,
+                          activeThumbColor: JellyTheme.primary,
                           onChanged: (v) => setSheet(() => draftReverseTap = v),
                         ),
                       ],
@@ -3764,7 +3764,7 @@ class _BookReaderPageState extends State<BookReaderPage>
                         ),
                         Switch(
                           value: draftDoublePage,
-                          activeColor: JellyTheme.primary,
+                          activeThumbColor: JellyTheme.primary,
                           onChanged: (v) => setSheet(() => draftDoublePage = v),
                         ),
                       ],
@@ -3789,7 +3789,7 @@ class _BookReaderPageState extends State<BookReaderPage>
                         ),
                         Switch(
                           value: draftShowHud,
-                          activeColor: JellyTheme.primary,
+                          activeThumbColor: JellyTheme.primary,
                           onChanged: (v) => setSheet(() => draftShowHud = v),
                         ),
                       ],
@@ -3814,7 +3814,7 @@ class _BookReaderPageState extends State<BookReaderPage>
                         ),
                         Switch(
                           value: draftVolumeKey,
-                          activeColor: JellyTheme.primary,
+                          activeThumbColor: JellyTheme.primary,
                           onChanged: (v) => setSheet(() => draftVolumeKey = v),
                         ),
                       ],

@@ -20,9 +20,9 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../services/settings_service.dart';
-import 'source_definition.dart';
-import 'global_proxy.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/source/source_definition.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
 
 void _log(String message) {
   if (kDebugMode) {

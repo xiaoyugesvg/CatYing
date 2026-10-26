@@ -14,7 +14,7 @@
 ///   A2 繁简转换  ：原始 / 繁→简 / 简→繁
 library;
 
-import '../novel_source/novel_chinese_converter.dart';
+import 'package:tvbox/reading/novel_source/novel_chinese_converter.dart';
 
 class ReadingSettings {
   ReadingSettings({

@@ -4,15 +4,15 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../common/theme.dart';
-import '../models/comic.dart';
-import '../services/download_service.dart';
-import '../services/platform_service.dart';
-import '../services/settings_service.dart';
-import '../theme/jelly_theme.dart';
-import '../utils/list_pagination.dart';
-import '../widgets/jelly_search_bar.dart';
-import 'reader_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/models/comic.dart';
+import 'package:tvbox/reading/services/download_service.dart';
+import 'package:tvbox/reading/services/platform_service.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/utils/list_pagination.dart';
+import 'package:tvbox/reading/widgets/jelly_search_bar.dart';
+import 'package:tvbox/reading/pages/reader_page.dart';
 
 /// 漫画下载记录页（参考目标界面 IMG_8400）：
 /// 标题「下载记录」+ 搜索框「搜索漫画」+ 5 个状态 tab

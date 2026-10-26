@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
-import '../models/hiker_source.dart';
-import 'hiker_store.dart';
+import 'package:tvbox/hiker/models/hiker_source.dart';
+import 'package:tvbox/hiker/services/hiker_store.dart';
 
 /// 海阔列表的**本地缓存**。
 ///

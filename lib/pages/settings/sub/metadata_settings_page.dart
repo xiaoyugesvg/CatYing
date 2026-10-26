@@ -4,11 +4,11 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:cached_network_image_ce/cached_network_image.dart';
 
-import '../../../common/theme.dart';
-import '../../../services/tmdb_service.dart';
-import '../../../widgets/common_widgets.dart';
-import 'settings_shared.dart';
-import '../../../widgets/app_toast.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/tmdb_service.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/pages/settings/sub/settings_shared.dart';
+import 'package:tvbox/widgets/app_toast.dart';
 
 /// 设置 → 元数据（TMDB 刮削详细配置）
 ///
@@ -560,7 +560,7 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
                                     height: 64,
                                     color: AppTheme.backgroundTertiary,
                                   ),
-                                  errorWidget: (_, __, ___) => Container(
+                                  errorBuilder: (_, __, ___) => Container(
                                     width: 46,
                                     height: 64,
                                     color: AppTheme.backgroundTertiary,

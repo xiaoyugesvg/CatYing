@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../pages/settings/sub/home_pages_settings_page.dart';
-import '../../services/nav_feature_service.dart';
-import '../widgets/app_toast.dart';
-import 'emby_editor_page.dart';
-import 'emby_models.dart';
-import 'emby_store.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/pages/settings/sub/home_pages_settings_page.dart';
+import 'package:tvbox/services/nav_feature_service.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/emby/emby_editor_page.dart';
+import 'package:tvbox/emby/emby_models.dart';
+import 'package:tvbox/emby/emby_store.dart';
 
 /// 媒体服务器账号管理页（VidHub 风格）。
 ///

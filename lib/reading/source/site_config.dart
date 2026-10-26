@@ -8,8 +8,8 @@
 // 内置站点数据已迁至 assets/config/sources.json（出厂默认）+ 文档目录 sources.json
 // （远端更新覆盖层），代码侧只保留本模型（字段/fromJson/toJson），不再硬编码站点。
 
-import '../utils/safe_num.dart';
-import 'models.dart';
+import 'package:tvbox/reading/utils/safe_num.dart';
+import 'package:tvbox/reading/source/models.dart';
 
 /// 单个漫画站点配置
 class SiteConfig {

@@ -4,13 +4,13 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/book_source.dart';
-import '../models/source_subscription.dart';
-import '../source/global_proxy.dart';
-import '../source/source_config_store.dart';
-import '../source/source_definition.dart';
-import '../source/source_manager.dart';
-import 'book_source_import_parser.dart';
+import 'package:tvbox/reading/models/book_source.dart';
+import 'package:tvbox/reading/models/source_subscription.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/reading/source/source_config_store.dart';
+import 'package:tvbox/reading/source/source_definition.dart';
+import 'package:tvbox/reading/source/source_manager.dart';
+import 'package:tvbox/reading/services/book_source_import_parser.dart';
 
 /// 阅读模块「源订阅」存储与更新。
 ///

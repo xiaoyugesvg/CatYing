@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../models/comic.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/models/comic.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 是否有可显示的评分 / 热度
 bool comicHasScore(Comic comic) {

@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../../models/source_bean.dart';
-import '../../services/api_config.dart';
-import '../../services/generic_source_service.dart';
-import '../../widgets/app_toast.dart';
-import 'drama_settings.dart';
-import 'generic_source_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/source_bean.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/generic_source_service.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/pages/drama/drama_settings.dart';
+import 'package:tvbox/pages/drama/generic_source_page.dart';
 
 /// 「短剧」管理页（2026-10-22 重做）。
 ///

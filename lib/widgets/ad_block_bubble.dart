@@ -3,9 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-import '../common/theme.dart';
-import '../services/ad_block_service.dart';
-import 'app_toast.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/ad_block_service.dart';
+import 'package:tvbox/widgets/app_toast.dart';
 
 /// 网页上的**去广告悬浮球**：点一下进入"点选元素"模式，选中后把规则存下来。
 ///

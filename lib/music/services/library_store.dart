@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/models.dart';
+import 'package:tvbox/music/models/models.dart';
 
 /// 音乐库：**最近播放 + 我的收藏 + 播放队列**（#4 / #5 / #11）。
 ///

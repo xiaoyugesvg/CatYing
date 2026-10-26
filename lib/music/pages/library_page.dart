@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 
-import '../models/models.dart';
-import '../services/library_store.dart';
-import '../services/music_api.dart';
-import '../services/player_manager.dart';
-import '../services/settings_store.dart';
-import '../theme/music_theme.dart';
-import '../widgets/music_components.dart';
-import 'playlist_page.dart';
-import 'local_music_page.dart';
-import '../../widgets/app_page_loading.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/services/library_store.dart';
+import 'package:tvbox/music/services/music_api.dart';
+import 'package:tvbox/music/services/player_manager.dart';
+import 'package:tvbox/music/services/settings_store.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/music/widgets/music_components.dart';
+import 'package:tvbox/music/pages/playlist_page.dart';
+import 'package:tvbox/music/pages/local_music_page.dart';
+import 'package:tvbox/widgets/app_page_loading.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 音乐库 —— 移植自 Beans 的 `LibraryView.swift`（817 行，取其主干）。
 ///

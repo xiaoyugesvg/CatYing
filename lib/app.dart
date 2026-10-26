@@ -4,7 +4,7 @@ import 'dart:io';
 //（实测报 `Undefined name 'kIsWeb'` ✗ ⇒ `error=1` ✓）⇒ 必须显式导入 ✓
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'music/widgets/floating_play_button.dart';
+import 'package:tvbox/music/widgets/floating_play_button.dart';
 // 🔴 **必须挂载 `MusicBottomChrome`**（音乐底部两条：播放条 + 导航栏）——
 //    它在 `c50ddd1` 那次提交里被**连带删掉了**（那次本来是改阅读体系，
 //    但 `app.dart` 被回退到了"加底栏之前"的版本，diff 是
@@ -20,25 +20,25 @@ import 'music/widgets/floating_play_button.dart';
 // ⚠️ 正因为这一层在 Navigator 之外，`MusicBottomChrome` 内部
 //    **不能用 `Navigator.of(context)`**，必须走全局
 //    `VideoPlayerPip.navigatorKey`（组件里有详细注释）。
-import 'music/pages/music_bottom_chrome.dart';
-import 'music/services/route_observer.dart';
+import 'package:tvbox/music/pages/music_bottom_chrome.dart';
+import 'package:tvbox/music/services/route_observer.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
-import 'common/theme.dart';
-import 'services/app_log.dart';
-import 'services/background_service.dart';
-import 'router/app_pages.dart';
-import 'services/detail_page_controller.dart';
-import 'services/player_fullscreen_controller.dart';
-import 'widgets/video_player_pip.dart';
-import 'common/appearance_sync.dart';
-import 'common/theme_mode_store.dart';
-import 'services/main_tab_controller.dart';
-import 'services/media_proxy_service.dart';
-import 'pages/content_view.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/background_service.dart';
+import 'package:tvbox/router/app_pages.dart';
+import 'package:tvbox/services/detail_page_controller.dart';
+import 'package:tvbox/services/player_fullscreen_controller.dart';
+import 'package:tvbox/widgets/video_player_pip.dart';
+import 'package:tvbox/common/appearance_sync.dart';
+import 'package:tvbox/common/theme_mode_store.dart';
+import 'package:tvbox/services/main_tab_controller.dart';
+import 'package:tvbox/services/media_proxy_service.dart';
+import 'package:tvbox/pages/content_view.dart';
 // ✅ **隐藏 WebView 的挂载点**（本轮 ✓）—— 见下方根 builder 里的说明 ✓
-import 'reading/source/webview_image_fetcher.dart';
-import 'reading/pet/reading_pet_overlay.dart';
+import 'package:tvbox/reading/source/webview_image_fetcher.dart';
+import 'package:tvbox/reading/pet/reading_pet_overlay.dart';
 
 /// 上一次打过的外观签名 —— 用**顶层变量**而不是实例字段：
 /// 日志去重本身是"进程级"的（同一时刻只会有一个 App 实例在跑）。

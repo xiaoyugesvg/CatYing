@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../../../common/theme.dart';
-import '../../../reading/theme/jelly_palette.dart';
-import '../theme/music_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/theme/jelly_palette.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
 
 /// 发现页的**视觉预设**（对齐 Beans 的 aurora / paper / midnight 三套）。
 ///

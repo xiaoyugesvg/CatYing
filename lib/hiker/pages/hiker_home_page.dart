@@ -5,24 +5,24 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
-import '../../common/theme.dart';
-import '../../services/app_log.dart';
-import '../../services/main_tab_controller.dart';
-import '../../services/nav_feature_service.dart';
-import '../../widgets/app_toast.dart';
-import '../widgets/card_source_sheet.dart';
-import '../models/hiker_source.dart';
-import '../services/hiker_builtin.dart';
-import '../services/hiker_cache.dart';
-import '../services/hiker_engine.dart';
-import '../services/hiker_prefs.dart';
-import '../services/hiker_store.dart';
-import '../widgets/hiker_blocks.dart';
-import '../widgets/hiker_widgets.dart';
-import 'hiker_detail_page.dart';
-import 'hiker_manage_page.dart';
-import 'hiker_search_page.dart';
-import 'hiker_settings_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/main_tab_controller.dart';
+import 'package:tvbox/services/nav_feature_service.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/hiker/widgets/card_source_sheet.dart';
+import 'package:tvbox/hiker/models/hiker_source.dart';
+import 'package:tvbox/hiker/services/hiker_builtin.dart';
+import 'package:tvbox/hiker/services/hiker_cache.dart';
+import 'package:tvbox/hiker/services/hiker_engine.dart';
+import 'package:tvbox/hiker/services/hiker_prefs.dart';
+import 'package:tvbox/hiker/services/hiker_store.dart';
+import 'package:tvbox/hiker/widgets/hiker_blocks.dart';
+import 'package:tvbox/hiker/widgets/hiker_widgets.dart';
+import 'package:tvbox/hiker/pages/hiker_detail_page.dart';
+import 'package:tvbox/hiker/pages/hiker_manage_page.dart';
+import 'package:tvbox/hiker/pages/hiker_search_page.dart';
+import 'package:tvbox/hiker/pages/hiker_settings_page.dart';
 
 /// 「海阔」模块主页（底栏分类，默认关闭，在「设置 → 主页页面」开启）。
 ///

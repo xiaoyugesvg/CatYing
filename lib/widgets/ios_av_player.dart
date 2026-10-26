@@ -6,7 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
-import 'app_player.dart';
+import 'package:tvbox/widgets/app_player.dart';
 
 /// iOS 专用：与系统小窗共用同一个原生 AVPlayer（AvEngine）。
 /// 进/出小窗视频连续，不会「一个播一个停」。

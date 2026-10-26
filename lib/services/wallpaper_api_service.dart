@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 
-import 'app_log.dart';
+import 'package:tvbox/services/app_log.dart';
 
 /// 一张在线壁纸
 class WallpaperItem {

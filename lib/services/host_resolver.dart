@@ -13,8 +13,8 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 
-import '../models/app_config.dart';
-import 'app_log.dart';
+import 'package:tvbox/models/app_config.dart';
+import 'package:tvbox/services/app_log.dart';
 
 class _CacheEntry {
   final String ip;
@@ -71,6 +71,38 @@ class HostResolver {
     }
     AppLog.instance.log(
         '[DNS] rules loaded: hosts=${_hosts.length}, doh=${_dohServers.length}');
+  }
+
+  /// 只查 hosts 覆盖表，**绝不触发 DoH**（同步、零副作用）。
+  ///
+  /// 给 [shouldUseSystemDns] 为 true 的 host 用：既能享受用户手写的 hosts
+  /// 覆盖，又不会在连接 DoH 服务器自身时再次发起 DoH 查询。
+  String? lookupHosts(String host) {
+    final h = host.trim();
+    if (h.isEmpty) return null;
+    final ip = _hosts[h.toLowerCase()];
+    return (ip == null || ip.isEmpty) ? null : ip;
+  }
+
+  /// 该 host 是否应该**跳过** hosts/DoH 覆盖，直接走系统 DNS。
+  ///
+  /// 三类必须放行（否则会出问题，不是优化）：
+  /// 1. **回环地址**（`localhost` / `127.x` / `::1`）——本机 Node spider、
+  ///    drpy 宿主、内嵌 python 服务都跑在回环上，任何改写都会连不上；
+  /// 2. **IP 字面量**——本来就没有解析这一步，改写无意义；
+  /// 3. **DoH 服务器自己的域名**——`resolve()` 内部要发 DoH 请求，
+  ///    而那个请求的连接同样会走本解析器 → 不加这条会 **自递归死锁**
+  ///    （外层 `_inflight` 等待内层，内层又等待外层同一个 future）。
+  bool shouldUseSystemDns(String host) {
+    final h = host.trim().toLowerCase();
+    if (h.isEmpty || h == 'localhost') return true;
+    if (h.startsWith('127.')) return true;
+    if (h == '::1' || h == '[::1]' || h == '0.0.0.0') return true;
+    if (_isIp(h)) return true;
+    for (final server in _dohServers) {
+      if (server.toLowerCase() == h) return true;
+    }
+    return false;
   }
 
   /// 解析 host：先查 hosts 覆盖 → 再查缓存 → 再走 DoH；都没有/失败返回 null。

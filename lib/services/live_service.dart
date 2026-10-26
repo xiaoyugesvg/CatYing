@@ -5,12 +5,12 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
-import 'app_log.dart';
-import 'prefs_mirror.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/prefs_mirror.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/live_models.dart';
-import 'xtream_service.dart';
+import 'package:tvbox/models/live_models.dart';
+import 'package:tvbox/services/xtream_service.dart';
 
 /// 直播源服务：解析 tvbox `lives` 配置 / m3u 播放列表 / 内嵌 channels / Xtream 账号
 class LiveService extends GetxService {
@@ -643,8 +643,8 @@ class LiveService extends GetxService {
 
   /// 手动调整直播源顺序（设置页拖动排序）。单源模式（_rawLives == null）直接返回。
   ///
-  /// [newIndex] 遵循 ReorderableListView.onReorder 的约定：向下拖动时它指向
-  /// 「目标位置之后」的插槽，这里先归一化（newIndex > oldIndex 时减一）。
+  /// [newIndex] 遵循 ReorderableListView.onReorderItem 的约定：已经是
+  /// 「移出后重新插入」的最终下标（框架内部替我们做了向下拖动时的减一）。
   /// 只重排 [_rawLives]，不重新联网；通过保留原始条目的对象引用，
   /// 让「当前已加载的源」在重排后仍然指向同一个源（loaded 标记跟着源走）。
   Future<void> reorderSource(int oldIndex, int newIndex) async {
@@ -652,7 +652,8 @@ class LiveService extends GetxService {
     if (raw == null) return;
     if (oldIndex < 0 || oldIndex >= raw.length) return;
     var target = newIndex;
-    if (target > oldIndex) target -= 1;
+    // newIndex 来自 onReorderItem，框架已归一化（移出后重新插入的最终下标），
+    // 这里不能再减一，否则会差一位。
     target = target.clamp(0, raw.length - 1);
     if (target == oldIndex) return;
     await _markLivesManaged();

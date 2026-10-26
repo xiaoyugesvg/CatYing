@@ -1,5 +1,5 @@
 import 'package:get/get.dart';
-import '../../models/cache_store.dart';
+import 'package:tvbox/models/cache_store.dart';
 
 /// 收藏控制器
 enum FavSort { timeDesc, timeAsc, nameAsc }

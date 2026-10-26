@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../../common/theme.dart';
-import '../theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
 
 /// 列表懒加载分页工具。
 ///

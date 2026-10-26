@@ -2,12 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import '../models/models.dart';
-import '../models/third_party_source.dart';
-import '../../services/app_log.dart';
-import 'music_api.dart';
-import 'semaphore.dart';
-import 'settings_store.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/models/third_party_source.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/music/services/music_api.dart';
+import 'package:tvbox/music/services/semaphore.dart';
+import 'package:tvbox/music/services/settings_store.dart';
 
 /// 音源解析结果
 class SourceResolveResult {

@@ -6,16 +6,16 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../common/theme.dart';
-import '../../reading/source/global_proxy.dart';
-import '../../reading/widgets/swipe_action_tile.dart';
-import '../../services/app_log.dart';
-import '../../widgets/app_toast.dart';
-import '../models/hiker_source.dart';
-import '../services/hiker_builtin.dart';
-import '../services/hiker_files.dart';
-import '../services/hiker_prefs.dart';
-import '../services/hiker_store.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/reading/widgets/swipe_action_tile.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/hiker/models/hiker_source.dart';
+import 'package:tvbox/hiker/services/hiker_builtin.dart';
+import 'package:tvbox/hiker/services/hiker_files.dart';
+import 'package:tvbox/hiker/services/hiker_prefs.dart';
+import 'package:tvbox/hiker/services/hiker_store.dart';
 
 /// 弹出「源配置」编辑框 —— **首页的「去设置」和源管理页共用**。
 ///
@@ -621,7 +621,7 @@ class _HikerManagePageState extends State<HikerManagePage> {
         padding: EdgeInsets.zero,
         buildDefaultDragHandles: false,
         itemCount: list.length,
-        onReorder: (o, n) => _reorderList(list, o, n),
+        onReorderItem: (o, n) => _reorderList(list, o, n),
         proxyDecorator: (child, index, animation) =>
             Material(color: Colors.transparent, child: child),
         itemBuilder: (_, i) => Padding(
@@ -675,7 +675,7 @@ class _HikerManagePageState extends State<HikerManagePage> {
     int oldIndex,
     int newIndex,
   ) async {
-    if (newIndex > oldIndex) newIndex -= 1;
+    // newIndex 来自 onReorderItem，框架已归一化，不再手动减一。
     final ids = list.map((e) => e.id).toList();
     if (oldIndex < 0 || oldIndex >= ids.length) return;
     final moved = ids.removeAt(oldIndex);

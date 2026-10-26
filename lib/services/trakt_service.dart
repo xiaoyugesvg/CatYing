@@ -5,7 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'app_log.dart';
+import 'package:tvbox/services/app_log.dart';
 
 /// Trakt 设备码授权信息（第一步返回）。
 class TraktDeviceAuth {

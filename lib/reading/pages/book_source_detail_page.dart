@@ -7,26 +7,26 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/book_source.dart';
-import '../models/bookshelf.dart';
-import '../utils/html_text.dart';
-import '../services/book_source_service.dart';
-import '../services/chapter_alignment.dart';
-import '../services/book_source_download_service.dart';
-import '../services/browse_history_service.dart';
+import 'package:tvbox/reading/models/book_source.dart';
+import 'package:tvbox/reading/models/bookshelf.dart';
+import 'package:tvbox/reading/utils/html_text.dart';
+import 'package:tvbox/reading/services/book_source_service.dart';
+import 'package:tvbox/reading/services/chapter_alignment.dart';
+import 'package:tvbox/reading/services/book_source_download_service.dart';
+import 'package:tvbox/reading/services/browse_history_service.dart';
 // 收藏服务：本文件原来导入的是**从未被使用**的 bookshelf_service ✗
 //（analyze 一直在报 unused_import ✓）—— 那正是"收藏接线写到一半"留下的痕迹 ✓。
 // 真正需要的是收藏服务（见下方 `_toggleFavorite` ✓）
-import '../services/book_favorites_service.dart';
-import '../services/bookshelf_service.dart';
+import 'package:tvbox/reading/services/book_favorites_service.dart';
+import 'package:tvbox/reading/services/bookshelf_service.dart';
 // `Book.fromJson`（收藏用 ✓）—— 上面换成收藏服务后，这个模型也必须一起导入 ✓
-import '../models/book.dart';
-import '../theme/jelly_theme.dart';
-import '../widgets/jelly_bookshelf_dialog.dart';
-import '../widgets/theme_background_animation.dart';
-import 'book_source_reader_page.dart';
-import 'book_source_switch_page.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/models/book.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/widgets/jelly_bookshelf_dialog.dart';
+import 'package:tvbox/reading/widgets/theme_background_animation.dart';
+import 'package:tvbox/reading/pages/book_source_reader_page.dart';
+import 'package:tvbox/reading/pages/book_source_switch_page.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 书源详情页 —— 书籍信息 + 目录。
 ///
@@ -754,7 +754,7 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
             : CachedNetworkImage(
                 imageUrl: _cover,
                 fit: BoxFit.cover,
-                errorWidget: (_, __, ___) => Container(
+                errorBuilder: (_, __, ___) => Container(
                   color: JellyTheme.primary.withValues(alpha: 0.1),
                   child: Icon(
                     Icons.menu_book_rounded,

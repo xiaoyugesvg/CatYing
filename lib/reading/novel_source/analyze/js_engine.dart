@@ -8,10 +8,10 @@ library;
 import 'package:quickjs_engine/quickjs_engine.dart';
 import 'package:html/dom.dart' as dom;
 
-import '../novel_chinese_converter.dart';
-import '../../../services/app_log.dart';
-import 'legado_java_prelude.dart';
-import 'js_polyfills.dart';
+import 'package:tvbox/reading/novel_source/novel_chinese_converter.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/reading/novel_source/analyze/legado_java_prelude.dart';
+import 'package:tvbox/reading/novel_source/analyze/js_polyfills.dart';
 
 class JsEngine {
   /// 进程级共享引擎：书源解析（搜索/发现/详情/目录/正文）全程复用同一个

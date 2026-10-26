@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
-import '../models/models.dart';
-import '../services/music_api.dart';
-import '../services/player_manager.dart';
-import '../theme/music_theme.dart';
-import '../../common/theme.dart';
-import '../widgets/listen_episode_list.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/services/music_api.dart';
+import 'package:tvbox/music/services/player_manager.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/music/widgets/listen_episode_list.dart';
 
 /// 一五听书专辑页（有声小说）——「专辑 = 影片，单集 = 剧集」。
 ///

@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart';
 
-import '../models/trim_preset.dart';
+import 'package:tvbox/reading/models/trim_preset.dart';
 
 /// 去白边核心服务
 ///

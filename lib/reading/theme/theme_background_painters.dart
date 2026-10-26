@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import 'jelly_palette.dart';
+import 'package:tvbox/reading/theme/jelly_palette.dart';
 
 /// 「清新护眼」主题背景动画：底部草丛萌发 + 花朵绽放 + 顶部短草/小花 +
 /// 飘落花瓣（线条生长风格）。

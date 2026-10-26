@@ -1,8 +1,8 @@
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../../services/tmdb_service.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/tmdb_service.dart';
 
 /// 「匹配 TMDB」搜索页（媒体库详情页右上角 🔍 进入）
 ///
@@ -281,7 +281,7 @@ class _TmdbMatchPageState extends State<TmdbMatchPage> {
                           fit: BoxFit.fill,
                           placeholder: (_, __) => ColoredBox(
                               color: AppTheme.backgroundSecondary),
-                          errorWidget: (_, __, ___) => ColoredBox(
+                          errorBuilder: (_, __, ___) => ColoredBox(
                               color: AppTheme.backgroundSecondary),
                         )
                       : ColoredBox(

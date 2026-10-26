@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image_ce/cached_network_image.dart';
-import '../common/theme.dart';
-import '../models/movie.dart';
-import 'glass.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/movie.dart';
+import 'package:tvbox/widgets/glass.dart';
 
 /// 视频卡片：海报 + 右下「源|备注」半透明黑标 + 居中标题
 class VodCard extends StatelessWidget {
@@ -265,7 +265,7 @@ class VodCard extends StatelessWidget {
             color: dim ? Colors.black.withValues(alpha: 0.45) : null,
             colorBlendMode: dim ? BlendMode.darken : null,
             placeholder: (_, __) => ColoredBox(color: AppTheme.backgroundTertiary),
-            errorWidget: (_, __, ___) => isBack
+            errorBuilder: (_, __, ___) => isBack
                 ? const SizedBox.shrink()
                 : ColoredBox(
                     color: AppTheme.backgroundTertiary,

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
-import '../../common/theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 书源仓库「二维码导入」扫码页。
 ///

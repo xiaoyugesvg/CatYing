@@ -66,7 +66,7 @@ class PluginSubscriptionStore {
   // 只在**首次启动**写入一次：用户删掉后不会再被补回来。
   static const String builtinId = 'builtin_gcore';
   static const String builtinUrl =
-      'https://hebijunge.github.io/musicfree-plugins/plugins-gcore.json';
+      'https://gcore.jsdelivr.net/gh/hebijunge/musicfree-plugins@master/plugins-gcore.json';
   static const String _seededKey = 'music.pluginSubscriptions.seeded.v1';
 
   final List<PluginSubscription> _items = [];

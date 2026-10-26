@@ -6,13 +6,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 import 'package:webview_flutter/webview_flutter.dart';
 
-import '../../common/theme.dart';
-import '../../services/ad_block_service.dart';
-import '../../services/app_log.dart';
-import '../../services/nodejs_manager.dart';
-import '../../services/webview_page_color.dart';
-import '../../widgets/ad_block_bubble.dart';
-import '../services/ant_bridge.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/ad_block_service.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/nodejs_manager.dart';
+import 'package:tvbox/services/webview_page_color.dart';
+import 'package:tvbox/widgets/ad_block_bubble.dart';
+import 'package:tvbox/miniapp/services/ant_bridge.dart';
 
 /// 小程序 WebView 页：加载远端/本地小程序页面 + 官方 ant SDK v4 桥注入。
 ///

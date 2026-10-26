@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
-import 'translate_service.dart';
+import 'package:tvbox/services/translate_service.dart';
 
 /// 一条字幕（时间轴原样保留，只换文本）
 class SubtitleCue {

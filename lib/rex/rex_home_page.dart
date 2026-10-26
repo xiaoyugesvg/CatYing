@@ -4,18 +4,18 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../common/theme.dart';
-import '../models/movie.dart';
-import '../services/player_prefs.dart';
-import '../widgets/app_toast.dart';
-import '../widgets/card_action_sheet.dart';
-import '../widgets/vod_card.dart';
-import 'rex_detail_page.dart';
-import 'rex_layout_sheet.dart';
-import 'rex_manage_page.dart';
-import 'rex_market_page.dart';
-import 'rex_models.dart';
-import 'rex_service.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/movie.dart';
+import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/card_action_sheet.dart';
+import 'package:tvbox/widgets/vod_card.dart';
+import 'package:tvbox/rex/rex_detail_page.dart';
+import 'package:tvbox/rex/rex_layout_sheet.dart';
+import 'package:tvbox/rex/rex_manage_page.dart';
+import 'package:tvbox/rex/rex_market_page.dart';
+import 'package:tvbox/rex/rex_models.dart';
+import 'package:tvbox/rex/rex_service.dart';
 
 /// 「REX」首页 —— 视觉与交互对齐影视首页：
 ///   顶栏源切换 + 幻灯片 → 模块分类 chips → 海报网格（VodCard）
@@ -406,7 +406,7 @@ class _RexHomePageState extends State<RexHomePage> {
                             CachedNetworkImage(
                               imageUrl: slides[i].cover,
                               fit: BoxFit.cover,
-                              errorWidget: (_, __, ___) => ColoredBox(
+                              errorBuilder: (_, __, ___) => ColoredBox(
                                   color: AppTheme.backgroundTertiary),
                             )
                           else

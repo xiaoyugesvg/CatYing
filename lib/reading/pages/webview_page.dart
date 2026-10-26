@@ -8,9 +8,9 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-import '../../services/ad_block_service.dart';
-import '../../widgets/ad_block_bubble.dart';
-import '../services/zlibrary_service.dart';
+import 'package:tvbox/services/ad_block_service.dart';
+import 'package:tvbox/widgets/ad_block_bubble.dart';
+import 'package:tvbox/reading/services/zlibrary_service.dart';
 
 class OnlineReaderPage extends StatefulWidget {
   final String url;

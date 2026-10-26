@@ -1,13 +1,13 @@
 import 'package:dio/dio.dart';
-import '../source/global_proxy.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
 import 'package:flutter/material.dart';
 
-import '../models/tts_source.dart';
-import '../services/tts_service.dart';
-import '../services/tts_source_store.dart';
-import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
-import '../../services/nodejs_manager.dart';
+import 'package:tvbox/reading/models/tts_source.dart';
+import 'package:tvbox/reading/services/tts_service.dart';
+import 'package:tvbox/reading/services/tts_source_store.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/nodejs_manager.dart';
 
 /// 添加 / 编辑朗读源（截图 IMG_8102~8110）。
 ///

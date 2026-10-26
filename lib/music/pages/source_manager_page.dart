@@ -1,21 +1,21 @@
 import 'dart:io';
-import '../widgets/music_sheet.dart';
+import 'package:tvbox/music/widgets/music_sheet.dart';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../models/third_party_source.dart';
-import '../models/models.dart';
-import '../services/music_api.dart';
-import '../services/settings_store.dart';
-import '../services/source_health_service.dart';
-import '../services/source_import_parser.dart';
-import '../services/unblock_service.dart';
-import '../theme/music_theme.dart';
-import 'plugin_variables_page.dart';
-import '../../common/theme.dart';
-import '../../widgets/app_toast.dart';
+import 'package:tvbox/music/models/third_party_source.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/services/music_api.dart';
+import 'package:tvbox/music/services/settings_store.dart';
+import 'package:tvbox/music/services/source_health_service.dart';
+import 'package:tvbox/music/services/source_import_parser.dart';
+import 'package:tvbox/music/services/unblock_service.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/music/pages/plugin_variables_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/app_toast.dart';
 
 /// 音源管理页 —— 移植自 Beans 的 `ThirdPartySourceManagerSheet.swift`。
 /// 界面样式对齐洛雪（LX Music）"自定义音源"设置页（参考图 IMG_8538）：

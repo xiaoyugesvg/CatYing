@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'app_log.dart';
+import 'package:tvbox/services/app_log.dart';
 
 /// 设置项的「**立刻落盘** + 文件镜像兜底」。
 ///

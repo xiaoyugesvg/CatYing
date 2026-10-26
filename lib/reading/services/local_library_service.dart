@@ -16,7 +16,7 @@ import 'package:crypto/crypto.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'settings_service.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
 
 class LocalLibraryEntry {
   const LocalLibraryEntry({

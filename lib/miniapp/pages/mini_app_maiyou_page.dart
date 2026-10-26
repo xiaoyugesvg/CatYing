@@ -3,16 +3,16 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../../common/theme.dart';
-import '../../models/live_models.dart';
-import '../../pages/live/controller.dart';
-import '../../services/app_log.dart';
-import '../../services/live_service.dart';
-import '../../services/main_tab_controller.dart';
-import '../../services/network_manager.dart';
-import '../../widgets/app_toast.dart';
-import '../models/mini_app.dart';
-import '../services/mini_app_service.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/live_models.dart';
+import 'package:tvbox/pages/live/controller.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/live_service.dart';
+import 'package:tvbox/services/main_tab_controller.dart';
+import 'package:tvbox/services/network_manager.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/miniapp/models/mini_app.dart';
+import 'package:tvbox/miniapp/services/mini_app_service.dart';
 
 /// 麦优直播独立应用页：分类浏览 + 频道网格 + 播放（复用直播页播放链路）。
 ///

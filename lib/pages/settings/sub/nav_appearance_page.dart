@@ -3,12 +3,12 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
-import '../../../common/floating_nav_spec.dart';
-import '../../../common/theme.dart';
-import '../../../reading/services/settings_service.dart';
-import '../../../services/nav_feature_service.dart';
-import '../../../widgets/app_toast.dart';
-import 'settings_shared.dart';
+import 'package:tvbox/common/floating_nav_spec.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/services/nav_feature_service.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 
 /// 设置 → 主页页面 → 底栏风格与图标。
 ///

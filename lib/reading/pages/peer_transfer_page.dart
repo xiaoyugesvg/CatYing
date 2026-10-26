@@ -1,15 +1,15 @@
 import 'package:file_picker/file_picker.dart';
-import '../../widgets/common_widgets.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:flutter/material.dart';
 
-import '../models/peer_device.dart';
-import '../models/transfer_offer.dart';
-import '../services/book_download_service.dart';
-import '../services/peer_transfer_service.dart';
-import '../services/download_service.dart';
-import '../services/settings_service.dart';
-import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/models/peer_device.dart';
+import 'package:tvbox/reading/models/transfer_offer.dart';
+import 'package:tvbox/reading/services/book_download_service.dart';
+import 'package:tvbox/reading/services/peer_transfer_service.dart';
+import 'package:tvbox/reading/services/download_service.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 跨设备传书页面。send=把书发到电脑；receive=接收电脑传来的书。
 enum PeerTransferMode { send, receive }

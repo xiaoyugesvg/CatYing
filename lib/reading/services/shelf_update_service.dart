@@ -23,13 +23,13 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/bookshelf.dart';
-import '../models/comic.dart';
-import '../source/adapter.dart';
-import '../source/source_manager.dart';
-import 'bookshelf_service.dart';
-import 'favorites_service.dart';
-import 'settings_service.dart';
+import 'package:tvbox/reading/models/bookshelf.dart';
+import 'package:tvbox/reading/models/comic.dart';
+import 'package:tvbox/reading/source/adapter.dart';
+import 'package:tvbox/reading/source/source_manager.dart';
+import 'package:tvbox/reading/services/bookshelf_service.dart';
+import 'package:tvbox/reading/services/favorites_service.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
 
 class ShelfUpdateService extends ChangeNotifier {
   ShelfUpdateService._();

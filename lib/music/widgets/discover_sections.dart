@@ -6,10 +6,10 @@ import 'package:flutter/material.dart';
 //    但那个多出来的 `../` 表达的是"再往外一层"的错误意图，
 //    对读代码的人是误导（同目录的 `music_components.dart` 写的就是两层）。
 //    改成正确写法，行为不变。
-import '../../common/theme.dart';
-import '../models/models.dart';
-import '../theme/discover_preset.dart';
-import 'music_components.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/theme/discover_preset.dart';
+import 'package:tvbox/music/widgets/music_components.dart';
 
 /// 发现页的三个区块组件 —— **对齐 Beans 的 DiscoverView 规格**。
 ///

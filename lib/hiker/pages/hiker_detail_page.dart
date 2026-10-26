@@ -4,21 +4,21 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../common/theme.dart';
-import '../../miniapp/pages/mini_app_player_page.dart';
-import '../../pages/detail/simple_image_reader_page.dart';
-import '../../pages/detail/simple_text_reader_page.dart';
-import '../../pages/play/sniff_player_page.dart';
-import '../../services/app_log.dart';
-import '../../services/sniff_filter.dart';
-import '../../widgets/app_toast.dart';
-import '../models/hiker_source.dart';
-import '../services/hiker_engine.dart';
-import '../services/hiker_prefs.dart';
-import '../services/hiker_route.dart';
-import '../services/hiker_store.dart';
-import '../widgets/hiker_blocks.dart' show hikerPlainText, hikerRichSpans;
-import 'hiker_search_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/miniapp/pages/mini_app_player_page.dart';
+import 'package:tvbox/pages/detail/simple_image_reader_page.dart';
+import 'package:tvbox/pages/detail/simple_text_reader_page.dart';
+import 'package:tvbox/pages/play/sniff_player_page.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/sniff_filter.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/hiker/models/hiker_source.dart';
+import 'package:tvbox/hiker/services/hiker_engine.dart';
+import 'package:tvbox/hiker/services/hiker_prefs.dart';
+import 'package:tvbox/hiker/services/hiker_route.dart';
+import 'package:tvbox/hiker/services/hiker_store.dart';
+import 'package:tvbox/hiker/widgets/hiker_blocks.dart' show hikerPlainText, hikerRichSpans;
+import 'package:tvbox/hiker/pages/hiker_search_page.dart';
 
 /// 海阔条目详情 + 打开。
 ///

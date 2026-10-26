@@ -15,12 +15,12 @@
 
 import 'package:flutter/material.dart';
 
-import '../source/source_config_store.dart';
-import '../source/source_definition.dart';
-import '../source/source_manager.dart';
-import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
-import 'book_source_login_page.dart';
+import 'package:tvbox/reading/source/source_config_store.dart';
+import 'package:tvbox/reading/source/source_definition.dart';
+import 'package:tvbox/reading/source/source_manager.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/pages/book_source_login_page.dart';
 
 /// 常用可编辑字段分组（config 源）。
 /// label：分组标题；entries：[(键名, 中文说明, 占位提示)]。

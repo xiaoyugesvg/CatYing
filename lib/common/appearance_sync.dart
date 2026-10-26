@@ -3,10 +3,10 @@ import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../reading/services/settings_service.dart';
-import '../services/main_tab_controller.dart';
-import 'theme.dart';
-import 'theme_mode_store.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/services/main_tab_controller.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/common/theme_mode_store.dart';
 
 /// 统一"当前该用浅色还是深色"，并把结果写进全局 [AppBrightness]。
 ///

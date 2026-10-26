@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
-import '../models/third_party_source.dart';
+import 'package:tvbox/music/models/third_party_source.dart';
 
 /// 音源导入解析 —— 移植自 Beans-Music 的 `ThirdPartySourceImportParser.swift`。
 ///

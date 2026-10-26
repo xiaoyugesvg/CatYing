@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../../common/theme.dart';
-import '../../../services/ad_block_service.dart';
-import '../../../widgets/app_toast.dart';
-import '../../../widgets/common_widgets.dart';
-import 'settings_shared.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/ad_block_service.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 
 /// 「广告管理」——网页去广告的**统一设置入口**。
 ///

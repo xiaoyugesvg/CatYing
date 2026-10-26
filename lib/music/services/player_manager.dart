@@ -4,21 +4,21 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart' show BuildContext;
 import 'package:media_kit/media_kit.dart';
 
-import '../models/models.dart';
-import '../models/third_party_source.dart';
-import 'music_api.dart';
-import 'download_service.dart';
-import 'settings_store.dart';
-import 'unblock_service.dart';
-import '../../services/audio_focus.dart';
-import '../../services/app_log.dart';
-import 'library_store.dart';
-import '../../widgets/app_toast.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/models/third_party_source.dart';
+import 'package:tvbox/music/services/music_api.dart';
+import 'package:tvbox/music/services/download_service.dart';
+import 'package:tvbox/music/services/settings_store.dart';
+import 'package:tvbox/music/services/unblock_service.dart';
+import 'package:tvbox/services/audio_focus.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/music/services/library_store.dart';
+import 'package:tvbox/widgets/app_toast.dart';
 // ⚠️ `cross_platform_matcher.dart` **不再 import** ——
 // 用户明确要求"不要搜索其他平台"，回退链已移除跨平台匹配。
 // 实现代码仍保留在 services/cross_platform_matcher.dart（需要时加回 import 即可）。
-import '../widgets/source_picker_sheet.dart';
-import '../../widgets/video_player_pip.dart' show VideoPlayerPip;
+import 'package:tvbox/music/widgets/source_picker_sheet.dart';
+import 'package:tvbox/widgets/video_player_pip.dart' show VideoPlayerPip;
 
 /// 播放模式（对齐 Beans 的循环/随机语义）
 enum PlayMode {

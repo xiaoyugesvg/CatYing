@@ -3,23 +3,23 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import '../../common/theme.dart';
-import '../../services/player_prefs.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/player_prefs.dart';
 import 'package:cached_network_image_ce/cached_network_image.dart';
-import '../../services/api_config.dart';
-import '../../models/movie.dart';
-import '../../models/movie_sort.dart';
-import '../../widgets/common_widgets.dart';
-import '../../widgets/engine_load_panel.dart';
-import '../../widgets/source_switch_sheet.dart';
-import '../../widgets/vod_card.dart';
-import '../webview/view.dart';
-import '../calendar/tv_calendar_page.dart';
-import 'controller.dart';
-import '../../widgets/home_search_bar.dart';
-import '../../services/main_tab_controller.dart';
-import '../../services/nav_feature_service.dart';
-import '../../reading/services/settings_service.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/models/movie.dart';
+import 'package:tvbox/models/movie_sort.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/widgets/engine_load_panel.dart';
+import 'package:tvbox/widgets/source_switch_sheet.dart';
+import 'package:tvbox/widgets/vod_card.dart';
+import 'package:tvbox/pages/webview/view.dart';
+import 'package:tvbox/pages/calendar/tv_calendar_page.dart';
+import 'package:tvbox/pages/home/controller.dart';
+import 'package:tvbox/widgets/home_search_bar.dart';
+import 'package:tvbox/services/main_tab_controller.dart';
+import 'package:tvbox/services/nav_feature_service.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
 
 /// 首页 - 对应 Swift HomeView
 class HomePage extends StatefulWidget {
@@ -1483,7 +1483,7 @@ class _RecommendBannerState extends State<_RecommendBanner>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final on = TickerMode.of(context);
+    final on = TickerMode.valuesOf(context).enabled;
     if (on == _visible) return;
     _visible = on;
     if (on) {
@@ -2722,9 +2722,11 @@ class _RecommendBannerState extends State<_RecommendBanner>
       //   三张齐平"的原因（用户 2026-10-14：「按上次的来」，即要 V 形效果）。
       transform: Matrix4.identity()
         ..setEntry(3, 2, 0.0012) // 透视
-        ..translate(0.0, dy, dz)
+        // translate/scale 已废弃：显式写四参版本，w 传 1.0，
+        // 与旧 `translate(x, y, z)` / `scale(s)` 的行为完全一致。
+        ..translateByDouble(0.0, dy, dz, 1.0)
         ..rotateY(rotY)
-        ..scale(scale),
+        ..scaleByDouble(scale, scale, scale, 1.0),
       child: Opacity(
         opacity: dim,
         // 卡宽由槽位（viewportFraction 0.30 ≈ 117pt）决定：`Center` 会把下面那个
@@ -2854,7 +2856,7 @@ class _BannerImage extends StatelessWidget {
       // 用户反馈"图片显示不全"）。允许变形，不允许裁切。
       fit: BoxFit.fill,
       placeholder: (_, __) => ColoredBox(color: AppTheme.backgroundTertiary),
-      errorWidget: (_, __, ___) => ColoredBox(
+      errorBuilder: (_, __, ___) => ColoredBox(
         color: AppTheme.backgroundTertiary,
         child: Icon(Icons.broken_image_outlined, color: AppTheme.textTertiary),
       ),

@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../../../common/theme.dart';
-import '../../../services/parse_service.dart';
-import '../../../services/player_prefs.dart';
-import '../../../services/play_route.dart';
-import '../../../services/sniff_filter.dart';
-import '../../../widgets/common_widgets.dart';
-import 'settings_shared.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/parse_service.dart';
+import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/services/play_route.dart';
+import 'package:tvbox/services/sniff_filter.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 
 /// 设置 → 播放设置 → 嗅探设置
 ///

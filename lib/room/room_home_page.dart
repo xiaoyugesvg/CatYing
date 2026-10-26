@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../common/theme.dart';
-import '../widgets/app_toast.dart';
-import 'room_models.dart';
-import 'room_page.dart';
-import 'room_session.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/room/room_models.dart';
+import 'package:tvbox/room/room_page.dart';
+import 'package:tvbox/room/room_session.dart';
 
 /// 「房间」大厅：连房间服务器 → 看房间列表 / 建房 / 加入。
 ///

@@ -14,14 +14,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../models/models.dart';
-import '../models/third_party_source.dart';
-import '../services/music_api.dart';
-import '../services/player_manager.dart';
-import '../theme/music_theme.dart';
-import 'music_components.dart';
-import '../pages/plugin_song_list_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/models/third_party_source.dart';
+import 'package:tvbox/music/services/music_api.dart';
+import 'package:tvbox/music/services/player_manager.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/music/widgets/music_components.dart';
+import 'package:tvbox/music/pages/plugin_song_list_page.dart';
 
 /// 插件里的一个「条目」（榜单 / 歌单 / 专辑都用它）
 class _PItem {

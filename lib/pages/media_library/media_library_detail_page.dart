@@ -6,18 +6,18 @@ import 'package:flutter/rendering.dart' show ImageStreamListener;
 import 'package:get/get.dart';
 import 'dart:ui' as ui;
 
-import '../../common/theme.dart';
-import '../../models/cache_store.dart';
-import '../../models/movie.dart';
-import '../../models/vod_info.dart';
-import '../../pages/detail/controller.dart';
-import '../detail/view.dart';
-import '../../services/app_log.dart';
-import '../../services/tmdb_service.dart';
-import '../../widgets/app_toast.dart';
-import '../../widgets/common_widgets.dart';
-import 'media_library_player_page.dart';
-import 'tmdb_match_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/cache_store.dart';
+import 'package:tvbox/models/movie.dart';
+import 'package:tvbox/models/vod_info.dart';
+import 'package:tvbox/pages/detail/controller.dart';
+import 'package:tvbox/pages/detail/view.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/tmdb_service.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/pages/media_library/media_library_player_page.dart';
+import 'package:tvbox/pages/media_library/tmdb_match_page.dart';
 
 /// 媒体库详情页（独立模块 `lib/pages/media_library/`）
 ///
@@ -1221,7 +1221,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                       fit: BoxFit.fill,
                       placeholder: (_, __) =>
                           ColoredBox(color: Colors.black),
-                      errorWidget: (_, __, ___) =>
+                      errorBuilder: (_, __, ___) =>
                           ColoredBox(color: Colors.black),
                     ),
                     // 海报底边过渡带：透明 → 主色调（高 70px，消掉硬分界）
@@ -1912,7 +1912,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                         fit: BoxFit.fill,
                         placeholder: (_, __) =>
                             ColoredBox(color: Colors.black26),
-                        errorWidget: (_, __, ___) =>
+                        errorBuilder: (_, __, ___) =>
                             ColoredBox(color: Colors.black26),
                       ),
                     ),
@@ -2070,7 +2070,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                         fit: BoxFit.fill, // 同上：不裁切
                         placeholder: (_, __) =>
                             ColoredBox(color: Colors.black26),
-                        errorWidget: (_, __, ___) =>
+                        errorBuilder: (_, __, ___) =>
                             ColoredBox(color: Colors.black26),
                       )
                     else
@@ -2560,7 +2560,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                         fit: BoxFit.fill, // 同上：封面不裁切
                         placeholder: (_, __) =>
                             ColoredBox(color: _libCard),
-                        errorWidget: (_, __, ___) =>
+                        errorBuilder: (_, __, ___) =>
                             ColoredBox(color: _libCard),
                       )
                     : ColoredBox(color: _libCard),
@@ -2652,7 +2652,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                         imageUrl: item.posterUrl,
                         fit: BoxFit.fill, // 同上：封面不裁切
                         placeholder: (_, __) => ColoredBox(color: Colors.black26),
-                        errorWidget: (_, __, ___) =>
+                        errorBuilder: (_, __, ___) =>
                             ColoredBox(color: Colors.black26),
                       )
                     : ColoredBox(color: Colors.black26),

@@ -2,11 +2,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
-import '../../common/floating_nav_spec.dart';
-import '../services/settings_service.dart';
-import '../theme/jelly_palette.dart';
-import '../theme/jelly_theme.dart';
-import 'jelly_nav_bar.dart';
+import 'package:tvbox/common/floating_nav_spec.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/theme/jelly_palette.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/widgets/jelly_nav_bar.dart';
 
 /// **iPad**（宽 ≥ 800 且短边 ≥ 600）下的**左侧竖向悬浮导航栏**。
 ///

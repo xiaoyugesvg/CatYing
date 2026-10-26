@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../common/theme.dart';
-import '../services/player_prefs.dart';
-import '../widgets/app_toast.dart';
-import '../widgets/card_action_sheet.dart';
-import 'rex_layout_sheet.dart';
-import 'rex_market_page.dart';
-import 'rex_models.dart';
-import 'rex_service.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/card_action_sheet.dart';
+import 'package:tvbox/rex/rex_layout_sheet.dart';
+import 'package:tvbox/rex/rex_market_page.dart';
+import 'package:tvbox/rex/rex_models.dart';
+import 'package:tvbox/rex/rex_service.dart';
 
 /// REX 订阅管理：市场入口 + 启用/停用 + 刷新 + 排序 + 改地址 + 删除。
 ///

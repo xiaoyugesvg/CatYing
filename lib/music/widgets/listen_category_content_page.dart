@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../models/models.dart';
-import '../services/music_api.dart';
-import '../services/settings_store.dart';
-import '../theme/music_theme.dart';
-import 'listen_view_toggle.dart';
-import 'music_components.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/services/music_api.dart';
+import 'package:tvbox/music/services/settings_store.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/music/widgets/listen_view_toggle.dart';
+import 'package:tvbox/music/widgets/music_components.dart';
 
 /// 听书分类内容页（公共）。
 ///

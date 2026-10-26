@@ -4,18 +4,18 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
-import 'app_log.dart';
-import 'local_python_sources.dart';
-import 'moontv_converter.dart';
-import 'prefs_mirror.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/local_python_sources.dart';
+import 'package:tvbox/services/moontv_converter.dart';
+import 'package:tvbox/services/prefs_mirror.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../models/app_config.dart';
-import '../models/source_bean.dart';
-import '../common/constants.dart';
-import 'network_manager.dart';
-import 'live_service.dart';
-import 'parse_store.dart';
-import 'host_resolver.dart';
+import 'package:tvbox/models/app_config.dart';
+import 'package:tvbox/models/source_bean.dart';
+import 'package:tvbox/common/constants.dart';
+import 'package:tvbox/services/network_manager.dart';
+import 'package:tvbox/services/live_service.dart';
+import 'package:tvbox/services/parse_store.dart';
+import 'package:tvbox/services/host_resolver.dart';
 
 /// 配置错误枚举
 enum ConfigError {

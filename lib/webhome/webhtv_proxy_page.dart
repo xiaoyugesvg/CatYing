@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../common/theme.dart';
-import '../reading/services/settings_service.dart';
-import '../services/api_config.dart';
-import '../widgets/app_toast.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/widgets/app_toast.dart';
 
 /// 「网络代理」（原 Webhtv → APP 代理）。
 ///

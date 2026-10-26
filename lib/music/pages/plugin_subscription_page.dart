@@ -8,11 +8,11 @@
 
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../../widgets/app_toast.dart';
-import '../models/plugin_subscription.dart';
-import '../services/plugin_market_service.dart';
-import '../theme/music_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/music/models/plugin_subscription.dart';
+import 'package:tvbox/music/services/plugin_market_service.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
 
 class PluginSubscriptionPage extends StatefulWidget {
   const PluginSubscriptionPage({super.key});

@@ -1,29 +1,29 @@
 import 'dart:async';
 import 'dart:convert';
-import '../../widgets/common_widgets.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:html/parser.dart' as html_parser;
-import '../models/comic.dart';
-import '../source/adapter.dart';
-import '../source/source_manager.dart';
-import '../services/download_service.dart';
-import '../models/bookshelf.dart';
-import '../services/bookshelf_service.dart';
-import '../services/shelf_update_service.dart';
-import '../services/favorites_service.dart';
-import '../services/reading_progress_service.dart';
-import '../theme/jelly_theme.dart';
-import '../widgets/download_chapter_sheet.dart';
-import '../widgets/source_cover_image.dart';
-import '../widgets/jelly_bookshelf_dialog.dart';
-import '../widgets/jelly_score_badge.dart';
-import '../widgets/theme_background_animation.dart';
-import 'reader_page.dart';
-import 'comic_aggregate_search_page.dart';
-import 'search_page.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/models/comic.dart';
+import 'package:tvbox/reading/source/adapter.dart';
+import 'package:tvbox/reading/source/source_manager.dart';
+import 'package:tvbox/reading/services/download_service.dart';
+import 'package:tvbox/reading/models/bookshelf.dart';
+import 'package:tvbox/reading/services/bookshelf_service.dart';
+import 'package:tvbox/reading/services/shelf_update_service.dart';
+import 'package:tvbox/reading/services/favorites_service.dart';
+import 'package:tvbox/reading/services/reading_progress_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/widgets/download_chapter_sheet.dart';
+import 'package:tvbox/reading/widgets/source_cover_image.dart';
+import 'package:tvbox/reading/widgets/jelly_bookshelf_dialog.dart';
+import 'package:tvbox/reading/widgets/jelly_score_badge.dart';
+import 'package:tvbox/reading/widgets/theme_background_animation.dart';
+import 'package:tvbox/reading/pages/reader_page.dart';
+import 'package:tvbox/reading/pages/comic_aggregate_search_page.dart';
+import 'package:tvbox/reading/pages/search_page.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 日志工具
 void _log(String message) {
@@ -336,7 +336,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
             placeholder: (c, u) => Container(
               color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
             ),
-            errorWidget: (c, u, e) => Container(
+            errorBuilder: (c, u, e) => Container(
               color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
               child: Icon(
                 Icons.broken_image,

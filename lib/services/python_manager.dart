@@ -17,7 +17,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart' show ValueNotifier, defaultTargetPlatform;
 import 'package:flutter/services.dart' show MethodChannel, PlatformException;
 
-import 'app_log.dart';
+import 'package:tvbox/services/app_log.dart';
 
 class PythonManager {
   static final PythonManager _instance = PythonManager._internal();

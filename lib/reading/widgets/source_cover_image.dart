@@ -8,7 +8,7 @@ import 'dart:io' show File;
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import '../theme/jelly_theme.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
 
 class SourceCoverImage extends StatelessWidget {
   final String url;
@@ -18,7 +18,14 @@ class SourceCoverImage extends StatelessWidget {
   final int? memCacheWidth;
   final Map<String, String>? httpHeaders;
   final Widget Function(BuildContext, String)? placeholder;
-  final Widget Function(BuildContext, String, Object)? errorWidget;
+
+  /// 加载失败时的占位构造器。
+  ///
+  /// ⚠️ 签名刻意保留 `(context, url, error)` 三参形态（与 `errorWidget` 时代
+  /// 一致），因为调用方普遍按这个顺序传 `(_, __, ___)` 或 `(c, u, e)`。
+  /// 组件内部会自己把 `url` 补齐，调用方不必关心底层是 `Image` 还是
+  /// `CachedNetworkImage`（两者的 errorBuilder 签名并不相同）。
+  final Widget Function(BuildContext, String, Object)? errorBuilder;
 
   const SourceCoverImage({
     super.key,
@@ -29,7 +36,7 @@ class SourceCoverImage extends StatelessWidget {
     this.memCacheWidth,
     this.httpHeaders,
     this.placeholder,
-    this.errorWidget,
+    this.errorBuilder,
   });
 
   /// 自动降采样宽度：显示宽度 × 屏幕倍率（最多 3 倍），再夹到合理区间。
@@ -69,7 +76,7 @@ class SourceCoverImage extends StatelessWidget {
               );
         },
         errorBuilder: (context, error, stackTrace) =>
-            errorWidget?.call(context, url, error) ??
+            errorBuilder?.call(context, url, error) ??
             Icon(Icons.broken_image, size: 40, color: JellyTheme.textSecondary),
       );
     }
@@ -83,7 +90,7 @@ class SourceCoverImage extends StatelessWidget {
         fit: fit,
         cacheWidth: cacheW,
         errorBuilder: (context, error, stackTrace) =>
-            errorWidget?.call(context, url, error) ??
+            errorBuilder?.call(context, url, error) ??
             Icon(Icons.broken_image, size: 40, color: JellyTheme.textSecondary),
       );
     }
@@ -95,8 +102,10 @@ class SourceCoverImage extends StatelessWidget {
       fit: fit,
       memCacheWidth: cacheW,
       placeholder: placeholder,
-      errorWidget: (context, url, error) =>
-          errorWidget?.call(context, url, error) ??
+      // CachedNetworkImage 的 errorBuilder 是 (context, error, stackTrace)，
+      // 不含 url —— 这里用外层的 url 字段补齐，保证回调签名对调用方不变。
+      errorBuilder: (context, error, stackTrace) =>
+          errorBuilder?.call(context, url, error) ??
           Icon(Icons.broken_image, size: 40, color: JellyTheme.textSecondary),
     );
   }

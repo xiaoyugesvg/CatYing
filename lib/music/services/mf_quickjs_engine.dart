@@ -24,9 +24,9 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:quickjs_engine/quickjs_engine.dart';
 
-import '../models/models.dart';
-import '../models/third_party_source.dart';
-import '../quickjs/mf_js_prelude.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/models/third_party_source.dart';
+import 'package:tvbox/music/quickjs/mf_js_prelude.dart';
 
 class MfQuickJsEngine {
   MfQuickJsEngine._();

@@ -5,13 +5,13 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../common/theme.dart';
-import '../../miniapp/pages/mini_app_player_page.dart';
-import '../../services/tg_service.dart';
-import '../../services/tg_title_filter.dart';
-import '../../services/translate_service.dart';
-import '../../widgets/app_toast.dart';
-import '../settings/sub/tg_source_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/miniapp/pages/mini_app_player_page.dart';
+import 'package:tvbox/services/tg_service.dart';
+import 'package:tvbox/services/tg_title_filter.dart';
+import 'package:tvbox/services/translate_service.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/pages/settings/sub/tg_source_page.dart';
 
 /// 「TG」分类页 —— 按影视首页的结构重做（2026-10-25）
 ///

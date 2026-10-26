@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../common/theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 长按菜单里的一项（**名称尽量 2 个字**，卡片式，一行两个）。
 class CardAction {

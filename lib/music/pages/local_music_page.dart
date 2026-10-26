@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
-import '../services/download_service.dart';
-import '../services/player_manager.dart';
-import '../theme/music_theme.dart';
-import '../../common/theme.dart';
-import '../../services/file_export_service.dart';
-import '../../widgets/app_toast.dart';
+import 'package:tvbox/music/services/download_service.dart';
+import 'package:tvbox/music/services/player_manager.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/file_export_service.dart';
+import 'package:tvbox/widgets/app_toast.dart';
 
 /// 本地音乐 —— 已下载的歌（App 沙盒 `Documents/music/`）。
 ///

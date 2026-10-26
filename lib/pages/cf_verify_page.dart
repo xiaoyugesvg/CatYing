@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-import '../services/app_log.dart';
-import '../services/cf_session.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/cf_session.dart';
 
 /// 「点一次，以后不用再点」的 Cloudflare 人机验证页。
 ///

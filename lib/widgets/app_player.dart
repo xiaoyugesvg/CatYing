@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:video_player/video_player.dart';
 
-import '../services/media_proxy_service.dart';
+import 'package:tvbox/services/media_proxy_service.dart';
 
 /// 封装 video_player（iOS/macOS/Android = AVPlayer）的播放内核。
 /// API 对齐 media_kit 的调用面，方便 VideoPlayerWidget / 详情页无感切换。

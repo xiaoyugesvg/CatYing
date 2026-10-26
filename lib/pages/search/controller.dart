@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'package:get/get.dart';
-import '../../services/app_log.dart';
+import 'package:tvbox/services/app_log.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../models/movie.dart';
-import '../../models/source_bean.dart';
-import '../../services/api_config.dart';
-import '../../services/source_service.dart';
-import '../../common/constants.dart';
+import 'package:tvbox/models/movie.dart';
+import 'package:tvbox/models/source_bean.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/source_service.dart';
+import 'package:tvbox/common/constants.dart';
 
 class TvSearchController extends GetxController {
   Timer? _debounce;

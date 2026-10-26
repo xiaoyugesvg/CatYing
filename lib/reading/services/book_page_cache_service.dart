@@ -4,8 +4,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../models/book_content.dart';
-import 'book_paginator.dart';
+import 'package:tvbox/reading/models/book_content.dart';
+import 'package:tvbox/reading/services/book_paginator.dart';
 
 /// 预计算分页结果的磁盘缓存：把排版后的 [pages] + 图片宽高比持久化，
 /// 避免同设备同参数每次打开都重新 TextPainter 度量。
@@ -63,7 +63,7 @@ class BookPageCacheService {
         ':${typo.verticalPadding}:${typo.verticalPaddingBottom ?? typo.verticalPadding}'
         ':${typo.paragraphSpacingFactor}'
         ':${typo.headingFontSizeOverride}:${typo.headingHeightOverride}'
-        ':${typo.headingFontWeight.index}:${typo.headingFixedHeight}'
+        ':${typo.headingFontWeight.value}:${typo.headingFixedHeight}'
         ':${typo.fontFamily}:${typo.textScaler.scale(1.0)}'
         ':${typo.inheritedStyle.hashCode}'
         ':$bookId:$fingerprint:dp${doublePage ? 1 : 0}';

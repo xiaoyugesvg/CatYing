@@ -1,9 +1,9 @@
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import '../common/theme.dart';
-import '../services/app_log.dart';
-import '../services/spider_service.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/spider_service.dart';
 
 /// 房间要播放的一条内容（已解析成可直接播放的地址）
 class RoomMedia {

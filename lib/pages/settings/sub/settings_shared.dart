@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../../../common/theme.dart';
-import '../../../services/prefs_mirror.dart';
-import '../../../widgets/common_widgets.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/prefs_mirror.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
 
 /// 设置子页的共享构件。
 ///

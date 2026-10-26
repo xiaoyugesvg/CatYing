@@ -6,11 +6,11 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../../reading/source/global_proxy.dart';
-import '../../services/app_log.dart';
-import '../../services/ocr_service.dart';
-import '../../services/translate_service.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/ocr_service.dart';
+import 'package:tvbox/services/translate_service.dart';
 
 /// 漫画「翻译本页」—— 独立的全屏翻译阅读页。
 ///

@@ -4,13 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-import '../models/book_source.dart';
-import '../novel_source/analyze/analyze_rule.dart';
-import '../novel_source/analyze/js_engine.dart';
-import '../novel_source/analyze/source_variable_store.dart';
-import '../services/book_source_service.dart';
-import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/models/book_source.dart';
+import 'package:tvbox/reading/novel_source/analyze/analyze_rule.dart';
+import 'package:tvbox/reading/novel_source/analyze/js_engine.dart';
+import 'package:tvbox/reading/novel_source/analyze/source_variable_store.dart';
+import 'package:tvbox/reading/services/book_source_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 书源登录（截图 IMG_8113）。
 ///

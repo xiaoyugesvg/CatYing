@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
-import '../../../common/theme.dart';
-import '../models/models.dart';
-import '../services/music_api.dart';
-import '../services/settings_store.dart';
-import '../theme/music_theme.dart';
-import '../widgets/music_components.dart';
-import 'playlist_detail_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/services/music_api.dart';
+import 'package:tvbox/music/services/settings_store.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/music/widgets/music_components.dart';
+import 'package:tvbox/music/pages/playlist_detail_page.dart';
 
 /// 「榜单」独立页（从音乐库拆出来的）。
 ///

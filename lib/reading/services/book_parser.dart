@@ -7,9 +7,9 @@ import 'package:html/dom.dart' as html;
 import 'package:html/parser.dart' show parse;
 import 'package:xml/xml.dart';
 
-import '../models/book_content.dart';
-import '../services/gbk_fast.dart';
-import '../services/platform_service.dart';
+import 'package:tvbox/reading/models/book_content.dart';
+import 'package:tvbox/reading/services/gbk_fast.dart';
+import 'package:tvbox/reading/services/platform_service.dart';
 
 /// 解析 EPUB / TXT 为 [BookContent]。
 ///

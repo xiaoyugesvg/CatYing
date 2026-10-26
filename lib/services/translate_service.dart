@@ -5,8 +5,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../reading/source/global_proxy.dart';
-import 'app_log.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/services/app_log.dart';
 
 /// 翻译设置（独立存 SharedPreferences，避免动 SettingsService 那一大坨）。
 ///

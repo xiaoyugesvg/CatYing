@@ -1,23 +1,23 @@
 import 'dart:async';
 import 'dart:convert';
 
-import '../../services/nodejs_manager.dart';
-import '../../services/remote_engine.dart';
+import 'package:tvbox/services/nodejs_manager.dart';
+import 'package:tvbox/services/remote_engine.dart';
 
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
-import '../models/book_source.dart';
+import 'package:tvbox/reading/models/book_source.dart';
 // ✅ **Legado → BookSiteConfig 转换**（本轮重构 ✓）：让书源**先走 Dart（含 WebView 兜底 ✓）**，
 //   失败 / 含 `@js:` 才回落 Node 引擎 ✓（Node 那段保持原样 ✓ 只增不减 ✓）
-import '../source/global_proxy.dart';
-import '../utils/html_text.dart';
-import '../utils/source_fail_text.dart';
-import 'book_source_dart_engine.dart';
-import 'book_source_python_engine.dart';
-import 'book_quickjs_engine.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/reading/utils/html_text.dart';
+import 'package:tvbox/reading/utils/source_fail_text.dart';
+import 'package:tvbox/reading/services/book_source_dart_engine.dart';
+import 'package:tvbox/reading/services/book_source_python_engine.dart';
+import 'package:tvbox/reading/services/book_quickjs_engine.dart';
 
 /// 书源搜索到的一本书。
 ///

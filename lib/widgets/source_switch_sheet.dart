@@ -1,17 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'common_widgets.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:get/get.dart';
-import '../common/theme.dart';
-import '../models/local_python_source.dart';
-import '../models/source_bean.dart';
-import '../models/subscription.dart';
-import '../services/api_config.dart';
-import '../services/local_python_sources.dart';
-import '../services/source_kind.dart';
-import 'app_toast.dart';
-import 'card_action_sheet.dart';
-import 'source_kind_badge.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/local_python_source.dart';
+import 'package:tvbox/models/source_bean.dart';
+import 'package:tvbox/models/subscription.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/local_python_sources.dart';
+import 'package:tvbox/services/source_kind.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/card_action_sheet.dart';
+import 'package:tvbox/widgets/source_kind_badge.dart';
 
 /// 源切换面板（2026-10-02 二次重构：**三分之一屏**）
 ///
@@ -281,9 +281,9 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
       return;
     }
     // 订阅线路：只重排当前可见的这批（搜索过滤时不影响隐藏的源）
-    // ignore: invalid_use_of_protected_member
+    // 直接对 RxList 本身取快照（它是 List 的子类），不碰受保护的 `.value`。
     final visible = _filteredSourcesFrom(
-      List<SourceBean>.of(ApiConfig.instance.sourceBeanList.value),
+      List<SourceBean>.of(ApiConfig.instance.sourceBeanList),
     ).map((s) => s.key).toList();
     final from = visible.indexOf(fromKey);
     final to = visible.indexOf(toKey);

@@ -3,8 +3,8 @@ import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 
-import '../../services/app_log.dart';
-import 'hiker_store.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/hiker/services/hiker_store.dart';
 
 /// 文件区里的一个文件
 typedef HikerFileEntry = ({String path, int size});

@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
-import '../../widgets/video_player.dart';
+import 'package:tvbox/widgets/video_player.dart';
 
 /// URL 直播放页（ant.player.open 用）。
 ///

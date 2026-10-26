@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../services/reader_notes_service.dart';
-import '../theme/jelly_theme.dart';
+import 'package:tvbox/reading/services/reader_notes_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
 
 /// 全书库划线笔记：按书分组 → 每本书的划线/批注列表。
 ///

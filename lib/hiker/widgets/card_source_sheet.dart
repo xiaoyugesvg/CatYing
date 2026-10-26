@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../../widgets/card_action_sheet.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/card_action_sheet.dart';
 
 /// 「源切换」面板里的一条源。
 class CardSourceItem {

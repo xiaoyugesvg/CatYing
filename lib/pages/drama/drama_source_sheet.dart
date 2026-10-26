@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../common/theme.dart';
-import '../../models/source_bean.dart';
-import '../../widgets/app_toast.dart';
-import '../../widgets/card_action_sheet.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/source_bean.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/card_action_sheet.dart';
 
 /// 短剧「切换源」面板 —— 与影视的 `SourceSwitchSheet` 同一套能力：
 ///   一行两列网格 / 单列列表切换、搜索、定位当前源、排序、长按卡片菜单。

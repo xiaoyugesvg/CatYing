@@ -1,23 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../../../common/theme.dart';
-import '../../../models/source_bean.dart';
-import '../../../services/api_config.dart';
-import '../../../services/remote_engine.dart';
-import '../../../services/source_kind.dart';
-import '../../subscription/view.dart';
-import '../../subscription/moontv_converter_page.dart';
-import '../../../widgets/app_toast.dart';
-import '../../../widgets/common_widgets.dart';
-import '../../../widgets/source_kind_badge.dart';
-import '../controller.dart';
-import 'cf_sites_page.dart';
-import 'engine_settings_page.dart';
-import 'local_python_sources_page.dart';
-import 'parse_settings_page.dart';
-import 'settings_shared.dart';
-import 'tg_source_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/source_bean.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/remote_engine.dart';
+import 'package:tvbox/services/source_kind.dart';
+import 'package:tvbox/pages/subscription/view.dart';
+import 'package:tvbox/pages/subscription/moontv_converter_page.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/widgets/source_kind_badge.dart';
+import 'package:tvbox/pages/settings/controller.dart';
+import 'package:tvbox/pages/settings/sub/cf_sites_page.dart';
+import 'package:tvbox/pages/settings/sub/engine_settings_page.dart';
+import 'package:tvbox/pages/settings/sub/local_python_sources_page.dart';
+import 'package:tvbox/pages/settings/sub/parse_settings_page.dart';
+import 'package:tvbox/pages/settings/sub/settings_shared.dart';
+import 'package:tvbox/pages/settings/sub/tg_source_page.dart';
 
 /// 设置 → 订阅管理
 ///

@@ -1,5 +1,5 @@
-import 'app_log.dart';
-import '../reading/services/ai_service.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/reading/services/ai_service.dart';
 
 /// 一类"同源"日志（归一化后聚合），代表一个待排查的问题
 class LogCluster {

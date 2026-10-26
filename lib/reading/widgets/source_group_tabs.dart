@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../theme/jelly_theme.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
 
 /// 分组名归一化：空 → 「未分组」（与「源仓库」页同一口径）。
 String sourceGroupLabel(String raw) {

@@ -2,9 +2,9 @@ import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../common/theme.dart';
-import '../../common/theme_mode_store.dart';
-import '../../reading/theme/jelly_palette.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/common/theme_mode_store.dart';
+import 'package:tvbox/reading/theme/jelly_palette.dart';
 
 /// 音乐模块主题体系 —— 移植自 Beans-Music 的 `Theme.swift`。
 ///

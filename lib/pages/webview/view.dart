@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import '../../services/app_log.dart';
+import 'package:tvbox/services/app_log.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-import '../../common/theme.dart';
-import '../../services/third_party_nav_guard.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/third_party_nav_guard.dart';
 
 /// 应用内 WebView 页面
 ///

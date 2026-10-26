@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import '../services/app_log.dart';
+import 'package:tvbox/services/app_log.dart';
 import 'package:window_manager/window_manager.dart';
 
 /// 窗口级全屏管理器 - 桌面端通过 `window_manager.setFullScreen(true)` 实现 OS 全屏

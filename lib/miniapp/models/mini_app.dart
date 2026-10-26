@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import '../../models/live_models.dart';
+import 'package:tvbox/models/live_models.dart';
 
 /// 「程序」= 导入的 TVBox 生态小程序配置（独立功能模块）。
 ///

@@ -27,7 +27,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:quickjs_engine/quickjs_engine.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../quickjs/book_js_prelude.dart';
+import 'package:tvbox/reading/quickjs/book_js_prelude.dart';
 
 class BookQuickJsEngine {
   BookQuickJsEngine._();

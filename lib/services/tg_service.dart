@@ -4,8 +4,8 @@ import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'nodejs_manager.dart';
-import 'remote_engine.dart';
+import 'package:tvbox/services/nodejs_manager.dart';
+import 'package:tvbox/services/remote_engine.dart';
 
 /// Telegram 源的 Dart 侧门面
 ///

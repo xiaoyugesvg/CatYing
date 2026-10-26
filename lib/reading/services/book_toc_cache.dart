@@ -3,7 +3,8 @@ import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
-import 'book_source_service.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/reading/services/book_source_service.dart';
 
 /// 一份落盘的目录缓存
 class CachedToc {
@@ -52,7 +53,11 @@ class BookTocCache {
       final dir = Directory('${d.path}/reader_toc');
       if (!dir.existsSync()) dir.createSync(recursive: true);
       _dir = dir.path;
-    } catch (_) {}
+    } catch (e) {
+      // 目录建不出来 ⇒ 整个目录缓存静默失效（每次进书都重新联网拉目录）。
+      // 这个后果用户能感知（进书变慢），必须留痕，否则查不到原因。
+      AppLog.instance.w('[目录缓存] 初始化失败，本次会话缓存不可用: $e');
+    }
   }
 
   /// 书 → 文件名（FNV-1a 32 位，稳定且不含路径非法字符）

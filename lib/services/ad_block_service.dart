@@ -8,8 +8,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-import '../reading/source/global_proxy.dart';
-import 'app_log.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/services/app_log.dart';
 
 /// 网页**去广告**（元素隐藏）—— 规则、持久化、注入脚本、选元素。
 ///

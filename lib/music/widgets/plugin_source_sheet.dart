@@ -10,9 +10,9 @@
 
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../models/third_party_source.dart';
-import '../theme/music_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/music/models/third_party_source.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
 
 class PluginSourceSheet extends StatefulWidget {
   const PluginSourceSheet({

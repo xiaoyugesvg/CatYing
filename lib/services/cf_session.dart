@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
-import 'app_log.dart';
+import 'package:tvbox/services/app_log.dart';
 
 /// 一个站点的 Cloudflare 会话（`cf_clearance` + 同域其他 cookie）
 class CfEntry {

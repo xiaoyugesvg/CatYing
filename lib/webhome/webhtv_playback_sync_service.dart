@@ -6,12 +6,12 @@ import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
-import '../models/cache_store.dart';
-import '../models/movie.dart';
-import '../reading/source/global_proxy.dart';
-import '../services/api_config.dart';
-import '../services/app_log.dart';
-import 'webhtv_playback_sync_page.dart';
+import 'package:tvbox/models/cache_store.dart';
+import 'package:tvbox/models/movie.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/webhome/webhtv_playback_sync_page.dart';
 
 /// 「观影记录同步」**引擎**（第 7 步 · 块 1，用户 2026-10-15）。
 ///

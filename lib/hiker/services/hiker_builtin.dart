@@ -3,9 +3,9 @@ import 'dart:io';
 import 'package:flutter/services.dart' show AssetManifest, rootBundle;
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../services/app_log.dart';
-import '../models/hiker_source.dart';
-import 'hiker_store.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/hiker/models/hiker_source.dart';
+import 'package:tvbox/hiker/services/hiker_store.dart';
 
 /// 「海阔」**内置源**（随包分发）。
 ///

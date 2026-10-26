@@ -26,10 +26,10 @@ import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
-import 'app_log.dart';
-import 'player_prefs.dart';
-import 'nodejs_platform.dart';
-import '../reading/services/settings_service.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/services/nodejs_platform.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
 
 class IOSNodeJSPlatform implements NodeJSPlatform {
   IOSNodeJSPlatform({

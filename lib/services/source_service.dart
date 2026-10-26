@@ -1,13 +1,13 @@
-import 'app_log.dart';
+import 'package:tvbox/services/app_log.dart';
 import 'dart:convert';
 import 'dart:io';
-import '../models/movie.dart';
-import '../models/vod_info.dart';
-import '../models/source_bean.dart';
-import '../models/movie_sort.dart';
-import 'api_config.dart';
-import 'spider_service.dart';
-import 'network_manager.dart';
+import 'package:tvbox/models/movie.dart';
+import 'package:tvbox/models/vod_info.dart';
+import 'package:tvbox/models/source_bean.dart';
+import 'package:tvbox/models/movie_sort.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/spider_service.dart';
+import 'package:tvbox/services/network_manager.dart';
 
 /// 源错误枚举
 enum SourceError {

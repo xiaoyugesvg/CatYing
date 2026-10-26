@@ -5,16 +5,16 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../hiker/services/hiker_builtin.dart';
-import '../../hiker/services/hiker_files.dart';
-import '../../reading/services/book_content_cache_service.dart';
-import '../../reading/services/book_page_cache_service.dart';
-import '../../reading/services/book_toc_cache.dart';
-import '../../reading/services/chapter_text_cache.dart';
-import '../../music/services/music_api.dart';
-import '../../rss/services/rss_reader.dart';
-import '../models/cache_store.dart';
-import 'nodejs_manager.dart';
+import 'package:tvbox/hiker/services/hiker_builtin.dart';
+import 'package:tvbox/hiker/services/hiker_files.dart';
+import 'package:tvbox/reading/services/book_content_cache_service.dart';
+import 'package:tvbox/reading/services/book_page_cache_service.dart';
+import 'package:tvbox/reading/services/book_toc_cache.dart';
+import 'package:tvbox/reading/services/chapter_text_cache.dart';
+import 'package:tvbox/music/services/music_api.dart';
+import 'package:tvbox/rss/services/rss_reader.dart';
+import 'package:tvbox/models/cache_store.dart';
+import 'package:tvbox/services/nodejs_manager.dart';
 
 /// 缓存分类：模块（影视/直播/音乐/阅读/TMDB/海阔/观影同步/RSS）在前，
 /// 「软件本身」收纳图片/数据/JS/临时文件等跨模块分类。

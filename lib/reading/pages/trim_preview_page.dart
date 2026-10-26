@@ -2,20 +2,20 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
-import '../source/global_proxy.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../models/comic.dart';
-import '../models/trim_preset.dart';
-import '../services/download_service.dart';
-import '../services/trim_service.dart';
-import '../source/adapter.dart';
-import '../source/source_manager.dart';
-import '../theme/jelly_theme.dart';
-import '../widgets/device_frame_preview.dart';
-import '../widgets/trim_preset_dialog.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/models/comic.dart';
+import 'package:tvbox/reading/models/trim_preset.dart';
+import 'package:tvbox/reading/services/download_service.dart';
+import 'package:tvbox/reading/services/trim_service.dart';
+import 'package:tvbox/reading/source/adapter.dart';
+import 'package:tvbox/reading/source/source_manager.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/widgets/device_frame_preview.dart';
+import 'package:tvbox/reading/widgets/trim_preset_dialog.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 去白边预览页面
 ///

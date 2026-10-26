@@ -5,11 +5,11 @@ import 'dart:ui' as ui;
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../../services/tmdb_service.dart';
-import 'emby_api.dart';
-import 'emby_models.dart';
-import 'emby_player_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/tmdb_service.dart';
+import 'package:tvbox/emby/emby_api.dart';
+import 'package:tvbox/emby/emby_models.dart';
+import 'package:tvbox/emby/emby_player_page.dart';
 
 /// Emby 条目详情：电影显示简介 + 播放；剧集显示分集列表。
 ///
@@ -378,7 +378,7 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                   httpHeaders: usingTmdb ? null : _api.imageHeaders,
                   fit: BoxFit.cover,
                   placeholder: (_, _) => const ColoredBox(color: Colors.black),
-                  errorWidget: (_, _, _) => const ColoredBox(color: Colors.black),
+                  errorBuilder: (_, _, _) => const ColoredBox(color: Colors.black),
                 ),
         ),
         // ③ 海报底边过渡带：透明 → 主色（消掉图片与渐变之间的硬分界）
@@ -756,7 +756,7 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                       fit: BoxFit.cover,
                       placeholder: (_, _) =>
                           const ColoredBox(color: Color(0xFF1A1A20)),
-                      errorWidget: (_, _, _) => const ColoredBox(
+                      errorBuilder: (_, _, _) => const ColoredBox(
                         color: Color(0xFF1A1A20),
                         child: Icon(
                           Icons.play_circle_outline_rounded,
@@ -913,7 +913,7 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
                       fit: BoxFit.cover,
                       placeholder: (_, _) =>
                           const ColoredBox(color: Color(0xFF1A1A20)),
-                      errorWidget: (_, _, _) => _personPlaceholder(),
+                      errorBuilder: (_, _, _) => _personPlaceholder(),
                     )
                   : _personPlaceholder(),
             ),

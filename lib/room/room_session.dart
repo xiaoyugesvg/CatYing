@@ -4,9 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
-import 'room_lan_client.dart';
-import 'room_lan_server.dart';
-import 'room_models.dart';
+import 'package:tvbox/room/room_lan_client.dart';
+import 'package:tvbox/room/room_lan_server.dart';
+import 'package:tvbox/room/room_models.dart';
 
 /// 房间的两种连法
 enum RoomMode {

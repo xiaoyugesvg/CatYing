@@ -8,16 +8,16 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-import '../../common/theme.dart';
-import '../../miniapp/pages/mini_app_player_page.dart';
-import '../../pages/play/sniff_player_page.dart';
-import '../../services/ad_block_service.dart';
-import '../../services/third_party_nav_guard.dart';
-import '../../widgets/ad_block_bubble.dart';
-import '../models/rss_article.dart';
-import '../models/rss_source.dart';
-import '../services/rss_reader.dart';
-import '../../reading/services/tts_service.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/miniapp/pages/mini_app_player_page.dart';
+import 'package:tvbox/pages/play/sniff_player_page.dart';
+import 'package:tvbox/services/ad_block_service.dart';
+import 'package:tvbox/services/third_party_nav_guard.dart';
+import 'package:tvbox/widgets/ad_block_bubble.dart';
+import 'package:tvbox/rss/models/rss_article.dart';
+import 'package:tvbox/rss/models/rss_source.dart';
+import 'package:tvbox/rss/services/rss_reader.dart';
+import 'package:tvbox/reading/services/tts_service.dart';
 
 class RssArticlePage extends StatefulWidget {
   const RssArticlePage({super.key, required this.source, required this.article});
@@ -455,7 +455,7 @@ class _RssArticlePageState extends State<RssArticlePage> {
                     child: CachedNetworkImage(
                       imageUrl: _cover,
                       fit: BoxFit.cover,
-                      errorWidget: (_, __, ___) => const SizedBox.shrink(),
+                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                     ),
                   ),
                 ],

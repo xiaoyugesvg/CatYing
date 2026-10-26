@@ -5,9 +5,9 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../services/reading_checkin_service.dart';
-import '../services/reading_time_service.dart';
-import 'pet_models.dart';
+import 'package:tvbox/reading/services/reading_checkin_service.dart';
+import 'package:tvbox/reading/services/reading_time_service.dart';
+import 'package:tvbox/reading/pet/pet_models.dart';
 
 /// 桌宠状态与成长系统。
 ///

@@ -1,19 +1,19 @@
 import 'dart:math' as math;
-import '../widgets/music_sheet.dart';
+import 'package:tvbox/music/widgets/music_sheet.dart';
 import 'dart:async';
 import 'dart:ui';
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import '../models/models.dart';
-import '../services/player_manager.dart';
-import '../theme/music_theme.dart';
-import '../widgets/music_components.dart';
-import 'player_settings_sheet.dart';
-import '../services/library_store.dart';
-import 'queue_page.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/services/player_manager.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/music/widgets/music_components.dart';
+import 'package:tvbox/music/pages/player_settings_sheet.dart';
+import 'package:tvbox/music/services/library_store.dart';
+import 'package:tvbox/music/pages/queue_page.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 全屏播放器 —— 移植自 Beans 的 `PlayerView.swift`（4447 行，这里取其主干）。
 ///

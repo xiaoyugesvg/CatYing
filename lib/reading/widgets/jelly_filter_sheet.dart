@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 阅读模块「分类筛选」弹窗的统一视觉件（漫画页 / 图书页 / 书源页共用）。
 ///

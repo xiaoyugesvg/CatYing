@@ -5,14 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
-import '../../common/theme.dart';
-import '../../models/subscription.dart';
-import '../../services/moontv_converter.dart';
-import '../../services/network_manager.dart';
-import '../../widgets/app_toast.dart';
-import '../../widgets/common_widgets.dart';
-import '../settings/controller.dart';
-import '../settings/sub/settings_shared.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/subscription.dart';
+import 'package:tvbox/services/moontv_converter.dart';
+import 'package:tvbox/services/network_manager.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/pages/settings/controller.dart';
+import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 
 /// 影视模块 · 影视仓转换器。
 ///

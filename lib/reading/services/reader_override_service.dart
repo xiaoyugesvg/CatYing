@@ -3,9 +3,9 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'book_font_service.dart';
-import 'settings_service.dart';
-import '../utils/safe_num.dart';
+import 'package:tvbox/reading/services/book_font_service.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/utils/safe_num.dart';
 
 void _log(String message) {
   if (kDebugMode) {

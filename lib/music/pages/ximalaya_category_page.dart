@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../services/music_api.dart';
-import '../theme/music_theme.dart';
-import '../widgets/listen_category_content_page.dart';
-import 'ximalaya_album_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/music/services/music_api.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/music/widgets/listen_category_content_page.dart';
+import 'package:tvbox/music/pages/ximalaya_album_page.dart';
 
 /// 喜马拉雅的**分类浏览**（有声书 / 儿童 / 相声 / 历史…）。
 ///

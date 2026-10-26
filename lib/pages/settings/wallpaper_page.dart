@@ -4,12 +4,12 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../../common/theme.dart';
-import '../../services/background_service.dart';
-import '../../services/wallpaper_random_service.dart';
-import '../../services/wallpaper_api_service.dart';
-import '../../widgets/common_widgets.dart';
-import '../../widgets/app_toast.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/background_service.dart';
+import 'package:tvbox/services/wallpaper_random_service.dart';
+import 'package:tvbox/services/wallpaper_api_service.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/widgets/app_toast.dart';
 
 /// 壁纸设置页
 ///
@@ -708,7 +708,7 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
               memCacheWidth: 400,
               placeholder: (_, __) =>
                   Container(color: AppTheme.backgroundTertiary),
-              errorWidget: (_, __, ___) => Container(
+              errorBuilder: (_, __, ___) => Container(
                 color: AppTheme.backgroundTertiary,
                 alignment: Alignment.center,
                 child: Icon(

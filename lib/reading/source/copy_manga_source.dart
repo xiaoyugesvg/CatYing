@@ -1,9 +1,9 @@
 import 'package:flutter/foundation.dart';
-import '../services/comic_api.dart';
-import 'adapter.dart';
-import 'copymanga_config.dart';
-import 'models.dart';
-import 'manga_source.dart';
+import 'package:tvbox/reading/services/comic_api.dart';
+import 'package:tvbox/reading/source/adapter.dart';
+import 'package:tvbox/reading/source/copymanga_config.dart';
+import 'package:tvbox/reading/source/models.dart';
+import 'package:tvbox/reading/source/manga_source.dart';
 
 void _log(String message) {
   if (kDebugMode) {

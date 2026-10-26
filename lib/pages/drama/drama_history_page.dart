@@ -2,10 +2,10 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../../common/theme.dart';
-import '../../models/cache_store.dart';
-import '../../models/movie.dart';
-import 'drama_entry.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/cache_store.dart';
+import 'package:tvbox/models/movie.dart';
+import 'package:tvbox/pages/drama/drama_entry.dart';
 
 /// 短剧「观看记录」页（2026-10-23）。
 ///
@@ -148,7 +148,7 @@ class _DramaHistoryPageState extends State<DramaHistoryPage> {
                       CachedNetworkImage(
                         imageUrl: r.vodPic,
                         fit: BoxFit.cover,
-                        errorWidget: (_, __, ___) =>
+                        errorBuilder: (_, __, ___) =>
                             ColoredBox(color: AppTheme.backgroundTertiary),
                       ),
                     Center(

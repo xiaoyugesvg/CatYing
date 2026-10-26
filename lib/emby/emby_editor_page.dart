@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../common/theme.dart';
-import '../../widgets/app_toast.dart';
-import 'emby_api.dart';
-import 'emby_models.dart';
-import 'emby_store.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/emby/emby_api.dart';
+import 'package:tvbox/emby/emby_models.dart';
+import 'package:tvbox/emby/emby_store.dart';
 
 /// 添加 / 编辑媒体服务器账号（VidHub 风格全屏表单页）。
 ///

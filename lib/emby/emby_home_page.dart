@@ -3,12 +3,12 @@ import 'dart:async';
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import 'emby_accounts_page.dart';
-import 'emby_api.dart';
-import 'emby_detail_page.dart';
-import 'emby_models.dart';
-import 'emby_store.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/emby/emby_accounts_page.dart';
+import 'package:tvbox/emby/emby_api.dart';
+import 'package:tvbox/emby/emby_detail_page.dart';
+import 'package:tvbox/emby/emby_models.dart';
+import 'package:tvbox/emby/emby_store.dart';
 
 /// Emby 分类首页：媒体库 → 继续观看 / 最新加入。
 ///
@@ -811,7 +811,7 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
       fit: BoxFit.cover,
       memCacheWidth: (width * 2).round(),
       placeholder: (_, _) => ColoredBox(color: AppTheme.backgroundSecondary),
-      errorWidget: (_, _, _) => ColoredBox(
+      errorBuilder: (_, _, _) => ColoredBox(
         color: AppTheme.backgroundSecondary,
         child: Icon(
           Icons.image_outlined,
@@ -834,7 +834,7 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
       fit: BoxFit.cover,
       memCacheWidth: (width * 2).round(),
       placeholder: (_, _) => ColoredBox(color: AppTheme.backgroundSecondary),
-      errorWidget: (_, _, _) => ColoredBox(
+      errorBuilder: (_, _, _) => ColoredBox(
         color: AppTheme.backgroundSecondary,
         child: Icon(
           Icons.movie_outlined,

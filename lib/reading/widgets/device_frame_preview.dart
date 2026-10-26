@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 设备边框预览组件
 ///

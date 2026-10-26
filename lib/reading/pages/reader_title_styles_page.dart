@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/reader_title_style.dart';
-import '../services/reader_style_store.dart';
-import '../services/title_html_parser.dart';
+import 'package:tvbox/reading/models/reader_title_style.dart';
+import 'package:tvbox/reading/services/reader_style_store.dart';
+import 'package:tvbox/reading/services/title_html_parser.dart';
 
 /// 「章标题样式」库：内置模板 + 我的 HTML + 管理（应用/复制/编辑/删除）。
 ///

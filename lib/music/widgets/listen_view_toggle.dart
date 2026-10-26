@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../services/settings_store.dart';
-import '../theme/music_theme.dart';
-import 'music_sheet.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/music/services/settings_store.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/music/widgets/music_sheet.dart';
 
 /// 听书分类内容页的视图切换按钮。
 ///

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../common/theme.dart';
-import '../reading/theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
 
 /// 页面顶栏的**大标题** —— 全 App 统一的一种写法。
 ///

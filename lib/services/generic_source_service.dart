@@ -17,9 +17,9 @@ import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../models/source_bean.dart';
-import '../reading/source/global_proxy.dart';
-import 'api_config.dart';
+import 'package:tvbox/models/source_bean.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/services/api_config.dart';
 
 class GenericSourceService {
   GenericSourceService._();

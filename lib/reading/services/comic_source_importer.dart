@@ -2,12 +2,12 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 
-import '../source/global_proxy.dart';
-import '../models/book_source.dart';
-import '../services/book_source_import_parser.dart';
-import '../source/source_config_store.dart';
-import '../source/source_definition.dart';
-import '../source/source_manager.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/reading/models/book_source.dart';
+import 'package:tvbox/reading/services/book_source_import_parser.dart';
+import 'package:tvbox/reading/source/source_config_store.dart';
+import 'package:tvbox/reading/source/source_definition.dart';
+import 'package:tvbox/reading/source/source_manager.dart';
 
 /// 漫画源导入（网址 / 文本 / 文件 / 二维码共用）。
 ///

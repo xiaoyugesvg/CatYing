@@ -2,15 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
-import '../../common/theme.dart';
-import '../../models/subscription.dart';
-import '../../services/api_config.dart';
-import '../../pages/settings/controller.dart';
-import 'edit_page.dart';
-import 'moontv_converter_page.dart';
-import 'pin_dialog.dart';
-import '../../widgets/app_toast.dart';
-import '../../reading/widgets/swipe_action_tile.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/subscription.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/pages/settings/controller.dart';
+import 'package:tvbox/pages/subscription/edit_page.dart';
+import 'package:tvbox/pages/subscription/moontv_converter_page.dart';
+import 'package:tvbox/pages/subscription/pin_dialog.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/reading/widgets/swipe_action_tile.dart';
 
 /// 订阅列表页 —— 多订阅管理
 ///

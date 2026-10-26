@@ -1,29 +1,29 @@
 import 'package:flutter/material.dart';
-import '../widgets/music_sheet.dart';
+import 'package:tvbox/music/widgets/music_sheet.dart';
 
-import '../models/models.dart';
-import '../models/third_party_source.dart';
-import '../services/library_store.dart';
-import '../services/music_api.dart';
-import '../services/player_manager.dart';
-import '../services/settings_store.dart';
-import '../theme/music_theme.dart';
-import '../theme/discover_preset.dart';
-import '../widgets/music_components.dart';
-import '../widgets/discover_sections.dart';
-import 'playlist_detail_page.dart';
-import 'plugin_market_page.dart';
-import '../widgets/plugin_explore_view.dart';
-import '../widgets/plugin_source_sheet.dart';
-import 'ximalaya_album_page.dart';
-import 'bookan_album_page.dart';
-import 'ting15_album_page.dart';
-import '../widgets/listen_category_content_page.dart';
-import '../../widgets/app_page_loading.dart';
-import '../../widgets/app_toast.dart';
-import '../../widgets/app_empty_view.dart';
-import '../../common/theme.dart';
-import '../../services/app_log.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/models/third_party_source.dart';
+import 'package:tvbox/music/services/library_store.dart';
+import 'package:tvbox/music/services/music_api.dart';
+import 'package:tvbox/music/services/player_manager.dart';
+import 'package:tvbox/music/services/settings_store.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/music/theme/discover_preset.dart';
+import 'package:tvbox/music/widgets/music_components.dart';
+import 'package:tvbox/music/widgets/discover_sections.dart';
+import 'package:tvbox/music/pages/playlist_detail_page.dart';
+import 'package:tvbox/music/pages/plugin_market_page.dart';
+import 'package:tvbox/music/widgets/plugin_explore_view.dart';
+import 'package:tvbox/music/widgets/plugin_source_sheet.dart';
+import 'package:tvbox/music/pages/ximalaya_album_page.dart';
+import 'package:tvbox/music/pages/bookan_album_page.dart';
+import 'package:tvbox/music/pages/ting15_album_page.dart';
+import 'package:tvbox/music/widgets/listen_category_content_page.dart';
+import 'package:tvbox/widgets/app_page_loading.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/app_empty_view.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/app_log.dart';
 
 /// 发现页（主页）—— 支持多平台：网易云 / 酷狗 / 喜马拉雅 / 博看听书 / 275听书
 ///

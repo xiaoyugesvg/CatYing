@@ -17,22 +17,22 @@ import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-import '../../common/theme.dart';
-import '../../services/ad_block_service.dart';
-import '../../services/nav_feature_service.dart';
-import '../../widgets/ad_block_bubble.dart';
-import '../../widgets/app_toast.dart';
-import '../../widgets/card_action_sheet.dart';
-import '../../widgets/common_widgets.dart';
-import '../models/rss_article.dart';
-import '../models/rss_source.dart';
-import '../services/rss_extra.dart';
-import '../services/rss_reader.dart';
-import '../services/rss_store.dart';
-import '../widgets/rss_login_sheet.dart';
-import 'rss_article_page.dart';
-import 'rss_manage_page.dart';
-import 'rss_source_edit_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/ad_block_service.dart';
+import 'package:tvbox/services/nav_feature_service.dart';
+import 'package:tvbox/widgets/ad_block_bubble.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/card_action_sheet.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/rss/models/rss_article.dart';
+import 'package:tvbox/rss/models/rss_source.dart';
+import 'package:tvbox/rss/services/rss_extra.dart';
+import 'package:tvbox/rss/services/rss_reader.dart';
+import 'package:tvbox/rss/services/rss_store.dart';
+import 'package:tvbox/rss/widgets/rss_login_sheet.dart';
+import 'package:tvbox/rss/pages/rss_article_page.dart';
+import 'package:tvbox/rss/pages/rss_manage_page.dart';
+import 'package:tvbox/rss/pages/rss_source_edit_page.dart';
 
 class RssPage extends StatefulWidget {
   const RssPage({super.key});
@@ -1024,7 +1024,7 @@ class _RssPageState extends State<RssPage> {
                       fit: BoxFit.cover,
                       placeholder: (_, __) =>
                           Container(color: AppTheme.backgroundTertiary),
-                      errorWidget: (_, __, ___) => _coverPlaceholder(),
+                      errorBuilder: (_, __, ___) => _coverPlaceholder(),
                     )
                   : _coverPlaceholder(),
             ),
@@ -1207,7 +1207,7 @@ class _RssPageState extends State<RssPage> {
                     child: CachedNetworkImage(
                       imageUrl: a.image,
                       fit: BoxFit.cover,
-                      errorWidget: (_, __, ___) => const SizedBox.shrink(),
+                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                     ),
                   ),
                 ),

@@ -1,26 +1,26 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:get/get.dart';
-import '../widgets/music_sheet.dart';
+import 'package:tvbox/music/widgets/music_sheet.dart';
 import 'package:flutter/material.dart';
 
-import '../models/models.dart';
-import '../models/third_party_source.dart';
-import '../services/settings_store.dart';
-import '../theme/music_theme.dart';
-import '../widgets/floating_play_button.dart';
-import 'music_log_page.dart';
-import 'music_source_settings_page.dart';
-import 'plugin_market_page.dart';
-import 'plugin_subscription_page.dart';
-import 'source_manager_page.dart';
-import '../../common/module_theme_store.dart';
-import '../../common/module_theme_sync.dart';
-import '../../common/theme_mode_store.dart';
-import '../../services/main_tab_controller.dart';
-import '../../reading/theme/jelly_palette.dart';
-import '../../common/theme.dart';
-import '../../widgets/app_toast.dart';
-import '../../widgets/theme_preset_row.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/models/third_party_source.dart';
+import 'package:tvbox/music/services/settings_store.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/music/widgets/floating_play_button.dart';
+import 'package:tvbox/music/pages/music_log_page.dart';
+import 'package:tvbox/music/pages/music_source_settings_page.dart';
+import 'package:tvbox/music/pages/plugin_market_page.dart';
+import 'package:tvbox/music/pages/plugin_subscription_page.dart';
+import 'package:tvbox/music/pages/source_manager_page.dart';
+import 'package:tvbox/common/module_theme_store.dart';
+import 'package:tvbox/common/module_theme_sync.dart';
+import 'package:tvbox/common/theme_mode_store.dart';
+import 'package:tvbox/services/main_tab_controller.dart';
+import 'package:tvbox/reading/theme/jelly_palette.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/theme_preset_row.dart';
 
 /// 「我的」页 —— 移植自 Beans 的 `ProfileView.swift`（3350 行，取其主干）。
 ///

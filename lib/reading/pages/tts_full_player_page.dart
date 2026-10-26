@@ -2,8 +2,8 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../../../common/theme.dart';
-import '../services/tts_service.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/services/tts_service.dart';
 
 /// 独立听书全屏页（参考图 IMG_8509）：
 /// 封面为背景深色渐变 + 书名/作者 + 章节名 + 当前句预览
@@ -43,7 +43,7 @@ class TtsFullPlayerPage extends StatelessWidget {
             CachedNetworkImage(
               imageUrl: coverUrl!,
               fit: BoxFit.cover,
-              errorWidget: (_, __, ___) => const _BgGradient(),
+              errorBuilder: (_, __, ___) => const _BgGradient(),
               placeholder: (_, __) => const _BgGradient(),
             )
           else

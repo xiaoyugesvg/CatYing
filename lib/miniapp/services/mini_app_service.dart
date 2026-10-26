@@ -7,14 +7,14 @@ import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../models/app_config.dart';
-import '../../models/source_bean.dart';
-import '../../services/api_config.dart';
-import '../../services/app_log.dart';
-import '../../services/live_service.dart';
-import '../../services/network_manager.dart';
-import '../../services/parse_store.dart';
-import '../models/mini_app.dart';
+import 'package:tvbox/models/app_config.dart';
+import 'package:tvbox/models/source_bean.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/live_service.dart';
+import 'package:tvbox/services/network_manager.dart';
+import 'package:tvbox/services/parse_store.dart';
+import 'package:tvbox/miniapp/models/mini_app.dart';
 
 /// 「程序」模块服务：管理导入的 TVBox 生态小程序配置。
 ///
@@ -683,9 +683,18 @@ class MiniAppService extends GetxService {
   }
 
   /// 拖动排序后落盘（列表顺序即自定义顺序）
-  Future<void> reorder(int oldIndex, int newIndex) async {
+  ///
+  /// [alreadyAdjusted] 为 true 时表示调用方给的是**已经归一化过**的目标下标
+  /// （`ReorderableListView.onReorderItem` 就是这种情况：框架已经替我们把
+  /// "向下拖要减一"这一步做完了）。此时不能再减一次，否则会差一位。
+  /// 旧的 `onReorder` 回调则必须保持 false。
+  Future<void> reorder(
+    int oldIndex,
+    int newIndex, {
+    bool alreadyAdjusted = false,
+  }) async {
     if (oldIndex < 0 || oldIndex >= apps.length) return;
-    if (newIndex > oldIndex) newIndex -= 1;
+    if (!alreadyAdjusted && newIndex > oldIndex) newIndex -= 1;
     if (newIndex < 0) newIndex = 0;
     if (newIndex >= apps.length) newIndex = apps.length - 1;
     final item = apps.removeAt(oldIndex);

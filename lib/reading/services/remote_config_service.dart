@@ -4,8 +4,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../utils/constants.dart';
-import '../source/global_proxy.dart';
+import 'package:tvbox/reading/utils/constants.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
 
 void _log(String message) {
   if (kDebugMode) debugPrint('[RemoteConfig] $message');

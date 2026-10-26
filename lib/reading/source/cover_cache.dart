@@ -10,9 +10,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
-import 'image_restore.dart';
-import 'site_config.dart';
-import 'global_proxy.dart';
+import 'package:tvbox/reading/source/image_restore.dart';
+import 'package:tvbox/reading/source/site_config.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
 
 void _log(String message) {
   if (kDebugMode) {

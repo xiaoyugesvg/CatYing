@@ -7,27 +7,27 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../common/theme.dart';
-import '../../services/app_log.dart';
-import '../../widgets/app_toast.dart';
-import '../../widgets/card_action_sheet.dart';
-import '../models/book_source.dart';
-import '../models/source_subscription.dart';
-import '../services/book_source_import_parser.dart';
-import '../services/comic_source_importer.dart';
-import '../services/source_subscription_store.dart';
-import '../source/manga_source.dart';
-import '../source/source_config_store.dart';
-import '../source/source_definition.dart';
-import '../source/source_manager.dart';
-import '../source/venera/venera_manga_source.dart';
-import '../theme/jelly_theme.dart';
-import '../widgets/import_box_icon.dart';
-import '../widgets/swipe_action_tile.dart';
-import 'book_source_editor_page.dart';
-import 'book_source_qr_scan_page.dart';
-import 'comic_source_edit_page.dart';
-import 'venera_source_edit_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/card_action_sheet.dart';
+import 'package:tvbox/reading/models/book_source.dart';
+import 'package:tvbox/reading/models/source_subscription.dart';
+import 'package:tvbox/reading/services/book_source_import_parser.dart';
+import 'package:tvbox/reading/services/comic_source_importer.dart';
+import 'package:tvbox/reading/services/source_subscription_store.dart';
+import 'package:tvbox/reading/source/manga_source.dart';
+import 'package:tvbox/reading/source/source_config_store.dart';
+import 'package:tvbox/reading/source/source_definition.dart';
+import 'package:tvbox/reading/source/source_manager.dart';
+import 'package:tvbox/reading/source/venera/venera_manga_source.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/widgets/import_box_icon.dart';
+import 'package:tvbox/reading/widgets/swipe_action_tile.dart';
+import 'package:tvbox/reading/pages/book_source_editor_page.dart';
+import 'package:tvbox/reading/pages/book_source_qr_scan_page.dart';
+import 'package:tvbox/reading/pages/comic_source_edit_page.dart';
+import 'package:tvbox/reading/pages/venera_source_edit_page.dart';
 
 /// 阅读模块的「书源仓 / 漫画仓」（两个独立页面，不再用 Tab 合并）。
 ///
@@ -2090,7 +2090,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
         padding: const EdgeInsets.only(left: 14, right: 14),
         buildDefaultDragHandles: false,
         itemCount: subs.length,
-        onReorder: _reorderSubs,
+        onReorderItem: _reorderSubs,
         itemBuilder: (_, i) => Padding(
           key: ValueKey('sub-${subs[i].id}'),
           padding: const EdgeInsets.fromLTRB(0, 2, 8, 2),
@@ -2101,7 +2101,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
   }
 
   Future<void> _reorderSubs(int oldIndex, int newIndex) async {
-    if (newIndex > oldIndex) newIndex -= 1;
+    // newIndex 来自 onReorderItem，框架已归一化，不再手动减一。
     final ids = _sortedSubs.map((e) => e.id).toList();
     if (oldIndex < 0 || oldIndex >= ids.length) return;
     final moved = ids.removeAt(oldIndex);
@@ -2604,7 +2604,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
   Widget _sourceSliverList(List<BookSource> sources) {
     return SliverReorderableList(
       itemCount: sources.length,
-      onReorder: (o, n) => _reorderBookSources(sources, o, n),
+      onReorderItem: (o, n) => _reorderBookSources(sources, o, n),
       proxyDecorator: (child, i, animation) =>
           Material(color: Colors.transparent, child: child),
       itemBuilder: (_, i) {
@@ -2693,7 +2693,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
     int oldIndex,
     int newIndex,
   ) async {
-    if (newIndex > oldIndex) newIndex -= 1;
+    // newIndex 来自 onReorderItem，框架已归一化，不再手动减一。
     final ids = visible.map((e) => e.id).toList();
     if (oldIndex < 0 || oldIndex >= ids.length) return;
     final moved = ids.removeAt(oldIndex);
@@ -2873,7 +2873,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
         padding: EdgeInsets.zero,
         buildDefaultDragHandles: false,
         itemCount: list.length,
-        onReorder: (o, n) => _reorderMangaSources(list, o, n),
+        onReorderItem: (o, n) => _reorderMangaSources(list, o, n),
         proxyDecorator: (child, i, animation) =>
             Material(color: Colors.transparent, child: child),
         itemBuilder: (_, i) {
@@ -2987,7 +2987,7 @@ class _WarehouseTabState extends State<_WarehouseTab>
     int oldIndex,
     int newIndex,
   ) async {
-    if (newIndex > oldIndex) newIndex -= 1;
+    // newIndex 来自 onReorderItem，框架已归一化，不再手动减一。
     final ids = visible.map((e) => e.id).toList();
     if (oldIndex < 0 || oldIndex >= ids.length) return;
     final moved = ids.removeAt(oldIndex);
@@ -3170,7 +3170,6 @@ class _SourceRow extends StatelessWidget {
     this.selectMode = false,
     this.picked = false,
     this.onTap,
-    this.onLongPress,
   });
 
   final BookSource source;
@@ -3178,7 +3177,6 @@ class _SourceRow extends StatelessWidget {
   final bool selectMode;
   final bool picked;
   final VoidCallback? onTap;
-  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -3187,7 +3185,6 @@ class _SourceRow extends StatelessWidget {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
-      onLongPress: onLongPress,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 2, 4, 2),
         child: Row(

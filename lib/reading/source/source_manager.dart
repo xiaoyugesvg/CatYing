@@ -2,22 +2,22 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../services/settings_service.dart';
-import 'config_manga_source.dart';
-import 'copy_manga_source.dart';
-import 'copymanga_config.dart';
-import 'legado_comic_source.dart';
-import 'manga_source.dart';
-import 'manhuaren_config.dart';
-import 'manhuaren_source.dart';
-import 'models.dart';
-import '../models/book_source.dart' show BookSourceStore;
-import 'site_config.dart';
-import 'source_config_store.dart';
-import 'source_definition.dart';
-import 'venera/venera_manga_source.dart';
-import 'zaimanhua_config.dart';
-import 'zaimanhua_source.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/source/config_manga_source.dart';
+import 'package:tvbox/reading/source/copy_manga_source.dart';
+import 'package:tvbox/reading/source/copymanga_config.dart';
+import 'package:tvbox/reading/source/legado_comic_source.dart';
+import 'package:tvbox/reading/source/manga_source.dart';
+import 'package:tvbox/reading/source/manhuaren_config.dart';
+import 'package:tvbox/reading/source/manhuaren_source.dart';
+import 'package:tvbox/reading/source/models.dart';
+import 'package:tvbox/reading/models/book_source.dart' show BookSourceStore;
+import 'package:tvbox/reading/source/site_config.dart';
+import 'package:tvbox/reading/source/source_config_store.dart';
+import 'package:tvbox/reading/source/source_definition.dart';
+import 'package:tvbox/reading/source/venera/venera_manga_source.dart';
+import 'package:tvbox/reading/source/zaimanhua_config.dart';
+import 'package:tvbox/reading/source/zaimanhua_source.dart';
 
 void _log(String message) {
   if (kDebugMode) {

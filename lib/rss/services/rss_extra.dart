@@ -12,10 +12,10 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/rss_article.dart';
-import '../models/rss_source.dart';
-import 'rss_reader.dart';
-import 'rss_store.dart';
+import 'package:tvbox/rss/models/rss_article.dart';
+import 'package:tvbox/rss/models/rss_source.dart';
+import 'package:tvbox/rss/services/rss_reader.dart';
+import 'package:tvbox/rss/services/rss_store.dart';
 
 class RssExtra {
   RssExtra._();

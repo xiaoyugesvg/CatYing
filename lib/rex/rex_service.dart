@@ -6,8 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../services/nodejs_manager.dart';
-import 'rex_models.dart';
+import 'package:tvbox/services/nodejs_manager.dart';
+import 'package:tvbox/rex/rex_models.dart';
 
 /// REX / ForwardWidget 模块的 Dart 侧服务。
 ///

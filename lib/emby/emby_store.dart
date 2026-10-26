@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'emby_models.dart';
+import 'package:tvbox/emby/emby_models.dart';
 
 /// Emby 多服务器配置存储（SharedPreferences）。
 ///

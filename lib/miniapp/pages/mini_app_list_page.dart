@@ -4,18 +4,18 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../common/theme.dart';
-import '../../services/prefs_mirror.dart';
-import '../../widgets/app_toast.dart';
-import '../../widgets/card_action_sheet.dart';
-import '../../widgets/home_search_bar.dart';
-import '../models/mini_app.dart';
-import '../services/market_subscription_store.dart';
-import '../services/mini_app_service.dart';
-import 'mini_app_detail_page.dart';
-import 'mini_app_maiyou_page.dart';
-import 'mini_app_market_page.dart';
-import 'mini_app_web_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/prefs_mirror.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/card_action_sheet.dart';
+import 'package:tvbox/widgets/home_search_bar.dart';
+import 'package:tvbox/miniapp/models/mini_app.dart';
+import 'package:tvbox/miniapp/services/market_subscription_store.dart';
+import 'package:tvbox/miniapp/services/mini_app_service.dart';
+import 'package:tvbox/miniapp/pages/mini_app_detail_page.dart';
+import 'package:tvbox/miniapp/pages/mini_app_maiyou_page.dart';
+import 'package:tvbox/miniapp/pages/mini_app_market_page.dart';
+import 'package:tvbox/miniapp/pages/mini_app_web_page.dart';
 
 /// 「程序」tab 主页：**直接显示已安装**的小程序（不再有「已安装 / 市场」双 Tab）。
 ///
@@ -1170,7 +1170,8 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
                   () => ReorderableListView.builder(
                     padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
                     itemCount: service.apps.length,
-                    onReorder: (o, n) => service.reorder(o, n),
+                    onReorderItem: (o, n) =>
+                        service.reorder(o, n, alreadyAdjusted: true),
                     itemBuilder: (c, i) {
                       final a = service.apps[i];
                       return ListTile(

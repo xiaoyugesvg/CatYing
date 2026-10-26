@@ -1,5 +1,5 @@
 import 'dart:async';
-import '../../widgets/common_widgets.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:cached_network_image_ce/cached_network_image.dart';
@@ -8,26 +8,26 @@ import 'package:flutter/services.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
-import '../models/comic.dart';
-import '../services/bookshelf_service.dart';
-import '../source/adapter.dart';
-import '../source/source_manager.dart';
-import '../source/webview_image_fetcher.dart';
-import '../services/download_service.dart';
-import '../services/platform_service.dart';
-import '../services/reading_progress_service.dart';
-import '../services/manga_bookmark_service.dart';
-import '../services/reader_override_service.dart';
-import '../services/settings_service.dart';
-import '../theme/jelly_theme.dart';
-import '../widgets/jelly_mode_picker.dart';
-import '../widgets/pomodoro_button.dart';
-import '../../common/theme.dart';
-import '../../common/system_ui.dart';
-import '../../services/ocr_service.dart';
-import '../../services/translate_service.dart';
-import '../../widgets/app_image_cache.dart';
-import 'comic_translate_page.dart';
+import 'package:tvbox/reading/models/comic.dart';
+import 'package:tvbox/reading/services/bookshelf_service.dart';
+import 'package:tvbox/reading/source/adapter.dart';
+import 'package:tvbox/reading/source/source_manager.dart';
+import 'package:tvbox/reading/source/webview_image_fetcher.dart';
+import 'package:tvbox/reading/services/download_service.dart';
+import 'package:tvbox/reading/services/platform_service.dart';
+import 'package:tvbox/reading/services/reading_progress_service.dart';
+import 'package:tvbox/reading/services/manga_bookmark_service.dart';
+import 'package:tvbox/reading/services/reader_override_service.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/widgets/jelly_mode_picker.dart';
+import 'package:tvbox/reading/widgets/pomodoro_button.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/common/system_ui.dart';
+import 'package:tvbox/services/ocr_service.dart';
+import 'package:tvbox/services/translate_service.dart';
+import 'package:tvbox/widgets/app_image_cache.dart';
+import 'package:tvbox/reading/pages/comic_translate_page.dart';
 
 /// 漫画阅读页面
 class ReaderPage extends StatefulWidget {
@@ -678,7 +678,7 @@ class _ReaderPageState extends State<ReaderPage> {
                         ),
                         Switch(
                           value: draftIndependent,
-                          activeColor: JellyTheme.primary,
+                          activeThumbColor: JellyTheme.primary,
                           onChanged: (v) =>
                               setSheet(() => draftIndependent = v),
                         ),
@@ -1176,7 +1176,7 @@ class _ReaderPageState extends State<ReaderPage> {
         ),
         Switch(
           value: value,
-          activeColor: JellyTheme.primary,
+          activeThumbColor: JellyTheme.primary,
           onChanged: onChanged,
         ),
       ],
@@ -1554,7 +1554,7 @@ class _ReaderPageState extends State<ReaderPage> {
                             ),
                             Switch(
                               value: autoClean,
-                              activeColor: JellyTheme.primary,
+                              activeThumbColor: JellyTheme.primary,
                               onChanged: (v) {
                                 setSheet(() => autoClean = v);
                                 s.setUpscaleAutoClean(v);
@@ -2894,7 +2894,7 @@ class _ReaderPageState extends State<ReaderPage> {
     Duration fadeInDuration = Duration.zero,
     Duration fadeOutDuration = Duration.zero,
     Widget Function(BuildContext, String)? placeholder,
-    Widget Function(BuildContext, String, dynamic)? errorWidget,
+    Widget Function(BuildContext, String, dynamic)? errorBuilder,
   }) {
     if (url.startsWith('file://') || !url.contains('://')) {
       // blob 站落盘临时文件路径 — 用 Image.file + cacheWidth 限解码分辨率
@@ -2920,7 +2920,7 @@ class _ReaderPageState extends State<ReaderPage> {
               );
         },
         errorBuilder: (context, error, stackTrace) =>
-            errorWidget?.call(context, url, error) ?? _buildBrokenImage(-1),
+            errorBuilder?.call(context, url, error) ?? _buildBrokenImage(-1),
       );
     }
     if (url.startsWith('data:')) {
@@ -2948,7 +2948,7 @@ class _ReaderPageState extends State<ReaderPage> {
               );
         },
         errorBuilder: (context, error, stackTrace) =>
-            errorWidget?.call(context, url, error) ?? _buildBrokenImage(-1),
+            errorBuilder?.call(context, url, error) ?? _buildBrokenImage(-1),
       );
     }
     return CachedNetworkImage(
@@ -2963,7 +2963,10 @@ class _ReaderPageState extends State<ReaderPage> {
       fadeInDuration: fadeInDuration,
       fadeOutDuration: fadeOutDuration,
       placeholder: placeholder,
-      errorWidget: errorWidget,
+      // CachedNetworkImage 的 errorBuilder 是 (context, error, stackTrace)，
+      // 不含 url —— 用外层 url 补齐，保持调用方看到的三参形态不变。
+      errorBuilder: (context, error, stackTrace) =>
+          errorBuilder?.call(context, url, error) ?? _buildBrokenImage(-1),
     );
   }
 
@@ -2999,7 +3002,7 @@ class _ReaderPageState extends State<ReaderPage> {
           child: CircularProgressIndicator(),
         ),
       ),
-      errorWidget: (c, u, e) => _buildBrokenImage(index),
+      errorBuilder: (c, u, e) => _buildBrokenImage(index),
     );
   }
 
@@ -3103,7 +3106,7 @@ class _ReaderPageState extends State<ReaderPage> {
             child: CircularProgressIndicator(),
           ),
         ),
-        errorWidget: (context, url, error) => _buildBrokenImage(index),
+        errorBuilder: (context, url, error) => _buildBrokenImage(index),
       );
     }
     return SizedBox.expand(
@@ -3169,7 +3172,7 @@ class _ReaderPageState extends State<ReaderPage> {
         height: 240,
         child: Center(child: CircularProgressIndicator()),
       ),
-      errorWidget: (context, url, error) => _buildBrokenImage(index),
+      errorBuilder: (context, url, error) => _buildBrokenImage(index),
     );
   }
 

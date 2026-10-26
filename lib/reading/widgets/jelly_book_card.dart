@@ -1,11 +1,11 @@
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import '../models/book.dart';
-import '../services/book_favorites_service.dart';
-import '../services/book_reading_progress_service.dart';
-import '../services/settings_service.dart';
-import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/models/book.dart';
+import 'package:tvbox/reading/services/book_favorites_service.dart';
+import 'package:tvbox/reading/services/book_reading_progress_service.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 果冻风图书卡片（grid / list 两态）
 /// 布局同漫画主卡片：封面 + 书名 + 作者 + 元信息 + 收藏按钮；点击进入详情页。
@@ -248,7 +248,7 @@ class _JellyBookCardState extends State<JellyBookCard>
                 ),
               ),
             ),
-            errorWidget: (c, u, e) => Container(
+            errorBuilder: (c, u, e) => Container(
               color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
               width: width,
               height: height,

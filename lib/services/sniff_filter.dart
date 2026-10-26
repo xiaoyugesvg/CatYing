@@ -13,8 +13,8 @@
 ///     （[kParseFirstHosts]）+ 用户追加域名，减去用户屏蔽域名。
 library;
 
-import 'player_prefs.dart';
-import 'play_route.dart';
+import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/services/play_route.dart';
 
 class SniffFilter {
   SniffFilter._();

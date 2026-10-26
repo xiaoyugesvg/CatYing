@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../../../common/theme.dart';
-import '../../../miniapp/pages/mini_app_player_page.dart';
-import '../../../services/tg_service.dart';
-import '../../../services/tg_title_filter.dart';
-import '../../../services/translate_service.dart';
-import '../../../widgets/app_toast.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/miniapp/pages/mini_app_player_page.dart';
+import 'package:tvbox/services/tg_service.dart';
+import 'package:tvbox/services/tg_title_filter.dart';
+import 'package:tvbox/services/translate_service.dart';
+import 'package:tvbox/widgets/app_toast.dart';
 
 /// 某个频道内的视频列表
 ///

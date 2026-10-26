@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 
-import '../services/music_api.dart';
-import '../services/settings_store.dart';
-import '../theme/music_theme.dart';
-import 'discover_page.dart';
-import 'library_page.dart';
-import 'music_bottom_chrome.dart';
-import 'charts_page.dart';
-import 'profile_page.dart';
-import 'search_page.dart';
-import '../../common/theme.dart';
-import '../../services/nodejs_manager.dart';
+import 'package:tvbox/music/services/music_api.dart';
+import 'package:tvbox/music/services/settings_store.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/music/pages/discover_page.dart';
+import 'package:tvbox/music/pages/library_page.dart';
+import 'package:tvbox/music/pages/music_bottom_chrome.dart';
+import 'package:tvbox/music/pages/charts_page.dart';
+import 'package:tvbox/music/pages/profile_page.dart';
+import 'package:tvbox/music/pages/search_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/nodejs_manager.dart';
 
 /// 音乐模块的 App 骨架 —— 移植自 Beans 的 `RootView.swift`。
 ///

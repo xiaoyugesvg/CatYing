@@ -6,24 +6,24 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../models/book.dart';
-import '../models/book_content.dart';
-import '../models/bookshelf.dart';
-import '../services/book_download_service.dart';
-import '../services/book_favorites_service.dart';
-import '../services/book_parser.dart';
-import '../services/book_reading_progress_service.dart';
-import '../services/bookshelf_service.dart';
-import '../services/gbk_txt_parser.dart';
-import '../services/zlibrary_service.dart';
-import '../theme/jelly_theme.dart';
-import '../widgets/jelly_bookshelf_dialog.dart';
-import '../widgets/theme_background_animation.dart';
-import 'book_reader_page.dart';
-import 'book_search_page.dart';
-import 'webview_page.dart';
-import 'zlibrary_auth_page.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/models/book.dart';
+import 'package:tvbox/reading/models/book_content.dart';
+import 'package:tvbox/reading/models/bookshelf.dart';
+import 'package:tvbox/reading/services/book_download_service.dart';
+import 'package:tvbox/reading/services/book_favorites_service.dart';
+import 'package:tvbox/reading/services/book_parser.dart';
+import 'package:tvbox/reading/services/book_reading_progress_service.dart';
+import 'package:tvbox/reading/services/bookshelf_service.dart';
+import 'package:tvbox/reading/services/gbk_txt_parser.dart';
+import 'package:tvbox/reading/services/zlibrary_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/widgets/jelly_bookshelf_dialog.dart';
+import 'package:tvbox/reading/widgets/theme_background_animation.dart';
+import 'package:tvbox/reading/pages/book_reader_page.dart';
+import 'package:tvbox/reading/pages/book_search_page.dart';
+import 'package:tvbox/reading/pages/webview_page.dart';
+import 'package:tvbox/reading/pages/zlibrary_auth_page.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 图书详情页面（参考漫画详情页 ComicDetailPage）
 /// 封面独占顶部 -> 标题/作者/评分/元信息 -> 简介 -> 推荐图书 -> 收藏/下载胶囊。
@@ -258,7 +258,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
                   placeholder: (c, u) => Container(
                     color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
                   ),
-                  errorWidget: (c, u, e) => Container(
+                  errorBuilder: (c, u, e) => Container(
                     color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
                     child: Icon(
                       Icons.broken_image,
@@ -1270,7 +1270,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
                         color:
                             isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
                       ),
-                      errorWidget: (c, u, e) => Container(
+                      errorBuilder: (c, u, e) => Container(
                         width: 92,
                         height: 124,
                         color:

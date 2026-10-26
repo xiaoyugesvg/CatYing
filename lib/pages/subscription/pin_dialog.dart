@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../../common/theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 6 位 PIN 输入弹窗（设置新 PIN / 验证 PIN 共用）
 ///

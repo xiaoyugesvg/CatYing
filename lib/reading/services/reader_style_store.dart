@@ -5,7 +5,8 @@ import 'package:archive/archive.dart';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/reader_style.dart';
+import 'package:tvbox/reading/models/reader_style.dart';
+import 'package:tvbox/services/app_log.dart';
 
 /// 用户保存的一套「标题样式」（HTML 源码 + 名字）。
 class TitleStylePreset {
@@ -69,7 +70,9 @@ class ReaderStyleStore {
         _kCustom,
         jsonEncode([for (final s in styles) s.toJson()]),
       );
-    } catch (_) {}
+    } catch (e) {
+      AppLog.instance.w('[阅读样式] 自定义样式保存失败（重启后会丢）: $e');
+    }
   }
 
   Future<String?> loadActiveId() async {
@@ -85,7 +88,9 @@ class ReaderStyleStore {
     try {
       final p = await SharedPreferences.getInstance();
       await p.setString(_kActive, id);
-    } catch (_) {}
+    } catch (e) {
+      AppLog.instance.w('[阅读样式] 当前样式 id 保存失败: $e');
+    }
   }
 
   /// 白天样式 id（null = 不自动套用）
@@ -118,7 +123,9 @@ class ReaderStyleStore {
       } else {
         await p.setString(_kDayStyle, id);
       }
-    } catch (_) {}
+    } catch (e) {
+      AppLog.instance.w('[阅读样式] 日夜样式 id 保存失败: $e');
+    }
   }
 
   Future<void> saveNightStyleId(String? id) async {

@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'music_sheet.dart';
+import 'package:tvbox/music/widgets/music_sheet.dart';
 
-import '../../common/theme.dart';
-import '../models/models.dart';
-import '../services/player_manager.dart';
-import '../services/unblock_service.dart';
-import '../theme/music_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/services/player_manager.dart';
+import 'package:tvbox/music/services/unblock_service.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
 
 /// 选音源弹窗 —— 内置接口拿不到地址时，把**所有能播的音源**列出来让用户决定。
 ///

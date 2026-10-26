@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../reading/theme/jelly_palette.dart';
+import 'package:tvbox/reading/theme/jelly_palette.dart';
 
 /// 全局明暗：外观模式切换后 AppTheme 颜色跟着变（深色/浅色/跟随系统）
 class AppBrightness {

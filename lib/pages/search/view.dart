@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:cached_network_image_ce/cached_network_image.dart';
-import '../../common/theme.dart';
-import '../../models/movie.dart';
-import '../../models/source_bean.dart';
-import '../../services/api_config.dart';
-import '../../services/player_prefs.dart';
-import '../../widgets/vod_card.dart';
-import '../../widgets/common_widgets.dart';
-import 'controller.dart';
-import '../../widgets/app_toast.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/movie.dart';
+import 'package:tvbox/models/source_bean.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/widgets/vod_card.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/pages/search/controller.dart';
+import 'package:tvbox/widgets/app_toast.dart';
 
 /// 热门搜索词（静态兜底列表，点击直达搜索）
 const List<String> _hotKeywords = [
@@ -334,7 +334,7 @@ class _SearchPageState extends State<SearchPage> {
                         fit: BoxFit.fill,
                         placeholder: (_, __) =>
                             ColoredBox(color: AppTheme.backgroundTertiary),
-                        errorWidget: (_, __, ___) => ColoredBox(
+                        errorBuilder: (_, __, ___) => ColoredBox(
                           color: AppTheme.backgroundTertiary,
                           child: Icon(
                             Icons.broken_image_outlined,

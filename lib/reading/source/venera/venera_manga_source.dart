@@ -14,10 +14,10 @@ import 'package:flutter/foundation.dart';
 import 'package:quickjs_engine/quickjs_engine.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../manga_source.dart';
-import '../models.dart';
-import 'venera_host_bridge.dart';
-import 'venera_js_prelude.dart';
+import 'package:tvbox/reading/source/manga_source.dart';
+import 'package:tvbox/reading/source/models.dart';
+import 'package:tvbox/reading/source/venera/venera_host_bridge.dart';
+import 'package:tvbox/reading/source/venera/venera_js_prelude.dart';
 
 class VeneraMangaSource extends MangaSource {
   VeneraMangaSource({

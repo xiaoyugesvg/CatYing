@@ -1,8 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../reading/theme/jelly_palette.dart';
-import '../services/prefs_mirror.dart';
+import 'package:tvbox/reading/theme/jelly_palette.dart';
+import 'package:tvbox/services/prefs_mirror.dart';
 
 /// 每个模块用哪套配色方案。
 ///

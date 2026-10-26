@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../common/theme.dart';
-import 'glass.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/glass.dart';
 
 /// 通用加载组件
 class AppLoading extends StatelessWidget {
@@ -473,7 +473,7 @@ class SettingsRow extends StatelessWidget {
               child: Switch(
                 value: switchValue,
                 onChanged: switchEnabled ? onSwitchChanged : null,
-                activeColor: AppTheme.accentColor,
+                activeThumbColor: AppTheme.accentColor,
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
             ),

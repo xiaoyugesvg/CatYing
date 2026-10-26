@@ -10,8 +10,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../services/prefs_mirror.dart';
-import '../models/rss_source.dart';
+import 'package:tvbox/services/prefs_mirror.dart';
+import 'package:tvbox/rss/models/rss_source.dart';
 
 class RssStore {
   RssStore._();

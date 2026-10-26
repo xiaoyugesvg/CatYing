@@ -11,11 +11,11 @@
 
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../../widgets/app_toast.dart';
-import '../models/third_party_source.dart';
-import '../services/music_api.dart';
-import '../theme/music_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/music/models/third_party_source.dart';
+import 'package:tvbox/music/services/music_api.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
 
 class PluginVariablesPage extends StatefulWidget {
   const PluginVariablesPage({super.key, required this.source});

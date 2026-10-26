@@ -4,9 +4,9 @@ import 'dart:typed_data';
 import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import '../common/theme.dart';
-import 'app_log.dart';
-import 'wallpaper_random_service.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/wallpaper_random_service.dart';
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
@@ -708,7 +708,7 @@ class BackgroundService extends GetxService {
               imageUrl: scene.networkUrl,
               fit: BoxFit.cover,
               placeholder: (_, __) => const SizedBox.shrink(),
-              errorWidget: (_, __, ___) => const SizedBox.shrink(),
+              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
             );
           }
 

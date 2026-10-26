@@ -6,10 +6,10 @@ import 'package:crypto/crypto.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/local_python_source.dart';
-import 'app_log.dart';
-import 'python_manager.dart';
-import 'python_sources_service.dart';
+import 'package:tvbox/models/local_python_source.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/python_manager.dart';
+import 'package:tvbox/services/python_sources_service.dart';
 
 /// 判断一段脚本**不像**影视源时返回原因；像源则返回 null。
 ///

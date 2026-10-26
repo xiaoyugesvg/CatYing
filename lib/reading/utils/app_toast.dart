@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../widgets/app_toast.dart' as common;
+import 'package:tvbox/widgets/app_toast.dart' as common;
 
 /// 阅读侧的提示组件 —— **薄委托**到公共的 [common.AppToast]。
 ///

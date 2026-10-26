@@ -3,9 +3,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../../common/theme.dart';
-import '../../../reading/services/ai_service.dart';
-import 'log_diagnosis_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/services/ai_service.dart';
+import 'package:tvbox/pages/settings/sub/log_diagnosis_page.dart';
 
 /// 一家 AI 服务商的预设（都是 OpenAI 兼容接口）
 class _Provider {

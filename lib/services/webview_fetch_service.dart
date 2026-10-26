@@ -22,9 +22,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-import 'app_log.dart';
-import 'cf_session.dart';
-import '../widgets/video_player_pip.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/cf_session.dart';
+import 'package:tvbox/widgets/video_player_pip.dart';
 
 /// 一次抓页的结果
 class WebViewPage {

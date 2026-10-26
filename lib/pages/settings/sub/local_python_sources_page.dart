@@ -6,18 +6,18 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../../common/theme.dart';
-import '../../../models/local_python_source.dart';
-import '../../../services/api_config.dart';
-import '../../../services/app_log.dart';
-import '../../../services/local_python_sources.dart';
-import '../../../services/python_manager.dart';
-import '../../../services/source_service.dart';
-import '../../../widgets/app_toast.dart';
-import '../../../widgets/card_action_sheet.dart';
-import '../../../widgets/common_widgets.dart';
-import '../../../reading/widgets/swipe_action_tile.dart';
-import 'settings_shared.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/local_python_source.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/local_python_sources.dart';
+import 'package:tvbox/services/python_manager.dart';
+import 'package:tvbox/services/source_service.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/card_action_sheet.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/reading/widgets/swipe_action_tile.dart';
+import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 
 /// 设置 → 订阅管理 → 本地 Python 源
 ///

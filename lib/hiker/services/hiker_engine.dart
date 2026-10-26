@@ -2,13 +2,13 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 
-import '../../services/app_log.dart';
-import '../../services/nodejs_manager.dart';
-import '../models/hiker_source.dart';
-import 'hiker_builtin.dart';
-import 'hiker_prefs.dart';
-import 'hiker_store.dart';
-import 'hiker_webview_service.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/nodejs_manager.dart';
+import 'package:tvbox/hiker/models/hiker_source.dart';
+import 'package:tvbox/hiker/services/hiker_builtin.dart';
+import 'package:tvbox/hiker/services/hiker_prefs.dart';
+import 'package:tvbox/hiker/services/hiker_store.dart';
+import 'package:tvbox/hiker/services/hiker_webview_service.dart';
 
 /// 一次规则求值的结果
 class HikerResult {

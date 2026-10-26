@@ -4,14 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../../common/theme.dart';
-import '../../../models/player_engine.dart';
-import '../../../services/app_log.dart';
-import '../../../services/player_prefs.dart';
-import '../../../widgets/common_widgets.dart';
-import '../controller.dart';
-import 'settings_shared.dart';
-import 'sniff_settings_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/player_engine.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/pages/settings/controller.dart';
+import 'package:tvbox/pages/settings/sub/settings_shared.dart';
+import 'package:tvbox/pages/settings/sub/sniff_settings_page.dart';
 
 /// 设置 → 播放设置
 ///

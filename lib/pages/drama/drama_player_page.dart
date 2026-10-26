@@ -6,19 +6,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
-import '../../common/system_ui.dart';
-import '../../common/theme.dart';
-import '../../models/cache_store.dart';
-import '../../models/movie.dart';
-import '../../models/player_engine.dart';
-import '../../models/vod_info.dart';
-import '../../services/api_config.dart';
-import '../../services/player_prefs.dart';
-import '../../widgets/app_player.dart';
-import '../../widgets/ios_av_player.dart';
-import '../../widgets/ks_player.dart';
-import '../../widgets/mpv_app_player.dart';
-import '../detail/controller.dart';
+import 'package:tvbox/common/system_ui.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/cache_store.dart';
+import 'package:tvbox/models/movie.dart';
+import 'package:tvbox/models/player_engine.dart';
+import 'package:tvbox/models/vod_info.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/widgets/app_player.dart';
+import 'package:tvbox/widgets/ios_av_player.dart';
+import 'package:tvbox/widgets/ks_player.dart';
+import 'package:tvbox/widgets/mpv_app_player.dart';
+import 'package:tvbox/pages/detail/controller.dart';
 
 /// 短剧专用播放页（2026-10-23 重做）。
 ///
@@ -450,7 +450,7 @@ class _DramaPlayerPageState extends State<DramaPlayerPage> {
           CachedNetworkImage(
             imageUrl: pic,
             fit: BoxFit.cover,
-            errorWidget: (_, __, ___) => const ColoredBox(color: Colors.black),
+            errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black),
           )
         else
           const ColoredBox(color: Color(0xFF101012)),
@@ -598,7 +598,7 @@ class _DramaPlayerPageState extends State<DramaPlayerPage> {
             : CachedNetworkImage(
                 imageUrl: pic,
                 fit: BoxFit.cover,
-                errorWidget: (_, __, ___) => const Icon(Icons.movie_rounded,
+                errorBuilder: (_, __, ___) => const Icon(Icons.movie_rounded,
                     size: 20, color: Colors.white70),
               ),
       ),

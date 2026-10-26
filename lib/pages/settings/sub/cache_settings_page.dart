@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../../common/theme.dart';
-import '../../../widgets/common_widgets.dart';
-import '../controller.dart';
-import 'data_cleanup_page.dart';
-import 'settings_shared.dart';
-import '../../../services/cache_manager_service.dart';
-import '../../../widgets/app_toast.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/pages/settings/controller.dart';
+import 'package:tvbox/pages/settings/sub/data_cleanup_page.dart';
+import 'package:tvbox/pages/settings/sub/settings_shared.dart';
+import 'package:tvbox/services/cache_manager_service.dart';
+import 'package:tvbox/widgets/app_toast.dart';
 
 /// 清除应用缓存的粒度
 enum _ClearCacheAction { cancel, itemsOnly, all }

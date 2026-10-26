@@ -6,25 +6,25 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
-import '../services/app_log.dart';
-import '../services/subtitle_translator.dart';
-import '../services/tmdb_service.dart';
-import 'app_player.dart';
-import 'ks_player.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/subtitle_translator.dart';
+import 'package:tvbox/services/tmdb_service.dart';
+import 'package:tvbox/widgets/app_player.dart';
+import 'package:tvbox/widgets/ks_player.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart' show DragToMoveArea;
-import '../common/theme.dart';
-import '../common/system_ui.dart';
-import 'video_player_pip.dart';
-import 'window_fullscreen.dart';
-import 'danmaku.dart';
-import 'stall_detector.dart';
-import '../services/audio_focus.dart';
-import 'app_toast.dart';
-import '../pages/settings/sub/danmu_settings_page.dart';
-import '../models/player_engine.dart';
-import '../services/player_prefs.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/common/system_ui.dart';
+import 'package:tvbox/widgets/video_player_pip.dart';
+import 'package:tvbox/widgets/window_fullscreen.dart';
+import 'package:tvbox/widgets/danmaku.dart';
+import 'package:tvbox/widgets/stall_detector.dart';
+import 'package:tvbox/services/audio_focus.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/pages/settings/sub/danmu_settings_page.dart';
+import 'package:tvbox/models/player_engine.dart';
+import 'package:tvbox/services/player_prefs.dart';
 part 'video_player_helpers.dart';
 part 'video_player_ext_subtitle.dart';
 
@@ -581,7 +581,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       final f = await _danmuDiskFile(key);
       if (f == null) return;
       await f.writeAsString(jsonEncode([
-        for (final d in list) [d.time, d.text, d.color.value, d.mode],
+        for (final d in list) [d.time, d.text, d.color.toARGB32(), d.mode],
       ]));
       final d = await _danmuDiskDir();
       if (d == null) return;
@@ -2335,7 +2335,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       await prefs.setDouble('danmu_bottom_padding', _danmuBottomPadding);
       await prefs.setBool('danmu_sync_speed', _danmuSyncSpeed);
       await prefs.setString('danmu_color_mode', _danmuColorMode);
-      await prefs.setInt('danmu_custom_color', _danmuCustomColor.value);
+      await prefs.setInt('danmu_custom_color', _danmuCustomColor.toARGB32());
       await prefs.setDouble('danmu_line_spacing', _danmuLineSpacing);
       await prefs.setDouble('danmu_stroke_width', _danmuStrokeWidth);
       await prefs.setInt('danmu_font_weight', _danmuFontWeight.value);
@@ -3294,7 +3294,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               itemCount: palette.length,
               itemBuilder: (_, i) {
                 final c = palette[i];
-                final isSel = c.value == selected.value;
+                final isSel = c.toARGB32() == selected.toARGB32();
                 return GestureDetector(
                   onTap: () => setDialogState(() => selected = c),
                   child: Container(
@@ -4805,7 +4805,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                 const Spacer(),
                                 Switch(
                                   value: _danmuOn,
-                                  activeColor: AppTheme.accentColor,
+                                  activeThumbColor: AppTheme.accentColor,
                                   onChanged: (v) {
                                     refresh(() {
                                       _danmuOn = v;

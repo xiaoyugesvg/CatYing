@@ -22,13 +22,13 @@ import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
 import 'package:xml/xml.dart';
 
-import '../../reading/novel_source/analyze/analyze_rule.dart';
-import '../../reading/novel_source/analyze/cookie_store.dart';
-import '../../reading/novel_source/analyze/js_engine.dart';
-import '../../reading/source/global_proxy.dart';
-import '../models/rss_article.dart';
-import '../models/rss_source.dart';
-import 'rss_store.dart';
+import 'package:tvbox/reading/novel_source/analyze/analyze_rule.dart';
+import 'package:tvbox/reading/novel_source/analyze/cookie_store.dart';
+import 'package:tvbox/reading/novel_source/analyze/js_engine.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/rss/models/rss_article.dart';
+import 'package:tvbox/rss/models/rss_source.dart';
+import 'package:tvbox/rss/services/rss_store.dart';
 
 /// 抓一页的结果：文章列表 + 下一页地址（空 = 到底了）+ 是否"其实是个网页"。
 typedef RssFetchResult = ({List<RssArticle> articles, String nextUrl, bool siteLike});

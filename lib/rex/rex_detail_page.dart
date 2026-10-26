@@ -1,11 +1,11 @@
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import '../common/theme.dart';
-import '../widgets/app_toast.dart';
-import 'rex_models.dart';
-import 'rex_player_page.dart';
-import 'rex_service.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/rex/rex_models.dart';
+import 'package:tvbox/rex/rex_player_page.dart';
+import 'package:tvbox/rex/rex_service.dart';
 
 /// REX 详情页 —— 布局对齐影视详情：
 ///   大幅头图 + 悬浮返回键 → 海报 + 标题/元数据 + 播放按钮 → 简介 → 播放列表。

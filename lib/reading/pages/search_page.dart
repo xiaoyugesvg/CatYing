@@ -4,52 +4,52 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
-import '../models/comic.dart';
-import '../models/book_source.dart';
-import '../models/search_result.dart';
-import '../source/adapter.dart';
-import '../source/config_manga_source.dart';
-import '../source/manga_source.dart';
-import '../source/models.dart';
-import '../source/source_config_store.dart';
-import '../source/source_definition.dart';
-import '../source/source_manager.dart';
-import '../services/browse_history_service.dart';
-import '../services/search_history_service.dart';
-import '../services/view_mode.dart';
-import '../services/reading_layout.dart';
-import '../theme/jelly_theme.dart';
-import '../services/settings_service.dart';
-import '../widgets/jelly_comic_card.dart';
-import '../widgets/jelly_nav_bar.dart';
-import '../widgets/jelly_filter_sheet.dart';
+import 'package:tvbox/reading/models/comic.dart';
+import 'package:tvbox/reading/models/book_source.dart';
+import 'package:tvbox/reading/models/search_result.dart';
+import 'package:tvbox/reading/source/adapter.dart';
+import 'package:tvbox/reading/source/config_manga_source.dart';
+import 'package:tvbox/reading/source/manga_source.dart';
+import 'package:tvbox/reading/source/models.dart';
+import 'package:tvbox/reading/source/source_config_store.dart';
+import 'package:tvbox/reading/source/source_definition.dart';
+import 'package:tvbox/reading/source/source_manager.dart';
+import 'package:tvbox/reading/services/browse_history_service.dart';
+import 'package:tvbox/reading/services/search_history_service.dart';
+import 'package:tvbox/reading/services/view_mode.dart';
+import 'package:tvbox/reading/services/reading_layout.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/widgets/jelly_comic_card.dart';
+import 'package:tvbox/reading/widgets/jelly_nav_bar.dart';
+import 'package:tvbox/reading/widgets/jelly_filter_sheet.dart';
 // 删掉 3 个"从未被使用"的 import ✓（analyze 一直在报 unused_import ✗）：
 // `jelly_ring_button.dart` · `jelly_segmented_toggle.dart` · `download_page.dart`
 // → 删除后 `lib/reading` 的 warning 从 14 降到 **11** ✓
-import '../widgets/jelly_comic_list_tile.dart';
-import '../widgets/jelly_expandable_search.dart';
-import '../widgets/jelly_search_bar.dart';
-import '../widgets/jelly_icon_deck.dart';
-import '../widgets/source_group_tabs.dart';
-import '../widgets/source_order_sheet.dart';
-import '../widgets/staggered_entrance.dart';
-import '../../widgets/app_toast.dart';
-import '../../widgets/card_action_sheet.dart';
-import 'browse_history_page.dart';
-import 'book_source_editor_page.dart';
-import 'book_source_login_page.dart';
-import 'comic_source_edit_page.dart';
-import 'comic_detail_page.dart';
+import 'package:tvbox/reading/widgets/jelly_comic_list_tile.dart';
+import 'package:tvbox/reading/widgets/jelly_expandable_search.dart';
+import 'package:tvbox/reading/widgets/jelly_search_bar.dart';
+import 'package:tvbox/reading/widgets/jelly_icon_deck.dart';
+import 'package:tvbox/reading/widgets/source_group_tabs.dart';
+import 'package:tvbox/reading/widgets/source_order_sheet.dart';
+import 'package:tvbox/reading/widgets/staggered_entrance.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/card_action_sheet.dart';
+import 'package:tvbox/reading/pages/browse_history_page.dart';
+import 'package:tvbox/reading/pages/book_source_editor_page.dart';
+import 'package:tvbox/reading/pages/book_source_login_page.dart';
+import 'package:tvbox/reading/pages/comic_source_edit_page.dart';
+import 'package:tvbox/reading/pages/comic_detail_page.dart';
 // `ComicAggregateSearchPage`（漫画聚合搜索）在本文件 `_buildAggregateChip` 里用到，
 // 之前缺了这一行 —— 于是 `:607 const ComicAggregateSearchPage()` 报
 // "The name 'ComicAggregateSearchPage' isn't a class"。
-import 'comic_aggregate_search_page.dart';
-import 'comic_download_records_page.dart';
-import 'favorites_page.dart';
-import 'source_warehouse_page.dart';
-import 'venera_source_edit_page.dart';
-import '../../common/theme.dart';
-import '../../widgets/app_page_header.dart';
+import 'package:tvbox/reading/pages/comic_aggregate_search_page.dart';
+import 'package:tvbox/reading/pages/comic_download_records_page.dart';
+import 'package:tvbox/reading/pages/favorites_page.dart';
+import 'package:tvbox/reading/pages/source_warehouse_page.dart';
+import 'package:tvbox/reading/pages/venera_source_edit_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/app_page_header.dart';
 
 /// 日志工具
 void _log(String message) {

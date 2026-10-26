@@ -5,17 +5,17 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
-import '../models/book_content.dart';
-import '../services/book_content_cache_service.dart';
-import '../services/book_download_service.dart';
-import '../services/book_page_cache_service.dart';
-import '../services/book_parser.dart';
-import '../services/gbk_txt_parser.dart';
-import '../services/book_paginator.dart';
-import '../services/book_reading_progress_service.dart';
-import '../services/reader_override_service.dart';
-import '../theme/jelly_theme.dart';
-import 'book_reader_page.dart';
+import 'package:tvbox/reading/models/book_content.dart';
+import 'package:tvbox/reading/services/book_content_cache_service.dart';
+import 'package:tvbox/reading/services/book_download_service.dart';
+import 'package:tvbox/reading/services/book_page_cache_service.dart';
+import 'package:tvbox/reading/services/book_parser.dart';
+import 'package:tvbox/reading/services/gbk_txt_parser.dart';
+import 'package:tvbox/reading/services/book_paginator.dart';
+import 'package:tvbox/reading/services/book_reading_progress_service.dart';
+import 'package:tvbox/reading/services/reader_override_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/pages/book_reader_page.dart';
 
 /// 阅读器前置页：解析 + 分页 + 缓存就绪后再进入阅读器。
 /// 命中缓存时仅解析文件（"加载中"）；首次 / 参数变更时完整分页（"排版中 X/Y 章"），

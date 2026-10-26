@@ -25,11 +25,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show File;
 
-import '../models/book_source.dart' as src;
+import 'package:tvbox/reading/models/book_source.dart' as src;
 // 失败判据**只从这一个出口拿** ✓（`SourceFailKind` / `describeSourceFail`）——
 // 本文件不自己写第二份"网络还是解析"的判据 ✗（历史上两份手写判据把 223 个源全判成解析失败 ✗）。
-import '../utils/source_fail_text.dart';
-import 'book_source_service.dart';
+import 'package:tvbox/reading/utils/source_fail_text.dart';
+import 'package:tvbox/reading/services/book_source_service.dart';
 
 /// 体检判活用的关键字（**至少两个**：第一轮 0 条再试下一个，减少误杀 ✓）。
 ///

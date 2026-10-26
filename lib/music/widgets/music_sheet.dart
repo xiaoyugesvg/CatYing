@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../theme/music_theme.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
 
 /// 音乐模块统一"中间弹出"弹窗。
 ///

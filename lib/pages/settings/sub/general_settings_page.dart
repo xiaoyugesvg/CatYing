@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../../../common/theme.dart';
-import '../../../reading/pages/general_settings_page.dart' show AppLogPage;
-import '../../../webhome/webhtv_pan_check_page.dart';
-import '../../../webhome/webhtv_playback_sync_page.dart';
-import '../../../webhome/webhtv_proxy_page.dart';
-import '../../../webhome/webhtv_site_health_page.dart';
-import '../../../widgets/common_widgets.dart';
-import 'cache_settings_page.dart';
-import 'settings_shared.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/pages/general_settings_page.dart' show AppLogPage;
+import 'package:tvbox/webhome/webhtv_pan_check_page.dart';
+import 'package:tvbox/webhome/webhtv_playback_sync_page.dart';
+import 'package:tvbox/webhome/webhtv_proxy_page.dart';
+import 'package:tvbox/webhome/webhtv_site_health_page.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/pages/settings/sub/cache_settings_page.dart';
+import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 
 /// 设置 → 通用设置（**影视模块专用**）
 ///

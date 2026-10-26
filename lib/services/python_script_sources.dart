@@ -16,10 +16,10 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 
-import 'app_log.dart';
-import 'network_manager.dart';
-import 'python_manager.dart';
-import 'python_sources_service.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/network_manager.dart';
+import 'package:tvbox/services/python_manager.dart';
+import 'package:tvbox/services/python_sources_service.dart';
 
 class PythonScriptSources {
   static final PythonScriptSources _instance = PythonScriptSources._internal();

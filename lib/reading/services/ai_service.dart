@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../source/global_proxy.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
 
 /// AI 对话服务（OpenAI 兼容 chat/completions）。
 ///

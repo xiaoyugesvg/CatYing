@@ -3,11 +3,11 @@ library;
 
 import 'dart:convert';
 
-import 'rule_search.dart';
-import 'rule_toc.dart';
-import 'rule_content.dart';
-import 'rule_book_info.dart';
-import 'rule_explore.dart';
+import 'package:tvbox/reading/novel_source/model/rule_search.dart';
+import 'package:tvbox/reading/novel_source/model/rule_toc.dart';
+import 'package:tvbox/reading/novel_source/model/rule_content.dart';
+import 'package:tvbox/reading/novel_source/model/rule_book_info.dart';
+import 'package:tvbox/reading/novel_source/model/rule_explore.dart';
 
 class XiaoshuoBookSource {
   String bookSourceUrl;

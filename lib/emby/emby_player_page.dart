@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../../widgets/video_player.dart';
-import 'emby_api.dart';
-import 'emby_models.dart';
+import 'package:tvbox/widgets/video_player.dart';
+import 'package:tvbox/emby/emby_api.dart';
+import 'package:tvbox/emby/emby_models.dart';
 
 /// Emby 播放页：复用全局播放器（含弹幕 / 内核切换 / 手势）。
 ///

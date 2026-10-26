@@ -1,11 +1,11 @@
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../models/hiker_source.dart';
-import '../services/hiker_prefs.dart';
-import 'hiker_richtext.dart';
-import 'hiker_widgets.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/hiker/models/hiker_source.dart';
+import 'package:tvbox/hiker/services/hiker_prefs.dart';
+import 'package:tvbox/hiker/widgets/hiker_richtext.dart';
+import 'package:tvbox/hiker/widgets/hiker_widgets.dart';
 
 // 富文本工具（hikerPlainText / hikerRichSpans / hikerRichIsActive …）对外转发，
 // 老调用点继续从本文件 import 即可

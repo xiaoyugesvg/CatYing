@@ -3,8 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// JellyTheme 的色值分 Light/Dark 两套字段，这里按当前主题明暗取。
 Color _bg(BuildContext c) => Theme.of(c).brightness == Brightness.dark

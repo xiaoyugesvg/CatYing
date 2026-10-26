@@ -44,14 +44,14 @@ library;
 import 'dart:async';
 import 'dart:isolate';
 
-import '../analyze/http_proxy.dart';
-import '../analyze/sync_http_bridge.dart';
-import '../model/book_source.dart';
-import '../model/search_book.dart';
-import '../model/xiaoshuo_book.dart';
-import '../model/xiaoshuo_book_chapter.dart';
-import '../novel_block.dart';
-import 'web_book.dart'; // 已 export 'web_book_types.dart'
+import 'package:tvbox/reading/novel_source/analyze/http_proxy.dart';
+import 'package:tvbox/reading/novel_source/analyze/sync_http_bridge.dart';
+import 'package:tvbox/reading/novel_source/model/book_source.dart';
+import 'package:tvbox/reading/novel_source/model/search_book.dart';
+import 'package:tvbox/reading/novel_source/model/xiaoshuo_book.dart';
+import 'package:tvbox/reading/novel_source/model/xiaoshuo_book_chapter.dart';
+import 'package:tvbox/reading/novel_source/novel_block.dart';
+import 'package:tvbox/reading/novel_source/web_book/web_book.dart'; // 已 export 'web_book_types.dart'
 import 'dart:ui' show DartPluginRegistrant, RootIsolateToken;
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/services.dart'

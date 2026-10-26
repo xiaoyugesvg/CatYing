@@ -3,13 +3,13 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
-import '../models/player_engine.dart';
-import '../services/player_prefs.dart';
-import '../widgets/app_player.dart';
-import '../widgets/ios_av_player.dart';
-import '../widgets/ks_player.dart';
-import '../widgets/mpv_app_player.dart';
-import '../widgets/video_player.dart';
+import 'package:tvbox/models/player_engine.dart';
+import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/widgets/app_player.dart';
+import 'package:tvbox/widgets/ios_av_player.dart';
+import 'package:tvbox/widgets/ks_player.dart';
+import 'package:tvbox/widgets/mpv_app_player.dart';
+import 'package:tvbox/widgets/video_player.dart';
 
 /// REX 模块的播放页：直接用模块 `loadResource` 返回的地址与请求头。
 class RexPlayerPage extends StatefulWidget {

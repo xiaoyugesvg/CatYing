@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 
-import '../models/live_models.dart';
+import 'package:tvbox/models/live_models.dart';
 
 /// Xtream Codes 直播账号（provider 的 player_api 接口体系）。
 ///

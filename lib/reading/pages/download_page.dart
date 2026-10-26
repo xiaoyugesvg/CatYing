@@ -5,28 +5,28 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
-import '../models/comic.dart';
-import '../services/book_download_service.dart';
-import '../services/book_reading_progress_service.dart';
-import '../services/download_service.dart';
-import '../services/platform_service.dart';
-import '../services/reading_progress_service.dart';
-import '../services/settings_service.dart';
-import '../services/zlibrary_service.dart';
-import '../source/source_manager.dart';
-import '../utils/list_pagination.dart';
-import '../theme/jelly_theme.dart';
-import '../widgets/jelly_segmented_toggle.dart';
-import '../widgets/jelly_select_badge.dart';
-import '../widgets/staggered_entrance.dart';
-import '../../services/file_export_service.dart';
-import '../widgets/theme_background_animation.dart';
-import 'book_reader_page.dart';
-import 'reader_page.dart';
-import 'zlibrary_auth_page.dart';
-import '../../common/theme.dart';
-import '../../widgets/app_expandable_search.dart';
-import '../../widgets/app_page_header.dart';
+import 'package:tvbox/reading/models/comic.dart';
+import 'package:tvbox/reading/services/book_download_service.dart';
+import 'package:tvbox/reading/services/book_reading_progress_service.dart';
+import 'package:tvbox/reading/services/download_service.dart';
+import 'package:tvbox/reading/services/platform_service.dart';
+import 'package:tvbox/reading/services/reading_progress_service.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/services/zlibrary_service.dart';
+import 'package:tvbox/reading/source/source_manager.dart';
+import 'package:tvbox/reading/utils/list_pagination.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/widgets/jelly_segmented_toggle.dart';
+import 'package:tvbox/reading/widgets/jelly_select_badge.dart';
+import 'package:tvbox/reading/widgets/staggered_entrance.dart';
+import 'package:tvbox/services/file_export_service.dart';
+import 'package:tvbox/reading/widgets/theme_background_animation.dart';
+import 'package:tvbox/reading/pages/book_reader_page.dart';
+import 'package:tvbox/reading/pages/reader_page.dart';
+import 'package:tvbox/reading/pages/zlibrary_auth_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/app_expandable_search.dart';
+import 'package:tvbox/widgets/app_page_header.dart';
 
 /// 下载页卡片列数自适应：默认每行 1 个，宽度足够时增多
 int _downloadAdaptiveCols(
@@ -1360,7 +1360,7 @@ class _DownloadPageState extends State<DownloadPage>
           width: 44,
           height: 60,
         ),
-        errorWidget: (c, u, e) => Container(
+        errorBuilder: (c, u, e) => Container(
           color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
           width: 44,
           height: 60,

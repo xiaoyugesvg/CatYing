@@ -4,9 +4,9 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../../widgets/app_toast.dart';
-import '../services/hiker_files.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/hiker/services/hiker_files.dart';
 
 /// 「海阔 → 文件管理」（规则里的 `hiker://files/*`）
 ///

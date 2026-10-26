@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-import '../common/theme.dart';
-import 'ad_block_service.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/ad_block_service.dart';
 
 /// 网页内跳转守卫：**默认禁止跳第三方网站**，先弹窗确认。
 ///

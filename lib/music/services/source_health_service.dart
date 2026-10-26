@@ -4,10 +4,10 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/models.dart';
-import '../models/third_party_source.dart';
-import 'semaphore.dart';
-import 'unblock_service.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/models/third_party_source.dart';
+import 'package:tvbox/music/services/semaphore.dart';
+import 'package:tvbox/music/services/unblock_service.dart';
 
 /// 单条音源体检结果。
 ///

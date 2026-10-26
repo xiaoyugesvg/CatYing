@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../models/bookshelf.dart';
-import 'book_favorites_service.dart';
-import 'bookshelf_service.dart';
+import 'package:tvbox/reading/models/bookshelf.dart';
+import 'package:tvbox/reading/services/book_favorites_service.dart';
+import 'package:tvbox/reading/services/bookshelf_service.dart';
 
 /// 日志工具
 void _log(String message) {

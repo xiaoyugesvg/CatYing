@@ -4,8 +4,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../common/theme.dart';
-import '../services/app_log.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/app_log.dart';
 
 /// 「站点健康排序」（原 Webhtv → 站点健康排序）。
 ///

@@ -6,13 +6,13 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../common/module_theme_sync.dart';
-import '../../common/theme_mode_store.dart';
-import '../../services/prefs_mirror.dart';
-import '../theme/jelly_palette.dart';
-import '../theme/jelly_theme.dart';
-import '../utils/constants.dart';
-import '../utils/safe_num.dart';
+import 'package:tvbox/common/module_theme_sync.dart';
+import 'package:tvbox/common/theme_mode_store.dart';
+import 'package:tvbox/services/prefs_mirror.dart';
+import 'package:tvbox/reading/theme/jelly_palette.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/utils/constants.dart';
+import 'package:tvbox/reading/utils/safe_num.dart';
 
 /// 日志工具
 void _log(String message) {

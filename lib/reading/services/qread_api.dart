@@ -4,7 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../utils/html_text.dart';
+import 'package:tvbox/reading/utils/html_text.dart';
 
 /// qread（轻阅读）服务端接入层。
 ///

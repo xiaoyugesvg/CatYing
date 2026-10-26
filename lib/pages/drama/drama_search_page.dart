@@ -1,12 +1,12 @@
 ﻿import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../../models/movie.dart';
-import '../../models/source_bean.dart';
-import '../../services/source_service.dart';
-import 'drama_entry.dart';
-import 'drama_settings.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/movie.dart';
+import 'package:tvbox/models/source_bean.dart';
+import 'package:tvbox/services/source_service.dart';
+import 'package:tvbox/pages/drama/drama_entry.dart';
+import 'package:tvbox/pages/drama/drama_settings.dart';
 
 /// 短剧搜索页（2026-10-23）。
 ///
@@ -336,7 +336,7 @@ class _DramaSearchPageState extends State<DramaSearchPage> {
                       imageUrl: v.pic,
                       fit: BoxFit.cover,
                       width: double.infinity,
-                      errorWidget: (_, __, ___) => _ph(),
+                      errorBuilder: (_, __, ___) => _ph(),
                     ),
             ),
           ),

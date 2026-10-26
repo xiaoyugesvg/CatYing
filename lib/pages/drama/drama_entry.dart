@@ -1,7 +1,7 @@
 import 'package:get/get.dart';
 
-import '../../models/movie.dart';
-import 'drama_player_page.dart';
+import 'package:tvbox/models/movie.dart';
+import 'package:tvbox/pages/drama/drama_player_page.dart';
 
 /// 从「短剧」打开播放的入口。
 ///

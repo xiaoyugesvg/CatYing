@@ -5,16 +5,16 @@ import 'package:flutter/foundation.dart';
 import 'package:html/dom.dart' as html_element;
 import 'package:html/parser.dart' as html_parser;
 import 'package:shared_preferences/shared_preferences.dart';
-import '../models/book.dart';
-import '../models/book_category.dart';
-import '../models/search_result.dart';
-import '../source/webview_image_fetcher.dart';
-import '../source/global_proxy.dart';
-import '../utils/source_fail_text.dart';
-import 'builtin_accounts.dart';
-import 'remote_config_service.dart';
-import 'settings_service.dart';
-import '../utils/constants.dart';
+import 'package:tvbox/reading/models/book.dart';
+import 'package:tvbox/reading/models/book_category.dart';
+import 'package:tvbox/reading/models/search_result.dart';
+import 'package:tvbox/reading/source/webview_image_fetcher.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/reading/utils/source_fail_text.dart';
+import 'package:tvbox/reading/services/builtin_accounts.dart';
+import 'package:tvbox/reading/services/remote_config_service.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/utils/constants.dart';
 
 void _log(String message) {
   if (kDebugMode) debugPrint('[Zlibrary] $message');

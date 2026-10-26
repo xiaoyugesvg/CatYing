@@ -1,11 +1,11 @@
 import 'package:get/get.dart';
-import '../pages/detail/view.dart';
-import '../pages/media_library/media_library_detail_page.dart';
-import '../pages/search/view.dart';
-import '../pages/dlna/view.dart';
-import '../pages/live/view.dart';
-import '../pages/live/settings_view.dart';
-import '../services/tmdb_service.dart';
+import 'package:tvbox/pages/detail/view.dart';
+import 'package:tvbox/pages/media_library/media_library_detail_page.dart';
+import 'package:tvbox/pages/search/view.dart';
+import 'package:tvbox/pages/dlna/view.dart';
+import 'package:tvbox/pages/live/view.dart';
+import 'package:tvbox/pages/live/settings_view.dart';
+import 'package:tvbox/services/tmdb_service.dart';
 
 class AppPages {
   static const String detail = '/detail';

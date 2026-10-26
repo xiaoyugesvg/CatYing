@@ -1,4 +1,4 @@
-import '../utils/html_text.dart';
+import 'package:tvbox/reading/utils/html_text.dart';
 
 /// 书名展示清洗：去掉外层书名号《》与首尾装饰性标点，
 /// 并清掉源站混进来的站名 / 导航词（`手机阅读`、`返回`、`www.xxx.com` …）。

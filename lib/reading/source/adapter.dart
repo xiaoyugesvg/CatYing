@@ -1,7 +1,7 @@
-import '../models/comic.dart';
-import '../models/search_result.dart';
-import '../utils/html_text.dart';
-import 'models.dart';
+import 'package:tvbox/reading/models/comic.dart';
+import 'package:tvbox/reading/models/search_result.dart';
+import 'package:tvbox/reading/utils/html_text.dart';
+import 'package:tvbox/reading/source/models.dart';
 
 /// CManga ↔ Comic / CChapter ↔ ComicChapter / MangasPage ↔ SearchResult 适配层。
 ///

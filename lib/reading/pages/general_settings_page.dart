@@ -9,16 +9,16 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../services/bookshelf_service.dart';
-import '../services/book_quickjs_engine.dart';
-import '../services/settings_service.dart';
-import '../services/sync_service.dart';
-import '../theme/jelly_theme.dart';
-import '../utils/file_browser.dart';
-import '../../../services/app_log.dart';
-import '../../../services/cache_manager_service.dart';
-import '../../common/theme.dart';
-import 'translate_settings_page.dart';
+import 'package:tvbox/reading/services/bookshelf_service.dart';
+import 'package:tvbox/reading/services/book_quickjs_engine.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/services/sync_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/utils/file_browser.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/cache_manager_service.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/pages/translate_settings_page.dart';
 
 /// 通用设置页：分组对齐参考图 IMG_8465。
 class GeneralSettingsPage extends StatefulWidget {
@@ -128,10 +128,10 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
       builder: (ctx) {
         final cur = BookQuickJsEngine.instance.mode.value;
         Widget tile(String value, String title, String subtitle) {
+          // groupValue / onChanged 已废弃：选中态与回调上移到 RadioGroup，
+          // 子树里的 RadioListTile 只声明自己的 value。
           return RadioListTile<String>(
             value: value,
-            groupValue: cur,
-            onChanged: (v) => Navigator.pop(ctx, v),
             title: Text(title),
             subtitle: Text(subtitle),
           );
@@ -139,15 +139,19 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
 
         return SafeArea(
           top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 8),
-              tile('node', 'Node', '默认，兼容性最好'),
-              tile('auto', '自动', 'QuickJS 优先，失败自动回落 Node'),
-              tile('quickjs', 'QuickJS', '实验引擎：失败不回落（便于对比测试）'),
-              const SizedBox(height: 8),
-            ],
+          child: RadioGroup<String>(
+            groupValue: cur,
+            onChanged: (v) => Navigator.pop(ctx, v),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 8),
+                tile('node', 'Node', '默认，兼容性最好'),
+                tile('auto', '自动', 'QuickJS 优先，失败自动回落 Node'),
+                tile('quickjs', 'QuickJS', '实验引擎：失败不回落（便于对比测试）'),
+                const SizedBox(height: 8),
+              ],
+            ),
           ),
         );
       },

@@ -1,4 +1,4 @@
-import 'source_bean.dart';
+import 'package:tvbox/models/source_bean.dart';
 
 /// 用户「单独导入」的本地 Python 影视源。
 ///

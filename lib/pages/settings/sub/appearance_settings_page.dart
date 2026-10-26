@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../../../common/theme.dart';
-import '../../../common/theme_mode_store.dart';
-import '../../../services/background_service.dart';
-import '../../../widgets/common_widgets.dart';
-import '../wallpaper_page.dart';
-import 'settings_shared.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/common/theme_mode_store.dart';
+import 'package:tvbox/services/background_service.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/pages/settings/wallpaper_page.dart';
+import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 
 /// 设置 → 外观
 ///

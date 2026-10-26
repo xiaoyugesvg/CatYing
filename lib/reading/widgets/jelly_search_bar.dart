@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 果冻风格胶囊搜索框（固定在顶部，胶囊形状）
 class JellySearchBar extends StatefulWidget {

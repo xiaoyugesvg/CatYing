@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../common/theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 顶栏圆形图标按钮 —— **全 App 统一的一种**。
 ///

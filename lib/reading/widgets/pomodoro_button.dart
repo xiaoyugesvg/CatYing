@@ -3,9 +3,9 @@ import 'dart:math' show pi, cos, sin;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import '../services/settings_service.dart';
-import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 void _log(String message) {
   if (kDebugMode) {

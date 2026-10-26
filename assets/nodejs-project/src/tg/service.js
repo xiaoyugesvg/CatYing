@@ -652,7 +652,7 @@ export async function streamTo(req, res, peer, id, fileName) {
         //   直接丢**裸 Document** 会在这里强转失败，于是点开就报错。
         //   传 `msg.media`（MessageMediaDocument）才会被拆成
         //   InputDocumentFileLocation，并且顺带拿到正确的 dcId（跨机房文件）。
-        it = c.iterDownload({
+        const stream = c.iterDownload({
             file: entry.msg.media,
             // ⚠️ 这两个必须是 big-integer：gramjs 内部对它们调 .add/.divide，
             //   传 number 就是 "o.add is not a function"（用户 2026-10-26）
@@ -666,6 +666,11 @@ export async function streamTo(req, res, peer, id, fileName) {
                 ? [entry.msg.inputChat, entry.msg.id]
                 : undefined,
         });
+        // 🔴 2026-10-26（用户报错 "m.next is not a function"）：
+        //   gramjs 的 RequestIter 实例**自身没有 next()**，它只实现了
+        //   `[Symbol.asyncIterator]()`，调用后返回一个 { next } 对象。
+        //   直接 `stream.next()` 必然报错；要先取异步迭代器。
+        it = stream[Symbol.asyncIterator]();
         // 手动 next()：`for await` 里 break 会 close 掉生成器，后面就没得读了
         while (true) {
             const r = await it.next();

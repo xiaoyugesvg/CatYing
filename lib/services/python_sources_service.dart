@@ -18,9 +18,9 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:path_provider/path_provider.dart';
 
-import 'app_log.dart';
-import 'network_manager.dart';
-import 'python_manager.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/network_manager.dart';
+import 'package:tvbox/services/python_manager.dart';
 
 class PythonSourcesService {
   static final PythonSourcesService _instance =

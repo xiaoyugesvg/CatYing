@@ -1,4 +1,4 @@
-import '../utils/html_text.dart';
+import 'package:tvbox/reading/utils/html_text.dart';
 
 String? _cleanTitleNullable(String? s) {
   if (s == null) return null;

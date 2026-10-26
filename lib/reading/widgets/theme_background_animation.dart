@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../services/settings_service.dart';
-import '../theme/jelly_theme.dart';
-import '../theme/theme_background_painters.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/theme/theme_background_painters.dart';
 
 /// 主题内置背景动画层。
 ///

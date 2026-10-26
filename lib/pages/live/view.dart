@@ -1,5 +1,5 @@
 import 'dart:async';
-import '../../widgets/common_widgets.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
 import 'dart:io';
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
@@ -10,26 +10,26 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart'
     show VideoController, Video;
 
-import '../../common/theme.dart';
-import '../../common/system_ui.dart';
-import '../../models/live_models.dart';
-import '../../models/player_engine.dart';
-import '../../services/app_log.dart';
-import '../../services/epg_service.dart';
-import '../../services/live_service.dart';
-import '../../services/main_tab_controller.dart';
-import '../../services/player_fullscreen_controller.dart';
-import '../../services/player_prefs.dart';
-import '../../widgets/app_player.dart';
-import '../../widgets/ios_av_player.dart';
-import '../../widgets/ks_player.dart';
-import '../../widgets/video_player_pip.dart';
-import 'controller.dart';
-import '../../services/audio_focus.dart';
-import '../../widgets/app_empty_view.dart';
-import '../../widgets/app_toast.dart';
-import '../../widgets/card_action_sheet.dart';
-import '../../music/services/route_observer.dart' show MusicRouteObserver;
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/common/system_ui.dart';
+import 'package:tvbox/models/live_models.dart';
+import 'package:tvbox/models/player_engine.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/epg_service.dart';
+import 'package:tvbox/services/live_service.dart';
+import 'package:tvbox/services/main_tab_controller.dart';
+import 'package:tvbox/services/player_fullscreen_controller.dart';
+import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/widgets/app_player.dart';
+import 'package:tvbox/widgets/ios_av_player.dart';
+import 'package:tvbox/widgets/ks_player.dart';
+import 'package:tvbox/widgets/video_player_pip.dart';
+import 'package:tvbox/pages/live/controller.dart';
+import 'package:tvbox/services/audio_focus.dart';
+import 'package:tvbox/widgets/app_empty_view.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/card_action_sheet.dart';
+import 'package:tvbox/music/services/route_observer.dart' show MusicRouteObserver;
 
 /// 直播主界面（对照参考图）
 /// 上：视频区 + LIVE 角标 + 小窗/全屏

@@ -23,8 +23,8 @@
 
 import 'dart:convert';
 
-import '../../services/python_manager.dart';
-import '../../services/python_sources_service.dart';
+import 'package:tvbox/services/python_manager.dart';
+import 'package:tvbox/services/python_sources_service.dart';
 
 class BookSourcePythonEngine {
   BookSourcePythonEngine._();

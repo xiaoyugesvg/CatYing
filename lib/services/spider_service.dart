@@ -2,16 +2,16 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import '../pages/cf_verify_page.dart';
-import '../widgets/video_player_pip.dart';
-import 'app_log.dart';
-import 'cf_session.dart';
-import 'dio_factory.dart';
-import 'drpy_service.dart';
-import 'nodejs_manager.dart';
-import 'local_python_sources.dart';
-import 'python_manager.dart';
-import 'python_script_sources.dart';
+import 'package:tvbox/pages/cf_verify_page.dart';
+import 'package:tvbox/widgets/video_player_pip.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/cf_session.dart';
+import 'package:tvbox/services/dio_factory.dart';
+import 'package:tvbox/services/drpy_service.dart';
+import 'package:tvbox/services/nodejs_manager.dart';
+import 'package:tvbox/services/local_python_sources.dart';
+import 'package:tvbox/services/python_manager.dart';
+import 'package:tvbox/services/python_script_sources.dart';
 
 /// Spider 服务 - 对应 Swift SpiderService
 /// 与本地 Node.js Spider 服务通信

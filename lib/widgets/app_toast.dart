@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
-import '../common/theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 全局轻量气泡服务（**全 App 统一的提示组件**）。
 ///

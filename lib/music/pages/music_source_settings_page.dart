@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../models/models.dart';
-import '../models/third_party_source.dart';
-import '../services/settings_store.dart';
-import '../theme/music_theme.dart';
-import '../widgets/music_sheet.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/models/third_party_source.dart';
+import 'package:tvbox/music/services/settings_store.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/music/widgets/music_sheet.dart';
 
 /// 音乐 → 我的 → 按平台固定源（网易/QQ 等平台各绑几个第三方源）。
 ///

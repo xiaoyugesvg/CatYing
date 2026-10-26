@@ -4,7 +4,7 @@ import 'dart:convert';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'prefs_mirror.dart';
+import 'package:tvbox/services/prefs_mirror.dart';
 
 /// 底部导航栏可管理的一项。
 ///
@@ -341,8 +341,8 @@ class NavFeatureService extends GetxService {
     if (oldIndex < 0 || oldIndex >= enabled.length) return;
     // 首页和设置不可拖动
     if (oldIndex == 0 || oldIndex == enabled.length - 1) return;
+    // newIndex 来自 onReorderItem，框架已归一化，不再手动减一。
     var target = newIndex;
-    if (target > oldIndex) target -= 1;
     // 落位夹在首页（1）与设置（末尾前一位）之间
     const minPos = 1;
     final maxPos = enabled.length - 2;
@@ -356,8 +356,8 @@ class NavFeatureService extends GetxService {
   /// 未启用段内部重排
   Future<void> reorderDisabled(int oldIndex, int newIndex) async {
     if (oldIndex < 0 || oldIndex >= disabled.length) return;
+    // newIndex 来自 onReorderItem，框架已归一化，不再手动减一。
     var target = newIndex;
-    if (target > oldIndex) target -= 1;
     if (target < 0) target = 0;
     if (target >= disabled.length) target = disabled.length - 1;
     final item = disabled.removeAt(oldIndex);

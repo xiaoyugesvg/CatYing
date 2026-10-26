@@ -8,13 +8,13 @@
 // 退出页面不中断（结果写入服务缓存）。
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../models/book_source.dart';
-import '../services/book_source_health_service.dart';
-import '../services/book_source_service.dart';
-import '../theme/jelly_theme.dart';
-import '../utils/source_fail_text.dart';
-import '../widgets/jelly_search_bar.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/models/book_source.dart';
+import 'package:tvbox/reading/services/book_source_health_service.dart';
+import 'package:tvbox/reading/services/book_source_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/utils/source_fail_text.dart';
+import 'package:tvbox/reading/widgets/jelly_search_bar.dart';
 
 /// 体检进行状态
 enum _Phase { idle, running, done }

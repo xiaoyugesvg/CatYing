@@ -2,9 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import 'module_theme_store.dart';
-import 'theme.dart';
-import '../reading/theme/jelly_palette.dart';
+import 'package:tvbox/common/module_theme_store.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/theme/jelly_palette.dart';
 
 /// 把 `ModuleThemeStore` 里选好的方案，实际推给各模块的主题入口。
 ///

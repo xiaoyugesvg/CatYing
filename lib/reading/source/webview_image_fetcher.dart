@@ -24,9 +24,9 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-import 'site_config.dart';
-import 'image_restore.dart';
-import 'global_proxy.dart';
+import 'package:tvbox/reading/source/site_config.dart';
+import 'package:tvbox/reading/source/image_restore.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
 
 void _log(String message) {
   debugPrint('[WebViewImageFetcher] $message');

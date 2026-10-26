@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 
-import '../models/models.dart';
-import '../services/music_api.dart';
-import '../services/player_manager.dart';
-import '../theme/music_theme.dart';
-import '../widgets/music_components.dart';
-import '../widgets/quick_actions.dart';
-import '../../common/floating_nav_spec.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/services/music_api.dart';
+import 'package:tvbox/music/services/player_manager.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/music/widgets/music_components.dart';
+import 'package:tvbox/music/widgets/quick_actions.dart';
+import 'package:tvbox/common/floating_nav_spec.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 迷你播放器的布局常量（#8）。
 ///

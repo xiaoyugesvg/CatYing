@@ -3,14 +3,14 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../common/theme.dart';
-import '../../widgets/app_toast.dart';
-import '../widgets/card_source_sheet.dart';
-import '../services/hiker_builtin.dart';
-import '../services/hiker_prefs.dart';
-import '../services/hiker_store.dart';
-import 'hiker_files_page.dart';
-import 'hiker_manage_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/hiker/widgets/card_source_sheet.dart';
+import 'package:tvbox/hiker/services/hiker_builtin.dart';
+import 'package:tvbox/hiker/services/hiker_prefs.dart';
+import 'package:tvbox/hiker/services/hiker_store.dart';
+import 'package:tvbox/hiker/pages/hiker_files_page.dart';
+import 'package:tvbox/hiker/pages/hiker_manage_page.dart';
 
 /// 「海阔设置」—— 模块的**总设置页**（入口：设置 → 海阔设置）。
 ///

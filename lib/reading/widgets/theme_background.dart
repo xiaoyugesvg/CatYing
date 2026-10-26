@@ -3,10 +3,10 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../services/settings_service.dart';
-import '../theme/jelly_palette.dart';
-import 'theme_background_animation.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/theme/jelly_palette.dart';
+import 'package:tvbox/reading/widgets/theme_background_animation.dart';
 
 /// 主题背景统一入口：按当前主题的背景配置（[SettingsService.currentBackground]）渲染。
 ///

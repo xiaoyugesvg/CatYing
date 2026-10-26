@@ -1,5 +1,5 @@
 import 'package:dio/dio.dart';
-import '../common/constants.dart';
+import 'package:tvbox/common/constants.dart';
 
 /// 网络层错误定义
 enum NetworkError {

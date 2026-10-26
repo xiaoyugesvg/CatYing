@@ -1,5 +1,5 @@
-import '../models/app_config.dart';
-import 'app_log.dart';
+import 'package:tvbox/models/app_config.dart';
+import 'package:tvbox/services/app_log.dart';
 
 /// 一条正则替换规则（`pattern#replacement` 形态）。
 class _Replacement {

@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 
-import 'app_log.dart';
+import 'package:tvbox/services/app_log.dart';
 
 /// 追剧日历的一条数据（来源：MineTrakt 的公开榜单 JSON）。
 class CalendarFeedItem {

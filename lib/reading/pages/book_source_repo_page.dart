@@ -4,33 +4,33 @@ import 'dart:io';
 
 import 'package:archive/archive.dart';
 import 'package:dio/dio.dart';
-import '../source/global_proxy.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../models/book_source.dart';
-import '../services/book_source_compatibility.dart';
-import '../services/book_source_import_parser.dart';
-import '../services/book_source_service.dart';
-import '../source/source_manager.dart';
-import 'book_source_editor_page.dart';
-import 'book_source_health_page.dart';
-import 'book_source_login_page.dart';
-import 'book_source_qr_scan_page.dart';
-import 'source_warehouse_page.dart';
+import 'package:tvbox/reading/models/book_source.dart';
+import 'package:tvbox/reading/services/book_source_compatibility.dart';
+import 'package:tvbox/reading/services/book_source_import_parser.dart';
+import 'package:tvbox/reading/services/book_source_service.dart';
+import 'package:tvbox/reading/source/source_manager.dart';
+import 'package:tvbox/reading/pages/book_source_editor_page.dart';
+import 'package:tvbox/reading/pages/book_source_health_page.dart';
+import 'package:tvbox/reading/pages/book_source_login_page.dart';
+import 'package:tvbox/reading/pages/book_source_qr_scan_page.dart';
+import 'package:tvbox/reading/pages/source_warehouse_page.dart';
 // cloud_book_source_page 的 import 已移除（云端网页入口迁到书源页）
 // ✅ **补齐缺失的 import** ✗✓（本轮修的 8 条 error 全因它们 ✗）：
 //   · `JellySearchBar` / `JellySlidingActions`(+`JellyAction`)
 //     是**共用组件** ✓ —— 我之前误以为"能被传递导出"✗，那是因为**闸门跑错了目录** ✗✗
 //     （`dart analyze` 没带仓库根 → 分析的是别的项目 ✓ → 假绿 ✓）。
 //   （书源页本身不再提供「浏览记录 / 收藏」入口，如需查看请到漫画/图书搜索页或“我的”页。）
-import '../widgets/jelly_search_bar.dart';
-import '../widgets/swipe_action_tile.dart';
-import '../widgets/import_box_icon.dart';
-import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
-import '../../services/app_log.dart';
+import 'package:tvbox/reading/widgets/jelly_search_bar.dart';
+import 'package:tvbox/reading/widgets/swipe_action_tile.dart';
+import 'package:tvbox/reading/widgets/import_box_icon.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/app_log.dart';
 
 /// 书源仓库 —— 小说书源（Legado 格式）的导入与管理。
 ///

@@ -1,7 +1,7 @@
 /// 搜索结果书籍模型：搜索/发现列表中的单本书籍。
 library;
 
-import 'xiaoshuo_book.dart';
+import 'package:tvbox/reading/novel_source/model/xiaoshuo_book.dart';
 
 class SearchBook {
   String bookUrl;

@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'reading_time_service.dart';
+import 'package:tvbox/reading/services/reading_time_service.dart';
 
 /// 每日阅读打卡 / 目标 / 连续天数（从原 `NotesAndJourneyPage` 抽出的服务）。
 ///

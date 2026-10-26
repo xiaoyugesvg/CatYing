@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../common/theme.dart';
-import '../services/app_state.dart';
-import '../services/nodejs_manager.dart';
-import '../services/python_manager.dart';
-import 'app_toast.dart';
-import 'common_widgets.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/app_state.dart';
+import 'package:tvbox/services/nodejs_manager.dart';
+import 'package:tvbox/services/python_manager.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
 
 /// Node / Python 两个运行时引擎的「加载」面板。
 ///

@@ -1,8 +1,8 @@
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../models/live_models.dart';
-import '../../services/live_service.dart';
+import 'package:tvbox/models/live_models.dart';
+import 'package:tvbox/services/live_service.dart';
 
 /// 直播页控制器
 class LiveController extends GetxController {

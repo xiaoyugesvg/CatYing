@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../../reading/services/ai_service.dart';
-import '../../../services/log_diagnoser.dart';
-import 'ai_settings_page.dart';
+import 'package:tvbox/reading/services/ai_service.dart';
+import 'package:tvbox/services/log_diagnoser.dart';
+import 'package:tvbox/pages/settings/sub/ai_settings_page.dart';
 
 /// 「日志诊断」——读本地运行日志 → 聚合 → 交给 AI 出优化建议。
 ///

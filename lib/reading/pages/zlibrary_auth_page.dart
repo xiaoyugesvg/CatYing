@@ -2,14 +2,14 @@ import 'dart:async';
 import 'dart:math' show pi, sin, cos;
 
 import 'package:flutter/material.dart';
-import '../services/search_history_service.dart';
-import '../services/zlibrary_service.dart';
-import '../theme/jelly_theme.dart';
-import '../widgets/staggered_entrance.dart';
-import '../../common/theme.dart';
-import '../../widgets/app_page_header.dart';
-import 'zlibrary_nodes_sheet.dart';
-import 'zlibrary_web_login_page.dart';
+import 'package:tvbox/reading/services/search_history_service.dart';
+import 'package:tvbox/reading/services/zlibrary_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/widgets/staggered_entrance.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/app_page_header.dart';
+import 'package:tvbox/reading/pages/zlibrary_nodes_sheet.dart';
+import 'package:tvbox/reading/pages/zlibrary_web_login_page.dart';
 
 /// z-library 登录/注册页面（扁平风、内容丰富、灵动）。
 /// 一个全屏页面内用分段切换在「登录 / 注册」间过渡。

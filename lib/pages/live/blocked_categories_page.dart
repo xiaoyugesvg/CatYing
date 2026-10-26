@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../../common/theme.dart';
-import '../../services/live_service.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/live_service.dart';
 
 /// 屏蔽分类 —— 独立管理页（对应参考图：右上「＋」新增，列表可删）
 ///

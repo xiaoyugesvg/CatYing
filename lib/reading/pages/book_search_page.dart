@@ -1,36 +1,37 @@
 import 'package:flutter/foundation.dart';
 // 删掉从未使用的 `package:dio/dio.dart` ✓（analyze 一直报 unused_import ✗，
 // 本文件只用 `ZlibraryService` 发出的请求 ✓，没有直接用 Dio ✓）
-import '../../widgets/common_widgets.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
-import '../models/book.dart';
-import '../models/book_category.dart';
-import '../models/search_result.dart';
-import '../services/book_download_service.dart';
-import '../services/book_view_mode.dart';
-import '../services/browse_history_service.dart';
-import '../services/reading_layout.dart';
-import '../services/search_history_service.dart';
-import '../services/zlibrary_service.dart';
-import '../theme/jelly_theme.dart';
-import '../services/settings_service.dart';
-import '../widgets/jelly_book_card.dart';
-import '../widgets/jelly_nav_bar.dart';
-import '../widgets/jelly_filter_sheet.dart';
-import '../widgets/jelly_icon_deck.dart';
-import '../widgets/jelly_expandable_search.dart';
-import '../widgets/jelly_pull_cord.dart';
-import '../widgets/staggered_entrance.dart';
-import 'book_detail_page.dart';
-import 'book_source_search_page.dart';
-import 'shell_embedded_page.dart';
-import 'douban_ranking_page.dart';
-import 'browse_history_page.dart';
-import 'book_download_records_page.dart';
-import 'favorites_page.dart';
-import '../../common/theme.dart';
-import '../../widgets/app_page_header.dart';
+import 'package:tvbox/reading/models/book.dart';
+import 'package:tvbox/reading/models/book_category.dart';
+import 'package:tvbox/reading/models/search_result.dart';
+import 'package:tvbox/reading/services/book_download_service.dart';
+import 'package:tvbox/reading/services/book_view_mode.dart';
+import 'package:tvbox/reading/services/browse_history_service.dart';
+import 'package:tvbox/reading/services/reading_layout.dart';
+import 'package:tvbox/reading/services/search_history_service.dart';
+import 'package:tvbox/reading/services/zlibrary_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/widgets/jelly_book_card.dart';
+import 'package:tvbox/reading/widgets/jelly_nav_bar.dart';
+import 'package:tvbox/reading/widgets/jelly_filter_sheet.dart';
+import 'package:tvbox/reading/widgets/jelly_icon_deck.dart';
+import 'package:tvbox/reading/widgets/jelly_expandable_search.dart';
+import 'package:tvbox/reading/widgets/jelly_pull_cord.dart';
+import 'package:tvbox/reading/widgets/staggered_entrance.dart';
+import 'package:tvbox/reading/pages/book_detail_page.dart';
+import 'package:tvbox/reading/pages/book_source_search_page.dart';
+import 'package:tvbox/reading/pages/shell_embedded_page.dart';
+import 'package:tvbox/reading/pages/douban_ranking_page.dart';
+import 'package:tvbox/reading/pages/browse_history_page.dart';
+import 'package:tvbox/reading/pages/book_download_records_page.dart';
+import 'package:tvbox/reading/pages/favorites_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/app_page_header.dart';
 
 /// 日志工具
 void _log(String message) {
@@ -1848,7 +1849,8 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  cacheExtent: double.maxFinite,
+                  scrollCacheExtent:
+                      const ScrollCacheExtent.pixels(double.maxFinite),
                   itemCount: BookCategories.groups.length,
                   separatorBuilder: (_, _) => const SizedBox(width: 8),
                   itemBuilder: (_, gi) {

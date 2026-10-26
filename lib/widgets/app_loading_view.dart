@@ -3,12 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../common/theme.dart';
-import '../pages/settings/sub/data_source_settings_page.dart';
-import '../services/app_state.dart';
-import '../services/nodejs_manager.dart';
-import 'app_toast.dart';
-import 'circular_logo_progress.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/pages/settings/sub/data_source_settings_page.dart';
+import 'package:tvbox/services/app_state.dart';
+import 'package:tvbox/services/nodejs_manager.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/circular_logo_progress.dart';
 
 /// 启动加载页：Logo + 进度（静默下载阶段不显示技术文案）。
 ///

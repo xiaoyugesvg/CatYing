@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:dlna_dart/dlna.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import '../../services/app_log.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// DLNA 投屏 page
 ///

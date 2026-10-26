@@ -1,26 +1,26 @@
 import 'dart:math' show min;
 
 import 'package:flutter/material.dart';
-import '../models/book.dart';
-import '../models/book_source.dart';
-import '../models/comic.dart';
-import '../services/book_favorites_service.dart';
-import '../services/book_reading_progress_service.dart';
-import '../services/book_source_service.dart';
-import '../services/browse_history_service.dart';
-import '../services/favorites_service.dart';
-import '../services/reading_progress_service.dart';
-import '../source/source_manager.dart';
-import '../theme/jelly_theme.dart';
-import '../utils/list_pagination.dart';
-import '../widgets/jelly_book_card.dart' show bookCoverHeroTag;
-import '../widgets/jelly_search_bar.dart';
-import '../widgets/jelly_segmented_toggle.dart';
-import '../widgets/source_cover_image.dart';
-import '../../common/theme.dart';
-import 'book_detail_page.dart';
-import 'book_source_detail_page.dart';
-import 'comic_detail_page.dart';
+import 'package:tvbox/reading/models/book.dart';
+import 'package:tvbox/reading/models/book_source.dart';
+import 'package:tvbox/reading/models/comic.dart';
+import 'package:tvbox/reading/services/book_favorites_service.dart';
+import 'package:tvbox/reading/services/book_reading_progress_service.dart';
+import 'package:tvbox/reading/services/book_source_service.dart';
+import 'package:tvbox/reading/services/browse_history_service.dart';
+import 'package:tvbox/reading/services/favorites_service.dart';
+import 'package:tvbox/reading/services/reading_progress_service.dart';
+import 'package:tvbox/reading/source/source_manager.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/utils/list_pagination.dart';
+import 'package:tvbox/reading/widgets/jelly_book_card.dart' show bookCoverHeroTag;
+import 'package:tvbox/reading/widgets/jelly_search_bar.dart';
+import 'package:tvbox/reading/widgets/jelly_segmented_toggle.dart';
+import 'package:tvbox/reading/widgets/source_cover_image.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/pages/book_detail_page.dart';
+import 'package:tvbox/reading/pages/book_source_detail_page.dart';
+import 'package:tvbox/reading/pages/comic_detail_page.dart';
 
 /// 足迹（浏览历史）页。
 ///
@@ -344,7 +344,7 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage> {
                   ),
                 ),
               ),
-              errorWidget: (c, u, e) => ColoredBox(
+              errorBuilder: (c, u, e) => ColoredBox(
                 color: cardColor,
                 child: Icon(
                   Icons.broken_image,
@@ -403,7 +403,7 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage> {
                     ),
                   ),
                 ),
-                errorWidget: (c, u, e) => ColoredBox(
+                errorBuilder: (c, u, e) => ColoredBox(
                   color: cardColor,
                   child: Icon(
                     Icons.broken_image,

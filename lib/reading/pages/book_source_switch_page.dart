@@ -1,10 +1,10 @@
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import '../models/book_source.dart';
-import '../services/book_source_service.dart';
-import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/models/book_source.dart';
+import 'package:tvbox/reading/services/book_source_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 换源页 —— 参考图 IMG_8482 / IMG_8483。
 ///
@@ -283,7 +283,7 @@ class _BookSourceSwitchPageState extends State<BookSourceSwitchPage> {
                             placeholder: (_, __) => Container(
                               color: JellyTheme.primary.withValues(alpha: 0.06),
                             ),
-                            errorWidget: (_, __, ___) => Container(
+                            errorBuilder: (_, __, ___) => Container(
                               color:
                                   JellyTheme.primary.withValues(alpha: 0.1),
                               child: Icon(Icons.menu_book_rounded,

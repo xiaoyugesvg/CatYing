@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../../../common/theme.dart';
-import '../../../reading/services/settings_service.dart';
-import '../../../services/nav_feature_service.dart';
-import 'nav_appearance_page.dart';
-import 'settings_shared.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/services/nav_feature_service.dart';
+import 'package:tvbox/pages/settings/sub/nav_appearance_page.dart';
+import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 
 /// 设置 → 主页页面
 ///
@@ -551,7 +551,7 @@ class HomePagesSettingsPage extends StatelessWidget {
       physics: const NeverScrollableScrollPhysics(),
       buildDefaultDragHandles: false,
       itemCount: items.length,
-      onReorder: (o, n) =>
+      onReorderItem: (o, n) =>
           isEnabled ? svc.reorderEnabled(o, n) : svc.reorderDisabled(o, n),
       itemBuilder: (context, i) {
         final f = items[i];
@@ -644,7 +644,7 @@ class HomePagesSettingsPage extends StatelessWidget {
                 onChanged: f.required
                     ? null
                     : (v) => svc.setEnabled(f, v),
-                activeColor: AppTheme.accentColor,
+                activeThumbColor: AppTheme.accentColor,
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
             ),

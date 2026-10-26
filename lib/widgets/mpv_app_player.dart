@@ -4,9 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart' as mk;
 
-import '../models/player_engine.dart';
-import '../services/app_log.dart';
-import 'app_player.dart';
+import 'package:tvbox/models/player_engine.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/widgets/app_player.dart';
 
 /// media_kit / libmpv 实现的 [AppPlayer] 适配层。
 /// 与 AVPlayer 后端共用同一套调用面，供设置里选「MPV」时使用。

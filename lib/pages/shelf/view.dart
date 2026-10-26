@@ -1,17 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../../common/theme.dart';
-import '../../models/cache_store.dart';
-import '../../models/movie.dart';
-import '../../services/player_prefs.dart';
-import '../../widgets/common_widgets.dart';
-import '../../widgets/vod_card.dart';
-import 'controller.dart';
-import '../favorites/controller.dart';
-import '../favorites/view.dart' show deleteFavoriteItems;
-import '../history/controller.dart';
-import '../history/view.dart' show deleteHistoryItems;
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/cache_store.dart';
+import 'package:tvbox/models/movie.dart';
+import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/widgets/vod_card.dart';
+import 'package:tvbox/pages/shelf/controller.dart';
+import 'package:tvbox/pages/favorites/controller.dart';
+import 'package:tvbox/pages/favorites/view.dart' show deleteFavoriteItems;
+import 'package:tvbox/pages/history/controller.dart';
+import 'package:tvbox/pages/history/view.dart' show deleteHistoryItems;
 
 /// 「史藏」页 —— **历史 + 收藏 的统一页**
 ///

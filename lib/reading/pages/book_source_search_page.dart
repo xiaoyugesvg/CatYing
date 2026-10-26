@@ -5,34 +5,34 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../widgets/card_action_sheet.dart';
-import '../models/book_source.dart';
-import '../services/book_source_service.dart';
-import '../services/qread_api.dart';
-import '../services/reading_layout.dart';
-import '../theme/jelly_theme.dart';
-import '../widgets/jelly_icon_deck.dart';
-import '../widgets/jelly_nav_bar.dart';
-import '../widgets/jelly_filter_sheet.dart';
-import '../widgets/jelly_pull_cord.dart';
-import '../widgets/jelly_expandable_search.dart';
-import '../widgets/source_order_sheet.dart';
-import '../widgets/source_group_tabs.dart';
-import '../widgets/jelly_search_bar.dart';
-import 'book_download_records_page.dart';
-import 'book_source_detail_page.dart';
-import 'book_source_editor_page.dart';
-import 'book_source_login_page.dart';
-import 'book_source_repo_page.dart';
-import 'browse_history_page.dart';
-import 'favorites_page.dart';
-import 'webview_page.dart';
-import '../../common/theme.dart';
-import '../utils/source_fail_text.dart';
-import '../utils/text_match.dart';
+import 'package:tvbox/widgets/card_action_sheet.dart';
+import 'package:tvbox/reading/models/book_source.dart';
+import 'package:tvbox/reading/services/book_source_service.dart';
+import 'package:tvbox/reading/services/qread_api.dart';
+import 'package:tvbox/reading/services/reading_layout.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/widgets/jelly_icon_deck.dart';
+import 'package:tvbox/reading/widgets/jelly_nav_bar.dart';
+import 'package:tvbox/reading/widgets/jelly_filter_sheet.dart';
+import 'package:tvbox/reading/widgets/jelly_pull_cord.dart';
+import 'package:tvbox/reading/widgets/jelly_expandable_search.dart';
+import 'package:tvbox/reading/widgets/source_order_sheet.dart';
+import 'package:tvbox/reading/widgets/source_group_tabs.dart';
+import 'package:tvbox/reading/widgets/jelly_search_bar.dart';
+import 'package:tvbox/reading/pages/book_download_records_page.dart';
+import 'package:tvbox/reading/pages/book_source_detail_page.dart';
+import 'package:tvbox/reading/pages/book_source_editor_page.dart';
+import 'package:tvbox/reading/pages/book_source_login_page.dart';
+import 'package:tvbox/reading/pages/book_source_repo_page.dart';
+import 'package:tvbox/reading/pages/browse_history_page.dart';
+import 'package:tvbox/reading/pages/favorites_page.dart';
+import 'package:tvbox/reading/pages/webview_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/utils/source_fail_text.dart';
+import 'package:tvbox/reading/utils/text_match.dart';
 // ✅ **外壳内嵌子页**（本轮重构 ✓）：本页由 `home_page.dart` 的外壳渲染 ✓
 //   ⇒ 底部胶囊导航栏（"悬浮菜单栏"）**照常显示** ✓✓；返回用 `closeEmbeddedPage()` ✓
-import 'shell_embedded_page.dart';
+import 'package:tvbox/reading/pages/shell_embedded_page.dart';
 
 /// 书源搜索页 —— 用已导入的 Legado 书源跨站搜小说。
 ///
@@ -1932,7 +1932,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                       : CachedNetworkImage(
                           imageUrl: r.coverUrl,
                           fit: BoxFit.cover,
-                          errorWidget: (_, __, ___) => Container(
+                          errorBuilder: (_, __, ___) => Container(
                             color: JellyTheme.primary.withValues(alpha: 0.1),
                             child: Icon(
                               Icons.menu_book_rounded,
@@ -2319,7 +2319,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                         fit: BoxFit.cover,
                         memCacheWidth: 300,
                         placeholder: (_, __) => _bookCoverPlaceholder(),
-                        errorWidget: (_, __, ___) => _bookCoverPlaceholder(),
+                        errorBuilder: (_, __, ___) => _bookCoverPlaceholder(),
                       ),
               ),
               // 信息区
@@ -2474,7 +2474,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                           fit: BoxFit.cover,
                           memCacheWidth: 300,
                           placeholder: (_, __) => _bookCoverPlaceholder(),
-                          errorWidget: (_, __, ___) => _bookCoverPlaceholder(),
+                          errorBuilder: (_, __, ___) => _bookCoverPlaceholder(),
                         ),
                   // 左上角作者角标：透明灰底（用户 2026-10-12）
                   if (first.author.trim().isNotEmpty)

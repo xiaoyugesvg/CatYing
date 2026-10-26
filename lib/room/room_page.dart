@@ -3,17 +3,17 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
-import '../common/theme.dart';
-import '../models/player_engine.dart';
-import '../services/player_prefs.dart';
-import '../widgets/app_player.dart';
-import '../widgets/ios_av_player.dart';
-import '../widgets/ks_player.dart';
-import '../widgets/mpv_app_player.dart';
-import '../widgets/video_player.dart';
-import 'room_models.dart';
-import 'room_session.dart';
-import 'room_source_picker.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/player_engine.dart';
+import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/widgets/app_player.dart';
+import 'package:tvbox/widgets/ios_av_player.dart';
+import 'package:tvbox/widgets/ks_player.dart';
+import 'package:tvbox/widgets/mpv_app_player.dart';
+import 'package:tvbox/widgets/video_player.dart';
+import 'package:tvbox/room/room_models.dart';
+import 'package:tvbox/room/room_session.dart';
+import 'package:tvbox/room/room_source_picker.dart';
 
 /// 「房间」播放页：播放器 + 成员 + 聊天。
 ///

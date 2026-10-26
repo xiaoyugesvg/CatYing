@@ -8,23 +8,23 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../common/theme.dart';
-import '../../models/cache_store.dart';
-import '../../models/movie_sort.dart';
-import '../../models/source_bean.dart';
-import '../../models/vod_info.dart';
-import '../../reading/source/global_proxy.dart';
-import '../../services/api_config.dart';
-import '../../services/app_log.dart';
-import '../../services/parse_service.dart';
-import '../../services/player_prefs.dart';
-import '../../services/sniff_filter.dart';
-import '../../services/source_service.dart';
-import '../../services/spider_service.dart';
-import '../../widgets/app_toast.dart';
-import '../../pages/play/sniff_player_page.dart';
-import '../../pages/play/webview_player_page.dart';
-import '../pages/mini_app_player_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/cache_store.dart';
+import 'package:tvbox/models/movie_sort.dart';
+import 'package:tvbox/models/source_bean.dart';
+import 'package:tvbox/models/vod_info.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/parse_service.dart';
+import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/services/sniff_filter.dart';
+import 'package:tvbox/services/source_service.dart';
+import 'package:tvbox/services/spider_service.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/pages/play/sniff_player_page.dart';
+import 'package:tvbox/pages/play/webview_player_page.dart';
+import 'package:tvbox/miniapp/pages/mini_app_player_page.dart';
 
 /// 官方 ant JSAPI SDK v4 桥（Dart 侧实现）。
 ///

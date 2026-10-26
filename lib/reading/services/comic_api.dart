@@ -2,11 +2,11 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import '../models/comic.dart';
-import '../models/search_result.dart';
-import 'crypto.dart';
-import 'remote_config_service.dart';
-import '../source/global_proxy.dart';
+import 'package:tvbox/reading/models/comic.dart';
+import 'package:tvbox/reading/models/search_result.dart';
+import 'package:tvbox/reading/services/crypto.dart';
+import 'package:tvbox/reading/services/remote_config_service.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
 
 /// 日志工具
 void _log(String message) {

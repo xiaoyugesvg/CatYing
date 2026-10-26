@@ -1,4 +1,4 @@
-import 'models.dart';
+import 'package:tvbox/reading/source/models.dart';
 
 /// 漫画源契约（借鉴 Mihon HttpSource，适配 Flutter/Dio）。
 ///

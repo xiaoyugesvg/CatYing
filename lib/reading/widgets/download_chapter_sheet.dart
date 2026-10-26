@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
-import '../models/comic.dart';
-import '../models/trim_preset.dart';
-import '../pages/trim_preview_page.dart';
-import '../services/download_service.dart';
-import '../services/settings_service.dart';
-import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/models/comic.dart';
+import 'package:tvbox/reading/models/trim_preset.dart';
+import 'package:tvbox/reading/pages/trim_preview_page.dart';
+import 'package:tvbox/reading/services/download_service.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 章节选择底部弹窗（网格多列自适应）
 /// 勾选章节 -> 加入下载队列 -> 提示并关闭（进度去"下载中"页查看）

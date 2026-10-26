@@ -203,7 +203,7 @@ List<Object?> _parseDanmuFlat(String body) {
   final items = parseDanmuBody(body);
   final out = <Object?>[];
   for (final d in items) {
-    out.add(<Object?>[d.time, d.text, d.color.value, d.mode]);
+    out.add(<Object?>[d.time, d.text, d.color.toARGB32(), d.mode]);
   }
   return out;
 }

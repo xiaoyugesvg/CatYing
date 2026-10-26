@@ -3,9 +3,9 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'book_reading_progress_service.dart';
-import 'reading_progress_service.dart';
-import 'reading_time_service.dart';
+import 'package:tvbox/reading/services/book_reading_progress_service.dart';
+import 'package:tvbox/reading/services/reading_progress_service.dart';
+import 'package:tvbox/reading/services/reading_time_service.dart';
 
 /// 阅读计划类型 ✓（对齐截图 IMG_8635 的两个分段 ✓）
 enum ReadingPlanKind {

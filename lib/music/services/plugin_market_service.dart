@@ -20,9 +20,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/plugin_subscription.dart';
-import '../models/third_party_source.dart';
-import 'plugin_script_cache.dart';
+import 'package:tvbox/music/models/plugin_subscription.dart';
+import 'package:tvbox/music/models/third_party_source.dart';
+import 'package:tvbox/music/services/plugin_script_cache.dart';
 
 /// 市场上的一个插件条目
 class PluginMarketEntry {

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
 
 /// **果冻风可展开搜索框** —— 对齐影视首页 `AppExpandableSearch` 的交互：
 /// 收起时是个小圆钮（只占一个图标位），点一下**带宽度动画**伸长成胶囊输入框。

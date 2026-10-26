@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import '../../services/app_log.dart';
-import '../../services/ad_block_service.dart';
-import '../../services/player_prefs.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/ad_block_service.dart';
+import 'package:tvbox/services/player_prefs.dart';
 import 'package:flutter/services.dart';
-import '../../common/system_ui.dart';
-import '../../widgets/ad_block_bubble.dart';
+import 'package:tvbox/common/system_ui.dart';
+import 'package:tvbox/widgets/ad_block_bubble.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 /// 网页播放器页 - 全屏 WebView 加载网页播放页

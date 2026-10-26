@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../theme/jelly_theme.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
 
 /// 多选模式下的圆形勾选角标（选中=主色实心✓，未选=白底空心）
 class JellySelectBadge extends StatelessWidget {

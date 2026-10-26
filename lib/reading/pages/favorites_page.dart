@@ -4,33 +4,33 @@ import 'dart:ui';
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
-import '../models/book.dart';
-import '../models/book_source.dart';
-import '../models/comic.dart';
-import '../services/book_favorites_service.dart';
-import '../services/book_source_service.dart';
-import '../services/book_view_mode.dart';
-import '../services/favorites_service.dart';
-import '../services/shelf_update_service.dart';
-import '../services/view_mode.dart';
-import '../theme/jelly_theme.dart';
-import '../widgets/jelly_book_card.dart';
-import '../widgets/jelly_expandable_search.dart';
-import '../widgets/jelly_select_badge.dart';
-import '../services/settings_service.dart';
-import '../utils/list_pagination.dart';
-import '../widgets/jelly_comic_card.dart';
-import '../widgets/jelly_comic_list_tile.dart';
-import '../widgets/jelly_nav_bar.dart';
-import '../widgets/jelly_search_bar.dart';
-import '../widgets/jelly_segmented_toggle.dart';
-import '../widgets/staggered_entrance.dart';
-import 'book_source_detail_page.dart';
-import '../widgets/source_cover_image.dart';
-import 'book_detail_page.dart';
-import 'comic_detail_page.dart';
-import '../../common/theme.dart';
-import '../../widgets/app_page_header.dart';
+import 'package:tvbox/reading/models/book.dart';
+import 'package:tvbox/reading/models/book_source.dart';
+import 'package:tvbox/reading/models/comic.dart';
+import 'package:tvbox/reading/services/book_favorites_service.dart';
+import 'package:tvbox/reading/services/book_source_service.dart';
+import 'package:tvbox/reading/services/book_view_mode.dart';
+import 'package:tvbox/reading/services/favorites_service.dart';
+import 'package:tvbox/reading/services/shelf_update_service.dart';
+import 'package:tvbox/reading/services/view_mode.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/widgets/jelly_book_card.dart';
+import 'package:tvbox/reading/widgets/jelly_expandable_search.dart';
+import 'package:tvbox/reading/widgets/jelly_select_badge.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/utils/list_pagination.dart';
+import 'package:tvbox/reading/widgets/jelly_comic_card.dart';
+import 'package:tvbox/reading/widgets/jelly_comic_list_tile.dart';
+import 'package:tvbox/reading/widgets/jelly_nav_bar.dart';
+import 'package:tvbox/reading/widgets/jelly_search_bar.dart';
+import 'package:tvbox/reading/widgets/jelly_segmented_toggle.dart';
+import 'package:tvbox/reading/widgets/staggered_entrance.dart';
+import 'package:tvbox/reading/pages/book_source_detail_page.dart';
+import 'package:tvbox/reading/widgets/source_cover_image.dart';
+import 'package:tvbox/reading/pages/book_detail_page.dart';
+import 'package:tvbox/reading/pages/comic_detail_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/app_page_header.dart';
 
 /// 收藏页面（顶部 Tab：漫画收藏 / 图书收藏）
 class FavoritesPage extends StatefulWidget {
@@ -732,7 +732,7 @@ class _FavoritesPageState extends State<FavoritesPage>
               color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
               width: 40,
               height: 56),
-          errorWidget: (c, u, e) => Container(
+          errorBuilder: (c, u, e) => Container(
             color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
             width: 40,
             height: 56,
@@ -790,7 +790,7 @@ class _FavoritesPageState extends State<FavoritesPage>
                     color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
                     width: 40,
                     height: 56),
-                errorWidget: (c, u, e) => Container(
+                errorBuilder: (c, u, e) => Container(
                   color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
                   width: 40,
                   height: 56,

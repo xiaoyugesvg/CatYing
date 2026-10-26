@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../../models/subscription.dart';
-import '../../widgets/common_widgets.dart';
-import 'pin_dialog.dart';
-import '../../widgets/app_toast.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/subscription.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/pages/subscription/pin_dialog.dart';
+import 'package:tvbox/widgets/app_toast.dart';
 
 /// 编辑订阅页 —— 对应参考图
 ///
@@ -400,7 +400,7 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
             child: Switch(
               value: value,
               onChanged: onChanged,
-              activeColor: AppTheme.accentColor,
+              activeThumbColor: AppTheme.accentColor,
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
           ),

@@ -2,14 +2,14 @@
 // `dart:convert`（:1）· `../models/search_result.dart`（:7）
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../models/comic.dart';
-import '../source/adapter.dart';
-import '../source/source_manager.dart';
-import '../theme/jelly_theme.dart';
-import '../widgets/jelly_comic_list_tile.dart';
-import '../widgets/jelly_search_bar.dart';
-import 'comic_detail_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/models/comic.dart';
+import 'package:tvbox/reading/source/adapter.dart';
+import 'package:tvbox/reading/source/source_manager.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/widgets/jelly_comic_list_tile.dart';
+import 'package:tvbox/reading/widgets/jelly_search_bar.dart';
+import 'package:tvbox/reading/pages/comic_detail_page.dart';
 
 /// ── 聚搜与复搜（跨所有漫画源聚合搜索）────────────────────────────
 /// 参考 cmbok 漫画页引导：

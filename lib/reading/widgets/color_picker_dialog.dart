@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// HSV 取色器对话框（自建，无第三方依赖）。
 ///

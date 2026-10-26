@@ -1,8 +1,8 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
-import '../reading/source/global_proxy.dart';
-import 'emby_models.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/emby/emby_models.dart';
 
 /// Emby 请求失败（带用户可读信息）。
 class EmbyApiException implements Exception {

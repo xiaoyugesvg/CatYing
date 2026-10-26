@@ -10,8 +10,8 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../models/source_bean.dart';
-import '../../services/api_config.dart';
+import 'package:tvbox/models/source_bean.dart';
+import 'package:tvbox/services/api_config.dart';
 
 class DramaSettings {
   DramaSettings._();

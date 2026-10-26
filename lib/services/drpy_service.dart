@@ -3,9 +3,9 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
 
-import 'app_log.dart';
-import 'dio_factory.dart';
-import 'nodejs_manager.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/dio_factory.dart';
+import 'package:tvbox/services/nodejs_manager.dart';
 
 /// drpy 标准源（TVBox `type:3` + `api=drpy2.min.js` + `ext=站点.js`）。
 ///

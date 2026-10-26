@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../common/theme.dart';
-import '../../widgets/app_toast.dart';
-import '../models/mini_app.dart';
-import '../services/market_subscription_store.dart';
-import '../services/mini_app_service.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/miniapp/models/mini_app.dart';
+import 'package:tvbox/miniapp/services/market_subscription_store.dart';
+import 'package:tvbox/miniapp/services/mini_app_service.dart';
 
 /// 市场条目的视图：列表 / 一行 2·3·4 个（用户 2026-10-18）
 enum _MarketView {
@@ -435,8 +435,9 @@ class _MiniAppMarketPageState extends State<MiniAppMarketPage> {
               padding: const EdgeInsets.only(left: AppTheme.spacingMD),
               buildDefaultDragHandles: false,
               itemCount: subs.length,
-              onReorder: (oldIndex, newIndex) async {
-                if (newIndex > oldIndex) newIndex -= 1;
+              // onReorderItem 的 newIndex 已由框架归一化（移出后重新插入的
+              // 最终下标），不要再手动减一。
+              onReorderItem: (oldIndex, newIndex) async {
                 final ids = subs.map((e) => e.id).toList();
                 final moved = ids.removeAt(oldIndex);
                 ids.insert(newIndex.clamp(0, ids.length), moved);

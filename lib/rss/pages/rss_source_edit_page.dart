@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../../pages/settings/sub/settings_shared.dart';
-import '../../widgets/app_toast.dart';
-import '../models/rss_source.dart';
-import '../services/rss_store.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/pages/settings/sub/settings_shared.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/rss/models/rss_source.dart';
+import 'package:tvbox/rss/services/rss_store.dart';
 
 /// 编辑 RSS 订阅源（含规则 / 请求头 / 分类）。
 ///

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../common/theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// **首页右上角搜索**（2026-10-02 定稿：iOS 风格收起/展开）
 ///

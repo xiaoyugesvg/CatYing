@@ -1,9 +1,9 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../services/local_library_service.dart';
-import '../theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/services/local_library_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
 
 /// 本地库管理：多库根 / 标签 / 查重 / 回收站。
 class LocalLibraryPage extends StatefulWidget {

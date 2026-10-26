@@ -4,9 +4,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-import '../../services/app_log.dart';
-import '../../services/nodejs_manager.dart';
-import '../../widgets/video_player_pip.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/nodejs_manager.dart';
+import 'package:tvbox/widgets/video_player_pip.dart';
 
 /// 海阔的 **WebView 抓页桥**（Phase 2）。
 ///

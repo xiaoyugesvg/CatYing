@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../models/tts_source.dart';
-import '../services/tts_source_store.dart';
-import '../theme/jelly_theme.dart';
-import 'tts_source_edit_page.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/models/tts_source.dart';
+import 'package:tvbox/reading/services/tts_source_store.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/pages/tts_source_edit_page.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 朗读引擎（截图 IMG_8087/8088）。
 ///

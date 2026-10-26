@@ -7,11 +7,11 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:media_kit/media_kit.dart';
 
-import '../models/tts_source.dart';
-import '../source/global_proxy.dart';
-import 'tts_now_playing.dart';
-import 'tts_source_store.dart';
-import '../../services/nodejs_manager.dart';
+import 'package:tvbox/reading/models/tts_source.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/reading/services/tts_now_playing.dart';
+import 'package:tvbox/reading/services/tts_source_store.dart';
+import 'package:tvbox/services/nodejs_manager.dart';
 
 /// 语音朗读（听书）。
 ///

@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import '../models/reader_style.dart';
+import 'package:tvbox/reading/models/reader_style.dart';
 
 /// 源阅读 `.srs` 样式导入。
 ///

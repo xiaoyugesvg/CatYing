@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'music_sheet.dart';
+import 'package:tvbox/music/widgets/music_sheet.dart';
 
-import '../models/models.dart';
-import 'music_components.dart';
-import '../services/music_api.dart';
-import '../theme/music_theme.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/widgets/music_components.dart';
+import 'package:tvbox/music/services/music_api.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 歌曲评论弹层。
 ///

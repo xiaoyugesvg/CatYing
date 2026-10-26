@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'package:get/get.dart';
 import 'package:hive_ce/hive.dart';
-import '../services/app_log.dart';
-import 'cache_ttl.dart';
-import 'movie.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/models/cache_ttl.dart';
+import 'package:tvbox/models/movie.dart';
 
 String makeVodBusinessKey(String vodId, String sourceKey) {
   final normalizedVodId = vodId.trim();

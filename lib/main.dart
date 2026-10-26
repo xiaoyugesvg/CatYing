@@ -2,68 +2,69 @@ import 'dart:async';
 import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/material.dart';
-import 'common/theme.dart';
+import 'package:tvbox/common/theme.dart';
 import 'package:get/get.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:window_manager/window_manager.dart';
-import 'app.dart';
-import 'miniapp/services/mini_app_service.dart';
+import 'package:tvbox/app.dart';
+import 'package:tvbox/miniapp/services/mini_app_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'common/constants.dart';
-import 'models/cache_store.dart';
-import 'pages/settings/controller.dart' show SettingsController;
-import 'models/subscription.dart';
-import 'services/api_config.dart';
-import 'services/nav_feature_service.dart';
-import 'services/remote_engine.dart';
-import 'services/app_log.dart';
-import 'services/prefs_mirror.dart';
-import 'services/app_state.dart';
-import 'services/background_service.dart';
-import 'services/epg_service.dart';
-import 'services/live_service.dart';
-import 'services/parse_store.dart';
-import 'reading/services/book_download_service.dart';
-import 'reading/services/book_font_service.dart';
-import 'reading/services/settings_service.dart';
-import 'reading/services/reader_override_service.dart';
-import 'reading/services/bookshelf_service.dart';
-import 'reading/services/book_reading_progress_service.dart';
-import 'reading/services/source_subscription_store.dart';
-import 'reading/services/zlibrary_service.dart';
-import 'reading/services/remote_config_service.dart';
-import 'reading/models/book_source.dart';
-import 'reading/services/tts_service.dart';
-import 'music/services/now_playing_service.dart';
-import 'music/services/settings_store.dart';
-import 'music/services/player_manager.dart';
-import 'music/services/download_service.dart';
-import 'common/module_theme_store.dart';
-import 'common/module_theme_sync.dart';
-import 'common/theme_mode_store.dart';
-import 'music/theme/music_theme.dart';
-import 'reading/services/book_favorites_service.dart';
-import 'reading/services/favorites_service.dart';
-import 'reading/services/browse_history_service.dart';
-import 'reading/services/download_service.dart';
-import 'reading/services/reading_progress_service.dart';
-import 'reading/novel_source/analyze/cookie_store.dart';
-import 'reading/novel_source/web_book/runner_isolate.dart';
-import 'rss/services/rss_store.dart';
-import 'reading/services/trim_preset_service.dart';
-import 'reading/services/view_mode.dart';
-import 'reading/services/book_view_mode.dart';
-import 'reading/services/reading_layout.dart';
-import 'reading/source/source_manager.dart';
-import 'services/player_prefs.dart';
-import 'services/tmdb_service.dart';
-import 'pages/search/controller.dart';
-import 'music/services/library_store.dart';
-import 'widgets/app_toast.dart';
-import 'widgets/video_player_pip.dart';
-import 'webhome/webhtv_playback_sync_service.dart';
+import 'package:tvbox/common/constants.dart';
+import 'package:tvbox/models/cache_store.dart';
+import 'package:tvbox/pages/settings/controller.dart' show SettingsController;
+import 'package:tvbox/models/subscription.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/nav_feature_service.dart';
+import 'package:tvbox/services/remote_engine.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/prefs_mirror.dart';
+import 'package:tvbox/services/app_state.dart';
+import 'package:tvbox/services/background_service.dart';
+import 'package:tvbox/services/dio_factory.dart' show installGlobalDnsOverrides;
+import 'package:tvbox/services/epg_service.dart';
+import 'package:tvbox/services/live_service.dart';
+import 'package:tvbox/services/parse_store.dart';
+import 'package:tvbox/reading/services/book_download_service.dart';
+import 'package:tvbox/reading/services/book_font_service.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/services/reader_override_service.dart';
+import 'package:tvbox/reading/services/bookshelf_service.dart';
+import 'package:tvbox/reading/services/book_reading_progress_service.dart';
+import 'package:tvbox/reading/services/source_subscription_store.dart';
+import 'package:tvbox/reading/services/zlibrary_service.dart';
+import 'package:tvbox/reading/services/remote_config_service.dart';
+import 'package:tvbox/reading/models/book_source.dart';
+import 'package:tvbox/reading/services/tts_service.dart';
+import 'package:tvbox/music/services/now_playing_service.dart';
+import 'package:tvbox/music/services/settings_store.dart';
+import 'package:tvbox/music/services/player_manager.dart';
+import 'package:tvbox/music/services/download_service.dart';
+import 'package:tvbox/common/module_theme_store.dart';
+import 'package:tvbox/common/module_theme_sync.dart';
+import 'package:tvbox/common/theme_mode_store.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/reading/services/book_favorites_service.dart';
+import 'package:tvbox/reading/services/favorites_service.dart';
+import 'package:tvbox/reading/services/browse_history_service.dart';
+import 'package:tvbox/reading/services/download_service.dart';
+import 'package:tvbox/reading/services/reading_progress_service.dart';
+import 'package:tvbox/reading/novel_source/analyze/cookie_store.dart';
+import 'package:tvbox/reading/novel_source/web_book/runner_isolate.dart';
+import 'package:tvbox/rss/services/rss_store.dart';
+import 'package:tvbox/reading/services/trim_preset_service.dart';
+import 'package:tvbox/reading/services/view_mode.dart';
+import 'package:tvbox/reading/services/book_view_mode.dart';
+import 'package:tvbox/reading/services/reading_layout.dart';
+import 'package:tvbox/reading/source/source_manager.dart';
+import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/services/tmdb_service.dart';
+import 'package:tvbox/pages/search/controller.dart';
+import 'package:tvbox/music/services/library_store.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/video_player_pip.dart';
+import 'package:tvbox/webhome/webhtv_playback_sync_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -71,6 +72,15 @@ void main() async {
   // 初始化 AppLog — 必须早于 runApp, 否则 handleSceneActive 等
   // 关键事件写不进 <Documents>/nodejs-project/runtime/app.log
   await AppLog.instance.init();
+
+  // ── hosts / DoH 接到全局网络层（2026-10-26）────────────────────
+  //   原来只有 drpy / epg / spider 三个服务走 `buildDioWithDns`，
+  //   其余 136 个 Dio 创建点全直连 ⇒ 用户配的 hosts / DoH 对影视、
+  //   音乐、阅读、RSS **完全无效**（设置里有开关，实际没生效）。
+  //   这里装一次 `HttpOverrides`，之后**任何**新建的 HttpClient
+  //   （Dio / Image.network / WebSocket / cached_network_image）都自动走规则。
+  //   规则判断放在每次连接时做，所以用户之后改配置也立刻生效。
+  installGlobalDnsOverrides();
 
   // ✅ **把 `debugPrint` 重定向进「软件日志」**（我的 → 通用设置 → 软件日志 ✓）——
   //   为什么需要这一行 ✓：全项目（含阅读模块 **34 个文件的 `_log()`**）此前只用

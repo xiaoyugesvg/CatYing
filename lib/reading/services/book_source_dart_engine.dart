@@ -48,13 +48,13 @@ import 'package:dio/dio.dart';
 // ⚠️ 本文件在 lib/reading/services/ 下，而引擎在 lib/reading/novel_source/
 // ⇒ 相对路径必须带 novel_source/ 前缀（首次交付时漏了，导致 19 个
 //   uri_does_not_exist / undefined_class 编译错误 —— 已修）
-import '../novel_source/model/book_source.dart';
-import '../novel_source/model/search_book.dart';
-import '../novel_source/model/xiaoshuo_book.dart';
-import '../novel_source/novel_block.dart';
-import '../novel_source/web_book/web_book.dart';
-import '../novel_source/web_book/runner_isolate.dart';
-import '../source/global_proxy.dart';
+import 'package:tvbox/reading/novel_source/model/book_source.dart';
+import 'package:tvbox/reading/novel_source/model/search_book.dart';
+import 'package:tvbox/reading/novel_source/model/xiaoshuo_book.dart';
+import 'package:tvbox/reading/novel_source/novel_block.dart';
+import 'package:tvbox/reading/novel_source/web_book/web_book.dart';
+import 'package:tvbox/reading/novel_source/web_book/runner_isolate.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
 
 /// 书源 Dart 原生引擎接入层（进程级单例）。
 class BookSourceDartEngine {

@@ -2,9 +2,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../common/theme.dart';
-import '../reading/source/global_proxy.dart';
-import '../widgets/app_toast.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/widgets/app_toast.dart';
 
 /// 「Webhtv → 网盘链接检测」（第 4 步，用户 2026-10-15）。
 ///

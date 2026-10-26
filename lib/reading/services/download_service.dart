@@ -6,16 +6,16 @@ import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../models/bookshelf.dart';
-import '../models/comic.dart';
-import '../models/trim_preset.dart';
-import 'bookshelf_service.dart';
-import 'settings_service.dart';
-import 'trim_service.dart';
-import '../source/models.dart';
-import '../source/global_proxy.dart';
-import '../source/source_manager.dart';
-import '../utils/app_toast.dart';
+import 'package:tvbox/reading/models/bookshelf.dart';
+import 'package:tvbox/reading/models/comic.dart';
+import 'package:tvbox/reading/models/trim_preset.dart';
+import 'package:tvbox/reading/services/bookshelf_service.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/services/trim_service.dart';
+import 'package:tvbox/reading/source/models.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/reading/source/source_manager.dart';
+import 'package:tvbox/reading/utils/app_toast.dart';
 
 /// 日志工具
 ///

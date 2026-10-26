@@ -4,13 +4,13 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../pages/player_page.dart';
-import 'music_components.dart';
-import 'mini_player.dart';
-import '../services/player_manager.dart';
-import '../theme/music_theme.dart';
-import '../../services/app_log.dart';
-import '../../widgets/video_player_pip.dart';
+import 'package:tvbox/music/pages/player_page.dart';
+import 'package:tvbox/music/widgets/music_components.dart';
+import 'package:tvbox/music/widgets/mini_player.dart';
+import 'package:tvbox/music/services/player_manager.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/widgets/video_player_pip.dart';
 
 /// **可拖动的悬浮播放球**（音乐模块）。
 ///

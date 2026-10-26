@@ -8,7 +8,7 @@
 // 分类 slug 由站点静态路径决定（/manhua-{slug}/），预定义于 [categories]，
 // 不走远端拉取（manhuaren 无分类维度 API，纯路径式）。
 
-import 'models.dart';
+import 'package:tvbox/reading/source/models.dart';
 
 /// 合并默认字符串映射与传入覆盖。
 Map<String, String> _strMap(dynamic j, Map<String, String> defaults) {

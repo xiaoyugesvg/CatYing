@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../../../services/cf_session.dart';
-import '../../../widgets/app_toast.dart';
-import '../../cf_verify_page.dart';
+import 'package:tvbox/services/cf_session.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/pages/cf_verify_page.dart';
 
 /// 「Cloudflare 站点验证」管理页。
 ///

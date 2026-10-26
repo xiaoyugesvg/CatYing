@@ -5,8 +5,8 @@ import 'package:dio/dio.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'app_log.dart';
-import 'dio_factory.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/dio_factory.dart';
 
 class EpgProgram {
   final String title;

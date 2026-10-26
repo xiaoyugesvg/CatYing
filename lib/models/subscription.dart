@@ -8,8 +8,8 @@ import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../services/app_log.dart';
-import '../services/moontv_converter.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/moontv_converter.dart';
 
 /// 订阅的「导入分类」——用于在订阅管理里按来源分组显示。
 ///

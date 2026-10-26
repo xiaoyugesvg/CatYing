@@ -9,7 +9,7 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:file_picker/file_picker.dart';
 
-import 'download_service.dart';
+import 'package:tvbox/reading/services/download_service.dart';
 
 class LocalComicImportResult {
   const LocalComicImportResult({

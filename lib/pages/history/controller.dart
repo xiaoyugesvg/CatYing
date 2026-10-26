@@ -1,10 +1,10 @@
 import 'dart:async';
 
 import 'package:get/get.dart';
-import '../../models/movie.dart';
-import '../../models/cache_store.dart';
-import '../../router/app_pages.dart';
-import '../../webhome/webhtv_playback_sync_service.dart';
+import 'package:tvbox/models/movie.dart';
+import 'package:tvbox/models/cache_store.dart';
+import 'package:tvbox/router/app_pages.dart';
+import 'package:tvbox/webhome/webhtv_playback_sync_service.dart';
 
 /// 历史记录控制器
 class HistoryController extends GetxController {

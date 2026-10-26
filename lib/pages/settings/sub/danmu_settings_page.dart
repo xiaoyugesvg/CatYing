@@ -3,12 +3,12 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../../common/theme.dart';
-import '../../../widgets/common_widgets.dart';
-import '../../../widgets/danmaku.dart' show loadDanmuSpeed, kDanmuSpeedMin, kDanmuSpeedMax;
-import '../../webview/view.dart';
-import 'settings_shared.dart';
-import '../../../widgets/app_toast.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/widgets/danmaku.dart' show loadDanmuSpeed, kDanmuSpeedMin, kDanmuSpeedMax;
+import 'package:tvbox/pages/webview/view.dart';
+import 'package:tvbox/pages/settings/sub/settings_shared.dart';
+import 'package:tvbox/widgets/app_toast.dart';
 
 /// 弹幕服务来源
 enum DanmuSource {
@@ -815,7 +815,7 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
     if (v == 'custom') {
       pickedColor = await _showColorPicker(initial: _customColor);
       if (pickedColor == null) return; // 用户取消 → 不切换模式
-      await p.setInt('danmu_custom_color', pickedColor.value);
+      await p.setInt('danmu_custom_color', pickedColor.toARGB32());
     }
     setState(() {
       _colorMode = v;
@@ -857,7 +857,7 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
               itemCount: palette.length,
               itemBuilder: (_, i) {
                 final c = palette[i];
-                final isSel = c.value == selected.value;
+                final isSel = c.toARGB32() == selected.toARGB32();
                 return GestureDetector(
                   onTap: () => setDialogState(() => selected = c),
                   child: Container(

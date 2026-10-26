@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../models/bookshelf.dart';
+import 'package:tvbox/reading/models/bookshelf.dart';
 
 void _log(String message) {
   if (kDebugMode) debugPrint('[Bookshelf] $message');

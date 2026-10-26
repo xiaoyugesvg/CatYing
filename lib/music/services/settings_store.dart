@@ -4,13 +4,13 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/models.dart';
-import '../models/plugin_subscription.dart';
-import '../models/third_party_source.dart';
-import '../theme/discover_preset.dart';
-import 'builtin_sources_service.dart';
-import 'plugin_market_service.dart';
-import '../../services/app_log.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/models/plugin_subscription.dart';
+import 'package:tvbox/music/models/third_party_source.dart';
+import 'package:tvbox/music/theme/discover_preset.dart';
+import 'package:tvbox/music/services/builtin_sources_service.dart';
+import 'package:tvbox/music/services/plugin_market_service.dart';
+import 'package:tvbox/services/app_log.dart';
 
 /// 音乐模块的设置存储 —— 对应 Beans 的 `@AppStorage` / `PlatformPreferenceStore`。
 ///

@@ -1,7 +1,7 @@
 import 'dart:math' show min;
 import 'dart:async';
 import 'dart:convert';
-import '../../widgets/common_widgets.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
 import 'dart:io';
 import 'dart:ui';
 
@@ -10,46 +10,46 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'peer_transfer_page.dart';
-import '../models/book.dart';
-import '../models/book_source.dart';
-import '../models/bookshelf.dart';
-import '../models/comic.dart';
-import '../services/book_download_service.dart';
-import '../services/book_source_service.dart';
-import '../services/book_toc_cache.dart';
-import '../services/chapter_alignment.dart';
-import '../services/sync_service.dart';
-import '../services/book_favorites_service.dart';
-import '../services/book_reading_progress_service.dart';
-import '../services/bookshelf_service.dart';
-import '../services/shelf_update_service.dart';
-import '../source/adapter.dart';
-import '../source/source_manager.dart';
-import '../services/download_service.dart';
-import '../services/local_comic_import_service.dart';
-import '../services/reading_progress_service.dart';
-import '../services/settings_service.dart';
-import '../utils/list_pagination.dart';
-import '../theme/jelly_theme.dart';
-import '../widgets/source_cover_image.dart';
-import '../widgets/jelly_bookshelf_dialog.dart';
-import '../widgets/jelly_nav_bar.dart';
-import '../widgets/jelly_expandable_search.dart';
-import '../widgets/jelly_search_bar.dart';
-import '../widgets/jelly_segmented_toggle.dart';
-import 'book_source_detail_page.dart';
-import 'book_source_reader_page.dart';
-import '../widgets/jelly_select_badge.dart';
-import '../widgets/staggered_entrance.dart';
-import '../../services/file_export_service.dart';
-import 'book_detail_page.dart';
-import 'book_reader_page.dart';
-import 'comic_detail_page.dart';
-import 'reader_page.dart';
-import 'local_library_page.dart';
-import '../../widgets/app_empty_view.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/pages/peer_transfer_page.dart';
+import 'package:tvbox/reading/models/book.dart';
+import 'package:tvbox/reading/models/book_source.dart';
+import 'package:tvbox/reading/models/bookshelf.dart';
+import 'package:tvbox/reading/models/comic.dart';
+import 'package:tvbox/reading/services/book_download_service.dart';
+import 'package:tvbox/reading/services/book_source_service.dart';
+import 'package:tvbox/reading/services/book_toc_cache.dart';
+import 'package:tvbox/reading/services/chapter_alignment.dart';
+import 'package:tvbox/reading/services/sync_service.dart';
+import 'package:tvbox/reading/services/book_favorites_service.dart';
+import 'package:tvbox/reading/services/book_reading_progress_service.dart';
+import 'package:tvbox/reading/services/bookshelf_service.dart';
+import 'package:tvbox/reading/services/shelf_update_service.dart';
+import 'package:tvbox/reading/source/adapter.dart';
+import 'package:tvbox/reading/source/source_manager.dart';
+import 'package:tvbox/reading/services/download_service.dart';
+import 'package:tvbox/reading/services/local_comic_import_service.dart';
+import 'package:tvbox/reading/services/reading_progress_service.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/utils/list_pagination.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/widgets/source_cover_image.dart';
+import 'package:tvbox/reading/widgets/jelly_bookshelf_dialog.dart';
+import 'package:tvbox/reading/widgets/jelly_nav_bar.dart';
+import 'package:tvbox/reading/widgets/jelly_expandable_search.dart';
+import 'package:tvbox/reading/widgets/jelly_search_bar.dart';
+import 'package:tvbox/reading/widgets/jelly_segmented_toggle.dart';
+import 'package:tvbox/reading/pages/book_source_detail_page.dart';
+import 'package:tvbox/reading/pages/book_source_reader_page.dart';
+import 'package:tvbox/reading/widgets/jelly_select_badge.dart';
+import 'package:tvbox/reading/widgets/staggered_entrance.dart';
+import 'package:tvbox/services/file_export_service.dart';
+import 'package:tvbox/reading/pages/book_detail_page.dart';
+import 'package:tvbox/reading/pages/book_reader_page.dart';
+import 'package:tvbox/reading/pages/comic_detail_page.dart';
+import 'package:tvbox/reading/pages/reader_page.dart';
+import 'package:tvbox/reading/pages/local_library_page.dart';
+import 'package:tvbox/widgets/app_empty_view.dart';
+import 'package:tvbox/common/theme.dart';
 // 🔴 这里原来还有一行 `import '../../widgets/app_icon_button.dart';` ✗ —— 已删除 ✓。
 // ℹ️ **关于下面这行 `app_icon_button.dart` 的 import**（B 档图标按钮统一 ② ✓）：
 //    现在 `_buildSearchButton` 确实在用 `AppIconButton` ✓（`:1823` ✓）——
@@ -63,8 +63,8 @@ import '../../common/theme.dart';
 //（今天实测：`lib/reading` warning **0 → 1** ✓，跑闸门才发现 ✓）。
 // 教训 ✓：**改注释也可能影响分析器判定** ✓ —— 删掉含 `[...]` 引用的注释后，
 // 一定要再跑一次闸门 ✓（我这次就是跑了才发现的 ✓）
-import '../../widgets/app_page_header.dart';
-import '../../widgets/app_icon_button.dart';
+import 'package:tvbox/widgets/app_page_header.dart';
+import 'package:tvbox/widgets/app_icon_button.dart';
 
 /// "全部"虚拟书架 id：聚合当前 tab 可见的所有书架条目（仅浏览，不参与移出等管理操作）
 const String kAllShelfId = '__all__';
@@ -873,10 +873,9 @@ class _BookshelfPageState extends State<BookshelfPage>
                       padding: const EdgeInsets.symmetric(vertical: 6),
                       itemCount: shelves.length,
                       // 拖动结束：把新顺序交给服务持久化
-                      onReorder: (oldIndex, newIndex) async {
-                        // Flutter 的约定：newIndex 是"插入到该位置之前"，
-                        // 向下拖时要减 1 —— 不减会导致拖到相邻位就弹回去。
-                        if (newIndex > oldIndex) newIndex -= 1;
+                      // onReorderItem 的 newIndex 已由框架归一化（移出后重新
+                      // 插入的最终下标），不要再手动减一，否则会差一位。
+                      onReorderItem: (oldIndex, newIndex) async {
                         final ids = shelves
                             .map((s) => s.id)
                             .toList(growable: true);
@@ -3805,7 +3804,7 @@ class _SearchComicTile extends StatelessWidget {
           httpHeaders: coverHeaders(comic.sourceId),
           fit: BoxFit.cover,
           placeholder: (_, __) => const SizedBox.shrink(),
-          errorWidget: (_, __, ___) => Icon(
+          errorBuilder: (_, __, ___) => Icon(
             Icons.palette_rounded,
             size: 20,
             color: JellyTheme.textSecondary,
@@ -5105,7 +5104,7 @@ class _ShelfCoverState extends State<_ShelfCover> {
         httpHeaders: coverHeaders(widget.sourceId),
         fit: BoxFit.cover,
         placeholder: (c, u) => _buildPlaceholder(isDark),
-        errorWidget: (c, u, e) => _buildPlaceholder(isDark),
+        errorBuilder: (c, u, e) => _buildPlaceholder(isDark),
       );
     }
     if (url.isNotEmpty) {

@@ -39,7 +39,7 @@ library;
 
 import 'package:flutter/material.dart';
 
-import '../theme/jelly_theme.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
 
 /// 叠图标里的一项。
 class JellyIconDeckItem {

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../common/theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 「调整源顺序」底部面板 —— 漫画页 / 书源页长按源标签共用。
 ///
@@ -230,11 +230,8 @@ class _OrderSheetBody extends StatelessWidget {
       buildDefaultDragHandles: false,
       padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
       itemCount: order.length,
-      onReorder: (oldIndex, newIndex) {
-        var target = newIndex;
-        if (target > oldIndex) target -= 1;
-        _move(oldIndex, target);
-      },
+      // onReorderItem 的 newIndex 已由框架归一化，直接当作最终下标用。
+      onReorderItem: (oldIndex, newIndex) => _move(oldIndex, newIndex),
       itemBuilder: (_, i) => ReorderableDelayedDragStartListener(
         key: ValueKey('src_order_${order[i].$1}'),
         index: i,

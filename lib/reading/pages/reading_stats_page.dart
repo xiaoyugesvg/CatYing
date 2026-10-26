@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../services/book_reading_progress_service.dart';
-import '../services/book_source_health_service.dart';
-import '../services/book_source_service.dart';
-import '../services/reading_checkin_service.dart';
-import '../services/reading_progress_service.dart';
-import '../services/reading_time_service.dart';
-import '../theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/services/book_reading_progress_service.dart';
+import 'package:tvbox/reading/services/book_source_health_service.dart';
+import 'package:tvbox/reading/services/book_source_service.dart';
+import 'package:tvbox/reading/services/reading_checkin_service.dart';
+import 'package:tvbox/reading/services/reading_progress_service.dart';
+import 'package:tvbox/reading/services/reading_time_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
 
 /// 阅读统计页。
 ///

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../common/theme.dart';
-import '../widgets/common_widgets.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
 
 /// REX 页面的「视图」面板（与影视首页「切换布局」同一套视觉）。
 ///

@@ -8,7 +8,7 @@
 /// 判定刻意保守：**只标明确的问题**，不猜测站点是否失效（那要真跑，属于体检）。
 library;
 
-import '../models/book_source.dart';
+import 'package:tvbox/reading/models/book_source.dart';
 
 enum CompatSeverity { warning, blocker }
 

@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../models/book_content.dart';
+import 'package:tvbox/reading/models/book_content.dart';
 
 /// 解析结果（[BookContent]）的磁盘缓存：把 EPUB/TXT 解析后的章节结构 + 图片字节
 /// 持久化，命中时跳过 [BookParser] 的 compute 解析（EPUB 解压 + XML 约数百 ms ~ 1s+）。

@@ -21,8 +21,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../../widgets/common_widgets.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
 
 /// `loginUi` 里的一项。
 class RssLoginField {

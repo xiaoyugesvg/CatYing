@@ -5,13 +5,13 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../../common/theme.dart';
-import '../source/global_proxy.dart';
-import '../theme/jelly_theme.dart';
-import 'pet_chat_sheet.dart';
-import 'pet_models.dart';
-import 'pet_service.dart';
-import 'pet_view.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/pet/pet_chat_sheet.dart';
+import 'package:tvbox/reading/pet/pet_models.dart';
+import 'package:tvbox/reading/pet/pet_service.dart';
+import 'package:tvbox/reading/pet/pet_view.dart';
 
 /// 桌宠中心：状态 / 喂食 / 换装 / 图鉴。
 class PetCenterPage extends StatefulWidget {

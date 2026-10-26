@@ -16,13 +16,13 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
-import '../../../common/theme.dart';
-import '../../../models/app_config.dart';
-import '../../../services/api_config.dart';
-import '../../../services/parse_service.dart';
-import '../../../services/parse_store.dart';
-import '../../../widgets/common_widgets.dart';
-import 'settings_shared.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/app_config.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/parse_service.dart';
+import 'package:tvbox/services/parse_store.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 
 class ParseSettingsPage extends StatefulWidget {
   const ParseSettingsPage({super.key});

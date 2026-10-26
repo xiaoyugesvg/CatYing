@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../models/comic.dart';
+import 'package:tvbox/reading/models/comic.dart';
 
 /// 收藏服务（本地持久化 via SharedPreferences）
 /// 单例 + ChangeNotifier，UI 用 ListenableBuilder 监听变化。

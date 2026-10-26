@@ -3,9 +3,9 @@ import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../services/background_service.dart';
-import '../services/prefs_mirror.dart';
-import 'theme.dart';
+import 'package:tvbox/services/background_service.dart';
+import 'package:tvbox/services/prefs_mirror.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 全局主题模式：dark / light / system（设置页可改）
 ///

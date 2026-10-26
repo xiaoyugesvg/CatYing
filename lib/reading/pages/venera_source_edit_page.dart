@@ -10,11 +10,11 @@
 //   · 保存写回 `SourceConfigStore` 后 reload，立即生效。
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../source/source_config_store.dart';
-import '../source/source_definition.dart';
-import '../source/source_manager.dart';
-import '../theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/source/source_config_store.dart';
+import 'package:tvbox/reading/source/source_definition.dart';
+import 'package:tvbox/reading/source/source_manager.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
 
 class VeneraSourceEditPage extends StatefulWidget {
   const VeneraSourceEditPage({super.key, required this.definition});

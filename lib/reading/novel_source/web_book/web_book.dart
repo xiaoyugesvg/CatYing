@@ -8,23 +8,23 @@ library;
 
 import 'dart:convert';
 
-import '../novel_block.dart';
-import '../novel_chinese_converter.dart';
-import '../../../services/app_log.dart';
-import '../analyze/analyze_rule.dart';
-import '../analyze/js_engine.dart';
-import '../analyze/analyze_url.dart';
-import '../analyze/cookie_store.dart';
-import '../model/book_source.dart';
-import '../model/search_book.dart';
-import '../model/xiaoshuo_book.dart';
-import '../model/xiaoshuo_book_chapter.dart';
-import 'book_chapter_list.dart';
-import 'book_content.dart';
-import 'book_info.dart';
-import 'book_list.dart';
-import 'web_book_types.dart';
-import 'runner_isolate.dart';
+import 'package:tvbox/reading/novel_source/novel_block.dart';
+import 'package:tvbox/reading/novel_source/novel_chinese_converter.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/reading/novel_source/analyze/analyze_rule.dart';
+import 'package:tvbox/reading/novel_source/analyze/js_engine.dart';
+import 'package:tvbox/reading/novel_source/analyze/analyze_url.dart';
+import 'package:tvbox/reading/novel_source/analyze/cookie_store.dart';
+import 'package:tvbox/reading/novel_source/model/book_source.dart';
+import 'package:tvbox/reading/novel_source/model/search_book.dart';
+import 'package:tvbox/reading/novel_source/model/xiaoshuo_book.dart';
+import 'package:tvbox/reading/novel_source/model/xiaoshuo_book_chapter.dart';
+import 'package:tvbox/reading/novel_source/web_book/book_chapter_list.dart';
+import 'package:tvbox/reading/novel_source/web_book/book_content.dart';
+import 'package:tvbox/reading/novel_source/web_book/book_info.dart';
+import 'package:tvbox/reading/novel_source/web_book/book_list.dart';
+import 'package:tvbox/reading/novel_source/web_book/web_book_types.dart';
+import 'package:tvbox/reading/novel_source/web_book/runner_isolate.dart';
 
 export 'web_book_types.dart';
 

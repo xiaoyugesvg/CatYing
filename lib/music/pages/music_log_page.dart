@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../../common/theme.dart';
-import '../../../services/app_log.dart';
-import '../../../widgets/app_toast.dart';
-import '../theme/music_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
 
 /// 音乐模块的**运行日志查看页**。
 ///

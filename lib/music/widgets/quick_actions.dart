@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
-import 'music_sheet.dart';
+import 'package:tvbox/music/widgets/music_sheet.dart';
 
-import '../models/models.dart';
-import '../services/download_service.dart';
-import '../services/library_store.dart';
-import '../services/player_manager.dart';
-import '../theme/music_theme.dart';
-import '../../common/theme.dart';
-import '../../widgets/app_toast.dart';
-import '../../widgets/video_player_pip.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/services/download_service.dart';
+import 'package:tvbox/music/services/library_store.dart';
+import 'package:tvbox/music/services/player_manager.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/video_player_pip.dart';
 
 /// 音乐模块的**共用快捷动作**：收藏 / 下载 / 历史。
 ///

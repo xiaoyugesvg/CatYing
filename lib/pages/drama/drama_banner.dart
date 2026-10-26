@@ -3,9 +3,9 @@
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../../models/movie.dart';
-import 'drama_entry.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/movie.dart';
+import 'package:tvbox/pages/drama/drama_entry.dart';
 
 /// 短剧页顶部的循环幻灯片。
 ///
@@ -143,7 +143,7 @@ class _DramaBannerState extends State<DramaBanner> {
                   : CachedNetworkImage(
                       imageUrl: v.pic,
                       fit: BoxFit.cover,
-                      errorWidget: (_, __, ___) => Container(
+                      errorBuilder: (_, __, ___) => Container(
                         color: widget.isDark
                             ? Colors.white10
                             : Colors.black.withValues(alpha: 0.06),

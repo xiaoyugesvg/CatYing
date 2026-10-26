@@ -27,7 +27,7 @@ import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../global_proxy.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
 
 const String _kDefaultUa =
     'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '

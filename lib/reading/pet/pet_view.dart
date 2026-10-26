@@ -8,18 +8,18 @@ import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
-import 'pet_models.dart';
-import 'blob_pet_painter.dart';
+import 'package:tvbox/reading/pet/pet_models.dart';
+import 'package:tvbox/reading/pet/blob_pet_painter.dart';
 
 /// 手绘 Q 版桌宠（CustomPainter，无图片素材依赖）。
 ///
-/// 用户 2026-10-25：QQ 企鹅换成**团子兽**（`BlobPetPainter`）——
-/// 大头小身、全圆角、大眼腮红；旧企鹅被评价"太丑"，已删除。
-/// 黑背白肚 + 橙嘴橙脚 + 红围巾，但给了人形比例（大头、短手、会挥手眨眼）。
-/// 旧的「QQ 秀小人类」画笔已删除；换装部位仍复用 `PetOutfitSlot`。
+/// QQ 企鹅（`species.qq`，小Q/小秀/书呆）：整只矢量企鹅——
+/// 圆胖身子 + 大头 + 白肚皮 + 橙嘴橙脚 + 红围巾，配色取自物种 `palette`，
+/// 每帧呼吸/眨眼/摆翅膀。2026-10-26 由上一版的熊猫团子兽改回企鹅，
+/// 去掉了外部 GIF 头依赖。
 ///
 /// 之所以用矢量绘制：宠物要每帧呼吸/眨眼/摆手臂，单张 PNG 做不到；
-/// 人形与生肖头像共用同一套 `PetView` 入口，按 `species.qq` 分派画笔。
+/// 企鹅与生肖头像共用同一套 `PetView` 入口，按 `species.qq` 分派画笔。
 class PetView extends StatelessWidget {
   const PetView({
     super.key,
@@ -67,22 +67,15 @@ class PetView extends StatelessWidget {
     return out;
   }
 
-  /// GIF 熊猫头（用户 2026-10-25 指定：`aigei` 那张 280×280 透明底动图）。
-  ///
-  /// 已随包打到 `assets/images/`（159KB / 24 帧）——
-  /// 不走网络：那条链接是带 token 的临时直链，换签名就 403，而且离线会白屏。
-  static const String gifHead = 'assets/images/pet_panda_head.gif';
-
   @override
   Widget build(BuildContext context) {
     final asset = species.imageAsset;
     if (asset != null && !headOnly) {
       return _buildImagePet(asset);
     }
-    // 熊猫（species.qq）：头用 GIF，身体仍用矢量画 ——
-    // 纯 GIF 只有头，没有身子；纯矢量又被嫌不像熊猫。
+    // QQ 企鹅（species.qq）：整只矢量企鹅（含头/红围巾），不再依赖外部 GIF。
     if (species.qq) {
-      return headOnly ? _gifHeadOnly() : _buildGifPanda();
+      return headOnly ? _buildPenguinHead() : _buildPenguin();
     }
     // 其它物种：保留原来的水墨画笔
     return SizedBox(
@@ -105,22 +98,28 @@ class PetView extends StatelessWidget {
     );
   }
 
-  /// 只显示 GIF 头（列表头像 / 聊天小头像）
-  Widget _gifHeadOnly() {
+  /// 只显示企鹅头（列表头像 / 聊天小头像）
+  Widget _buildPenguinHead() {
     return SizedBox(
       width: size,
       height: size,
-      child: Image.asset(
-        gifHead,
-        fit: BoxFit.contain,
-        gaplessPlayback: true,
-        filterQuality: FilterQuality.medium,
+      child: RepaintBoundary(
+        child: CustomPaint(
+          painter: BlobPetPainter(
+            species: species,
+            outfits: _equipped,
+            t: t,
+            mood: mood,
+            headOnly: true,
+            animate: true,
+          ),
+        ),
       ),
     );
   }
 
-  /// 全身：矢量身体（无头）+ GIF 头，整只做同一个呼吸/浮动/摇摆
-  Widget _buildGifPanda() {
+  /// 全身：整只矢量企鹅，外层做呼吸/浮动/摇摆（与画笔内部 animate 二选一）。
+  Widget _buildPenguin() {
     final cycle = t * 2 * math.pi;
     final s = size / 100.0;
     final bob = math.sin(cycle) * 1.7 * s;
@@ -136,35 +135,16 @@ class PetView extends StatelessWidget {
             angle: sway,
             child: Transform.scale(
               scale: breathe,
-              child: Stack(
-                children: [
-                  CustomPaint(
-                    size: Size.square(size),
-                    painter: BlobPetPainter(
-                      species: species,
-                      outfits: _equipped,
-                      t: t,
-                      mood: mood,
-                      drawHead: false,
-                      animate: false,
-                    ),
-                  ),
-                  // GIF 头的位置由动图本身的留白反推：
-                  //   bbox ≈ (1%,8%)–(90%,90%) ⇒ 按头宽 52 单位反推整图 58 单位，
-                  //   left 0.236 / top 0.075 / 边长 0.58。
-                  Positioned(
-                    left: size * 0.236,
-                    top: size * 0.075,
-                    width: size * 0.58,
-                    height: size * 0.58,
-                    child: Image.asset(
-                      gifHead,
-                      fit: BoxFit.contain,
-                      gaplessPlayback: true,
-                      filterQuality: FilterQuality.medium,
-                    ),
-                  ),
-                ],
+              child: CustomPaint(
+                size: Size.square(size),
+                painter: BlobPetPainter(
+                  species: species,
+                  outfits: _equipped,
+                  t: t,
+                  mood: mood,
+                  drawHead: true,
+                  animate: false,
+                ),
               ),
             ),
           ),

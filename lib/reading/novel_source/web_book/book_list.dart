@@ -6,12 +6,12 @@ import 'dart:collection';
 
 import 'package:html/parser.dart' as html_parser;
 
-import '../../../services/app_log.dart';
-import '../../utils/html_text.dart';
-import '../analyze/analyze_rule.dart';
-import '../model/book_source.dart';
-import '../model/search_book.dart';
-import '../model/xiaoshuo_book.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/reading/utils/html_text.dart';
+import 'package:tvbox/reading/novel_source/analyze/analyze_rule.dart';
+import 'package:tvbox/reading/novel_source/model/book_source.dart';
+import 'package:tvbox/reading/novel_source/model/search_book.dart';
+import 'package:tvbox/reading/novel_source/model/xiaoshuo_book.dart';
 
 class BookList {
   static String _currentCategoryName = '';
@@ -195,7 +195,13 @@ class BookList {
       if (reverse) {
         books = books.reversed.toList();
       }
-    } catch (_) {}
+    } catch (e) {
+      // 整页列表解析失败 → 用户看到"搜不到书"。这条必须落盘，
+      // 否则和"源确实没结果"在界面上完全无法区分。
+      AppLog.instance.w(
+        '[书源列表] 解析失败：源=${bookSource.bookSourceName} → $e',
+      );
+    }
 
     if (books.isEmpty) {
       return _parseGenericBookList(body, bookSource, baseUrl);

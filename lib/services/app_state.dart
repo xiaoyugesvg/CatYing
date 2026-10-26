@@ -1,17 +1,17 @@
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:get/get.dart';
-import '../models/source_bean.dart';
-import 'api_config.dart';
-import 'ad_filter_service.dart';
-import 'app_log.dart';
-import 'nodejs_manager.dart';
-import 'local_python_sources.dart';
-import 'python_manager.dart';
-import 'python_script_sources.dart';
-import 'python_sources_service.dart';
-import 'scene_recovery.dart';
-import 'spider_service.dart';
+import 'package:tvbox/models/source_bean.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/ad_filter_service.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/nodejs_manager.dart';
+import 'package:tvbox/services/local_python_sources.dart';
+import 'package:tvbox/services/python_manager.dart';
+import 'package:tvbox/services/python_script_sources.dart';
+import 'package:tvbox/services/python_sources_service.dart';
+import 'package:tvbox/services/scene_recovery.dart';
+import 'package:tvbox/services/spider_service.dart';
 
 /// 加载阶段 - 对应 Swift LoadingPhase
 enum LoadingPhase {

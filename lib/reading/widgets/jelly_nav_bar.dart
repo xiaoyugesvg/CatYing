@@ -1,10 +1,10 @@
 ﻿import 'dart:io';
 
 import 'package:flutter/material.dart';
-import '../../common/floating_nav_spec.dart';
-import '../services/settings_service.dart';
-import '../theme/jelly_palette.dart';
-import '../theme/jelly_theme.dart';
+import 'package:tvbox/common/floating_nav_spec.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/theme/jelly_palette.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
 
 /// 果冻风格底部导航栏（支持悬浮胶囊样式，果冻弹性指示器）
 class JellyNavBar extends StatefulWidget {

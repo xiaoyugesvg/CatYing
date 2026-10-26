@@ -17,13 +17,13 @@ import 'package:flutter/foundation.dart';
 import 'package:html/dom.dart';
 import 'package:html/parser.dart';
 
-import 'manga_source.dart';
-import 'models.dart';
-import 'cover_cache.dart';
-import 'site_config.dart';
-import 'webview_image_fetcher.dart';
+import 'package:tvbox/reading/source/manga_source.dart';
+import 'package:tvbox/reading/source/models.dart';
+import 'package:tvbox/reading/source/cover_cache.dart';
+import 'package:tvbox/reading/source/site_config.dart';
+import 'package:tvbox/reading/source/webview_image_fetcher.dart';
 import 'package:gbk_codec/gbk_codec.dart';
-import '../services/settings_service.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
 
 /// 配置源不支持搜索时抛出（UI 提示用 URL 兜底入口）。
 class UnsupportedSearchError implements Exception {

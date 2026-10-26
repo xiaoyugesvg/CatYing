@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../models/trim_preset.dart';
-import '../services/trim_preset_service.dart';
-import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/models/trim_preset.dart';
+import 'package:tvbox/reading/services/trim_preset_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 预设管理弹窗
 ///

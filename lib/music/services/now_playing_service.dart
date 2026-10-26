@@ -4,8 +4,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-import '../../services/app_log.dart';
-import 'player_manager.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/music/services/player_manager.dart';
 
 /// **锁屏 / 控制中心 / 耳机按键** 的系统媒体控制接入。
 ///

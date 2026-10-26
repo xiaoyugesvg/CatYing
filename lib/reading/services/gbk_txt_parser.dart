@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:isolate';
 import 'dart:typed_data';
 
-import '../models/book_content.dart';
-import 'book_parser.dart';
+import 'package:tvbox/reading/models/book_content.dart';
+import 'package:tvbox/reading/services/book_parser.dart';
 
 /// 在常驻后台 isolate 中解析 TXT。
 ///

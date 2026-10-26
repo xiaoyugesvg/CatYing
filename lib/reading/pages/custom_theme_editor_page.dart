@@ -3,12 +3,12 @@ import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import '../services/settings_service.dart';
-import '../theme/jelly_palette.dart';
-import '../theme/jelly_theme.dart';
-import '../theme/theme_background_painters.dart';
-import '../widgets/color_picker_dialog.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/theme/jelly_palette.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/theme/theme_background_painters.dart';
+import 'package:tvbox/reading/widgets/color_picker_dialog.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 自定义主题编辑页：命名 + 选基底预设 + 全量 18 色逐项调色 + 保存。
 ///

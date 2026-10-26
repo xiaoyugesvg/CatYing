@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import '../models/comic.dart';
-import '../source/source_manager.dart';
-import '../theme/jelly_theme.dart';
-import 'jelly_favorite_button.dart';
-import 'jelly_score_badge.dart';
-import 'source_cover_image.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/models/comic.dart';
+import 'package:tvbox/reading/source/source_manager.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/widgets/jelly_favorite_button.dart';
+import 'package:tvbox/reading/widgets/jelly_score_badge.dart';
+import 'package:tvbox/reading/widgets/source_cover_image.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 果冻风漫画列表项（横向：封面 + 信息，用于列表视图）
 class JellyComicListTile extends StatefulWidget {
@@ -177,7 +177,7 @@ class _JellyComicListTileState extends State<JellyComicListTile>
                             ),
                           ),
                         ),
-                        errorWidget: (context, url, error) => ColoredBox(
+                        errorBuilder: (context, url, error) => ColoredBox(
                           color: isDark
                               ? JellyTheme.cardDark
                               : JellyTheme.cardLight,

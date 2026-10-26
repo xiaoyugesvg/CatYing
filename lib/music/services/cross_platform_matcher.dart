@@ -2,9 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
-import '../../services/app_log.dart';
-import '../models/models.dart';
-import 'music_api.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/services/music_api.dart';
 
 /// 一次跨平台匹配的候选（含"为什么选它"的依据，便于排错与展示）
 class CrossPlatformMatch {

@@ -20,8 +20,8 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/app_config.dart';
-import 'app_log.dart';
+import 'package:tvbox/models/app_config.dart';
+import 'package:tvbox/services/app_log.dart';
 
 class ParseStore {
   ParseStore._();

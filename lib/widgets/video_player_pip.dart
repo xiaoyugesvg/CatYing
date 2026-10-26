@@ -1,8 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import '../services/app_log.dart';
+import 'package:tvbox/services/app_log.dart';
 import 'package:flutter/services.dart';
-import 'app_player.dart';
+import 'package:tvbox/widgets/app_player.dart';
 import 'package:window_manager/window_manager.dart';
 
 /// 画中画管理器

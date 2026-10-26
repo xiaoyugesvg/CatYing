@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../common/theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// **可伸长的搜索框** —— iOS 风格：收起时是个 44 圆钮，点一下展开成胶囊输入框。
 ///

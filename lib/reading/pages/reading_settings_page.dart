@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import '../services/settings_service.dart';
-import '../theme/jelly_theme.dart';
-import '../widgets/jelly_mode_picker.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/widgets/jelly_mode_picker.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 漫画阅读模式分段选项顺序（对齐参考图 IMG_8567 的 5 段 chips：
 /// 右左 / 左右 / 消散 / 无动画 / 拼页；枚举末尾保持旧持久化 index 不变）
@@ -280,7 +280,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
           ),
           Switch(
             value: s.inkScreenMode,
-            activeColor: JellyTheme.primary,
+            activeThumbColor: JellyTheme.primary,
             onChanged: (v) => s.setInkScreenMode(v),
           ),
         ],
@@ -620,7 +620,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
           ),
           Switch(
             value: s.reverseTap,
-            activeColor: JellyTheme.primary,
+            activeThumbColor: JellyTheme.primary,
             onChanged: (v) => s.setReverseTap(v),
           ),
         ],
@@ -667,7 +667,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
           ),
           Switch(
             value: s.doublePage,
-            activeColor: JellyTheme.primary,
+            activeThumbColor: JellyTheme.primary,
             onChanged: (v) => s.setDoublePage(v),
           ),
         ],
@@ -714,7 +714,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
           ),
           Switch(
             value: s.showReaderHud,
-            activeColor: JellyTheme.primary,
+            activeThumbColor: JellyTheme.primary,
             onChanged: (v) => s.setShowReaderHud(v),
           ),
         ],
@@ -761,7 +761,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
           ),
           Switch(
             value: s.volumeKeyTurn,
-            activeColor: JellyTheme.primary,
+            activeThumbColor: JellyTheme.primary,
             onChanged: (v) => s.setVolumeKeyTurn(v),
           ),
         ],

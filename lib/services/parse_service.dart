@@ -5,14 +5,14 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
-import '../common/constants.dart';
-import '../models/app_config.dart';
-import 'api_config.dart';
-import 'app_log.dart';
-import 'parse_store.dart';
-import 'play_route.dart';
-import 'player_prefs.dart';
-import 'sniff_filter.dart';
+import 'package:tvbox/common/constants.dart';
+import 'package:tvbox/models/app_config.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/parse_store.dart';
+import 'package:tvbox/services/play_route.dart';
+import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/services/sniff_filter.dart';
 
 /// 解析结果：url 为解析得到的地址；direct 表示是否已是可直链播放的媒体。
 class ParseOutcome {

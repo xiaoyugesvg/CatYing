@@ -27,7 +27,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
-import '../reading/source/global_proxy.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
 
 class MediaProxyService {
   MediaProxyService._();

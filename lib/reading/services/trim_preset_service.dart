@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/trim_preset.dart';
+import 'package:tvbox/reading/models/trim_preset.dart';
 
 /// 去白边预设管理服务
 ///

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../theme/jelly_theme.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
 
 /// 标题右侧的「拉绳」图标（一根竖线 + 底部一个小圆环）。
 ///

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../services/reading_layout.dart';
-import '../theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/services/reading_layout.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
 
 /// 阅读模块统一的**视图切换按钮**（漫画 / 图书 / 书源 共用）。
 ///

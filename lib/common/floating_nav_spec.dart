@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../reading/theme/jelly_palette.dart';
+import 'package:tvbox/reading/theme/jelly_palette.dart';
 
 /// 全 App 悬浮菜单栏的**统一视觉规格**。
 ///

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../../widgets/common_widgets.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 剧集列表组件 - 对应 Swift EpisodeListView
 /// **2026-09-26 UI 重构（对照参考图）**：

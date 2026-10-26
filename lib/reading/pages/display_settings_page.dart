@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
-import '../services/book_view_mode.dart';
-import '../pet/pet_center_page.dart';
-import '../pet/pet_service.dart';
-import '../services/reading_layout.dart';
-import '../services/settings_service.dart';
-import '../services/view_mode.dart';
-import '../theme/jelly_theme.dart';
-import '../widgets/bookshelf_icon.dart';
-import '../widgets/jelly_segmented_toggle.dart';
-import '../widgets/reading_view_toggle.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/services/book_view_mode.dart';
+import 'package:tvbox/reading/pet/pet_center_page.dart';
+import 'package:tvbox/reading/pet/pet_service.dart';
+import 'package:tvbox/reading/services/reading_layout.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/services/view_mode.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/widgets/bookshelf_icon.dart';
+import 'package:tvbox/reading/widgets/jelly_segmented_toggle.dart';
+import 'package:tvbox/reading/widgets/reading_view_toggle.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 显示设置页：漫画/图书搜索页视图 + 启动默认首页。
 /// 与搜索页右上角的视图切换共用 ViewMode / BookViewMode，二者同步并持久化。
@@ -293,7 +293,7 @@ class _DisplaySettingsPageState extends State<DisplaySettingsPage> {
       trailing: Switch(
         value: s.navFloating,
         onChanged: (v) => s.setNavFloating(v),
-        activeColor: JellyTheme.primary,
+        activeThumbColor: JellyTheme.primary,
       ),
     );
   }
@@ -413,7 +413,7 @@ class _DisplaySettingsPageState extends State<DisplaySettingsPage> {
       trailing: Switch(
         value: s.pageTabsFollowNav,
         onChanged: (v) => s.setPageTabsFollowNav(v),
-        activeColor: JellyTheme.primary,
+        activeThumbColor: JellyTheme.primary,
       ),
     );
   }
@@ -464,7 +464,7 @@ class _DisplaySettingsPageState extends State<DisplaySettingsPage> {
           Switch(
             value: value,
             onChanged: disabled ? null : onChanged,
-            activeColor: JellyTheme.primary,
+            activeThumbColor: JellyTheme.primary,
           ),
         ],
       ),

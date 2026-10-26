@@ -3,12 +3,12 @@ import 'dart:math';
 
 import 'package:dio/dio.dart';
 import 'package:get/get.dart';
-import 'app_log.dart';
-import '../models/cache_store.dart';
-import '../models/cache_ttl.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/models/cache_store.dart';
+import 'package:tvbox/models/cache_ttl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/vod_info.dart';
+import 'package:tvbox/models/vod_info.dart';
 
 /// TMDB 智能刮削：搜索匹配 → 拉详情/演职员 → 回填 VodInfo
 class TmdbService extends GetxService {
@@ -26,8 +26,26 @@ class TmdbService extends GetxService {
   static const _base = 'https://api.themoviedb.org/3';
   static const _img = 'https://image.tmdb.org/t/p';
 
-  /// 内置默认 Key（用户提供；设置页未填写时自动生效，填写则覆盖）
-  static const _defaultApiKey = '6d6be1a1b3ab89a859e188abc279760a';
+  /// 默认 API Key —— **仓库内不再保留任何明文 Key**。
+  ///
+  /// ── 🔴 安全说明（2026-10-26 代码复核）──────────────────────────
+  /// 原来这里写死了一个公开 TMDB Key（可被反编译提取，任何人 fork 都能消耗
+  /// 你的配额，且无法单独吊销）。**按复核结论，已彻底移除内置明文 Key**：
+  /// 现在 `_defaultApiKeyLiteral` 为空 → 默认 `apiKey` 为空 → `configured`
+  /// 为 false → TMDB 相关功能默认关闭，直到以下任一方式注入：
+  ///
+  ///   · 构建期 `--dart-define=TMDB_API_KEY=xxx`（CI / 自有专属 Key，推荐）；
+  ///   · 用户在「设置 → TMDB」里手动填写自己的 Key（优先级最高）。
+  ///
+  /// 建议后续（需要服务端）：把 TMDB 请求收敛到你自己的中转服务，客户端只持有
+  /// 中转地址，Key 留在服务端。当前 `apiProxy` 已支持填代理地址，具备落地条件。
+  static const _defaultApiKeyLiteral = '';
+
+  /// 构建期注入优先；没注入则为空字符串（功能默认关闭，等用户自填）。
+  static const _defaultApiKey = String.fromEnvironment(
+    'TMDB_API_KEY',
+    defaultValue: _defaultApiKeyLiteral,
+  );
 
   /// 总开关（关掉后完全不走 TMDB）
   final enabled = true.obs;

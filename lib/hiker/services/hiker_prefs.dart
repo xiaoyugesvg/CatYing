@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../services/app_log.dart';
+import 'package:tvbox/services/app_log.dart';
 
 /// 「海阔」模块自己的偏好设置（独立键前缀，不碰其它模块）。
 ///

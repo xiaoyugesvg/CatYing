@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../models/models.dart';
-import '../services/player_manager.dart';
-import '../services/settings_store.dart';
-import '../theme/music_theme.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/services/player_manager.dart';
+import 'package:tvbox/music/services/settings_store.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 播放设置面板（Beans 的播放设置/个性化外观的合并入口）。
 ///

@@ -19,10 +19,10 @@ import 'package:flutter/foundation.dart';
 import 'package:html/dom.dart';
 import 'package:html/parser.dart';
 
-import 'manga_source.dart';
-import 'manhuaren_config.dart';
-import 'models.dart';
-import 'global_proxy.dart';
+import 'package:tvbox/reading/source/manga_source.dart';
+import 'package:tvbox/reading/source/manhuaren_config.dart';
+import 'package:tvbox/reading/source/models.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
 
 void _log(String message) {
   if (kDebugMode) {

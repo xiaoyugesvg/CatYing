@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:tvbox/services/app_log.dart';
+
 /// 一个已导入的自定义字体。
 class ReaderFont {
   const ReaderFont({
@@ -418,7 +420,11 @@ class ReaderFontService {
         ..addFont(Future.value(ByteData.sublistView(Uint8List.fromList(bytes))));
       await loader.load();
       _registered.add(f.family);
-    } catch (_) {}
+    } catch (e) {
+      // 字体注册失败 → 阅读器里选了这套字却静默回落默认字体。
+      // 用户只会说"选了这个字体没反应"，没有这条日志完全无从判断。
+      AppLog.instance.w('[阅读字体] 注册失败，将回落默认字体: ${f.family} → $e');
+    }
   }
 
   /// 导入字体字节（ttf / otf / ttc）。成功返回 [ReaderFont]，失败返回 null。

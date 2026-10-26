@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
-import '../widgets/music_sheet.dart';
+import 'package:tvbox/music/widgets/music_sheet.dart';
 
-import '../models/models.dart';
-import '../services/library_store.dart';
-import '../services/player_manager.dart';
-import '../theme/music_theme.dart';
-import '../../common/theme.dart';
-import '../../widgets/app_toast.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/services/library_store.dart';
+import 'package:tvbox/music/services/player_manager.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/app_toast.dart';
 
 /// 歌单编辑（本地歌单，**不需要账号**）。
 ///

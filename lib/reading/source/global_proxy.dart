@@ -8,7 +8,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 
-import '../services/settings_service.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
 
 /// 把全局代理应用到 [dio]（开启且地址合法时才生效）。
 /// 返回是否已应用代理。

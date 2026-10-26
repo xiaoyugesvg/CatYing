@@ -22,11 +22,11 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
-import '../common/constants.dart';
-import '../reading/source/global_proxy.dart';
-import 'app_log.dart';
-import 'sniff_filter.dart';
-import 'webview_fetch_service.dart';
+import 'package:tvbox/common/constants.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/sniff_filter.dart';
+import 'package:tvbox/services/webview_fetch_service.dart';
 
 class WebSniffService {
   WebSniffService._();

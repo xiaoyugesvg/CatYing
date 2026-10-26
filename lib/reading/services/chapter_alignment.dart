@@ -12,7 +12,7 @@
 /// 只做定位，不改任何书源/目录数据。
 library;
 
-import '../utils/text_match.dart';
+import 'package:tvbox/reading/utils/text_match.dart';
 
 /// 对齐结果。
 class ChapterAlignment {

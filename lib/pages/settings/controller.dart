@@ -1,15 +1,15 @@
 import 'package:get/get.dart';
-import '../../services/app_log.dart';
-import '../../services/prefs_mirror.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/prefs_mirror.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../models/player_engine.dart';
-import '../../services/player_prefs.dart';
-import '../../services/api_config.dart';
-import '../../services/app_state.dart';
-import '../../services/nodejs_manager.dart';
-import '../../common/constants.dart';
-import '../../models/cache_store.dart';
-import '../../services/cache_manager_service.dart';
+import 'package:tvbox/models/player_engine.dart';
+import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/app_state.dart';
+import 'package:tvbox/services/nodejs_manager.dart';
+import 'package:tvbox/common/constants.dart';
+import 'package:tvbox/models/cache_store.dart';
+import 'package:tvbox/services/cache_manager_service.dart';
 
 enum PendingMultiRepoTarget { vod }
 

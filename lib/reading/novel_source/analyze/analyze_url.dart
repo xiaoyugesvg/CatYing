@@ -10,16 +10,16 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:fast_gbk/fast_gbk.dart';
-import '../../../services/app_log.dart';
-import 'analyze_rule.dart';
-import 'source_rate_limiter.dart';
-import 'sync_http_bridge.dart';
-import 'browser_faithful_adapter.dart';
-import 'verification_exception.dart';
-import 'source_variable_store.dart';
-import '../model/xiaoshuo_book.dart';
-import '../model/xiaoshuo_book_chapter.dart';
-import '../model/book_source.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/reading/novel_source/analyze/analyze_rule.dart';
+import 'package:tvbox/reading/novel_source/analyze/source_rate_limiter.dart';
+import 'package:tvbox/reading/novel_source/analyze/sync_http_bridge.dart';
+import 'package:tvbox/reading/novel_source/analyze/browser_faithful_adapter.dart';
+import 'package:tvbox/reading/novel_source/analyze/verification_exception.dart';
+import 'package:tvbox/reading/novel_source/analyze/source_variable_store.dart';
+import 'package:tvbox/reading/novel_source/model/xiaoshuo_book.dart';
+import 'package:tvbox/reading/novel_source/model/xiaoshuo_book_chapter.dart';
+import 'package:tvbox/reading/novel_source/model/book_source.dart';
 
 /// 默认 UA（无源 UA / 全局 UA 注册时的兜底）。
 const String _kDefaultUa =

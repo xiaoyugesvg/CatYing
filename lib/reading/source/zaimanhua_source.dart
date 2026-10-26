@@ -1,10 +1,10 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'models.dart';
-import 'manga_source.dart';
-import 'zaimanhua_config.dart';
-import 'global_proxy.dart';
-import '../utils/safe_num.dart';
+import 'package:tvbox/reading/source/models.dart';
+import 'package:tvbox/reading/source/manga_source.dart';
+import 'package:tvbox/reading/source/zaimanhua_config.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/reading/utils/safe_num.dart';
 
 void _log(String message) {
   if (kDebugMode) {

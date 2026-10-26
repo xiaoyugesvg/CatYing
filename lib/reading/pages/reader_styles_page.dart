@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../models/reader_style.dart';
-import '../services/reader_style_store.dart';
-import 'reader_style_visual_page.dart';
+import 'package:tvbox/reading/models/reader_style.dart';
+import 'package:tvbox/reading/services/reader_style_store.dart';
+import 'package:tvbox/reading/pages/reader_style_visual_page.dart';
 
 /// 「阅读样式」库：内置样式 + 我的样式 + 管理（复制/编辑/删除/排序）。
 ///

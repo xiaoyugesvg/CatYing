@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import '../../common/theme.dart';
-import '../../models/movie.dart';
-import '../../services/player_prefs.dart';
-import '../../widgets/common_widgets.dart';
-import '../../widgets/vod_card.dart';
-import '../../models/cache_store.dart';
-import '../shelf/controller.dart';
-import 'controller.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/movie.dart';
+import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/widgets/vod_card.dart';
+import 'package:tvbox/models/cache_store.dart';
+import 'package:tvbox/pages/shelf/controller.dart';
+import 'package:tvbox/pages/history/controller.dart';
 
 /// 「史藏」父页用它做「全选」：当前搜索过滤后可见项的 key 列表。
 ///

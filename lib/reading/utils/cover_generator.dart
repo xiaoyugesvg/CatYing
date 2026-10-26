@@ -3,7 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
-import '../theme/jelly_theme.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
 
 /// 生成默认封面图（PNG），供无内嵌封面的本地书（如 txt）使用。
 class CoverGenerator {

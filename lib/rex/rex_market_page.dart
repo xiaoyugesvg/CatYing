@@ -2,13 +2,13 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
-import '../common/theme.dart';
-import '../reading/pages/book_source_qr_scan_page.dart';
-import '../services/player_prefs.dart';
-import '../widgets/app_toast.dart';
-import 'rex_layout_sheet.dart';
-import 'rex_models.dart';
-import 'rex_service.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/pages/book_source_qr_scan_page.dart';
+import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/rex/rex_layout_sheet.dart';
+import 'package:tvbox/rex/rex_models.dart';
+import 'package:tvbox/rex/rex_service.dart';
 
 /// 「REX 市场」——把 `.rex` 集合当成小程序市场来浏览。
 ///
@@ -770,7 +770,7 @@ class _RexMarketPageState extends State<RexMarketPage> {
                   : CachedNetworkImage(
                       imageUrl: col.icon,
                       fit: BoxFit.cover,
-                      errorWidget: (_, __, ___) => _iconFallback(),
+                      errorBuilder: (_, __, ___) => _iconFallback(),
                     ),
             ),
           ),

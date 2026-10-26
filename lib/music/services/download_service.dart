@@ -7,10 +7,10 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/models.dart';
-import 'music_api.dart';
-import 'settings_store.dart';
-import '../../services/app_log.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/services/music_api.dart';
+import 'package:tvbox/music/services/settings_store.dart';
+import 'package:tvbox/services/app_log.dart';
 
 /// 下载状态
 enum MusicDownloadStatus { queued, downloading, done, failed }

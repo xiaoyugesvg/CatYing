@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import '../theme/jelly_theme.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
 // 这里的 constants 已改名 CmbokConstants（原 AppConstants），
 // 不再与 common/constants.dart 的 AppConstants 冲突，所以**不需要前缀**了。
-import '../utils/constants.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/utils/constants.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 关于页面：顶部应用图标+名称+版本，下方免责声明
 /// （GitHub / QQ群 在「我的」页底部快捷区）

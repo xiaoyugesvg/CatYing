@@ -1,18 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../../../common/module_theme_store.dart';
-import '../../../common/module_theme_sync.dart';
-import '../../../common/theme.dart';
-import '../../../common/theme_mode_store.dart';
-import '../../../services/background_service.dart';
-import '../../../reading/services/settings_service.dart';
-import '../../../reading/theme/jelly_palette.dart';
-import '../wallpaper_page.dart';
-import 'settings_shared.dart';
-import '../../../widgets/app_toast.dart';
-import '../../../widgets/common_widgets.dart';
-import '../../../widgets/theme_preset_row.dart';
+import 'package:tvbox/common/module_theme_store.dart';
+import 'package:tvbox/common/module_theme_sync.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/common/theme_mode_store.dart';
+import 'package:tvbox/services/background_service.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/theme/jelly_palette.dart';
+import 'package:tvbox/pages/settings/wallpaper_page.dart';
+import 'package:tvbox/pages/settings/sub/settings_shared.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/widgets/theme_preset_row.dart';
 
 /// 统一主题设置 —— 一个页面里分别调**影视/直播、音乐、阅读**的风格。
 ///

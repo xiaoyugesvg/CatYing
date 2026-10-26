@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../common/theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 启动加载：圆形进度环 + 中心 Logo + 百分比
 class CircularLogoProgress extends StatelessWidget {

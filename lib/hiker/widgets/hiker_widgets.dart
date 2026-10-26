@@ -1,10 +1,10 @@
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../models/hiker_source.dart';
-import '../services/hiker_prefs.dart';
-import 'hiker_richtext.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/hiker/models/hiker_source.dart';
+import 'package:tvbox/hiker/services/hiker_prefs.dart';
+import 'package:tvbox/hiker/widgets/hiker_richtext.dart';
 
 /// 海阔条目的网格卡片（主页 / 搜索页 / 收藏共用一套，避免三处各写一遍）
 class HikerCard extends StatelessWidget {

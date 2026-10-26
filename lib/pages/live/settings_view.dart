@@ -4,11 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../common/theme.dart';
-import 'blocked_categories_page.dart';
-import '../../services/live_service.dart';
-import '../../services/xtream_service.dart';
-import '../../widgets/app_toast.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/pages/live/blocked_categories_page.dart';
+import 'package:tvbox/services/live_service.dart';
+import 'package:tvbox/services/xtream_service.dart';
+import 'package:tvbox/widgets/app_toast.dart';
 
 /// 设置 → 直播：直播源管理 + 全局 EPG + 屏蔽分类
 class LiveSettingsPage extends StatefulWidget {
@@ -294,7 +294,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
                     buildDefaultDragHandles: false,
-                    onReorder: svc.reorderSource,
+                    onReorderItem: svc.reorderSource,
                     children: [
                       for (var i = 0; i < srcs.length; i++)
                         _sourceTile(

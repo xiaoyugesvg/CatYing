@@ -1,4 +1,4 @@
-import '../utils/safe_num.dart';
+import 'package:tvbox/reading/utils/safe_num.dart';
 
 /// 图书分类项（对应 z-library /category/glm_5.2_ark_toC/{slug} 路由）。
 ///

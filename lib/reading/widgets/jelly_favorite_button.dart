@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import '../models/comic.dart';
-import '../services/favorites_service.dart';
-import '../theme/jelly_theme.dart';
+import 'package:tvbox/reading/models/comic.dart';
+import 'package:tvbox/reading/services/favorites_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
 
 /// 收藏按钮（心形，点击切换收藏；带缩放动画）
 /// 样式与图书卡片 [JellyBookCard] 内的收藏按钮一致：

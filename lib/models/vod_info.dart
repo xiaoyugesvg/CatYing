@@ -1,4 +1,4 @@
-import 'movie.dart';
+import 'package:tvbox/models/movie.dart';
 
 /// TMDB 演职人员条目（刮削增强：带头像与角色名）
 class VodCastMember {

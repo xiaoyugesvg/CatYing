@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/tts_source.dart';
+import 'package:tvbox/reading/models/tts_source.dart';
 
 /// 朗读源仓库。
 ///

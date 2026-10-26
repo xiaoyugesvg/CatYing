@@ -1,20 +1,20 @@
 ﻿import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../../models/movie.dart';
-import '../../models/movie_sort.dart';
-import '../../models/source_bean.dart';
-import '../../services/api_config.dart';
-import '../../services/source_service.dart';
-import '../../widgets/app_toast.dart';
-import 'drama_banner.dart';
-import 'drama_entry.dart';
-import 'drama_history_page.dart';
-import 'drama_manage_page.dart';
-import 'drama_search_page.dart';
-import 'drama_settings.dart';
-import 'drama_source_sheet.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/movie.dart';
+import 'package:tvbox/models/movie_sort.dart';
+import 'package:tvbox/models/source_bean.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/source_service.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/pages/drama/drama_banner.dart';
+import 'package:tvbox/pages/drama/drama_entry.dart';
+import 'package:tvbox/pages/drama/drama_history_page.dart';
+import 'package:tvbox/pages/drama/drama_manage_page.dart';
+import 'package:tvbox/pages/drama/drama_search_page.dart';
+import 'package:tvbox/pages/drama/drama_settings.dart';
+import 'package:tvbox/pages/drama/drama_source_sheet.dart';
 
 /// 「短剧」分类页（2026-10-22）。
 ///
@@ -683,7 +683,7 @@ class _DramaPageState extends State<DramaPage> {
                                       : null,
                                   colorBlendMode:
                                       dim ? BlendMode.darken : null,
-                                  errorWidget: (_, __, ___) => isBack
+                                  errorBuilder: (_, __, ___) => isBack
                                       ? const SizedBox.shrink()
                                       : _ph(isDark),
                                 );

@@ -1,8 +1,8 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 
-import 'jelly_palette.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/theme/jelly_palette.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 果冻风主题配置
 ///

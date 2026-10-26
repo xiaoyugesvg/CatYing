@@ -24,17 +24,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../common/theme.dart';
-import '../../reading/pages/book_source_qr_scan_page.dart';
-import '../../reading/source/global_proxy.dart';
-import '../../widgets/app_toast.dart';
-import '../../widgets/card_action_sheet.dart';
-import '../../widgets/common_widgets.dart';
-import '../models/rss_source.dart';
-import '../services/rss_reader.dart';
-import '../services/rss_extra.dart';
-import '../services/rss_store.dart';
-import 'rss_source_edit_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/pages/book_source_qr_scan_page.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/card_action_sheet.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/rss/models/rss_source.dart';
+import 'package:tvbox/rss/services/rss_reader.dart';
+import 'package:tvbox/rss/services/rss_extra.dart';
+import 'package:tvbox/rss/services/rss_store.dart';
+import 'package:tvbox/rss/pages/rss_source_edit_page.dart';
 
 /// 列表展示方式（与书源仓 / 漫源仓库同款：列表 / 一行两个）
 ///

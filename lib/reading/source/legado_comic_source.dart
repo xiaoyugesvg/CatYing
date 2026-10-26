@@ -15,18 +15,18 @@ import 'dart:convert';
 
 import 'package:html/parser.dart' as html_parser;
 
-import 'models.dart';
-import '../novel_source/analyze/analyze_rule.dart';
-import '../novel_source/analyze/analyze_url.dart';
-import '../novel_source/analyze/cookie_store.dart';
-import '../novel_source/analyze/js_engine.dart';
-import '../novel_source/model/book_source.dart';
-import '../novel_source/model/search_book.dart';
-import '../novel_source/model/xiaoshuo_book.dart';
-import '../novel_source/model/xiaoshuo_book_chapter.dart';
-import '../novel_source/web_book/web_book.dart';
-import '../utils/html_text.dart';
-import 'manga_source.dart';
+import 'package:tvbox/reading/source/models.dart';
+import 'package:tvbox/reading/novel_source/analyze/analyze_rule.dart';
+import 'package:tvbox/reading/novel_source/analyze/analyze_url.dart';
+import 'package:tvbox/reading/novel_source/analyze/cookie_store.dart';
+import 'package:tvbox/reading/novel_source/analyze/js_engine.dart';
+import 'package:tvbox/reading/novel_source/model/book_source.dart';
+import 'package:tvbox/reading/novel_source/model/search_book.dart';
+import 'package:tvbox/reading/novel_source/model/xiaoshuo_book.dart';
+import 'package:tvbox/reading/novel_source/model/xiaoshuo_book_chapter.dart';
+import 'package:tvbox/reading/novel_source/web_book/web_book.dart';
+import 'package:tvbox/reading/utils/html_text.dart';
+import 'package:tvbox/reading/source/manga_source.dart';
 
 /// 老式「扁平」Legado 规则（`ruleChapterList` / `ruleBookContent` / …）
 /// → 新式嵌套规则（`ruleToc.chapterList` / `ruleContent.content` / …）。

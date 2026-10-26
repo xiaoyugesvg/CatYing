@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../common/theme.dart';
-import '../services/main_tab_controller.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/main_tab_controller.dart';
 
 /// 主题预设行 —— **与阅读模块「主题风格」面板同款**：三色点 + 名称 + 右侧单选圈。
 ///

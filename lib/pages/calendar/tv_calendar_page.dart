@@ -5,12 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../common/theme.dart';
-import '../../services/calendar_feed_service.dart';
-import '../../services/tmdb_service.dart';
-import '../../services/trakt_service.dart';
-import '../settings/sub/calendar_settings_page.dart';
-import '../webview/view.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/calendar_feed_service.dart';
+import 'package:tvbox/services/tmdb_service.dart';
+import 'package:tvbox/services/trakt_service.dart';
+import 'package:tvbox/pages/settings/sub/calendar_settings_page.dart';
+import 'package:tvbox/pages/webview/view.dart';
 
 /// 「追剧日历」—— 首页右上角日历入口。
 ///
@@ -584,7 +584,7 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
                       fit: BoxFit.cover,
                       placeholder: (_, _) =>
                           Container(color: AppTheme.backgroundSecondary),
-                      errorWidget: (_, _, _) => Container(
+                      errorBuilder: (_, _, _) => Container(
                         color: AppTheme.backgroundSecondary,
                         child: Icon(
                           Icons.live_tv_rounded,
@@ -957,7 +957,7 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
                             fit: BoxFit.cover,
                             placeholder: (_, _) =>
                                 Container(color: AppTheme.backgroundSecondary),
-                            errorWidget: (_, _, _) => Container(
+                            errorBuilder: (_, _, _) => Container(
                               color: AppTheme.backgroundSecondary,
                               child: Icon(
                                 Icons.movie_outlined,
@@ -1106,7 +1106,7 @@ class _TvCalendarPageState extends State<TvCalendarPage> {
                               imageUrl: poster,
                               httpHeaders: coverHeaders,
                               fit: BoxFit.cover,
-                              errorWidget: (_, _, _) => Container(
+                              errorBuilder: (_, _, _) => Container(
                                 color: AppTheme.backgroundPrimary,
                               ),
                             ),

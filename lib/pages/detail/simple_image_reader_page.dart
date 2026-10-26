@@ -273,7 +273,7 @@ class _ImageTile extends StatelessWidget {
           ),
         ),
       ),
-      errorWidget: (_, __, ___) => const AspectRatio(
+      errorBuilder: (_, __, ___) => const AspectRatio(
         aspectRatio: 2 / 3,
         child: Center(
           child: Icon(Icons.broken_image_rounded,

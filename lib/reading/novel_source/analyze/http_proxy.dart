@@ -44,10 +44,10 @@ import 'package:dio/dio.dart';
 import 'package:fast_gbk/fast_gbk.dart';
 import 'package:get/get.dart';
 
-import '../../../services/app_log.dart';
-import '../../pages/webview_page.dart';
-import '../../source/global_proxy.dart';
-import '../../source/webview_image_fetcher.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/reading/pages/webview_page.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/reading/source/webview_image_fetcher.dart';
 
 /// 本机同步 HTTP 代理（进程级单例）。
 class LegadoHttpProxy {

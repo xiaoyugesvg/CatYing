@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../common/theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 免责声明段落（启动弹窗用）
 class DisclaimerText extends StatelessWidget {

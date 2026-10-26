@@ -4,22 +4,22 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../common/theme.dart';
-import '../models/book_source.dart';
-import '../models/comic.dart';
-import '../services/book_download_service.dart';
-import '../services/book_reading_progress_service.dart';
-import '../services/book_source_download_service.dart';
-import '../services/book_source_service.dart';
-import '../services/download_service.dart';
-import '../services/platform_service.dart';
-import '../services/settings_service.dart';
-import '../theme/jelly_theme.dart';
-import '../utils/list_pagination.dart';
-import '../widgets/jelly_search_bar.dart';
-import 'book_reader_page.dart';
-import 'book_source_detail_page.dart';
-import 'reader_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/models/book_source.dart';
+import 'package:tvbox/reading/models/comic.dart';
+import 'package:tvbox/reading/services/book_download_service.dart';
+import 'package:tvbox/reading/services/book_reading_progress_service.dart';
+import 'package:tvbox/reading/services/book_source_download_service.dart';
+import 'package:tvbox/reading/services/book_source_service.dart';
+import 'package:tvbox/reading/services/download_service.dart';
+import 'package:tvbox/reading/services/platform_service.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/reading/utils/list_pagination.dart';
+import 'package:tvbox/reading/widgets/jelly_search_bar.dart';
+import 'package:tvbox/reading/pages/book_reader_page.dart';
+import 'package:tvbox/reading/pages/book_source_detail_page.dart';
+import 'package:tvbox/reading/pages/reader_page.dart';
 
 /// 下载记录页（参考目标界面 IMG_8397）：
 /// 分段切换（漫画 | 图书）+ 搜索框 + 5 个状态胶囊
@@ -416,7 +416,7 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
                         : CachedNetworkImage(
                             imageUrl: rec.cover,
                             fit: BoxFit.cover,
-                            errorWidget: (_, _, _) => ColoredBox(
+                            errorBuilder: (_, _, _) => ColoredBox(
                               color:
                                   JellyTheme.primary.withValues(alpha: 0.15),
                               child: Icon(

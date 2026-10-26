@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../../../common/floating_nav_spec.dart';
-import '../../../services/main_tab_controller.dart';
-import '../../reading/widgets/jelly_nav_bar.dart';
-import '../services/player_manager.dart';
-import '../services/settings_store.dart';
-import '../theme/music_theme.dart';
-import '../widgets/mini_player.dart';
-import 'player_page.dart' show MusicPlayerPage;
-import '../services/route_observer.dart';
-import '../../widgets/video_player_pip.dart';
+import 'package:tvbox/common/floating_nav_spec.dart';
+import 'package:tvbox/services/main_tab_controller.dart';
+import 'package:tvbox/reading/widgets/jelly_nav_bar.dart';
+import 'package:tvbox/music/services/player_manager.dart';
+import 'package:tvbox/music/services/settings_store.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/music/widgets/mini_player.dart';
+import 'package:tvbox/music/pages/player_page.dart' show MusicPlayerPage;
+import 'package:tvbox/music/services/route_observer.dart';
+import 'package:tvbox/widgets/video_player_pip.dart';
 
 /// 音乐底栏的**共享状态**（tab 选中项 + 可见性）。
 ///

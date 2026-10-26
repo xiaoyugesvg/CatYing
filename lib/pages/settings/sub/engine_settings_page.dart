@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../../../widgets/engine_load_panel.dart';
-import 'settings_shared.dart';
+import 'package:tvbox/widgets/engine_load_panel.dart';
+import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 
 /// 设置 → 引擎管理
 ///

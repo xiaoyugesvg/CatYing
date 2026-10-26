@@ -3,15 +3,15 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../../common/theme.dart';
-import '../../models/live_models.dart';
-import '../../models/movie.dart';
-import '../../services/main_tab_controller.dart';
-import '../../services/network_manager.dart';
-import '../../services/spider_service.dart';
-import '../../widgets/glass.dart';
-import '../models/mini_app.dart';
-import '../services/mini_app_service.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/live_models.dart';
+import 'package:tvbox/models/movie.dart';
+import 'package:tvbox/services/main_tab_controller.dart';
+import 'package:tvbox/services/network_manager.dart';
+import 'package:tvbox/services/spider_service.dart';
+import 'package:tvbox/widgets/glass.dart';
+import 'package:tvbox/miniapp/models/mini_app.dart';
+import 'package:tvbox/miniapp/services/mini_app_service.dart';
 
 /// 「程序」详情页：影视（CMS 浏览 → 现有详情/播放链路）+ 频道（直播）。
 class MiniAppDetailPage extends StatefulWidget {

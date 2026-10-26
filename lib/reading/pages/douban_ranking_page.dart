@@ -1,12 +1,12 @@
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:dio/dio.dart';
-import '../source/global_proxy.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
 import 'package:flutter/material.dart';
 
-import '../theme/jelly_theme.dart';
-import '../../widgets/app_page_loading.dart';
-import '../../common/theme.dart';
-import 'book_search_page.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/widgets/app_page_loading.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/pages/book_search_page.dart';
 
 /// 豆瓣图书排行榜。
 ///
@@ -447,7 +447,7 @@ class _DoubanRankingPageState extends State<DoubanRankingPage>
                               color: JellyTheme.textSecondary
                                   .withValues(alpha: 0.10),
                             ),
-                            errorWidget: (_, __, ___) =>
+                            errorBuilder: (_, __, ___) =>
                                 _coverPlaceholder(),
                           ),
                   ),

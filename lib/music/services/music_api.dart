@@ -3,11 +3,11 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
-import '../../services/nodejs_manager.dart';
-import '../models/models.dart';
-import '../models/third_party_source.dart';
-import 'mf_quickjs_engine.dart';
-import 'settings_store.dart';
+import 'package:tvbox/services/nodejs_manager.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/models/third_party_source.dart';
+import 'package:tvbox/music/services/mf_quickjs_engine.dart';
+import 'package:tvbox/music/services/settings_store.dart';
 
 /// 播放地址解析结果
 class MusicUrlInfo {

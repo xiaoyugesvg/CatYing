@@ -34,7 +34,7 @@ import 'dart:convert';
 
 import 'package:sync_http/sync_http.dart';
 
-import 'cookie_store.dart';
+import 'package:tvbox/reading/novel_source/analyze/cookie_store.dart';
 
 /// 默认 UA（与 analyze_url.dart 的兜底 UA 保持一致）。
 const String _kDefaultUa =

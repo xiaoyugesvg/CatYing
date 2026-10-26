@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 
-import 'app_log.dart';
+import 'package:tvbox/services/app_log.dart';
 
 /// 全局音频焦点协调器 —— **保证同一时刻只有一路声音在播**。
 ///

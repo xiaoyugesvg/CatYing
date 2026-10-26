@@ -1,9 +1,9 @@
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/player_engine.dart';
-import '../common/constants.dart';
-import '../common/theme.dart';
+import 'package:tvbox/models/player_engine.dart';
+import 'package:tvbox/common/constants.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 全局播放内核与各内核选项（设置页写入，播放器实时读取）
 class PlayerPrefs {

@@ -5,9 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../common/theme.dart';
-import '../models/reading_settings.dart';
-import '../theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/models/reading_settings.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
 
 /// 「我的 → 净化规则」：照 Legado 的**替换净化**管理页做的全局规则面板。
 ///

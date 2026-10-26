@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../services/zlibrary_service.dart';
-import '../theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/services/zlibrary_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
 
 /// z-library **节点管理面板** ✓（"一键测试 + 延迟 + 切换 + 添加"✓）。
 ///

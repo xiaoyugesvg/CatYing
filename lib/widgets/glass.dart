@@ -1,6 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import '../common/theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// iOS 27 Liquid Glass 玻璃面板
 ///

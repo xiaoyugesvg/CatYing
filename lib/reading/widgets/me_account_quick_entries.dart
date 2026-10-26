@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../theme/jelly_theme.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
 
 /// 三条"我的"入口（「我的笔记」/「阅读经历」/「阅读计划」）的**纯图标行**。
 ///

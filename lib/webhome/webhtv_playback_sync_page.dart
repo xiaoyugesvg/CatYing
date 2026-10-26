@@ -3,9 +3,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../common/theme.dart';
-import '../widgets/app_toast.dart';
-import 'webhtv_playback_sync_service.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/webhome/webhtv_playback_sync_service.dart';
 
 /// 「观影记录同步」（原 Webhtv → 观影记录同步）。
 ///

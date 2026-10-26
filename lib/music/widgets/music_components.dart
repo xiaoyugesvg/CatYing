@@ -1,19 +1,19 @@
 import 'dart:async';
-import 'music_sheet.dart';
+import 'package:tvbox/music/widgets/music_sheet.dart';
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
-import '../models/models.dart';
-import '../services/library_store.dart';
-import '../services/player_manager.dart';
-import '../theme/music_theme.dart';
-import '../../common/theme.dart';
-import '../../widgets/app_toast.dart';
-import 'comment_sheet.dart';
-import 'quick_actions.dart';
-import '../pages/playlist_page.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/services/library_store.dart';
+import 'package:tvbox/music/services/player_manager.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/music/widgets/comment_sheet.dart';
+import 'package:tvbox/music/widgets/quick_actions.dart';
+import 'package:tvbox/music/pages/playlist_page.dart';
 
 /// 音乐模块的通用 UI 组件 —— 对应 Beans 的 `Components.swift` / `SongCell.swift`。
 ///

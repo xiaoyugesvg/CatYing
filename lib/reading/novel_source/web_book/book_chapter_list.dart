@@ -3,13 +3,13 @@ library;
 
 import 'dart:convert';
 
-import '../../../services/app_log.dart';
-import '../analyze/js_engine.dart';
-import '../analyze/analyze_rule.dart';
-import '../model/book_source.dart';
-import '../model/xiaoshuo_book.dart';
-import '../model/xiaoshuo_book_chapter.dart';
-import '../../utils/html_text.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/reading/novel_source/analyze/js_engine.dart';
+import 'package:tvbox/reading/novel_source/analyze/analyze_rule.dart';
+import 'package:tvbox/reading/novel_source/model/book_source.dart';
+import 'package:tvbox/reading/novel_source/model/xiaoshuo_book.dart';
+import 'package:tvbox/reading/novel_source/model/xiaoshuo_book_chapter.dart';
+import 'package:tvbox/reading/utils/html_text.dart';
 
 class BookChapterList {
   // 复用进程级共享 QuickJS 运行时（见 JsEngine.shared 说明），

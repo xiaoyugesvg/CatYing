@@ -1,8 +1,8 @@
-import 'app_log.dart';
-import 'api_config.dart';
-import 'network_manager.dart';
-import 'nodejs_manager.dart';
-import 'spider_service.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/network_manager.dart';
+import 'package:tvbox/services/nodejs_manager.dart';
+import 'package:tvbox/services/spider_service.dart';
 
 /// 前台恢复状态机（原 AppState.handleSceneActive 四级流程）
 ///

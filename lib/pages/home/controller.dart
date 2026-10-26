@@ -1,13 +1,13 @@
 import 'package:get/get.dart';
-import '../../services/app_log.dart';
-import '../../models/cache_store.dart';
-import '../../models/cache_ttl.dart';
-import '../../models/movie.dart';
-import '../../models/movie_sort.dart';
-import '../../services/api_config.dart';
-import '../../services/source_service.dart';
-import '../../reading/services/settings_service.dart';
-import '../../webhome/webhtv_site_health_page.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/models/cache_store.dart';
+import 'package:tvbox/models/cache_ttl.dart';
+import 'package:tvbox/models/movie.dart';
+import 'package:tvbox/models/movie_sort.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/source_service.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/webhome/webhtv_site_health_page.dart';
 
 class HomeController extends GetxController {
   final sorts = <SortData>[].obs;

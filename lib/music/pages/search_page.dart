@@ -2,18 +2,18 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/models.dart';
-import '../models/third_party_source.dart';
-import '../services/music_api.dart';
-import '../services/player_manager.dart';
-import '../services/settings_store.dart';
-import 'ximalaya_category_page.dart';
-import 'ximalaya_album_page.dart';
-import '../theme/music_theme.dart';
-import '../widgets/music_components.dart';
-import '../widgets/music_sheet.dart';
-import '../../widgets/app_page_loading.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/music/models/models.dart';
+import 'package:tvbox/music/models/third_party_source.dart';
+import 'package:tvbox/music/services/music_api.dart';
+import 'package:tvbox/music/services/player_manager.dart';
+import 'package:tvbox/music/services/settings_store.dart';
+import 'package:tvbox/music/pages/ximalaya_category_page.dart';
+import 'package:tvbox/music/pages/ximalaya_album_page.dart';
+import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/music/widgets/music_components.dart';
+import 'package:tvbox/music/widgets/music_sheet.dart';
+import 'package:tvbox/widgets/app_page_loading.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 搜索页 —— 移植自 Beans 的 `SearchView.swift`（1127 行，取其主干）。
 ///

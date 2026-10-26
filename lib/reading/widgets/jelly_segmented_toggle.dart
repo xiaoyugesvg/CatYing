@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 分段数据（图标、emoji 或 文字）
 class JellySegmentData {

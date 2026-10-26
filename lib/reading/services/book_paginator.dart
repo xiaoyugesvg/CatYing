@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../models/book_content.dart';
+import 'package:tvbox/reading/models/book_content.dart';
 
 /// 图书排版参数：字号 / 行距 / 边距。paginator 与阅读器页共用同一实例，
 /// 保证度量高度与实际渲染一致（颜色不影响布局，渲染时 copyWith 颜色）。

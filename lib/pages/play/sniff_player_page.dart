@@ -6,14 +6,14 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-import '../../common/system_ui.dart';
-import '../../miniapp/pages/mini_app_player_page.dart';
-import '../../services/api_config.dart';
-import '../../services/app_log.dart';
-import '../../services/parse_service.dart';
-import '../../services/player_prefs.dart';
-import '../../services/sniff_filter.dart';
-import '../../services/web_sniff_service.dart';
+import 'package:tvbox/common/system_ui.dart';
+import 'package:tvbox/miniapp/pages/mini_app_player_page.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/parse_service.dart';
+import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/services/sniff_filter.dart';
+import 'package:tvbox/services/web_sniff_service.dart';
 
 /// 嗅探播放页 - WebView 加载网页播放器页 + 主动嗅探视频地址
 ///

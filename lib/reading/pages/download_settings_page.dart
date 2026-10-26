@@ -4,12 +4,12 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import '../services/cache_capacity.dart';
-import '../services/book_content_cache_service.dart';
-import '../services/settings_service.dart';
-import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
-import '../../widgets/app_image_cache.dart';
+import 'package:tvbox/reading/services/cache_capacity.dart';
+import 'package:tvbox/reading/services/book_content_cache_service.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/app_image_cache.dart';
 
 /// 下载设置页（参考图 IMG_8466~8468）。
 /// 结构与「阅读设置」保持一致：分组标题 + 独立小卡片（圆角 16）。
@@ -547,7 +547,7 @@ class _DownloadSettingsPageState extends State<DownloadSettingsPage> {
             ),
             Switch(
               value: value,
-              activeColor: JellyTheme.primary,
+              activeThumbColor: JellyTheme.primary,
               onChanged: enabled ? (v) => onChanged(v) : null,
             ),
           ],

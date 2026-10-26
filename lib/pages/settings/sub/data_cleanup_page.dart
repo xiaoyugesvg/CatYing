@@ -2,18 +2,18 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
-import '../../../services/api_config.dart';
+import 'package:tvbox/services/api_config.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../../common/constants.dart';
-import '../../../common/theme.dart';
-import '../../../models/cache_store.dart';
-import '../../../models/subscription.dart';
-import '../../../services/app_log.dart';
-import '../../../services/prefs_mirror.dart';
-import '../../../widgets/app_toast.dart';
-import '../../../services/cache_manager_service.dart';
+import 'package:tvbox/common/constants.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/cache_store.dart';
+import 'package:tvbox/models/subscription.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/prefs_mirror.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/services/cache_manager_service.dart';
 
 /// 可清理的数据项
 enum CleanTarget {

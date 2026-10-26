@@ -3,41 +3,41 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
-import '../../services/live_service.dart';
+import 'package:tvbox/services/live_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../common/theme.dart';
-import '../../common/system_ui.dart';
-import '../../models/movie.dart';
-import '../../models/vod_info.dart';
-import '../../models/player_engine.dart';
-import '../../services/api_config.dart';
-import '../../services/spider_service.dart';
-import '../../widgets/vod_card.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/common/system_ui.dart';
+import 'package:tvbox/models/movie.dart';
+import 'package:tvbox/models/vod_info.dart';
+import 'package:tvbox/models/player_engine.dart';
+import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/spider_service.dart';
+import 'package:tvbox/widgets/vod_card.dart';
 import 'package:cached_network_image_ce/cached_network_image.dart';
-import '../../models/cache_store.dart';
-import '../../models/cache_ttl.dart';
-import '../../services/tmdb_service.dart';
-import '../../services/detail_page_controller.dart';
-import '../../services/player_fullscreen_controller.dart';
-import '../../services/player_prefs.dart';
-import '../../services/parse_store.dart';
-import '../../services/play_route.dart';
-import '../../services/sniff_filter.dart';
-import '../../widgets/common_widgets.dart';
-import '../../widgets/app_player.dart';
-import '../../widgets/ios_av_player.dart';
-import '../../widgets/ks_player.dart';
-import '../../widgets/mpv_app_player.dart';
-import '../../widgets/video_player.dart';
-import '../../widgets/video_player_pip.dart';
-import '../../widgets/window_fullscreen.dart';
-import '../drama/drama_player_page.dart';
-import '../play/webview_player_page.dart';
-import '../search/controller.dart' show TvSearchController;
-import 'controller.dart';
-import 'episode_list.dart';
-import '../../widgets/app_toast.dart';
-import '../../webhome/webhtv_playback_sync_service.dart';
+import 'package:tvbox/models/cache_store.dart';
+import 'package:tvbox/models/cache_ttl.dart';
+import 'package:tvbox/services/tmdb_service.dart';
+import 'package:tvbox/services/detail_page_controller.dart';
+import 'package:tvbox/services/player_fullscreen_controller.dart';
+import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/services/parse_store.dart';
+import 'package:tvbox/services/play_route.dart';
+import 'package:tvbox/services/sniff_filter.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/widgets/app_player.dart';
+import 'package:tvbox/widgets/ios_av_player.dart';
+import 'package:tvbox/widgets/ks_player.dart';
+import 'package:tvbox/widgets/mpv_app_player.dart';
+import 'package:tvbox/widgets/video_player.dart';
+import 'package:tvbox/widgets/video_player_pip.dart';
+import 'package:tvbox/widgets/window_fullscreen.dart';
+import 'package:tvbox/pages/drama/drama_player_page.dart';
+import 'package:tvbox/pages/play/webview_player_page.dart';
+import 'package:tvbox/pages/search/controller.dart' show TvSearchController;
+import 'package:tvbox/pages/detail/controller.dart';
+import 'package:tvbox/pages/detail/episode_list.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/webhome/webhtv_playback_sync_service.dart';
 
 /// 详情页 - 对应 Swift DetailView
 class DetailPage extends StatefulWidget {
@@ -1468,7 +1468,7 @@ class _DetailPageState extends State<DetailPage> {
                           size: 28,
                         ),
                       ),
-                      errorWidget: (_, __, ___) => Container(
+                      errorBuilder: (_, __, ___) => Container(
                         color: AppTheme.backgroundTertiary,
                         alignment: Alignment.center,
                         child: Icon(
@@ -2947,7 +2947,7 @@ class _CandidatePoster extends StatelessWidget {
                 memCacheWidth: 120,
                 placeholder: (_, __) =>
                     Container(color: AppTheme.backgroundSecondary),
-                errorWidget: (_, __, ___) => Container(
+                errorBuilder: (_, __, ___) => Container(
                   color: AppTheme.backgroundSecondary,
                   alignment: Alignment.center,
                   child: Icon(
@@ -2988,7 +2988,7 @@ class _CastMemberCard extends StatelessWidget {
                       fit: BoxFit.cover,
                       memCacheWidth: 160,
                       placeholder: (_, __) => _avatarPlaceholder(),
-                      errorWidget: (_, __, ___) => _avatarPlaceholder(),
+                      errorBuilder: (_, __, ___) => _avatarPlaceholder(),
                     ),
             ),
           ),
@@ -3076,7 +3076,7 @@ class _SimilarCard extends StatelessWidget {
                             memCacheWidth: 224,
                             placeholder: (_, __) =>
                                 ColoredBox(color: AppTheme.backgroundTertiary),
-                            errorWidget: (_, __, ___) =>
+                            errorBuilder: (_, __, ___) =>
                                 ColoredBox(color: AppTheme.backgroundTertiary),
                           ),
                     // 评分角标（右上）

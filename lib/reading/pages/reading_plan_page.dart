@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../services/browse_history_service.dart';
-import '../services/reading_checkin_service.dart';
-import '../services/reading_plan_service.dart';
-import '../theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/services/browse_history_service.dart';
+import 'package:tvbox/reading/services/reading_checkin_service.dart';
+import 'package:tvbox/reading/services/reading_plan_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
 
 /// 阅读计划页 ✓（参考截图 **IMG_8634 / IMG_8635** ✓）。
 ///

@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
+import 'package:tvbox/services/app_log.dart';
+
 /// 章节正文的**磁盘缓存**（只存纯文字章，不含图片）。
 ///
 /// ── 为什么需要 ────────────────────────────────────────────────
@@ -78,7 +80,11 @@ class ChapterTextCache {
         h.forEach((k, v) => headers['$k'] = '$v');
       }
       return (text, headers);
-    } catch (_) {
+    } catch (e) {
+      // 缓存文件损坏 / 读不出来 → 当作未命中，上层会重新联网抓正文。
+      // 这本身是正常的降级，但如果是**持续**损坏（例如磁盘满、JSON 被写坏），
+      // 用户看到的是"每次翻页都重新下载"，没有这条日志就完全查不到。
+      AppLog.instance.w('[章节缓存] 读取失败（按未命中处理）: $e');
       return null;
     }
   }

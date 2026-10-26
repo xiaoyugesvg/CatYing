@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
-import 'room_models.dart';
+import 'package:tvbox/room/room_models.dart';
 
 /// 局域网房间服务 —— 房主手机自己当服务器。
 ///

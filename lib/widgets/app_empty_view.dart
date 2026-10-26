@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../common/theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 通用空态视图（三模块共用）。
 ///

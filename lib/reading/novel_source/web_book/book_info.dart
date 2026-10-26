@@ -1,11 +1,11 @@
 /// 书籍详情解析：依据书源 `ruleBookInfo` 解析书名/作者/简介/封面/目录 URL 等字段。
 library;
 
-import '../model/book_source.dart';
-import '../model/xiaoshuo_book.dart';
-import '../analyze/analyze_rule.dart';
-import '../../../services/app_log.dart';
-import '../../utils/html_text.dart';
+import 'package:tvbox/reading/novel_source/model/book_source.dart';
+import 'package:tvbox/reading/novel_source/model/xiaoshuo_book.dart';
+import 'package:tvbox/reading/novel_source/analyze/analyze_rule.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/reading/utils/html_text.dart';
 
 class BookInfo {
   static void analyzeBookInfo({
@@ -58,7 +58,9 @@ class BookInfo {
         if (name.isNotEmpty && (canReNameFlag || book.name.isEmpty)) {
           book.name = name;
         }
-      } catch (_) {}
+      } catch (e) {
+        AppLog.instance.w('[书源详情] 书名(name) 字段解析失败: $e');
+      }
     }
 
     if (bookInfoRule.author != null && bookInfoRule.author!.isNotEmpty) {
@@ -69,7 +71,9 @@ class BookInfo {
         if (author.isNotEmpty && (canReNameFlag || book.author.isEmpty)) {
           book.author = author;
         }
-      } catch (_) {}
+      } catch (e) {
+        AppLog.instance.w('[书源详情] 作者(author) 字段解析失败: $e');
+      }
     }
 
     if (bookInfoRule.kind != null && bookInfoRule.kind!.isNotEmpty) {
@@ -80,7 +84,9 @@ class BookInfo {
           if (book.kind!.length > 1000)
             book.kind = book.kind!.substring(0, 1000);
         }
-      } catch (_) {}
+      } catch (e) {
+        AppLog.instance.w('[书源详情] 分类(kind) 字段解析失败: $e');
+      }
     }
 
     if (bookInfoRule.lastChapter != null &&
@@ -90,7 +96,9 @@ class BookInfo {
         if (lastChapter.isNotEmpty) {
           book.lastChapter = lastChapter;
         }
-      } catch (_) {}
+      } catch (e) {
+        AppLog.instance.w('[书源详情] 最新章节(lastChapter) 字段解析失败: $e');
+      }
     }
 
     if (bookInfoRule.intro != null && bookInfoRule.intro!.isNotEmpty) {
@@ -105,7 +113,9 @@ class BookInfo {
           final clean = cleanIntroText(unescapeLineBreaks(intro));
           book.intro = clean.length > 5000 ? clean.substring(0, 5000) : clean;
         }
-      } catch (_) {}
+      } catch (e) {
+        AppLog.instance.w('[书源详情] 简介(intro) 字段解析失败: $e');
+      }
     }
 
     if (bookInfoRule.bookStatus != null &&
@@ -115,7 +125,9 @@ class BookInfo {
         if (bookStatus.isNotEmpty) {
           book.bookStatus = bookStatus;
         }
-      } catch (_) {}
+      } catch (e) {
+        AppLog.instance.w('[书源详情] 状态(bookStatus) 字段解析失败: $e');
+      }
     }
 
     if (bookInfoRule.updateTime != null &&
@@ -125,7 +137,9 @@ class BookInfo {
         if (updateTime.isNotEmpty) {
           book.updateTime = updateTime;
         }
-      } catch (_) {}
+      } catch (e) {
+        AppLog.instance.w('[书源详情] 更新时间(updateTime) 字段解析失败: $e');
+      }
     }
 
     if (bookInfoRule.wordCount != null && bookInfoRule.wordCount!.isNotEmpty) {
@@ -134,7 +148,9 @@ class BookInfo {
         if (wordCount.isNotEmpty) {
           book.wordCount = wordCount;
         }
-      } catch (_) {}
+      } catch (e) {
+        AppLog.instance.w('[书源详情] 字数(wordCount) 字段解析失败: $e');
+      }
     }
 
     if (bookInfoRule.recommendations != null &&
@@ -149,7 +165,9 @@ class BookInfo {
               .map((s) => s.trim())
               .toList();
         }
-      } catch (_) {}
+      } catch (e) {
+        AppLog.instance.w('[书源详情] 推荐(recommendations) 字段解析失败: $e');
+      }
     }
 
     if (bookInfoRule.coverUrl != null && bookInfoRule.coverUrl!.isNotEmpty) {
@@ -161,7 +179,9 @@ class BookInfo {
         if (coverUrl.isNotEmpty) {
           book.coverUrl = coverUrl;
         }
-      } catch (_) {}
+      } catch (e) {
+        AppLog.instance.w('[书源详情] 封面(coverUrl) 字段解析失败: $e');
+      }
     }
 
     if (bookInfoRule.tocUrl != null && bookInfoRule.tocUrl!.isNotEmpty) {
@@ -170,7 +190,9 @@ class BookInfo {
         if (tocUrl.isNotEmpty) {
           book.tocUrl = tocUrl;
         }
-      } catch (_) {}
+      } catch (e) {
+        AppLog.instance.w('[书源详情] 目录地址(tocUrl) 字段解析失败: $e');
+      }
     }
 
     if (book.tocUrl == null || book.tocUrl!.isEmpty) {

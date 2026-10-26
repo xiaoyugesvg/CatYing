@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../common/theme.dart';
-import '../services/source_kind.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/source_kind.dart';
 
 /// 源「内容类型」小徽章 —— 显示单个汉字（影/听/漫/书）。
 ///

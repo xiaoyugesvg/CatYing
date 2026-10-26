@@ -4,13 +4,13 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../../../common/theme.dart';
-import '../../../services/tg_service.dart';
-import '../../../services/tg_title_filter.dart';
-import '../../../widgets/app_toast.dart';
-import '../../../widgets/common_widgets.dart';
-import 'settings_shared.dart';
-import 'tg_channel_page.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/tg_service.dart';
+import 'package:tvbox/services/tg_title_filter.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/pages/settings/sub/settings_shared.dart';
+import 'package:tvbox/pages/settings/sub/tg_channel_page.dart';
 
 /// 设置 → 订阅管理 → Telegram 源
 ///

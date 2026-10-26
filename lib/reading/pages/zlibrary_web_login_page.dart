@@ -30,7 +30,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-import '../services/zlibrary_service.dart';
+import 'package:tvbox/reading/services/zlibrary_service.dart';
 
 class ZlibraryWebLoginPage extends StatefulWidget {
   const ZlibraryWebLoginPage({super.key, required this.domain});

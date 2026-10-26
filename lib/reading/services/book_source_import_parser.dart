@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import '../models/book_source.dart';
+import 'package:tvbox/reading/models/book_source.dart';
 
 /// 书源 JSON 解析（**唯一实现**）。
 ///

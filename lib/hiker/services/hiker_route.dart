@@ -24,8 +24,8 @@ library;
 
 import 'dart:convert';
 
-import '../../services/play_route.dart' as play_route;
-import '../../services/sniff_filter.dart';
+import 'package:tvbox/services/play_route.dart' as play_route;
+import 'package:tvbox/services/sniff_filter.dart';
 
 /// 链接类别 —— 与官方 [dealWithUrl] 的分支一一对应（顺序也照抄官方）。
 enum HikerLinkKind {

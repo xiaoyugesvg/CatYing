@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../models/reading_settings.dart';
-import '../services/settings_service.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/models/reading_settings.dart';
+import 'package:tvbox/reading/services/settings_service.dart';
 
 /// 阅读模式选择器里的一项。
 class JellyModeItem {

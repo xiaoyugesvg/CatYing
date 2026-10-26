@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../models/book_source.dart';
-import '../source/source_manager.dart';
-import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/reading/models/book_source.dart';
+import 'package:tvbox/reading/source/source_manager.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 书源编辑页 —— 7 个 tab（源变量 / 基础 / 搜索 / 发现 / 详情 / 目录 / 正文）。
 ///

@@ -1,9 +1,9 @@
 /// WebBook 公共类型：发现分类、发现结果、正文结果、URL 条目，以及多级 URL 解析。
 library;
 
-import '../novel_block.dart';
-import '../analyze/js_engine.dart';
-import '../model/xiaoshuo_book.dart';
+import 'package:tvbox/reading/novel_source/novel_block.dart';
+import 'package:tvbox/reading/novel_source/analyze/js_engine.dart';
+import 'package:tvbox/reading/novel_source/model/xiaoshuo_book.dart';
 
 /// 发现分类。
 class ExploreCategory {

@@ -5,8 +5,8 @@ library;
 import 'package:html/dom.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:xpath_selector_html_parser/xpath_selector_html_parser.dart';
-import 'rule_analyzer.dart';
-import 'source_rule.dart';
+import 'package:tvbox/reading/novel_source/analyze/rule_analyzer.dart';
+import 'package:tvbox/reading/novel_source/analyze/source_rule.dart';
 
 class AnalyzeByJsoup {
   dynamic content;

@@ -1,14 +1,14 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
-import '../models/reader_bg_assets.dart';
-import '../models/reader_style.dart';
-import '../models/reader_title_style.dart';
-import '../services/reader_font_service.dart';
-import '../services/reader_style_store.dart';
-import '../services/title_html_parser.dart';
-import 'reader_style_edit_page.dart';
-import 'reader_title_styles_page.dart';
+import 'package:tvbox/reading/models/reader_bg_assets.dart';
+import 'package:tvbox/reading/models/reader_style.dart';
+import 'package:tvbox/reading/models/reader_title_style.dart';
+import 'package:tvbox/reading/services/reader_font_service.dart';
+import 'package:tvbox/reading/services/reader_style_store.dart';
+import 'package:tvbox/reading/services/title_html_parser.dart';
+import 'package:tvbox/reading/pages/reader_style_edit_page.dart';
+import 'package:tvbox/reading/pages/reader_title_styles_page.dart';
 
 /// 可点击的区域
 enum _Zone { header, title, body, footer, margin, background }

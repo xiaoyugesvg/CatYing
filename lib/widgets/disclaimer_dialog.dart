@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../common/constants.dart';
-import '../common/theme.dart';
-import 'disclaimer_text.dart';
+import 'package:tvbox/common/constants.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/disclaimer_text.dart';
 
 Future<void> showAppDisclaimerDialog(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();

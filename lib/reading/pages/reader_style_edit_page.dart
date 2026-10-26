@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../models/reader_style.dart';
-import '../models/reader_bg_assets.dart';
-import '../models/reader_title_style.dart';
-import '../services/title_html_parser.dart';
+import 'package:tvbox/reading/models/reader_style.dart';
+import 'package:tvbox/reading/models/reader_bg_assets.dart';
+import 'package:tvbox/reading/models/reader_title_style.dart';
+import 'package:tvbox/reading/services/title_html_parser.dart';
 
 /// 单套「阅读样式」编辑器。
 ///

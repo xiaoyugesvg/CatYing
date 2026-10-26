@@ -5,9 +5,9 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../services/app_log.dart';
-import '../models/hiker_source.dart';
-import 'hiker_prefs.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/hiker/models/hiker_source.dart';
+import 'package:tvbox/hiker/services/hiker_prefs.dart';
 
 /// 「海阔」源仓库。
 ///

@@ -4,11 +4,11 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../../common/theme.dart';
-import 'pet_center_page.dart';
-import 'pet_chat_sheet.dart';
-import 'pet_service.dart';
-import 'pet_view.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/pet/pet_center_page.dart';
+import 'package:tvbox/reading/pet/pet_chat_sheet.dart';
+import 'package:tvbox/reading/pet/pet_service.dart';
+import 'package:tvbox/reading/pet/pet_view.dart';
 
 /// 全局悬浮桌宠（挂在 app.dart 根 Stack，覆盖所有路由）。
 ///

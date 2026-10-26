@@ -5,8 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/third_party_source.dart';
-import 'plugin_script_cache.dart';
+import 'package:tvbox/music/models/third_party_source.dart';
+import 'package:tvbox/music/services/plugin_script_cache.dart';
 
 /// 内置音源注册 + 自动更新服务。
 ///
@@ -133,10 +133,21 @@ class BuiltinSourcesService {
 
   /// 洛雪源清单（文件名 → 显示名），与 `assets/music/lx/` 目录一一对应，
   /// 也是远端拉取的相对路径。顺序即"用户看到/尝试"的优先级。
-  /// 洛雪源远端更新基地址。用 ghproxy 加速前缀，国内网络能直连。
-  /// 仓库：https://github.com/pdone/lx-music-source
-  static const _lxRawBase =
-      'https://ghproxy.net/raw.githubusercontent.com/pdone/lx-music-source/main';
+  ///
+  /// ── 远端地址（2026-10-26 改为多镜像回退）──────────────────────
+  /// 上游仓库：https://github.com/pdone/lx-music-source
+  /// 以前只有 `ghproxy.net` 一个前缀，它抽风时整轮更新会卡到 20s 超时
+  /// （用户日志：`更新洛雪源 Huibq 失败: receive timeout`）。
+  /// 现在按 [_ghRawMirrors] 顺序快速切换（每个最多等 8s）。
+  static const _ghRawMirrors = <String>[
+    // jsDelivr（gcore）走 CDN —— 国内通常最快；项目里 MusicFree 索引也用它
+    'https://gcore.jsdelivr.net/gh/pdone/lx-music-source@main',
+    // GitHub 反代
+    'https://ghproxy.net/raw.githubusercontent.com/pdone/lx-music-source/main',
+    'https://gh-proxy.com/https://raw.githubusercontent.com/pdone/lx-music-source/main',
+    // 直连兜底（挂了代理/VPN 时这条最快）
+    'https://raw.githubusercontent.com/pdone/lx-music-source/main',
+  ];
 
   static const _lxCandidates = <({String path, String name})>[
     // ✅ 用户 2026-10-21 提供：五源合一（洛雪自定义源，仅 musicUrl）
@@ -168,12 +179,20 @@ class BuiltinSourcesService {
   ];
 
   /// 个别洛雪源不在 pdone 仓库里（没有 `<path>/latest.js`），更新地址单独给。
-  static const Map<String, String> _lxUpdateUrls = {
-    'five': 'https://hebijunge.github.io/musicfree-plugins/plugins/five-source-lx.plugin.v1.2.0.js',
+  /// 这些只走原始地址（镜像拼不出来），失败就保留内置版本。
+  static const Map<String, String> _lxOverrideUrls = {
+    'five': 'https://gcore.jsdelivr.net/gh/hebijunge/musicfree-plugins@master/plugins/five-source-lx.plugin.v1.2.0.js',
   };
 
-  static String _lxUpdateUrl(String path) =>
-      _lxUpdateUrls[path] ?? '$_lxRawBase/$path/latest.js';
+  /// 一次更新要尝试的地址序列（按优先级）；override 源只有一个地址。
+  static List<String> _lxUpdateCandidates(String path) {
+    final o = _lxOverrideUrls[path];
+    if (o != null) return [o];
+    return [for (final m in _ghRawMirrors) '$m/$path/latest.js'];
+  }
+
+  /// 写进 `ThirdPartySource.updateUrl` 的那一条（= 首选镜像）
+  static String _lxUpdateUrl(String path) => _lxUpdateCandidates(path).first;
 
   /// **失效源名单**（洛雪源 path）：后端已停服 ⇒ 注册时**默认禁用**，
   /// 避免用户误选、也避免每次试播先撞一次死源。
@@ -224,15 +243,18 @@ class BuiltinSourcesService {
   }
 
   /// 从远端更新每个洛雪源到最新脚本（替换 script 内容）。
+  ///
+  /// ── 2026-10-26（用户要求 A+B）────────────────────────────────
+  ///  A. **跳过死源**：`_deadLxPaths` 里的源后端早就停服（默认禁用），
+  ///     以前也照样去拉 → 白等一次 20s 超时（日志里的 Huibq 就是它）。
+  ///  B. **多镜像回退 + 短超时**：见 [_lxUpdateCandidates]，每个镜像最多 8s，
+  ///     失败立刻换下一个；全部失败就保留内置版本（静默）。
   Future<void> _updateLxSources() async {
     for (final c in _lxCandidates) {
+      if (_isDeadLx(c.path)) continue; // A：不再为死源浪费网络时间
       try {
-        final resp =
-            await _dio.get(_lxUpdateUrl(c.path));
-        final script = resp.data is String
-            ? resp.data as String
-            : (resp.data?.toString() ?? '');
-        if (script.trim().isEmpty || script.length > 512 * 1024) continue;
+        final script = await _fetchLxScript(_lxUpdateCandidates(c.path));
+        if (script == null) continue;
         final store = ThirdPartySourceStore.instance;
         final cur = store.byId('builtin_lx_${c.path}');
         if (cur == null) continue;
@@ -241,6 +263,28 @@ class BuiltinSourcesService {
         debugPrint('[BuiltinSources] 更新洛雪源 ${c.name} 失败: $e');
       }
     }
+  }
+
+  /// B：按顺序试镜像，第一个拿到合法脚本就返回；全失败返回 null。
+  Future<String?> _fetchLxScript(List<String> urls) async {
+    for (final u in urls) {
+      try {
+        final resp = await _dio.get<String>(
+          u,
+          options: Options(
+            responseType: ResponseType.plain,
+            // 单个镜像最多等 8 秒就换下一个（全局 20s 留给 MusicFree 大文件）
+            receiveTimeout: const Duration(seconds: 8),
+          ),
+        );
+        final script = resp.data ?? '';
+        if (script.trim().isEmpty || script.length > 512 * 1024) continue;
+        return script;
+      } catch (e) {
+        debugPrint('[BuiltinSources] 镜像不可用，换下一个：$u（$e）');
+      }
+    }
+    return null;
   }
 
   // ────────────────────────────────────────────────────────────

@@ -3,9 +3,9 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../../services/generic_source_service.dart';
-import '../../widgets/app_toast.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/services/generic_source_service.dart';
+import 'package:tvbox/widgets/app_toast.dart';
 
 /// 「通用源」管理页（2026-10-22；2026-10-23 重做）。
 ///

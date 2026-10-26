@@ -27,9 +27,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter/services.dart' show rootBundle;
 
-import 'app_log.dart';
-import 'nodejs_platform.dart';
-import 'nodejs_platform_ios.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/nodejs_platform.dart';
+import 'package:tvbox/services/nodejs_platform_ios.dart';
 
 class NodeJSManager {
   static final NodeJSManager _instance = NodeJSManager._internal();

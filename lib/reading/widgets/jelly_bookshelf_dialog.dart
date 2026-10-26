@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import '../../widgets/common_widgets.dart';
-import '../models/bookshelf.dart';
-import '../services/bookshelf_service.dart';
-import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/reading/models/bookshelf.dart';
+import 'package:tvbox/reading/services/bookshelf_service.dart';
+import 'package:tvbox/reading/theme/jelly_theme.dart';
+import 'package:tvbox/common/theme.dart';
 
 /// 加入书架弹窗：多选书架 + 快速新建
 /// 返回值：用户确认后返回选中的书架 ID 列表，取消返回 null

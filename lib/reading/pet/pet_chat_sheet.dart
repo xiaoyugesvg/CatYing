@@ -3,12 +3,12 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../../common/theme.dart';
-import '../../pages/settings/sub/ai_settings_page.dart';
-import '../../widgets/app_toast.dart';
-import '../services/ai_service.dart';
-import 'pet_service.dart';
-import 'pet_view.dart';
+import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/pages/settings/sub/ai_settings_page.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/reading/services/ai_service.dart';
+import 'package:tvbox/reading/pet/pet_service.dart';
+import 'package:tvbox/reading/pet/pet_view.dart';
 
 /// 桌宠对话（2026-10-25 重做）
 ///

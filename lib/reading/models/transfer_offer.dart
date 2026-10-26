@@ -1,4 +1,4 @@
-import '../utils/safe_num.dart';
+import 'package:tvbox/reading/utils/safe_num.dart';
 
 /// 一笔待传文件描述。
 class TransferFile {
