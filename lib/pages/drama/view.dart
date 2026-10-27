@@ -25,8 +25,10 @@ import 'package:tvbox/pages/drama/drama_source_sheet.dart';
 ///   1. 左上角是当前源（默认跟随首页源），点头像/源名换一个，**一次只扫这一个**；
 ///   2. 在该源的分类里匹配关键词（默认 短剧/微短剧/竖屏/爽剧/短剧场）；
 ///   3. 命中的分类作为本页的 tab chips，选哪个就按普通分类接口拉列表。
-/// 扫描结果按源落盘（DramaSettings.cachedGroups），换源时先读缓存，
-/// 没缓存才扫 —— 不会每次进页面都打十几个源的分类接口。
+/// 扫描结果按源落盘（DramaSettings.cachedGroups），**进页面**先读缓存秒出内容；
+/// 但**换源**（`_pickSource`）一律重扫这个源，且缓存列表拉回空时自动重扫一次 ——
+/// 用户 2026-10-27：「打开和切换不同的源不能直接刷新扫描加载吗？非要我自己手动刷新」。
+/// 仍然是单源，不会每次进页面都打十几个源的分类接口。
 /// 不写死任何站源、不内置内容、不绕过任何 VIP。
 class DramaPage extends StatefulWidget {
   const DramaPage({super.key});
@@ -64,11 +66,45 @@ class _DramaPageState extends State<DramaPage> {
   String? _error;
   String _scanHint = '';
 
+  /// 已经「因为缓存列表为空而自动重扫过一次」的源 —— 防止死循环
+  final Set<String> _autoRescanned = {};
+
+  /// 加载代次：换源连点时用来丢弃旧请求的结果
+  int _loadGen = 0;
+
+  /// 这个 tab 是否在前台。
+  ///
+  /// 底栏是 IndexedStack，**15 个 tab 页在 App 启动时就全部 initState 了**
+  /// （短剧页因此会在冷启动、网络/引擎还没就绪时抢跑一次）。等用户真正
+  /// 点到「短剧」时，那次加载多半已经失败或过期，但页面不会自己再试 ——
+  /// 用户 2026-10-27：「打开…不能直接刷新扫描加载吗？非要我自己手动刷新」。
+  /// 这里借 IndexedStack 外层包着的 `TickerMode(enabled: i == tabIndex)`
+  /// 判断前后台切换（见 pages/content_view.dart:426）。
+  bool _tabActive = false;
+
   @override
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
     _load();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final active = TickerMode.valuesOf(context).enabled;
+    if (active == _tabActive) return;
+    _tabActive = active;
+    // 从别的 tab 切回来，且上次没拿到内容（或报错了）→ 自动补一次，
+    // 不用用户再下拉。已有内容时不动，避免每次切 tab 都白闪一下。
+    // 放到帧后再 setState：didChangeDependencies 还在 build 阶段里。
+    if (active && (_videos.isEmpty || _error != null)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (_videos.isNotEmpty && _error == null) return;
+        _load();
+      });
+    }
   }
 
   @override
@@ -164,7 +200,12 @@ class _DramaPageState extends State<DramaPage> {
   }
 
   /// [rescan] = true 才重新扫当前源的分类；否则优先用缓存。
+  ///
+  /// 换源现在是「点了就重扫」，用户连点几个源时会有多个请求在飞 ——
+  /// 用 [_loadGen] 作代次号，回来的旧结果直接丢弃，避免后到的慢请求
+  /// 把新源的内容盖掉（2026-10-27）。
   Future<void> _load({bool rescan = false}) async {
+    final gen = ++_loadGen;
     setState(() {
       _loading = true;
       _error = null;
@@ -175,9 +216,10 @@ class _DramaPageState extends State<DramaPage> {
       _scanHint = '';
     });
     _keywords = await DramaSettings.keywords();
+    if (!mounted || gen != _loadGen) return;
 
     final source = await _currentSource();
-    if (!mounted) return;
+    if (!mounted || gen != _loadGen) return;
     if (source == null) {
       setState(() {
         _source = null;
@@ -188,18 +230,27 @@ class _DramaPageState extends State<DramaPage> {
     }
     setState(() => _source = source);
     await _refreshHistorySources();
+    if (!mounted || gen != _loadGen) return;
 
     // ── 缓存优先：这个源上次扫到的短剧分类直接用 ────────────────
     if (!rescan) {
       final cached = await _groupsFromCache(source.key);
-      if (!mounted) return;
+      if (!mounted || gen != _loadGen) return;
       if (cached != null) {
         setState(() {
           _groups = cached;
           _groupIdx = 0;
           _loading = false;
         });
-        await _loadPage(1);
+        await _loadPage(1, gen: gen);
+        if (!mounted || gen != _loadGen) return;
+        // 缓存里的分类可能已经失效（源改版 / 分类被删）→ 列表空着。
+        // 这时自动重扫一次，别把「还没有内容」甩给用户去下拉
+        // （用户 2026-10-27）。同一个源只自动重扫一次，
+        // 避免「空 → 扫 → 还是空 → 再扫」的死循环。
+        if (_videos.isEmpty && _error == null && _autoRescanned.add(source.key)) {
+          return _load(rescan: true);
+        }
         return;
       }
     }
@@ -207,7 +258,7 @@ class _DramaPageState extends State<DramaPage> {
     // 只扫这一个源（不再并发扫所有源）
     setState(() => _scanHint = '正在扫描「${source.name}」的分类…');
     final found = await _probeSource(source);
-    if (!mounted) return;
+    if (!mounted || gen != _loadGen) return;
 
     if (found.isEmpty) {
       setState(() {
@@ -220,6 +271,7 @@ class _DramaPageState extends State<DramaPage> {
     }
     // 落盘：保留其他源的缓存，整组替换这个源的
     final oldRows = await DramaSettings.cachedGroups();
+    if (!mounted || gen != _loadGen) return;
     final merged = <Map<String, String>>[
       for (final r in oldRows)
         if (r['source'] != source.key) r,
@@ -232,14 +284,15 @@ class _DramaPageState extends State<DramaPage> {
         },
     ];
     await DramaSettings.saveGroups(merged);
-    if (!mounted) return;
+    if (!mounted || gen != _loadGen) return;
     setState(() {
       _groups = found;
       _groupIdx = 0;
       _scanHint = '';
     });
     await _refreshHistorySources();
-    await _loadPage(1);
+    if (!mounted || gen != _loadGen) return;
+    await _loadPage(1, gen: gen);
   }
 
   Future<List<_DramaGroup>> _probeSource(SourceBean s) async {
@@ -256,7 +309,7 @@ class _DramaPageState extends State<DramaPage> {
     }
   }
 
-  Future<void> _loadPage(int page) async {
+  Future<void> _loadPage(int page, {int? gen}) async {
     if (_groups.isEmpty) return;
     final g = _groups[_groupIdx.clamp(0, _groups.length - 1)];
     if (page > 1) {
@@ -270,6 +323,7 @@ class _DramaPageState extends State<DramaPage> {
         page: page,
       );
       if (!mounted) return;
+      if (gen != null && gen != _loadGen) return;
       setState(() {
         if (page == 1) {
           _videos
@@ -312,7 +366,9 @@ class _DramaPageState extends State<DramaPage> {
   /// 之前这里列的是全部源，跟设置里的白名单不一致，等于设置白设了。
   /// 没勾过（空集合）时仍列全部：否则新用户第一次进短剧页一个源都选不了。
   ///
-  /// 选中后先读缓存，没缓存才扫 —— 换源不再是「把十几个源全刷一遍」。
+  /// 选中后**立刻重扫这个源**（2026-10-27 改）：原来先读缓存，
+  /// 缓存里的分类一失效就停在「这个短剧分类还没有内容」，用户得自己下拉。
+  /// 现在换源 = 重新扫分类 + 拉第一页，重复点当前源也等于强制刷新。
   Future<void> _pickSource() async {
     if (_allSources().isEmpty) return;
 
@@ -338,8 +394,13 @@ class _DramaPageState extends State<DramaPage> {
     );
     if (picked == null || !mounted) return;
     await DramaSettings.savePickedSourceKey(picked.key);
-    if (!mounted || picked.key == _source?.key) return;
-    _load();
+    if (!mounted) return;
+    // 换源就**直接重扫**（用户 2026-10-27：「切换不同的源不能直接刷新扫描
+    // 加载吗？非要我自己手动刷新」）。原来这里走 `_load()` 的缓存优先分支，
+    // 缓存里的分类一旦失效就停在「这个短剧分类还没有内容」。
+    // 顺手把自动重扫标记清掉：这次是用户主动换源，允许再兜底一次。
+    _autoRescanned.remove(picked.key);
+    await _load(rescan: true);
   }
 
   /// 顶部幻灯片：只取有封面的条目，最多 8 张
