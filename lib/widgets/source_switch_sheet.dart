@@ -57,8 +57,12 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   /// 是否正在看「失效线路」分类（顶部「失效 N」切换）
   bool _showInvalid = false;
 
-  /// 0 = 本地 Python / 1 = 订阅线路（用户 2026-10-20：源面板要像漫源仓库那样分 tab）
-  int _tab = 1;
+  /// 0 = 本地 Python / 1 = 本地 JS / 2 = 订阅线路
+  ///
+  /// 用户 2026-10-27：「本地将 PY、JS 源分开了，也就是 tab 栏有 3 个均分，
+  /// 名称分别是 PY本地、JS本地 以及 订阅」—— 原来本地 PY/JS 混在一个 tab 里，
+  /// 一堆脚本名看不出哪个是哪个。
+  int _tab = 2;
 
   /// 首次构建时按当前主页源决定默认 tab（本地源 → 本地 tab）
   bool _tabInited = false;
@@ -519,16 +523,22 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   void _locateSelected() {
     final key = _selectedKey;
     if (key == null) return;
-    final local = _filteredSourcesFrom(
-      // ignore: invalid_use_of_protected_member
-      ApiConfig.instance.localVideoSources.value,
-    );
+    final py = _filteredSourcesFrom(_localPySources);
+    final js = _filteredSourcesFrom(_localJsSources);
     final subs = _filteredSourcesFrom(
       // ignore: invalid_use_of_protected_member
       ApiConfig.instance.sourceBeanList.value,
     );
-    final targetTab = local.any((s) => s.key == key) ? 0 : 1;
-    final list = targetTab == 0 && local.isNotEmpty ? local : subs;
+    // 选中源在哪个 tab：本地 PY → 0，本地 JS → 1，其余（订阅线路）→ 2
+    int targetTab = 2;
+    List<SourceBean> list = subs;
+    if (py.any((s) => s.key == key)) {
+      targetTab = 0;
+      list = py;
+    } else if (js.any((s) => s.key == key)) {
+      targetTab = 1;
+      list = js;
+    }
     if (_tab != targetTab) {
       setState(() => _tab = targetTab);
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -574,6 +584,20 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
     if (_keyword.isEmpty) return all;
     final kw = _keyword.toLowerCase();
     return all.where((s) => s.name.toLowerCase().contains(kw)).toList();
+  }
+
+  /// 本地 **Python** 源（key 前缀 `localpy_`）
+  List<SourceBean> get _localPySources {
+    // ignore: invalid_use_of_protected_member
+    final all = ApiConfig.instance.localVideoSources.value;
+    return all.where((s) => s.key.startsWith('localpy_')).toList();
+  }
+
+  /// 本地 **JS** 源（key 前缀 `localjs_`）
+  List<SourceBean> get _localJsSources {
+    // ignore: invalid_use_of_protected_member
+    final all = ApiConfig.instance.localVideoSources.value;
+    return all.where((s) => s.key.startsWith('localjs_')).toList();
   }
 
   /// tab 胶囊（与漫源仓库 / RSS 分类同一套样式）
@@ -741,13 +765,17 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   @override
   Widget build(BuildContext context) {
     final h = MediaQuery.of(context).size.height;
-    // 首次打开：当前主页源是本地源 → 直接落在「本地」tab
+    // 首次打开：当前主页源是本地源 → 直接落在对应 tab
+    // （localpy_ → 0，localjs_ → 1）
     if (!_tabInited) {
       _tabInited = true;
       final key = _selectedKey;
-      if (key != null &&
-          (key.startsWith('localpy_') || key.startsWith('localjs_'))) {
-        _tab = 0;
+      if (key != null) {
+        if (key.startsWith('localpy_')) {
+          _tab = 0;
+        } else if (key.startsWith('localjs_')) {
+          _tab = 1;
+        }
       }
     }
     // 面板高度 = 1/3 屏 × 1.2（用户要求"变成现在的 1.2 倍"）：
@@ -882,26 +910,27 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                   onChanged: (v) => setState(() => _keyword = v.trim()),
                 ),
               ),
-              // tab：本地 / 订阅（用户 2026-10-20：「源切换加个 tab，
-              // 就是本地以及订阅激活线路的名称」）—— 与漫源仓库同一套胶囊样式。
+              // tab：PY本地 / JS本地 / 订阅（用户 2026-10-27：「本地将 PY、JS 源
+              // 分开了，也就是 tab 栏有 3 个均分，名称分别是 PY本地、JS本地以及
+              // 订阅」）—— 与漫源仓库同一套胶囊样式。
               // 本地源即使「本地爬虫」开关关着也显示：用户点它即会打开开关。
               Obx(() {
                 // ignore: invalid_use_of_protected_member
                 final localCount = ApiConfig.instance.localVideoSources.length;
                 if (localCount == 0) return const SizedBox.shrink();
+                final pyCount = _localPySources.length;
+                final jsCount = _localJsSources.length;
                 final subName =
                     SubscriptionService.instance.active?.name ?? '订阅线路';
                 return Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                   child: Row(
                     children: [
-                      // ⚠️ 两个 tab 必须**各占一半**：原来第一个是自然宽度、
-                      //   第二个用 Flexible（Container 带 alignment ⇒ 撑满剩余）
-                      //   ⇒ 订阅那一颗被拉成一整行长条（用户 2026-10-20 截图：
-                      //   「这个分类的按钮太大了吧，要么两个对半分」）。
+                      // ⚠️ 三个 tab **各占三分之一**（用户 2026-10-27）。
+                      //   原来两个是 Expanded 各一半；现在拆成 3 个均分。
                       Expanded(
                         child: _tabPill(
-                          '本地 $localCount',
+                          'PY本地 $pyCount',
                           _tab == 0,
                           () => setState(() => _tab = 0),
                         ),
@@ -909,9 +938,17 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: _tabPill(
-                          subName,
+                          'JS本地 $jsCount',
                           _tab == 1,
                           () => setState(() => _tab = 1),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _tabPill(
+                          subName,
+                          _tab == 2,
+                          () => setState(() => _tab = 2),
                         ),
                       ),
                     ],
@@ -927,19 +964,24 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                   final all = ApiConfig.instance.sourceBeanList.value;
                   final selectedKey = _selectedKey;
                   final subs = _filteredSourcesFrom(all);
-                  // 本地 Python 源单独一个 tab（用户 2026-10-17/20），不跟订阅线路混排。
+                  // 本地 Python / 本地 JS 各占一个 tab（用户 2026-10-27），
+                  // 不跟订阅线路、也不跟彼此混排。
                   // 管理页里的脚本即使「本地爬虫」开关关着也要能在这里看到并选择
                   //（选中时会自动打开开关，见 _selectSource）。
-                  final local = _filteredSourcesFrom(
-                    // ignore: invalid_use_of_protected_member
-                    ApiConfig.instance.localVideoSources.value,
-                  );
-                  final isLocal = _tab == 0 && local.isNotEmpty;
-                  final list = isLocal ? local : subs;
+                  final py = _filteredSourcesFrom(_localPySources);
+                  final js = _filteredSourcesFrom(_localJsSources);
+                  // 本地源被删光时 tab 条整条隐藏，此时列表必须回落成订阅线路
+                  final localCount = py.length + js.length;
+                  final tab =
+                      (_tab == 0 || _tab == 1) && localCount == 0 ? 2 : _tab;
+                  final isLocal = tab == 0 || tab == 1;
+                  final list = tab == 0 ? py : (tab == 1 ? js : subs);
                   if (list.isEmpty) {
                     return Center(
                       child: Text(
-                        _keyword.isEmpty ? '这里还没有源' : '未找到匹配的源',
+                        _keyword.isEmpty
+                            ? (isLocal ? '这里还没有本地源' : '这里还没有源')
+                            : '未找到匹配的源',
                         style: TextStyle(color: AppTheme.textTertiary),
                       ),
                     );
