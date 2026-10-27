@@ -61,8 +61,10 @@ class ReaderBgAssets {
       'assets/images/reader_bg/reading_bg_wuqing_night.webp';
 
   /// 夜间竹林（刘海屏）
+  /// ⚠️ 原为 `.png`（1170×2532 RGBA 但**全不透明**，920 KB）；
+  ///    2026-10-27 缩包时转成 JPEG q90（350 KB），视觉一致。
   static const nightForest =
-      'assets/images/reader_bg/reading_bg_night_forest.png';
+      'assets/images/reader_bg/reading_bg_night_forest.jpg';
 
   /// 黑白成对的壁纸（编辑样式时，选一张自动带出另一张）
   static const pairs = <String, String>{
