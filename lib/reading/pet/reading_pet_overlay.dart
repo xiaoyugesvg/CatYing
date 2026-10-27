@@ -302,11 +302,24 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
             //（身体探出屏幕一部分 + 朝屏幕内侧微倾），而不是贴平站在边上。
             final dockLeft = _pet.posX <= 0.001;
             final dockRight = _pet.posX >= 0.999;
+            // 内置矢量宠物贴边时走「门后探头」（画笔里画细白门框 + 只露脑袋）；
+            // 自定义 PNG/GIF 没法画门框，还是老样子整体推出屏幕 + 斜 45°。
+            final peek = !_pet.hasCustomPet && (dockLeft || dockRight)
+                ? (dockLeft ? -1 : 1)
+                : 0;
             // 记录宠物**实际可见**的屏幕矩形（贴边姿态有位移）——
             // 点开对话时用它算"贴着宠物"的位置
-            final dockDx =
-                dockLeft ? -petSize * 0.62 : (dockRight ? petSize * 0.62 : 0.0);
-            _petRect = Rect.fromLTWH(left + dockDx, top, petSize, petSize);
+            final dockDx = peek != 0
+                ? 0.0
+                : (dockLeft ? -petSize * 0.62 : (dockRight ? petSize * 0.62 : 0.0));
+            _petRect = peek != 0
+                ? Rect.fromLTWH(
+                    dockLeft ? left : left + petSize * 0.16,
+                    top + petSize * 0.10,
+                    petSize * 0.84,
+                    petSize * 0.86,
+                  )
+                : Rect.fromLTWH(left + dockDx, top, petSize, petSize);
 
             Widget petBody = Column(
               mainAxisSize: MainAxisSize.min,
@@ -358,6 +371,7 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                                 t: _anim.value * 4,
                                 size: petSize,
                                 mood: _pet.mood,
+                                peek: peek,
                               ),
                       ),
                     ),
@@ -388,13 +402,15 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
               ],
             );
 
-            if (dockLeft || dockRight) {
+            if ((dockLeft || dockRight) && peek == 0) {
               // 贴边姿态（用户 2026-10-25：斜着 45°）——
               //   一半身子推到屏幕外，同时整体朝屏幕内侧倾 45°，
               //   像从边缘斜插进来的贴纸。
               // ⚠️ 探出量（2026-10-25 第二轮）：原来只推 0.45，旋转 45° 之后
               //   实际露出屏幕的部分接近 2/3，用户反馈「贴边的时候出来太多了」
               //   ⇒ 推到 0.62，只露一小截。
+              // 2026-10-27：内置矢量宠物改成「门后探头」（peek != 0），
+              //   不再整体推出去 —— 门框和爪子都是画笔在组件内侧画的。
               petBody = Transform.translate(
                 offset: Offset(
                   dockLeft ? -petSize * 0.62 : petSize * 0.62,

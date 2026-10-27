@@ -169,12 +169,17 @@ class _CutoutPetView extends StatelessWidget {
     required this.cacheKey,
     required this.loader,
     required this.size,
+    this.outfits = const {},
     this.fallback,
   });
 
   final String cacheKey;
   final Future<Uint8List> Function() loader;
   final double size;
+
+  /// 穿戴：交给 [_CutoutPainter] 在**知道图片真实落点之后**再叠，
+  /// 这样配饰能贴着宠物的头/身子，而不是按整幅画布瞎猜。
+  final Map<PetOutfitSlot, String> outfits;
   final Widget? fallback;
 
   @override
@@ -192,7 +197,7 @@ class _CutoutPetView extends StatelessWidget {
         return SizedBox(
           width: size,
           height: size,
-          child: CustomPaint(painter: _CutoutPainter(cut)),
+          child: CustomPaint(painter: _CutoutPainter(cut, outfits)),
         );
       },
     );
@@ -200,9 +205,10 @@ class _CutoutPetView extends StatelessWidget {
 }
 
 class _CutoutPainter extends CustomPainter {
-  _CutoutPainter(this.cut);
+  _CutoutPainter(this.cut, this.outfits);
 
   final _PetCutout cut;
+  final Map<PetOutfitSlot, String> outfits;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -215,301 +221,63 @@ class _CutoutPainter extends CustomPainter {
       dh = size.height;
       dw = dh * aspect;
     }
+    final dest = Rect.fromLTWH((size.width - dw) / 2, size.height - dh, dw, dh);
     canvas.drawImageRect(
       cut.image,
       src,
-      Rect.fromLTWH((size.width - dw) / 2, size.height - dh, dw, dh),
+      dest,
       Paint()..filterQuality = FilterQuality.medium,
     );
+    if (outfits.isNotEmpty) _drawOutfits(canvas, dest);
+  }
+
+  /// 图片宠物没法知道真实关节坐标，退一步：按**图片实际落点**估一颗虚拟圆团。
+  ///
+  /// 常见 Q 版插画是 3:4 全身像，头大约占宽度的 50%、纵向 25% 处；
+  /// 把这颗"虚拟头团"的尺寸交给 [PetOutfitPainter]，帽檐/镜片/领口的相对
+  /// 位置就和矢量宠物完全一致 —— 比旧版按整幅画布百分比摆放准得多。
+  void _drawOutfits(Canvas canvas, Rect dest) {
+    final headW = dest.width * 0.52;
+    final k = headW / 74.0;
+    canvas.save();
+    canvas.translate(dest.center.dx, dest.top + dest.height * 0.26);
+    canvas.scale(k);
+    PetOutfitPainter(outfits: outfits).paintAll(canvas);
+    canvas.restore();
   }
 
   @override
-  bool shouldRepaint(_CutoutPainter old) => old.cut != cut;
+  bool shouldRepaint(_CutoutPainter old) =>
+      old.cut != cut ||
+      old.outfits.length != outfits.length ||
+      !old.outfits.entries.every((e) => outfits[e.key] == e.value);
 }
 
-/// 给**图片宠物**叠加换装（QQ秀式）。
+/// 给**图片宠物**叠加换装（GIF 等拿不到抠图落点的情况）。
 ///
-/// 图片宠物没法像矢量宠物那样精确知道头/身体坐标，这里按
-/// 「图片本体铺满画布、头部在上半部」的常见构图放配饰：
-///   头饰 y≈8%、面部 y≈48%、颈饰 y≈74%、手持在右下。
+/// 静态图走 [_CutoutPainter]（能拿到真实落点，配饰贴得准）；GIF 逐帧没法
+/// 抠图，只能按「整幅画面 = 宠物本体」的常见构图估算一颗虚拟圆团，
+/// 再用同一套 [PetOutfitPainter] 画 —— 至少帽檐/领口的相对位置是一致的。
 class _ImageOutfitPainter extends CustomPainter {
-  _ImageOutfitPainter(this.outfits, {this.backgroundOnly = false});
+  _ImageOutfitPainter(this.outfits);
 
   final Map<PetOutfitSlot, String> outfits;
-  final bool backgroundOnly;
-
-  static const _ink = Color(0xFF232323);
-
-  Paint _fill(Color c) => Paint()..color = c;
-
-  Paint _line({double width = 2, Color color = _ink}) => Paint()
-    ..color = color
-    ..style = PaintingStyle.stroke
-    ..strokeWidth = width
-    ..strokeCap = StrokeCap.round
-    ..strokeJoin = StrokeJoin.round;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final s = size.width / 100.0;
-    canvas.scale(s, s);
-    if (backgroundOnly) {
-      _background(canvas);
-      return;
-    }
-    _top(canvas);
-    _neck(canvas);
-    _hand(canvas);
-    _face(canvas);
-    _hat(canvas);
-  }
-
-  void _background(Canvas c) {
-    switch (outfits[PetOutfitSlot.background]) {
-      case 'moon':
-        c.drawCircle(
-          const Offset(50, 48),
-          38,
-          _fill(const Color(0xFFFFE9A8).withValues(alpha: 0.30)),
-        );
-        c.drawCircle(
-          const Offset(50, 48),
-          38,
-          _line(width: 1.4, color: const Color(0xFFE8C766)),
-        );
-        break;
-      case 'stars':
-        final p = _fill(const Color(0xFFFFD54F).withValues(alpha: 0.75));
-        for (final o in const [
-          Offset(18, 22),
-          Offset(82, 20),
-          Offset(86, 60),
-          Offset(14, 64),
-        ]) {
-          c.drawCircle(o, 2.4, p);
-        }
-        break;
-    }
-  }
-
-  void _hat(Canvas c) {
-    switch (outfits[PetOutfitSlot.hat]) {
-      case 'hat':
-        c.drawRRect(
-          RRect.fromRectAndRadius(
-            const Rect.fromLTWH(34, 20, 32, 4),
-            const Radius.circular(2),
-          ),
-          _fill(const Color(0xFF263238)),
-        );
-        c.drawRRect(
-          RRect.fromRectAndRadius(
-            const Rect.fromLTWH(42, 8, 16, 12),
-            const Radius.circular(3),
-          ),
-          _fill(const Color(0xFF37474F)),
-        );
-        break;
-      case 'cap':
-        c.drawArc(
-          Rect.fromCenter(center: const Offset(48, 20), width: 28, height: 22),
-          math.pi,
-          math.pi,
-          true,
-          _fill(const Color(0xFF4FC3F7)),
-        );
-        c.drawRRect(
-          RRect.fromRectAndRadius(
-            const Rect.fromLTWH(48, 18, 20, 4),
-            const Radius.circular(2),
-          ),
-          _fill(const Color(0xFF4FC3F7)),
-        );
-        break;
-      case 'crown':
-        c.drawPath(
-          Path()
-            ..moveTo(38, 18)
-            ..lineTo(42, 6)
-            ..lineTo(46, 14)
-            ..lineTo(50, 4)
-            ..lineTo(54, 14)
-            ..lineTo(58, 6)
-            ..lineTo(62, 18)
-            ..close(),
-          _fill(const Color(0xFFF2C14E)),
-        );
-        break;
-      case 'bow':
-        c.drawPath(
-          Path()
-            ..moveTo(66, 18)
-            ..lineTo(76, 12)
-            ..lineTo(76, 24)
-            ..close(),
-          _fill(const Color(0xFFFF8FA3)),
-        );
-        c.drawPath(
-          Path()
-            ..moveTo(66, 18)
-            ..lineTo(56, 12)
-            ..lineTo(56, 24)
-            ..close(),
-          _fill(const Color(0xFFFF8FA3)),
-        );
-        c.drawCircle(const Offset(66, 18), 2.8, _fill(const Color(0xFFFF8FA3)));
-        break;
-    }
-  }
-
-  void _face(Canvas c) {
-    switch (outfits[PetOutfitSlot.face]) {
-      case 'glasses':
-        final p = _line(width: 1.8, color: const Color(0xFF37474F));
-        c.drawCircle(const Offset(40, 48), 7, p);
-        c.drawCircle(const Offset(60, 48), 7, p);
-        c.drawLine(const Offset(47, 48), const Offset(53, 48), p);
-        break;
-      case 'shades':
-        final fill = _fill(const Color(0xFF263238));
-        c.drawRRect(
-          RRect.fromRectAndRadius(
-            const Rect.fromLTWH(32, 43, 16, 9),
-            const Radius.circular(3),
-          ),
-          fill,
-        );
-        c.drawRRect(
-          RRect.fromRectAndRadius(
-            const Rect.fromLTWH(52, 43, 16, 9),
-            const Radius.circular(3),
-          ),
-          fill,
-        );
-        break;
-    }
-  }
-
-  void _neck(Canvas c) {
-    switch (outfits[PetOutfitSlot.neck]) {
-      case 'scarf':
-        c.drawRRect(
-          RRect.fromRectAndRadius(
-            const Rect.fromLTWH(30, 72, 40, 8),
-            const Radius.circular(4),
-          ),
-          _fill(const Color(0xFFFF8FA3)),
-        );
-        c.drawRRect(
-          RRect.fromRectAndRadius(
-            const Rect.fromLTWH(32, 77, 8, 12),
-            const Radius.circular(3),
-          ),
-          _fill(const Color(0xFFFF8FA3)),
-        );
-        break;
-      case 'tie':
-        c.drawPath(
-          Path()
-            ..moveTo(46, 72)
-            ..lineTo(54, 72)
-            ..lineTo(50, 77)
-            ..close(),
-          _fill(const Color(0xFFD32F2F)),
-        );
-        c.drawPath(
-          Path()
-            ..moveTo(47, 77)
-            ..lineTo(53, 77)
-            ..lineTo(50, 88)
-            ..close(),
-          _fill(const Color(0xFFD32F2F)),
-        );
-        break;
-    }
-  }
-
-  void _top(Canvas c) {
-    switch (outfits[PetOutfitSlot.top]) {
-      case 'hoodie':
-        c.drawRRect(
-          RRect.fromRectAndRadius(
-            const Rect.fromLTWH(26, 70, 48, 10),
-            const Radius.circular(6),
-          ),
-          _fill(const Color(0xFF64B5F6).withValues(alpha: 0.85)),
-        );
-        break;
-      case 'vest':
-        c.drawRRect(
-          RRect.fromRectAndRadius(
-            const Rect.fromLTWH(26, 70, 14, 16),
-            const Radius.circular(4),
-          ),
-          _fill(const Color(0xFF8D6E63).withValues(alpha: 0.85)),
-        );
-        c.drawRRect(
-          RRect.fromRectAndRadius(
-            const Rect.fromLTWH(60, 70, 14, 16),
-            const Radius.circular(4),
-          ),
-          _fill(const Color(0xFF8D6E63).withValues(alpha: 0.85)),
-        );
-        break;
-    }
-  }
-
-  void _hand(Canvas c) {
-    switch (outfits[PetOutfitSlot.hand]) {
-      case 'book':
-        c.drawRRect(
-          RRect.fromRectAndRadius(
-            const Rect.fromLTWH(68, 70, 18, 13),
-            const Radius.circular(2),
-          ),
-          _fill(const Color(0xFFF5F0E6)),
-        );
-        c.drawLine(
-          const Offset(77, 70),
-          const Offset(77, 83),
-          _line(width: 1.4, color: const Color(0xFF8D6E63)),
-        );
-        break;
-      case 'coffee':
-        c.drawRRect(
-          RRect.fromRectAndRadius(
-            const Rect.fromLTWH(70, 72, 13, 13),
-            const Radius.circular(3),
-          ),
-          _fill(Colors.white),
-        );
-        c.drawArc(
-          Rect.fromCenter(center: const Offset(85, 78), width: 6, height: 8),
-          -math.pi / 2,
-          math.pi,
-          false,
-          _line(width: 1.6, color: Colors.white),
-        );
-        break;
-      case 'balloon':
-        c.drawCircle(
-          const Offset(78, 46),
-          9,
-          _fill(const Color(0xFFFF8FA3).withValues(alpha: 0.9)),
-        );
-        c.drawPath(
-          Path()
-            ..moveTo(78, 55)
-            ..quadraticBezierTo(72, 64, 74, 72),
-          _line(width: 0.9, color: const Color(0xFFFF8FA3)),
-        );
-        break;
-    }
+    if (outfits.isEmpty) return;
+    final r = Rect.fromLTWH(0, 0, size.width, size.height);
+    final headW = r.width * 0.52;
+    final k = headW / 74.0;
+    canvas.save();
+    canvas.translate(r.center.dx, r.top + r.height * 0.26);
+    canvas.scale(k);
+    PetOutfitPainter(outfits: outfits).paintAll(canvas);
+    canvas.restore();
   }
 
   @override
   bool shouldRepaint(_ImageOutfitPainter old) =>
-      old.backgroundOnly != backgroundOnly ||
       old.outfits.length != outfits.length ||
       !old.outfits.entries.every((e) => outfits[e.key] == e.value);
 }

@@ -75,9 +75,7 @@ class _InkPetPainter extends _InkPetPainterBase
       return;
     }
 
-    // 背景（穿戴「月光 / 星芒」时）画在最底层
-    _drawOutfitBackground(canvas, accent);
-
+    // 背景件（月光 / 星芒）已在 2026-10-27 随「手持 / 背景」两类一起砍掉
     canvas.translate(0, bob);
 
     // 地面阴影
@@ -167,10 +165,8 @@ class _InkPetPainter extends _InkPetPainterBase
     _drawFace(c, accent, blinking);
     _drawHeadFront(c, main, light, accent);
 
-    // 头像也能戴头饰 / 眼镜 / 围巾（QQ秀式换装在头像上同样可见）
-    _drawNeck(c, accent);
-    _drawFaceAccessory(c);
-    _drawHat(c, accent);
+    // 头像也能戴头饰 / 眼镜（2026-10-27：统一走 PetOutfitPainter）
+    _drawOutfits(c, main, light, accent);
 
     c.restore();
   }

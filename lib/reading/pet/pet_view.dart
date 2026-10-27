@@ -10,6 +10,7 @@ import 'package:flutter/services.dart' show rootBundle;
 
 import 'package:tvbox/reading/pet/pet_models.dart';
 import 'package:tvbox/reading/pet/blob_pet_painter.dart';
+import 'package:tvbox/reading/pet/pet_outfit_painter.dart';
 
 // ══════════════════════════════════════════════════════════════
 // 宠物绘制 —— 本文件是 library 根，只放「对外三个组件」
@@ -23,7 +24,7 @@ import 'package:tvbox/reading/pet/blob_pet_painter.dart';
 //   pet_cutout.dart         图片宠物：去背景抠图 + 裁切 + 图片换装
 //   pet_painter.dart        矢量画笔骨架（状态 + paint 主流程 + 头像模式）
 //   pet_painter_body.dart   矢量「身体零件」：耳朵/角/冠羽/尾/花纹/脸
-//   pet_painter_outfit.dart 矢量「穿戴」：头饰/面饰/颈饰/上衣/手持
+//   pet_painter_outfit.dart 矢量「穿戴」适配层（真绘制在 pet_outfit_painter.dart）
 //
 // ⚠️ 所有绘制方法体是**逐字节原样搬的**（拆分时对每一段做了 sha256 比对，
 //    并在新文件里做子串校验，全部命中）。唯一的外壳变化：两个 mixin 取代
@@ -54,6 +55,7 @@ class PetView extends StatelessWidget {
     this.mood = 80,
     this.headOnly = false,
     this.outfits = const {},
+    this.peek = 0,
   });
 
   final PetSpeciesInfo species;
@@ -71,6 +73,10 @@ class PetView extends StatelessWidget {
 
   /// 只画头部（头像用）：把脸放大铺满圆形，不画身体/脚/尾巴。
   final bool headOnly;
+
+  /// 贴边「门后探头」：`-1` 扒左边缘 / `+1` 扒右边缘 / `0` 正常站立。
+  /// 只有矢量宠物支持（图片宠物还是走老的贴边姿态）。
+  final int peek;
 
   /// 把「部位名 → 单品 id」归一化成枚举键（兼容旧单件）。
   Map<PetOutfitSlot, String> get _equipped {
@@ -97,8 +103,10 @@ class PetView extends StatelessWidget {
     if (asset != null && !headOnly) {
       return _buildImagePet(asset);
     }
-    // QQ 企鹅（species.qq）：整只矢量企鹅（含头/红围巾），不再依赖外部 GIF。
-    if (species.qq) {
+    // 圆团桌宠（`species.isBlob`）：整只矢量绘制（一颗圆团 + 按动物的装饰），
+    // 不再依赖外部 GIF。老的 QQ 企鹅（`qq=true`）也走这一支，
+    // 视觉与新版 6 只统一（见 BlobPetPainter）。
+    if (species.isBlob) {
       return headOnly ? _buildPenguinHead() : _buildPenguin();
     }
     // 其它物种：保留原来的水墨画笔
@@ -144,6 +152,27 @@ class PetView extends StatelessWidget {
 
   /// 全身：整只矢量企鹅，外层做呼吸/浮动/摇摆（与画笔内部 animate 二选一）。
   Widget _buildPenguin() {
+    // 探头姿态：门框不能跟着呼吸/摇摆一起动，所以外层的位移动效全部关掉，
+    // 只留画笔内部对脑袋的轻微浮动。
+    if (peek != 0) {
+      return SizedBox(
+        width: size,
+        height: size,
+        child: RepaintBoundary(
+          child: CustomPaint(
+            size: Size.square(size),
+            painter: BlobPetPainter(
+              species: species,
+              outfits: _equipped,
+              t: t,
+              mood: mood,
+              peek: peek,
+              animate: true,
+            ),
+          ),
+        ),
+      );
+    }
     final cycle = t * 2 * math.pi;
     final s = size / 100.0;
     final bob = math.sin(cycle) * 1.7 * s;
@@ -225,32 +254,19 @@ class PetView extends StatelessWidget {
                 child: SizedBox(
                   width: size,
                   height: size,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      if (_equipped[PetOutfitSlot.background] != null)
-                        CustomPaint(
-                          painter: _ImageOutfitPainter(
-                            _equipped,
-                            backgroundOnly: true,
-                          ),
-                        ),
-                      _CutoutPetView(
-                        cacheKey: 'asset:$asset',
-                        loader: () async =>
-                            (await rootBundle.load(asset)).buffer.asUint8List(),
-                        size: size,
-                        fallback: Image.asset(
-                          asset,
-                          fit: BoxFit.contain,
-                          gaplessPlayback: true,
-                        ),
-                      ),
-                      if (_equipped.isNotEmpty)
-                        CustomPaint(
-                          painter: _ImageOutfitPainter(_equipped),
-                        ),
-                    ],
+                  // 穿戴交给 _CutoutPetView：它在抠图后知道宠物的真实落点，
+                  // 配饰才能贴着轮廓叠（2026-10-27 换装重做）
+                  child: _CutoutPetView(
+                    cacheKey: 'asset:$asset',
+                    loader: () async =>
+                        (await rootBundle.load(asset)).buffer.asUint8List(),
+                    size: size,
+                    outfits: _equipped,
+                    fallback: Image.asset(
+                      asset,
+                      fit: BoxFit.contain,
+                      gaplessPlayback: true,
+                    ),
                   ),
                 ),
               ),
@@ -307,6 +323,7 @@ class CustomPetImage extends StatelessWidget {
             cacheKey: 'file:$path',
             loader: f.readAsBytes,
             size: size,
+            outfits: outfits,
             fallback: Image.file(
               f,
               fit: BoxFit.contain,
@@ -318,20 +335,14 @@ class CustomPetImage extends StatelessWidget {
       height: size,
       child: Transform.translate(
         offset: Offset(0, bob),
-        // GIF 保留原样（逐帧动画无法做静态抠图）；
-        // 静态图同样做「去白底 + 裁到本体」，自定义图也不会带一圈白。
+        // GIF 保留原样（逐帧动画无法做静态抠图）；静态图同样做
+        // 「去白底 + 裁到本体」，换装也跟着本体落点走。
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (outfits[PetOutfitSlot.background] != null)
-              CustomPaint(
-                painter: _ImageOutfitPainter(
-                  outfits,
-                  backgroundOnly: true,
-                ),
-              ),
             image,
-            if (outfits.isNotEmpty)
+            // GIF 拿不到本体落点，只能按整幅画面的常见构图估算
+            if (isGif && outfits.isNotEmpty)
               CustomPaint(painter: _ImageOutfitPainter(outfits)),
           ],
         ),

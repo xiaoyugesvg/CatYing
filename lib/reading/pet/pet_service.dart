@@ -139,6 +139,12 @@ class PetService extends ChangeNotifier {
               ..clear()
               ..addAll(of.map((e) => '$e'))
               ..add(PetOutfits.none.id);
+            // 2026-10-27：换装从六部位收敛成三类（节日头饰/眼镜/衣服），
+            // 旧档里的 bow / hoodie / book / moon 这些 id 已经不存在了。
+            // 不清理的话「已拥有」列表会一直带着一堆永远点不到的幽灵单品。
+            ownedOutfits.removeWhere(
+              (id) => id != PetOutfits.none.id && PetOutfits.byId(id) == null,
+            );
           }
           // ── 多部位穿搭恢复（兼容旧版单件 equipped）──────────────
           equippedSlots.clear();
@@ -190,6 +196,12 @@ class PetService extends ChangeNotifier {
             needPersist = true;
           }
         }
+      }
+      // 免费物种（price <= 0）默认就是解锁的。
+      // 2026-10-27 新增的熊猫/少年/少女定价 0（用户要求「放在前面」当主形象），
+      // 老存档里没有它们的 id，不补这一步会显示成"锁着 · 0 币"的怪状态。
+      for (final sp in PetSpecies.pets) {
+        if (sp.price <= 0 && unlockedSpecies.add(sp.id)) needPersist = true;
       }
       isLoaded = true;
       _decay();

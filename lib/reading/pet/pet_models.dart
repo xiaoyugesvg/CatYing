@@ -18,6 +18,7 @@ class PetSpeciesInfo {
     this.unlockLevel = 1,
     this.price = 200,
     this.qq = false,
+    this.animal,
   });
 
   final String id;
@@ -38,6 +39,17 @@ class PetSpeciesInfo {
 
   /// QQ 秀风格的人形桌宠（矢量绘制，可换装）。
   final bool qq;
+
+  /// 「纯圆团」桌宠的动物形态（用户 2026-10-27）。
+  ///
+  /// 非空即表示这只走 `BlobPetPainter` 的圆团画笔，取值决定装饰：
+  ///   `penguin` / `cat` / `dog` / `rabbit` / `bear` / `fox`
+  /// 六个物种共用同一套版型（一颗圆团当身子兼脸），只换耳朵/口鼻/尾巴，
+  /// 所以加新动物只要加一个取值 + 一段装饰绘制。
+  final String? animal;
+
+  /// 是否走圆团画笔（老的三只企鹅用 [qq] 标记，圆团新物种用 [animal]）
+  bool get isBlob => qq || animal != null;
 
   String get rarity {
     if (legendary) return '传说';
@@ -216,6 +228,114 @@ class PetSpecies {
     price: 220,
   );
 
+  // ── 二头身 Q 版（用户 2026-10-27）──────────────────────────
+  //
+  // 与上面六只「一颗圆团当身子兼脸」不同，这三只是**大脑袋 + 小身子**：
+  // 头占整体 2/3、脑袋比身子大一圈、四肢短圆，画法见 `blob_pet_chibi.dart`。
+  // 用户给的配色/造型规格：熊猫 米白 #F8F8F8 + 纯黑 #000000 + 腮红 #FFC8D0，
+  // 半圆黑耳、大圆角黑眼圈（不是正圆）、短粗黑爪子；少年少女是低饱和穿搭，
+  // 全部**无描边、纯色块、无渐变**。
+
+  static const blobPanda = PetSpeciesInfo(
+    id: 'blob_panda',
+    name: '熊猫团',
+    element: '墨',
+    description: '米白脑袋配两个大黑眼圈，扒着门框偷偷看你翻到第几页。',
+    palette: [Color(0xFFF8F8F8), Color(0xFFFFFFFF), Color(0xFF2B2B2B)],
+    animal: 'panda',
+    unlockLevel: 1,
+    price: 0,
+  );
+  static const blobBoy = PetSpeciesInfo(
+    id: 'blob_boy',
+    name: '少年团',
+    element: '青',
+    description: '利落短发配蓝灰上衣，安安静静站在旁边陪你读。',
+    palette: [Color(0xFFFDE8DA), Color(0xFFFFF6F0), Color(0xFFA9B7C4)],
+    animal: 'boy',
+    unlockLevel: 1,
+    price: 0,
+  );
+  static const blobGirl = PetSpeciesInfo(
+    id: 'blob_girl',
+    name: '少女团',
+    element: '樱',
+    description: '柔和中短发、浅色穿搭，眼睛圆圆的，笑起来很软。',
+    palette: [Color(0xFFFDE8DA), Color(0xFFFFF6F0), Color(0xFFEFDCD6)],
+    animal: 'girl',
+    unlockLevel: 1,
+    price: 0,
+  );
+
+  // ── 纯圆团桌宠（用户 2026-10-27：「6 个形象走纯圆团风格，换不同动物」）──
+  //
+  // 六只共用同一套版型：**一颗圆团当身子兼脸** + 小短手 + 短脚，
+  // 物种差异只在耳朵 / 口鼻 / 尾巴（见 `BlobPetPainter` 里按 `animal` 分支）。
+  // 这样版型统一、辨识度靠装饰拉开，小尺寸下也不会糊成一团。
+
+  static const blobPenguin = PetSpeciesInfo(
+    id: 'blob_penguin',
+    name: '团团',
+    element: '风',
+    description: '圆滚滚的读书企鹅，围巾一年四季都系着。',
+    palette: [Color(0xFF5C8DFF), Color(0xFFF2F6FF), Color(0xFF2C3E66)],
+    animal: 'penguin',
+    unlockLevel: 1,
+    price: 0,
+  );
+  static const blobCat = PetSpeciesInfo(
+    id: 'blob_cat',
+    name: '喵团',
+    element: '金',
+    description: '橘色圆团，最爱把尾巴搭在你的书页边上。',
+    palette: [Color(0xFFF2A65A), Color(0xFFFFE8D2), Color(0xFFC97B3C)],
+    animal: 'cat',
+    unlockLevel: 1,
+    price: 200,
+  );
+  static const blobDog = PetSpeciesInfo(
+    id: 'blob_dog',
+    name: '汪团',
+    element: '土',
+    description: '垂耳圆团，你一翻页它就摇尾巴。',
+    palette: [Color(0xFFD9A05B), Color(0xFFF7E7CE), Color(0xFFB07A3F)],
+    animal: 'dog',
+    unlockLevel: 2,
+    price: 220,
+  );
+  static const blobRabbit = PetSpeciesInfo(
+    id: 'blob_rabbit',
+    name: '兔团',
+    element: '月',
+    description: '长耳朵圆团，安静地陪你读到很晚。',
+    palette: [Color(0xFFE8E2EC), Color(0xFFFBF7FF), Color(0xFFB9AEC4)],
+    animal: 'rabbit',
+    unlockLevel: 2,
+    price: 240,
+  );
+  static const blobBear = PetSpeciesInfo(
+    id: 'blob_bear',
+    name: '熊团',
+    element: '木',
+    description: '小圆耳的大团子，抱着书就睡着。',
+    palette: [Color(0xFFB08050), Color(0xFFF0DCC2), Color(0xFF8A5F33)],
+    animal: 'bear',
+    rare: true,
+    unlockLevel: 3,
+    price: 280,
+  );
+  static const blobFox = PetSpeciesInfo(
+    id: 'blob_fox',
+    name: '狐团',
+    element: '火',
+    description: '大尾巴圆团，白颊上总挂着一点小得意。',
+    palette: [Color(0xFFE8763C), Color(0xFFFFE9D6), Color(0xFFC8552A)],
+    animal: 'fox',
+    rare: true,
+    unlockLevel: 4,
+    price: 320,
+  );
+
   /// 自定义桌宠（用户 2026-10-18）：PNG / GIF 由用户自己上传。
   ///
   /// 不属于图鉴（不在 [all] 里），只作为「当前皮肤」使用；
@@ -229,11 +349,36 @@ class PetSpecies {
     price: 0,
   );
 
-  /// 桌宠图鉴：只有 QQ 秀风格人形宠物（用户 2026-10-18）。
-  static const List<PetSpeciesInfo> pets = [qqBoy, qqGirl, qqScholar];
+  /// 桌宠图鉴（用户 2026-10-27）。
+  ///
+  /// 前 3 只是**二头身 Q 版**（熊猫 / 少年 / 少女，用户 2026-10-27 追加，
+  /// 要求「放在前面」），后 6 只是纯圆团动物。
+  /// 老的三只 QQ 秀企鹅（[qqBoy]/[qqGirl]/[qqScholar]）**仍留在 [all] 里**，
+  /// 只是为了「用户已选中的 id 还能解析出来」——不再进图鉴。
+  /// 它们现在也会被圆团画笔按 `penguin` 形态绘制，视觉与新版一致。
+  static const List<PetSpeciesInfo> pets = [
+    blobPanda,
+    blobBoy,
+    blobGirl,
+    blobPenguin,
+    blobCat,
+    blobDog,
+    blobRabbit,
+    blobBear,
+    blobFox,
+  ];
 
   /// 全部物种（含**只用于登录头像**的生肖插画），byId 用。
   static const List<PetSpeciesInfo> all = [
+    blobPanda,
+    blobBoy,
+    blobGirl,
+    blobPenguin,
+    blobCat,
+    blobDog,
+    blobRabbit,
+    blobBear,
+    blobFox,
     qqBoy,
     qqGirl,
     qqScholar,
@@ -257,14 +402,20 @@ class PetSpecies {
       : all.firstWhere((e) => e.id == id, orElse: () => qqBoy);
 }
 
-/// 换装部位（QQ秀式多部位穿搭，用户 2026-10-18）
+/// 换装部位（2026-10-27 收敛成三类）。
+///
+/// 用户：「不要什么服装系统了，就弄各种节日头饰、眼镜和衣服吧，这个要贴合呀」。
+///
+/// 旧的六部位（头饰 / 面部 / 颈饰 / 上衣 / 手持 / 背景）里，「手持」和
+/// 「背景」是**飘在身体外面**的独立物件，圆团宠物穿上就是"贴纸糊上去"，
+/// 跟「贴合」完全相反，全部砍掉；剩下的按圆团的三段几何归成三类：
+///   头饰 → 团子上沿；眼镜 → 眼睛那条线；衣服 → 团子下半身。
+///
+/// ⚠️ 枚举 `name` 会写进存档（`equippedSlots`），改名等于清空玩家的穿搭。
 enum PetOutfitSlot {
-  hat('头饰'),
-  face('面部'),
-  neck('颈部'),
-  top('上衣'),
-  hand('手持'),
-  background('背景');
+  hat('节日头饰'),
+  glasses('眼镜'),
+  clothes('衣服');
 
   const PetOutfitSlot(this.label);
   final String label;
@@ -297,129 +448,119 @@ class PetOutfits {
     price: 0,
   );
 
-  // ── 头饰 ────────────────────────────────────────────────────
-  static const bow = PetOutfitInfo(
-    id: 'bow',
-    name: '蝴蝶结',
-    slot: PetOutfitSlot.hat,
-    price: 60,
-  );
-  static const hat = PetOutfitInfo(
-    id: 'hat',
-    name: '小礼帽',
-    slot: PetOutfitSlot.hat,
-    price: 80,
-  );
-  static const cap = PetOutfitInfo(
-    id: 'cap',
-    name: '鸭舌帽',
+  // ── 节日头饰（贴着团子上沿）────────────────────────────────
+  static const lionHat = PetOutfitInfo(
+    id: 'lion_hat',
+    name: '狮头帽',
     slot: PetOutfitSlot.hat,
     price: 120,
   );
-  static const crown = PetOutfitInfo(
-    id: 'crown',
-    name: '小皇冠',
+  static const moonCrown = PetOutfitInfo(
+    id: 'moon_crown',
+    name: '月桂冠',
     slot: PetOutfitSlot.hat,
-    price: 300,
-    unlockLevel: 4,
+    price: 160,
+    unlockLevel: 2,
+  );
+  static const pumpkinHat = PetOutfitInfo(
+    id: 'pumpkin_hat',
+    name: '南瓜帽',
+    slot: PetOutfitSlot.hat,
+    price: 180,
+  );
+  static const santaHat = PetOutfitInfo(
+    id: 'santa_hat',
+    name: '圣诞帽',
+    slot: PetOutfitSlot.hat,
+    price: 200,
+    unlockLevel: 2,
+  );
+  static const leafHat = PetOutfitInfo(
+    id: 'leaf_hat',
+    name: '粽叶斗笠',
+    slot: PetOutfitSlot.hat,
+    price: 240,
+    unlockLevel: 3,
   );
 
-  // ── 面部 ────────────────────────────────────────────────────
-  static const glasses = PetOutfitInfo(
-    id: 'glasses',
+  // ── 眼镜（镜片对齐眼睛坐标）────────────────────────────────
+  static const roundGlasses = PetOutfitInfo(
+    id: 'round_glasses',
     name: '圆框眼镜',
-    slot: PetOutfitSlot.face,
-    price: 120,
+    slot: PetOutfitSlot.glasses,
+    price: 80,
   );
   static const shades = PetOutfitInfo(
     id: 'shades',
     name: '墨镜',
-    slot: PetOutfitSlot.face,
-    price: 180,
-  );
-
-  // ── 颈部 ────────────────────────────────────────────────────
-  static const scarf = PetOutfitInfo(
-    id: 'scarf',
-    name: '围巾',
-    slot: PetOutfitSlot.neck,
-    price: 100,
-  );
-  static const tie = PetOutfitInfo(
-    id: 'tie',
-    name: '小领结',
-    slot: PetOutfitSlot.neck,
+    slot: PetOutfitSlot.glasses,
     price: 140,
   );
-
-  // ── 上衣 ────────────────────────────────────────────────────
-  static const hoodie = PetOutfitInfo(
-    id: 'hoodie',
-    name: '连帽卫衣',
-    slot: PetOutfitSlot.top,
-    price: 260,
+  static const starGlasses = PetOutfitInfo(
+    id: 'star_glasses',
+    name: '星星镜',
+    slot: PetOutfitSlot.glasses,
+    price: 200,
     unlockLevel: 2,
   );
-  static const vest = PetOutfitInfo(
-    id: 'vest',
-    name: '小马甲',
-    slot: PetOutfitSlot.top,
-    price: 320,
+  static const heartGlasses = PetOutfitInfo(
+    id: 'heart_glasses',
+    name: '爱心镜',
+    slot: PetOutfitSlot.glasses,
+    price: 260,
     unlockLevel: 3,
   );
 
-  // ── 手持 ────────────────────────────────────────────────────
-  static const book = PetOutfitInfo(
-    id: 'book',
-    name: '一本书',
-    slot: PetOutfitSlot.hand,
-    price: 160,
+  // ── 衣服（贴着团子下半身）──────────────────────────────────
+  static const tangSuit = PetOutfitInfo(
+    id: 'tang_suit',
+    name: '唐装马甲',
+    slot: PetOutfitSlot.clothes,
+    price: 120,
   );
-  static const coffee = PetOutfitInfo(
-    id: 'coffee',
-    name: '咖啡杯',
-    slot: PetOutfitSlot.hand,
-    price: 200,
-  );
-  static const balloon = PetOutfitInfo(
-    id: 'balloon',
-    name: '小气球',
-    slot: PetOutfitSlot.hand,
-    price: 220,
-  );
-
-  // ── 背景 ────────────────────────────────────────────────────
-  static const moon = PetOutfitInfo(
-    id: 'moon',
-    name: '月光',
-    slot: PetOutfitSlot.background,
-    price: 240,
+  static const sweater = PetOutfitInfo(
+    id: 'sweater',
+    name: '圣诞毛衣',
+    slot: PetOutfitSlot.clothes,
+    price: 180,
     unlockLevel: 2,
   );
-  static const stars = PetOutfitInfo(
-    id: 'stars',
-    name: '星芒',
-    slot: PetOutfitSlot.background,
+  static const poncho = PetOutfitInfo(
+    id: 'poncho',
+    name: '南瓜斗篷',
+    slot: PetOutfitSlot.clothes,
+    price: 220,
+  );
+  static const hanfu = PetOutfitInfo(
+    id: 'hanfu',
+    name: '汉服襦裙',
+    slot: PetOutfitSlot.clothes,
     price: 280,
     unlockLevel: 3,
   );
+  static const overalls = PetOutfitInfo(
+    id: 'overalls',
+    name: '背带裤',
+    slot: PetOutfitSlot.clothes,
+    price: 320,
+    unlockLevel: 4,
+  );
 
   static const List<PetOutfitInfo> all = [
-    bow,
-    hat,
-    cap,
-    crown,
-    glasses,
+    lionHat,
+    moonCrown,
+    pumpkinHat,
+    santaHat,
+    leafHat,
+    roundGlasses,
     shades,
-    scarf,
-    tie,
-    hoodie,
-    vest,
-    book,
-    coffee,
-    balloon,
-    moon,
-    stars,
+    starGlasses,
+    heartGlasses,
+    tangSuit,
+    sweater,
+    poncho,
+    hanfu,
+    overalls,
   ];
 
   static PetOutfitInfo? byId(String? id) {
