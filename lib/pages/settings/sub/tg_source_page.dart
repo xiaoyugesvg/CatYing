@@ -987,41 +987,11 @@ class _TgSourcePageState extends State<TgSourcePage> {
               ),
             ),
             const SizedBox(height: 4),
-            ..._allDialogs.map((d) {
-              final peer = (d['peer'] ?? '').toString();
-              final title = (d['title'] ?? peer).toString();
-              final checked = _loginPeerSet.contains(peer);
-              return CheckboxListTile(
-                dense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                value: checked,
-                onChanged: (_) => _toggleLoginChannel(d),
-                title: Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 13,
-                    fontWeight: checked ? FontWeight.w600 : FontWeight.w400,
-                  ),
-                ),
-                subtitle: Text(
-                  '@$peer',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: AppTheme.textTertiary, fontSize: 10.5),
-                ),
-                secondary: Icon(
-                  checked ? Icons.check_circle : Icons.radio_button_unchecked,
-                  size: 18,
-                  color: checked
-                      ? AppTheme.accentOnSurface
-                      : AppTheme.textTertiary,
-                ),
-                controlAffinity: ListTileControlAffinity.trailing,
-              );
-            }),
+            // 一行两个的**卡片**（用户 2026-10-27：这一列竖排太长，改成网格）
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
+              child: _dialogGrid(_allDialogs),
+            ),
           ],
           if (mine.isNotEmpty) ...[
             const Divider(height: 1),
@@ -1171,6 +1141,83 @@ class _TgSourcePageState extends State<TgSourcePage> {
       crossAxisSpacing: 8,
       childAspectRatio: 2.35,
       children: [for (final c in list) _savedRow(c)],
+    );
+  }
+
+  /// 「我的群 / 频道」勾选用的单张卡片
+  ///
+  /// 用户 2026-10-27：这串 CheckboxListTile 竖排一长条太难找，也改成一行两个。
+  Widget _dialogCard(Map<String, dynamic> d) {
+    final peer = (d['peer'] ?? '').toString();
+    final title = (d['title'] ?? peer).toString();
+    final on = _loginPeerSet.contains(peer);
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => _toggleLoginChannel(d),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+        decoration: BoxDecoration(
+          color: on
+              ? AppTheme.accentOnSurface.withValues(alpha: 0.14)
+              : AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: on
+                ? AppTheme.accentOnSurface
+                : AppTheme.borderLight.withValues(alpha: 0.6),
+            width: on ? 1 : 0.6,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Icon(on ? Icons.check_box : Icons.check_box_outline_blank,
+                    size: 15,
+                    color:
+                        on ? AppTheme.accentOnSurface : AppTheme.textTertiary),
+                const Spacer(),
+                Icon(Icons.lock_outline,
+                    size: 12, color: AppTheme.textTertiary),
+              ],
+            ),
+            const SizedBox(height: 3),
+            Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 12.5,
+                  fontWeight: on ? FontWeight.w600 : FontWeight.w500),
+            ),
+            const SizedBox(height: 1),
+            Text('@$peer',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: AppTheme.textTertiary, fontSize: 10)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 「我的群 / 频道」的**两列卡片网格**
+  Widget _dialogGrid(List<Map<String, dynamic>> list) {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
+        mainAxisExtent: 72,
+      ),
+      itemCount: list.length,
+      itemBuilder: (_, i) => _dialogCard(list[i]),
     );
   }
 

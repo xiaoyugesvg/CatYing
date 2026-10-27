@@ -495,33 +495,81 @@ class _SourcePickerDialogState extends State<_SourcePickerDialog> {
             ),
             const SizedBox(height: 6),
             Expanded(
-              child: ListView.builder(
+              // 一行两个的**卡片**（用户 2026-10-27：竖排列表改成网格）
+              child: GridView.builder(
+                padding: const EdgeInsets.only(bottom: 4),
+                gridDelegate:
+                    const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 8,
+                  mainAxisExtent: 68,
+                ),
                 itemCount: shown.length,
                 itemBuilder: (_, i) {
                   final s = shown[i];
                   final on = _sel.contains(s.key);
-                  return CheckboxListTile(
-                    dense: true,
-                    value: on,
-                    title: Text(
-                      s.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 13),
-                    ),
-                    subtitle: Text(
-                      s.key,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 10),
-                    ),
-                    onChanged: (v) => setState(() {
-                      if (v == true) {
-                        _sel.add(s.key);
-                      } else {
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => setState(() {
+                      if (on) {
                         _sel.remove(s.key);
+                      } else {
+                        _sel.add(s.key);
                       }
                     }),
+                    child: Container(
+                      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                      decoration: BoxDecoration(
+                        color: on
+                            ? AppTheme.accentOnSurface.withValues(alpha: 0.14)
+                            : AppTheme.backgroundTertiary,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: on
+                              ? AppTheme.accentOnSurface
+                              : AppTheme.borderLight.withValues(alpha: 0.6),
+                          width: on ? 1 : 0.6,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            on
+                                ? Icons.check_box
+                                : Icons.check_box_outline_blank,
+                            size: 15,
+                            color: on
+                                ? AppTheme.accentOnSurface
+                                : AppTheme.textTertiary,
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            s.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight:
+                                  on ? FontWeight.w600 : FontWeight.w500,
+                              color: on
+                                  ? AppTheme.accentOnSurface
+                                  : AppTheme.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 1),
+                          Text(
+                            s.key,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 10, color: AppTheme.textTertiary),
+                          ),
+                        ],
+                      ),
+                    ),
                   );
                 },
               ),
