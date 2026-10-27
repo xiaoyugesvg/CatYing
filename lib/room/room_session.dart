@@ -192,6 +192,16 @@ class RoomSession extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+    // ⚠️ 地址**必须**带 scheme。少了 `https://` 时 `Uri.parse('ra.muii.site')`
+    //    会把整串当成 path、host 为空，socket_io 拿到的就是空 host + 0 端口，
+    //    最终报 `SocketException: ... errno = 49, port = 0`（用户 2026-10-27
+    //    截图）。这里提前拦下并说清怎么改，比让它连一个不存在的地址好得多。
+    final parsed = Uri.tryParse(url);
+    if (parsed == null || parsed.host.isEmpty) {
+      error = '服务器地址要以 http:// 或 https:// 开头（例如 https://room.example.com）';
+      notifyListeners();
+      return false;
+    }
     if (authKey.trim().isEmpty) {
       error = '先填服务器的 AUTH_KEY（与服务端环境变量一致）';
       notifyListeners();

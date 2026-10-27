@@ -28,6 +28,28 @@
 //    本文件只设 `connectionFactory`，两者叠加不冲突 —— 配了代理时
 //    dart:io 会把 `proxyHost/proxyPort` 传给 connectionFactory，
 //    本文件据此连代理本身，**不做 IP 替换**（否则 CONNECT 隧道必错）。
+//
+// ---------------------------------------------------------------------------
+// 🔴 2026-10-27 事故：全局 override 让**全 App 的 HTTPS 全部失效**（已修）
+// ---------------------------------------------------------------------------
+// 现象：Emby / RSS 报 `HTTP 400 The plain HTTP request was sent to HTTPS port`，
+//      漫画与 rex 详情页封面全部破图，房间连不上（`errno 49, port = 0`）。
+//
+// 根因（两条，都在下面这个函数里）：
+//   1. **一旦设置 `connectionFactory`，dart:io 就不再替你套 TLS** ——
+//      `http_impl.dart` 里只有 `connectionFactory == null` 那条分支才会走
+//      `SecureSocket.startConnect(...)`；设了 cf 就直接把 cf 返回的 socket
+//      塞进 `_HttpClientConnection`，连 `isSecure` 都不再参与。
+//      原实现统一 `Socket.startConnect(...)`（**明文**）⇒ https 变成
+//      「明文 HTTP 打到 443」⇒ 服务端回 400（nginx 的报错原文就是上面那句）。
+//   2. **Dart 的 `Uri` 不认 `ws`/`wss` 的默认端口**：`Uri.parse('wss://h/x').port == 0`
+//      （`https://` 才给 443）。`uri.port` 直接拿去 connect 就是连 0 端口 ⇒
+//      `EADDRNOTAVAIL, errno = 49`。房间模块（socket_io → wss）就是这样炸的。
+//
+// 修法：https/wss 用 `SecureSocket.secure(socket, host: 原域名)` 升级
+//      （SNI 与证书校验仍针对域名，IP 替换不影响 TLS）；端口用
+//      [_effectivePort] 兜底。两者都用独立脚本实测过：
+//      修复前 https 直连 → 400，修复后 → 200；wss 的 0 → 443。
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -36,41 +58,71 @@ import 'package:dio/io.dart';
 import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/host_resolver.dart';
 
+/// 该 URI 是否需要用 TLS 连接。
+bool _isSecureScheme(Uri uri) =>
+    uri.isScheme('https') || uri.isScheme('wss');
+
+/// 真实连接端口。
+///
+/// `Uri` 只为 http/https 定义了默认端口，`ws`/`wss` 的 `.port` 是 **0**；
+/// 而 dart:io 把 wss 改写成 https 时会把这个 0 原样带下来（`https://host:0/…`），
+/// 直接拿去 connect 就是 `EADDRNOTAVAIL`。这里统一兜底。
+int _effectivePort(Uri uri) {
+  final p = uri.port;
+  if (p != 0) return p;
+  return _isSecureScheme(uri) ? 443 : 80;
+}
+
 /// socket 连接目标解析：hosts/DoH 命中则连解析出的 IP，否则原样交给系统 DNS。
 ///
 /// 这是唯一一处真正"换 IP"的地方，[buildDioWithDns] 与全局 override 共用它。
+///
+/// [tlsContext] 是调用方 `HttpClient` 的 SecurityContext（全局 override 传进来的），
+/// 透传给 `SecureSocket.secure` 才能保持"自定义信任链"这类用法不被破坏。
 Future<ConnectionTask<Socket>> _connectWithDns(
   Uri uri,
   String? proxyHost,
-  int? proxyPort,
-) {
+  int? proxyPort, {
+  SecurityContext? tlsContext,
+}) async {
+  final port = _effectivePort(uri);
+
   // ① 走代理：目标必须是代理本身。此时替换 IP 会把请求发到源站，
   //    代理形同虚设，且 HTTPS 的 CONNECT 隧道会失败。
+  //    ⚠️ 走代理时**不要**自己套 TLS —— dart:io 会在隧道建立后
+  //    （`http_impl.dart` 的 `createProxyTunnel`）自己 `SecureSocket.secure`。
   if (proxyHost != null && proxyHost.isNotEmpty) {
-    return Socket.startConnect(proxyHost, proxyPort ?? uri.port);
+    return Socket.startConnect(proxyHost, proxyPort ?? port);
   }
 
   final resolver = HostResolver.instance;
+  var target = uri.host;
 
-  // ② 没配任何规则 → 与默认实现逐字一致，保证零行为变化
-  if (!resolver.hasRules) {
-    return Socket.startConnect(uri.host, uri.port);
+  if (resolver.hasRules) {
+    if (resolver.shouldUseSystemDns(uri.host)) {
+      // ② 回环 / IP 字面量 / DoH 服务器自身 → 只认 hosts 表，绝不发 DoH
+      //    （对 DoH 服务器发 DoH 会自递归死锁，见 HostResolver.shouldUseSystemDns）
+      target = resolver.lookupHosts(uri.host) ?? uri.host;
+    } else {
+      // ③ 正常路径：换连接目标，域名仍用于 Host 头 / TLS SNI / 证书校验
+      final ip = await resolver.resolve(uri.host);
+      if (ip != null && ip.isNotEmpty) target = ip;
+    }
   }
 
-  // ③ 回环 / IP 字面量 / DoH 服务器自身 → 只认 hosts 表，绝不发 DoH
-  //    （对 DoH 服务器发 DoH 会自递归死锁，见 HostResolver.shouldUseSystemDns）
-  if (resolver.shouldUseSystemDns(uri.host)) {
-    final overridden = resolver.lookupHosts(uri.host);
-    return Socket.startConnect(overridden ?? uri.host, uri.port);
-  }
+  final task = await Socket.startConnect(target, port);
 
-  // ④ 正常路径：换连接目标，域名仍用于 Host 头 / TLS SNI / 证书校验
-  return resolver.resolve(uri.host).then(
-        (ip) => Socket.startConnect(
-          (ip == null || ip.isEmpty) ? uri.host : ip,
-          uri.port,
-        ),
-      );
+  // ④ 明文协议到此为止
+  if (!_isSecureScheme(uri)) return task;
+
+  // ⑤ https / wss：**必须**自己升级成 TLS（见文件头「事故」第 1 条）。
+  //    `host:` 用原始域名 ⇒ SNI 与证书校验针对域名，连的却是上面解析出的 IP。
+  return ConnectionTask.fromSocket<Socket>(
+    task.socket.then(
+      (s) => SecureSocket.secure(s, host: uri.host, context: tlsContext),
+    ),
+    task.cancel,
+  );
 }
 
 /// 全局 [HttpOverrides]：给每个新建的 `HttpClient` 装上 [_connectWithDns]。
@@ -82,7 +134,9 @@ class _DnsHttpOverrides extends HttpOverrides {
   @override
   HttpClient createHttpClient(SecurityContext? context) {
     final client = super.createHttpClient(context);
-    client.connectionFactory = _connectWithDns;
+    // 把调用方的 SecurityContext 透传下去（自定义信任链的用法才不会被打断）
+    client.connectionFactory = (uri, proxyHost, proxyPort) =>
+        _connectWithDns(uri, proxyHost, proxyPort, tlsContext: context);
     return client;
   }
 }

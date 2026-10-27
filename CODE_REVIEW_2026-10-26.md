@@ -3,14 +3,14 @@
 > **复核对象**：`New-Tv`（Flutter 跨平台 TVBox 播放器）
 > **复核时间**：2026-10-26
 > **代码规模**：**568** 个 Dart 文件 / **311,857** 行
-> **静态分析**：`dart analyze lib` → **0 error / 0 warning / 1,663 info**（`lib` + `test/` 合计 **1,744**）
-> **单元测试**：`flutter test` → **659 / 659 全部通过**
+> **静态分析**：`dart analyze lib` → **0 error / 0 warning / 1,663 info**（`lib` + `test/` 合计 **1,745**）
+> **单元测试**：`flutter test` → **661 / 661 全部通过**
 >
 > **本版说明（重构）**
 > ① 已修复的条目不再作为"问题"罗列，统一收进 §六「已完成的整改」仅作追溯；
 > ② 新增 §三「本轮新发现的问题」——用自研扫描器 + 人工逐行核实做了系统性深挖；
 > ③ 新增 §四「深挖已排除的项」——记录**查过并确认没问题**的地方，避免重复排查；
-> ④ **更正上一版的两处错误结论**：附录里"637 通过 / 8 失败"已过期（实测 645 全过，现 659 全过）；"0 warning"也不成立（拆分实际引入了 149 条，本轮已修，见 N0）；
+> ④ **更正上一版的两处错误结论**：附录里"637 通过 / 8 失败"已过期（实测 645 全过，现 661 全过）；"0 warning"也不成立（拆分实际引入了 149 条，本轮已修，见 N0）；
 > ⑤ **§3.1 的 4 处 P2 缺陷已全部修复并回归验证**（详见各条末尾「修复记录」），当前**无未修的 P2**。
 
 ---
@@ -25,9 +25,21 @@
 
 其中两处属于"**同一个仓库里别的模块做对了、只有这一处漏了**"的不一致型缺陷（N2、N3）——修法有现成参照，成本极低、风险极小，本轮已按参照实现补齐。
 
-> **当前状态**：P2 已清零（4/4 修复，`dart analyze` 0 error / 0 warning，`flutter test` 659/659 回归通过）；剩余待办只有 §3.2 的 3 处 P3（N5/N6/N8），以及 §五 中按你决策保留的项。
+> **当前状态**：P2 已清零（4/4 修复，`dart analyze` 0 error / 0 warning，`flutter test` 661/661 回归通过）；剩余待办只有 §3.2 的 3 处 P3（N5/N6/N8），以及 §五 中按你决策保留的项。
 >
 > **P3 需要区别对待（2026-10-27 复核影响面后）**：N7 已修；剩余三项中 **只有 N8（健康检查并发 12）有真实用户可见后果**——超时被误判会导致可用源被自动停用；N5/N6 的实际影响约等于零（父控制器已释放、订阅已 cancel），属规范项；N7 是"Hive 没有 PrefsMirror 那样的兜底"的设计不对称。
+>
+> **⚠️ 第三轮（见 §九）：一次自伤事故，已修复**
+>
+> 7 张真机截图（Emby / RSS 报 400、房间 `port=0`、漫画与 rex 封面破图）里，**5 张是同一个根因**：
+> `34bb3a1` 加的全局 `HttpOverrides` 把 `connectionFactory` 装到每个 `HttpClient` 上，
+> 而 **dart:io 一旦看到自定义 `connectionFactory` 就不再替你套 TLS** —— 原实现统一返回明文
+> `Socket.startConnect(...)`，于是**全 App 的 https 都变成「明文 HTTP 打到 443」**，
+> 服务端回 `400 The plain HTTP request was sent to HTTPS port`。
+> 已在 `dio_factory.dart` 用 `SecureSocket.secure(socket, host: 原域名)` 修复，
+> 并补了一条**真 TLS 本地服务**的回归测试（去掉修复即失败）。
+>
+> 剩余未修：R5（TG `m.next`，Node 侧缺堆栈）、R7（rex 解析无超时/无取消）。
 
 ---
 
@@ -38,7 +50,7 @@
 | Dart 文件 | 568 | 含 P0.1 拆分新增的 7 个 part |
 | 代码行数 | 311,857 | — |
 | `dart analyze lib` | **0 error / 0 warning / 1,663 info** | info 全部为 lint 建议 |
-| `flutter test` | **659 / 659 通过** | 0 失败（新增 14 条：音乐订阅迁移 7 + CacheStore 生命周期 7） |
+| `flutter test` | **661 / 661 通过** | 0 失败（新增 16 条：音乐订阅迁移 7 + CacheStore 生命周期 7 + TLS 回归 2） |
 | 启用 lint | 40+ 条 | 含 `cancel_subscriptions`、`avoid_slow_async_io`、`always_use_package_imports` 等 |
 
 **规模分布**（行）：
@@ -462,7 +474,7 @@ int _concurrency = 12;   // 默认值
 | **`onReorder` 语义变更** | ✅ 10 处已按新索引语义人工修正 |
 | **宠物形象** | ✅ 重绘为矢量红围巾企鹅（`blob_pet_painter.dart`），去掉外部 GIF 依赖 |
 | **音乐模块 github.io 单点** | ✅ `plugin_subscription.dart:69`、`builtin_sources_service.dart:184`（five 源）换 jsDelivr(gcore) |
-| **8 个陈旧测试** | ✅ 已修好，本次实测 **659 / 659 全过**（上一版附录"637 通过 / 8 失败"已过期） |
+| **8 个陈旧测试** | ✅ 已修好，本次实测 **661 / 661 全过**（上一版附录"637 通过 / 8 失败"已过期） |
 | **N1 阅读器 TTS 控制器泄漏** | ✅ `reader_part_01.dart` 的 `dispose()` 补 `_ttsNarratorCtl` / `_ttsDialogueCtl` 释放（原先每进出阅读器泄漏 2 个） |
 | **N2 局域网传书文件名净化** | ✅ `peer_transfer_service._sanitizeFilename` 对齐 `book_download_service._sanitize`：全非法字符 + 尾部点/空格 + 挡 `.`/`..` + 按 UTF-8 字节截断（180B）并保留扩展名 |
 | **N3 章节导出文件名** | ✅ `book_source_detail_page._safeFileName` 补控制字符过滤、尾部点/空格、180 字节截断（留 `.txt` 余量），空名兜底 `chapter` |
@@ -504,7 +516,7 @@ dart analyze lib
 $env:NO_PROXY="127.0.0.1,localhost,::1"
 Remove-Item Env:HTTP_PROXY, Env:HTTPS_PROXY, Env:http_proxy, Env:https_proxy
 flutter test
-# → 01:07 +659: All tests passed!
+# → 10:20 +661: All tests passed!
 ```
 
 ### 文件名净化边界验证（N2 / N3）
@@ -528,3 +540,142 @@ dart run E:\Dev\_tools\bugscan\scan.dart lib E:\Dev\_tools\bugscan\out.txt
 扫描器覆盖 20 类需显式释放的资源：`Timer`、`StreamSubscription`、`AnimationController`、`TextEditingController`、`ScrollController`、`PageController`、`TabController`、`FocusNode`、`TransformationController`、`ValueNotifier`、`VideoPlayerController`、`AudioPlayer`、`ReceivePort`、`RawDatagramSocket`、`StreamController`、`Isolate`、`HttpClient`、`ImageStream`、`OverlayEntry`、`Animation`。命中项已全部人工甄别（见 §四）。
 
 > 注意：扫描器**不识别所有权**（外部传入的 controller、单例上的 ValueNotifier 都会被算命中），所以 133 → 4 的收敛是人工甄别的结果，不是脚本能自动给出的。
+
+---
+
+## 九、真机截图 7 连炸：**一个根因**（2026-10-27，已修复）
+
+> 用户提供的 7 张真机截图：Emby 400、房间 `port=0`、RSS 400、漫画封面破图、
+> TG `m.next`、MissAV 封面破图、短剧卡「解析线路中」。
+>
+> 最初的判断是「7 个独立问题」。**错了。** 逐层验证后发现：其中 **5 张截图是同一个根因**，
+> 而且这个根因是我们在 `34bb3a1` 里自己引入的。
+
+### 统一根因：全局 DNS 拦截让**整个 App 的 HTTPS 退化成明文 HTTP**
+
+`34bb3a1` 给 `main()` 加了 `installGlobalDnsOverrides()`，把 `connectionFactory` 装到
+**每一个** `HttpClient` 上（Dio / `cached_network_image` / `WebSocket` 全覆盖）。
+
+但 dart:io 的约定是：**一旦你设置了 `connectionFactory`，TLS 就得你自己做。**
+
+```dart
+// dart-sdk/lib/_http/http_impl.dart  _ConnectionTarget.connect()
+if (cf != null) {
+  connectionTask = proxy.isDirect ? cf(uri, null, null) : cf(uri, host, port);
+} else {
+  connectionTask = (isSecure && proxy.isDirect
+      ? SecureSocket.startConnect(host, port, context: context, ...)  // ← 只有这条分支才套 TLS
+      : Socket.startConnect(host, port));
+}
+```
+
+原实现四条分支**全部**返回 `Socket.startConnect(...)`（明文 Socket），于是 https 请求
+把明文 HTTP 写进了 443 端口。nginx 对这种情况的标准回答就是：
+
+```
+400 The plain HTTP request was sent to HTTPS port
+```
+
+—— 与截图 ① 的 Emby 报错**逐字一致**。
+
+**实测复现**（独立 Dart 脚本，强制直连以排除本机代理干扰）：
+
+| 场景 | 结果 |
+|---|---|
+| 不装 override，`https://sspai.com/api/...` | **200** |
+| 装 override（原实现），同一地址 | **400 `The plain HTTP request was sent to HTTPS port`** |
+| 装 override（修复后：`SecureSocket.secure`），同一地址 | **200** |
+
+> 为什么我第一次 curl 测出来全是 200 却没能定位：curl 自己做了 TLS；
+> 而脚本第一次跑也返回 200，是因为**本机 `HTTP_PROXY` 生效** → 走了 CONNECT 隧道 →
+> dart:io 在隧道里自己套了 TLS（`createProxyTunnel` 那条分支）。加上
+> `findProxy = DIRECT` 之后立刻复现 400。**这个细节决定了能不能定位到根因。**
+
+### 顺带查出的第二个缺陷：`wss` 的端口是 0
+
+同一函数里还有个独立的坑：**Dart 的 `Uri` 不为 `ws`/`wss` 定义默认端口**。
+
+```
+Uri.parse('https://a.com/x').port  → 443
+Uri.parse('wss://a.com/x').port    → 0     ← 陷阱
+```
+
+`dart:io` 把 wss 改写成 https 时会把这个 0 原样带下来（`https://host:0/…`），
+而我们的工厂拿 `uri.port` 直接 connect ⇒ `Socket.startConnect(host, 0)` ⇒
+`EADDRNOTAVAIL, errno = 49, port = 0` —— 截图 ② 的房间报错，逐字一致。
+
+### 五张截图归位
+
+| 截图 | 现象 | 归属 |
+|---|---|---|
+| ① Emby | 400 plain HTTP → HTTPS port | TLS 缺失 |
+| ② 房间 | `errno 49, port = 0` | TLS 缺失 **+** 端口 0 |
+| ③ RSS | 请求失败（400） | TLS 缺失（源站被明文打 443） |
+| ④ 漫画 | 封面破图 | TLS 缺失（https 图床） |
+| ⑥ MissAV | 封面破图 | TLS 缺失（https 图床） |
+
+> 这也解释了为什么「有些地方还能用」：走 `http://` 的源、以及 `127.0.0.1` 的
+> Node 服务（TG / rex / 书源）完全不受影响 —— 所以截图 ⑤⑦ 是另外的问题（见下）。
+
+### 修复（`lib/services/dio_factory.dart`）
+
+1. **https / wss 自己升级 TLS**：`Socket.startConnect(ip, port)` 拿到明文 socket 后
+   `SecureSocket.secure(socket, host: 原域名)` —— 连的是解析出的 IP，
+   SNI 与证书校验仍针对域名，hosts/DoH 的能力一点没丢；
+2. **端口兜底** `_effectivePort(uri)`：`0` → 按 scheme 取 443/80；
+3. **透传调用方的 `SecurityContext`**：`createHttpClient(context)` 收到的 context
+   一路传给 `SecureSocket.secure`，自定义信任链的用法不被破坏；
+4. **走代理时不自己套 TLS**（dart:io 会在 CONNECT 隧道里做），避免双重加密。
+
+`lib/room/room_session.dart` 另加一道前置校验：地址不带 `http(s)://` 时直接给出
+可读提示，而不是让它连一个 host 为空、端口为 0 的地址。
+
+### 回归
+
+新增 `test/dns_override_tls_test.dart`（2 条），用**真 TLS 本地服务**（自签名证书
+`test/fixtures/tls/`）+ 全局 override 验证握手成功：
+
+- 修复后：**通过**
+- 把 TLS 升级那几行去掉（模拟原实现）：**失败** ← 证明这条测试真的能抓住该回归
+- 第二条用例钉住 `ws/wss` 的 `.port == 0` 这个 SDK 事实，防止以后又有人直接用它
+
+`dart analyze lib test` → **0 error / 0 warning / 1,745 info**；`flutter test` → **661 / 661**。
+
+---
+
+### 剩下两张：与上面无关，仍未修
+
+#### R5｜TG `m.next is not a function`
+
+Node 侧抛出的裸 JS TypeError，被 `/tg/…` 的 JSON 错误体透传到播放页
+（`mini_app_player_page.dart:52-97`）。`X.next is not a function` 是 tslib / esbuild
+`__async` helper 的典型报错——helper 拿到的 `generator` 不是迭代器。
+`assets/nodejs-project` 依赖的 `telegram`(gramjs) 是 ES5 降级产物
+（`_asyncToGenerator` + `function*`），所以根因落在「NodeMobile 对 generator 支持不全」
+或「该模块被以 es5 target 打包」二者之一。
+
+**确定缺陷**：Node 侧没有 try/catch 兜住并附堆栈，UI 只拿到一句裸 TypeError，
+无法定位到模块与行号。**修法**：`/tg` 路由统一 catch，回 `{error, stack, module, url}`。
+
+#### R7｜短剧详情永久「解析线路中…」
+
+`rex_detail_page.dart:84-105` 的 `_loadStreams()` **没有 `.timeout()`**，
+底层 `_dio`（`rex_service.dart:45-48`）`receiveTimeout` 是 **90 秒**。
+所以"永远转圈"的真实含义是"最长转 90 秒"，期间按钮 disabled、无提示、无取消；
+连续点两个模块时第二条还会排在 Node 侧后面。
+
+**修法**：`resource()` 加 20~30s 上限 + 超时文案 + 「取消/重试」；`_loadStreams`
+用序号防串号（切 item 后旧响应不回写）。
+
+---
+
+### 教训
+
+这次的核心教训不是"哪里写错了"，而是**全局网络拦截的验证方式**：
+
+1. 全局 `HttpOverrides` 的影响面是**整个 App 的每一个连接**，改动它必须用
+   「真 TLS 服务 + 强制直连」验证，不能只跑单元测试（单测里没有真实网络，全部通过）；
+2. 本机 `HTTP_PROXY` 会让"代理隧道自动套 TLS"的路径掩盖直连缺陷 ——
+   排查网络问题时**必须显式 `findProxy = DIRECT`**；
+3. 我上一轮把 7 张截图当 7 个独立问题逐条归因，其中 5 条其实是同一个根因。
+   **先找共同点，再逐条拆**，比逐条猜快得多。
