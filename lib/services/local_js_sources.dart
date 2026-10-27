@@ -31,15 +31,27 @@ import 'package:tvbox/services/app_log.dart';
 ///
 /// 判定刻意**放宽**：出现任一入口特征就放行 —— 宁可漏判，也不要把写法特殊的
 /// 正常源误杀掉。真正能不能跑，选中时 Node 载入会给出更准确的错误。
+///
+/// ⚠️ 2026-10-27 修（用户导入「官方聚合.js」被误判成网页）：
+///   很多正常源会在**字符串或正则里**拼 HTML（典型：
+///   `/<!doctype html|<html\b|<head\b/i.test(body)` 判断响应是不是网页）。
+///   旧逻辑「全文出现 `<html` 就判成 HTML 网页」会把这些源直接误杀。
+///   ⇒ 现在**先**认入口/导出特征，只有「完全没有 JS 入口、且文件**开头**就是
+///   HTML 文档」才判成网页（那才是真的下载到了错误页）。
 String? whyNotJsSource(String code) {
   final s = code.trim();
   if (s.isEmpty) return '脚本内容为空';
-  final lower = s.toLowerCase();
-  if (lower.startsWith('<!doctype') || lower.contains('<html')) {
-    return '这是一段 HTML 网页，不是 JS 源脚本（可能是下载到了错误页）。';
-  }
+
+  // ① 先认「像不像 JS 源」：入口 / 导出 / CatVod 工厂特征任一命中即放行。
   if (_reEntry.hasMatch(s) || _reExport.hasMatch(s) || _reCatVod.hasMatch(s)) {
     return null;
+  }
+
+  // ② 没有任何 JS 入口特征，且**文件开头就是 HTML 文档** ⇒ 基本是错误页。
+  final head = s.length > 512 ? s.substring(0, 512) : s;
+  final lowerHead = head.toLowerCase();
+  if (lowerHead.startsWith('<!doctype') || lowerHead.startsWith('<html')) {
+    return '这是一段 HTML 网页，不是 JS 源脚本（可能下载到了错误页）。';
   }
   return '这不是 JS 影视源脚本：既没有 module.exports / export，'
       '也没有 homeContent / start 等入口。';
