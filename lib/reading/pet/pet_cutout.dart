@@ -169,17 +169,12 @@ class _CutoutPetView extends StatelessWidget {
     required this.cacheKey,
     required this.loader,
     required this.size,
-    this.outfits = const {},
     this.fallback,
   });
 
   final String cacheKey;
   final Future<Uint8List> Function() loader;
   final double size;
-
-  /// 穿戴：交给 [_CutoutPainter] 在**知道图片真实落点之后**再叠，
-  /// 这样配饰能贴着宠物的头/身子，而不是按整幅画布瞎猜。
-  final Map<PetOutfitSlot, String> outfits;
   final Widget? fallback;
 
   @override
@@ -197,7 +192,7 @@ class _CutoutPetView extends StatelessWidget {
         return SizedBox(
           width: size,
           height: size,
-          child: CustomPaint(painter: _CutoutPainter(cut, outfits)),
+          child: CustomPaint(painter: _CutoutPainter(cut)),
         );
       },
     );
@@ -205,10 +200,9 @@ class _CutoutPetView extends StatelessWidget {
 }
 
 class _CutoutPainter extends CustomPainter {
-  _CutoutPainter(this.cut, this.outfits);
+  _CutoutPainter(this.cut);
 
   final _PetCutout cut;
-  final Map<PetOutfitSlot, String> outfits;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -228,56 +222,8 @@ class _CutoutPainter extends CustomPainter {
       dest,
       Paint()..filterQuality = FilterQuality.medium,
     );
-    if (outfits.isNotEmpty) _drawOutfits(canvas, dest);
-  }
-
-  /// 图片宠物没法知道真实关节坐标，退一步：按**图片实际落点**估一颗虚拟圆团。
-  ///
-  /// 常见 Q 版插画是 3:4 全身像，头大约占宽度的 50%、纵向 25% 处；
-  /// 把这颗"虚拟头团"的尺寸交给 [PetOutfitPainter]，帽檐/镜片/领口的相对
-  /// 位置就和矢量宠物完全一致 —— 比旧版按整幅画布百分比摆放准得多。
-  void _drawOutfits(Canvas canvas, Rect dest) {
-    final headW = dest.width * 0.52;
-    final k = headW / 74.0;
-    canvas.save();
-    canvas.translate(dest.center.dx, dest.top + dest.height * 0.26);
-    canvas.scale(k);
-    PetOutfitPainter(outfits: outfits).paintAll(canvas);
-    canvas.restore();
   }
 
   @override
-  bool shouldRepaint(_CutoutPainter old) =>
-      old.cut != cut ||
-      old.outfits.length != outfits.length ||
-      !old.outfits.entries.every((e) => outfits[e.key] == e.value);
-}
-
-/// 给**图片宠物**叠加换装（GIF 等拿不到抠图落点的情况）。
-///
-/// 静态图走 [_CutoutPainter]（能拿到真实落点，配饰贴得准）；GIF 逐帧没法
-/// 抠图，只能按「整幅画面 = 宠物本体」的常见构图估算一颗虚拟圆团，
-/// 再用同一套 [PetOutfitPainter] 画 —— 至少帽檐/领口的相对位置是一致的。
-class _ImageOutfitPainter extends CustomPainter {
-  _ImageOutfitPainter(this.outfits);
-
-  final Map<PetOutfitSlot, String> outfits;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (outfits.isEmpty) return;
-    final r = Rect.fromLTWH(0, 0, size.width, size.height);
-    final headW = r.width * 0.52;
-    final k = headW / 74.0;
-    canvas.save();
-    canvas.translate(r.center.dx, r.top + r.height * 0.26);
-    canvas.scale(k);
-    PetOutfitPainter(outfits: outfits).paintAll(canvas);
-    canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(_ImageOutfitPainter old) =>
-      old.outfits.length != outfits.length ||
-      !old.outfits.entries.every((e) => outfits[e.key] == e.value);
+  bool shouldRepaint(_CutoutPainter old) => old.cut != cut;
 }

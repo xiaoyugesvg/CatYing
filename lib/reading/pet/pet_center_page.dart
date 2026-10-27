@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -13,7 +14,7 @@ import 'package:tvbox/reading/pet/pet_models.dart';
 import 'package:tvbox/reading/pet/pet_service.dart';
 import 'package:tvbox/reading/pet/pet_view.dart';
 
-/// 桌宠中心：状态 / 喂食 / 换装 / 图鉴。
+/// 桌宠中心：状态 / 喂食 / 动作表情 / 图鉴。
 class PetCenterPage extends StatefulWidget {
   const PetCenterPage({super.key});
 
@@ -32,6 +33,10 @@ class _PetCenterPageState extends State<PetCenterPage>
   /// AI 生成中（按钮转圈 / 防重复点击）
   bool _aiBusy = false;
 
+  /// 正在预览的动作表情（4 秒后回到站立）
+  PetMood? _expr;
+  Timer? _exprTimer;
+
   @override
   void initState() {
     super.initState();
@@ -40,8 +45,17 @@ class _PetCenterPageState extends State<PetCenterPage>
 
   @override
   void dispose() {
+    _exprTimer?.cancel();
     _anim.dispose();
     super.dispose();
+  }
+
+  void _playMood(PetMood m) {
+    setState(() => _expr = m);
+    _exprTimer?.cancel();
+    _exprTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted) setState(() => _expr = null);
+    });
   }
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
@@ -93,11 +107,9 @@ class _PetCenterPageState extends State<PetCenterPage>
               const SizedBox(height: 14),
               _actionsCard(),
               const SizedBox(height: 18),
-              // 换装（用户 2026-10-25：重新开放）——
-              //   新熊猫的服饰贴图已经能画（PetView 的 _ImageOutfitPainter），
-              //   这里按部位列出可买/可穿的单品。
-              _sectionTitle('换装 · ${_pet.coins} 猫币'),
-              _outfitsCard(),
+              // 动作表情（用户 2026-10-27：不要服装系统了，改扩展动作表情）
+              _sectionTitle('动作表情'),
+              _moodsCard(),
               const SizedBox(height: 18),
               _sectionTitle('图鉴（$ownedPets/${PetSpecies.pets.length}）'),
               _collection(),
@@ -137,15 +149,14 @@ class _PetCenterPageState extends State<PetCenterPage>
                     path: _pet.customPetPath,
                     size: 118,
                     bob: 0,
-                    outfits: _pet.equippedSlots,
+                    expr: _expr,
                   )
                 : PetView(
                     species: s,
-                    outfit: _pet.equippedOutfit,
-                    outfits: _pet.equippedOutfitsByName,
                     t: _anim.value * 4,
                     size: 118,
                     mood: _pet.mood,
+                    expr: _expr,
                   ),
           ),
           const SizedBox(width: 12),
@@ -600,11 +611,10 @@ class _PetCenterPageState extends State<PetCenterPage>
     );
   }
 
-  /// 换装：按部位列出单品，点一下 = 购买（若未拥有）+ 穿上；
-  /// 再点已穿的那件 = 脱下。等级不够 / 猫币不够会给明确提示。
-  Widget _outfitsCard() {
+  /// 动作表情：点一下当场做一个（开心 / 生气 / 疑惑 / 打招呼 / 谢谢 / 晚安）
+  Widget _moodsCard() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
       decoration: BoxDecoration(
         color: _card,
         borderRadius: BorderRadius.circular(16),
@@ -612,104 +622,54 @@ class _PetCenterPageState extends State<PetCenterPage>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (final slot in PetOutfitSlot.values) ...[
-            Padding(
-              padding: const EdgeInsets.only(top: 6, bottom: 2),
-              child: Text(
-                slot.label,
-                style: TextStyle(
-                  fontSize: AppTheme.fontCaption,
-                  color: JellyTheme.textSecondary,
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final m in PetMood.values)
+                GestureDetector(
+                  onTap: () => _playMood(m),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _expr == m
+                          ? AppTheme.accentOnSurface.withValues(alpha: 0.18)
+                          : JellyTheme.textSecondary.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: _expr == m
+                            ? AppTheme.accentOnSurface
+                            : Colors.transparent,
+                      ),
+                    ),
+                    child: Text(
+                      '${m.emoji} ${m.label}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: _expr == m
+                            ? FontWeight.w700
+                            : FontWeight.w400,
+                        color: _expr == m
+                            ? AppTheme.accentOnSurface
+                            : JellyTheme.textSecondary,
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-            ),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _outfitChip(slot, null),
-                for (final o in PetOutfits.forSlot(slot))
-                  _outfitChip(slot, o),
-              ],
-            ),
-          ],
-          const SizedBox(height: 6),
+            ],
+          ),
+          const SizedBox(height: 8),
           Text(
-            '点一下购买/穿上，再点已穿的脱下',
+            '点一下，它就在上面那个框里当场做给你看',
             style: TextStyle(
               fontSize: 10.5,
               color: JellyTheme.textSecondary.withValues(alpha: 0.75),
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _outfitChip(PetOutfitSlot slot, PetOutfitInfo? o) {
-    final equipped = o == null
-        ? !_pet.equippedSlots.containsKey(slot)
-        : _pet.equippedSlots[slot] == o.id;
-    final owned = o == null || _pet.ownsOutfit(o);
-    final locked = o != null && _pet.level < o.unlockLevel;
-    final label = o == null
-        ? '不戴'
-        : locked
-            ? '${o.name} · Lv.${o.unlockLevel}'
-            : owned
-                ? o.name
-                : '${o.name} · ${o.price}币';
-    return GestureDetector(
-      onTap: () async {
-        if (o == null) {
-          await _pet.clearOutfitSlot(slot);
-          setState(() {});
-          return;
-        }
-        if (locked) {
-          _toast('到 Lv.${o.unlockLevel} 才能解锁「${o.name}」');
-          return;
-        }
-        if (equipped) {
-          await _pet.clearOutfitSlot(slot);
-          setState(() {});
-          return;
-        }
-        if (!owned && _pet.coins < o.price) {
-          _toast('猫币不够：还差 ${o.price - _pet.coins}');
-          return;
-        }
-        final ok = await _pet.buyOutfit(o);
-        if (!mounted) return;
-        setState(() {});
-        _toast(ok ? (owned ? '已穿上「${o.name}」' : '已购买并穿上「${o.name}」') : '购买失败');
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-        decoration: BoxDecoration(
-          color: equipped
-              ? AppTheme.accentOnSurface.withValues(alpha: 0.18)
-              : JellyTheme.textSecondary.withValues(alpha: 0.10),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: equipped
-                ? AppTheme.accentOnSurface
-                : Colors.transparent,
-            width: 1,
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 11.5,
-            fontWeight: equipped ? FontWeight.w600 : FontWeight.w400,
-            color: equipped
-                ? AppTheme.accentOnSurface
-                : locked
-                    ? JellyTheme.textSecondary.withValues(alpha: 0.5)
-                    : JellyTheme.textSecondary,
-          ),
-        ),
       ),
     );
   }
@@ -748,10 +708,6 @@ class _PetCenterPageState extends State<PetCenterPage>
                   children: [
                     PetView(
                       species: s,
-                      outfit: unlocked
-                          ? _pet.equippedOutfit
-                          : PetOutfits.none.id,
-                      outfits: unlocked ? _pet.equippedOutfitsByName : const {},
                       t: 0.8,
                       size: 74,
                       mood: unlocked ? 80 : 20,

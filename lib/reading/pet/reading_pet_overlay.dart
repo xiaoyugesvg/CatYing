@@ -6,6 +6,7 @@ import 'package:get/get.dart';
 
 import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/reading/pet/pet_center_page.dart';
+import 'package:tvbox/reading/pet/pet_models.dart';
 import 'package:tvbox/reading/pet/pet_chat_sheet.dart';
 import 'package:tvbox/reading/pet/pet_service.dart';
 import 'package:tvbox/reading/pet/pet_view.dart';
@@ -53,6 +54,15 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
   /// 点一下弹一下（互动反馈）
   bool _bounce = false;
 
+  /// 当前动作表情（开心/生气/疑惑/打招呼/谢谢/晚安），`null` = 平时站着。
+  ///
+  /// 用户 2026-10-27：「扩展 开心 / 生气 / 疑惑 / 打招呼 / 谢谢 / 晚安
+  /// 这一类动作表情」。形象是静态插画，所以用「动作节奏 + emoji 气泡」表达，
+  /// 见 [PetView.expr]。自动触发：每 30 秒掷一次骰子，深夜固定「晚安」。
+  PetMood? _expr;
+  Timer? _exprTimer;
+  Timer? _exprResetTimer;
+
   static const _bubbleMaxWidth = 180.0;
 
   /// 按当前状态启停待机动画。
@@ -88,6 +98,12 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
     _usageTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (_resumed) _pet.addUsageMinute();
     });
+    // 动作表情：闲着自己做个小动作，别一直傻站着
+    _exprTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!mounted || !_pet.enabled || !_resumed) return;
+      if (_expr != null || _dragging) return;
+      if (Random().nextInt(100) < 35) _playMood(_pickMood());
+    });
   }
 
   @override
@@ -98,6 +114,8 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
     _usageTimer?.cancel();
     _bubbleTimer?.cancel();
     _bounceTimer?.cancel();
+    _exprTimer?.cancel();
+    _exprResetTimer?.cancel();
     _anim.dispose();
     super.dispose();
   }
@@ -119,6 +137,30 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
     _bubbleTimer?.cancel();
     _bubbleTimer = Timer(const Duration(seconds: 3), () {
       if (mounted) setState(() => _bubble = null);
+    });
+  }
+
+  /// 深夜优先「晚安」，其余随机挑一个
+  PetMood _pickMood() {
+    final h = DateTime.now().hour;
+    if (h >= 22 || h < 6) return PetMood.night;
+    const pool = [
+      PetMood.happy,
+      PetMood.greet,
+      PetMood.thanks,
+      PetMood.puzzled,
+      PetMood.angry,
+    ];
+    return pool[Random().nextInt(pool.length)];
+  }
+
+  /// 做一个动作表情，4 秒后恢复站立
+  void _playMood(PetMood m) {
+    if (!mounted) return;
+    setState(() => _expr = m);
+    _exprResetTimer?.cancel();
+    _exprResetTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted) setState(() => _expr = null);
     });
   }
 
@@ -203,7 +245,36 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                     fontSize: 12,
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
+                // 动作表情：点一下当场做一个（用户 2026-10-27）
+                SizedBox(
+                  height: 34,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      for (final m in PetMood.values)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: OutlinedButton(
+                            onPressed: () => _playMood(m),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppTheme.textPrimary,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                              ),
+                              minimumSize: const Size(0, 32),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            child: Text(
+                              '${m.emoji} ${m.label}',
+                              style: const TextStyle(fontSize: 12.5),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
                 // 长按菜单只要文字（用户 2026-10-27）—— 原来三个按钮/条目
                 // 都带图标，去掉后整块只剩文字，视线不再被图标打断。
                 Row(
@@ -240,7 +311,7 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                   dense: true,
                   contentPadding: EdgeInsets.zero,
                   title: Text(
-                    '宠物中心 / 图鉴 / 换装',
+                    '宠物中心 / 图鉴',
                     style: TextStyle(color: AppTheme.textPrimary),
                   ),
                   onTap: () {
@@ -302,24 +373,12 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
             //（身体探出屏幕一部分 + 朝屏幕内侧微倾），而不是贴平站在边上。
             final dockLeft = _pet.posX <= 0.001;
             final dockRight = _pet.posX >= 0.999;
-            // 内置矢量宠物贴边时走「门后探头」（画笔里画细白门框 + 只露脑袋）；
-            // 自定义 PNG/GIF 没法画门框，还是老样子整体推出屏幕 + 斜 45°。
-            final peek = !_pet.hasCustomPet && (dockLeft || dockRight)
-                ? (dockLeft ? -1 : 1)
-                : 0;
             // 记录宠物**实际可见**的屏幕矩形（贴边姿态有位移）——
             // 点开对话时用它算"贴着宠物"的位置
-            final dockDx = peek != 0
-                ? 0.0
-                : (dockLeft ? -petSize * 0.62 : (dockRight ? petSize * 0.62 : 0.0));
-            _petRect = peek != 0
-                ? Rect.fromLTWH(
-                    dockLeft ? left : left + petSize * 0.16,
-                    top + petSize * 0.10,
-                    petSize * 0.84,
-                    petSize * 0.86,
-                  )
-                : Rect.fromLTWH(left + dockDx, top, petSize, petSize);
+            final dockDx = dockLeft
+                ? -petSize * 0.62
+                : (dockRight ? petSize * 0.62 : 0.0);
+            _petRect = Rect.fromLTWH(left + dockDx, top, petSize, petSize);
 
             Widget petBody = Column(
               mainAxisSize: MainAxisSize.min,
@@ -362,16 +421,14 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                                 path: _pet.customPetPath,
                                 size: petSize,
                                 bob: sin(_anim.value * 2 * pi) * 1.6,
-                                outfits: _pet.equippedSlots,
+                                expr: _expr,
                               )
                             : PetView(
                                 species: _pet.species,
-                                outfit: _pet.equippedOutfit,
-                                outfits: _pet.equippedOutfitsByName,
                                 t: _anim.value * 4,
                                 size: petSize,
                                 mood: _pet.mood,
-                                peek: peek,
+                                expr: _expr,
                               ),
                       ),
                     ),
@@ -402,15 +459,15 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
               ],
             );
 
-            if ((dockLeft || dockRight) && peek == 0) {
+            if (dockLeft || dockRight) {
               // 贴边姿态（用户 2026-10-25：斜着 45°）——
               //   一半身子推到屏幕外，同时整体朝屏幕内侧倾 45°，
               //   像从边缘斜插进来的贴纸。
               // ⚠️ 探出量（2026-10-25 第二轮）：原来只推 0.45，旋转 45° 之后
               //   实际露出屏幕的部分接近 2/3，用户反馈「贴边的时候出来太多了」
               //   ⇒ 推到 0.62，只露一小截。
-              // 2026-10-27：内置矢量宠物改成「门后探头」（peek != 0），
-              //   不再整体推出去 —— 门框和爪子都是画笔在组件内侧画的。
+              // 2026-10-27：内置形象也统一走这套（原来的「门后探头」画笔
+              //   已随手绘宠物一起删除，形象只剩用户给的 3 张透明 PNG）。
               petBody = Transform.translate(
                 offset: Offset(
                   dockLeft ? -petSize * 0.62 : petSize * 0.62,

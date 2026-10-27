@@ -286,8 +286,6 @@ class _PetChatSheetState extends State<PetChatSheet> {
               clipBehavior: Clip.antiAlias,
               child: PetView(
                 species: p.species,
-                outfit: p.equippedOutfit,
-                outfits: p.equippedOutfitsByName,
                 t: 0.5,
                 size: 38,
                 headOnly: true,
@@ -458,8 +456,6 @@ class _PetChatSheetState extends State<PetChatSheet> {
       clipBehavior: Clip.antiAlias,
       child: PetView(
         species: p.species,
-        outfit: p.equippedOutfit,
-        outfits: p.equippedOutfitsByName,
         t: 0.5,
         size: 26,
         headOnly: true,

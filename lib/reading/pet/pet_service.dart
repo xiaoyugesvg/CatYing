@@ -24,31 +24,18 @@ class PetService extends ChangeNotifier {
 
   static const _key = 'reading_pet_v1';
 
-  /// 默认桌宠：**小Q**（QQ 秀风格人形，用户 2026-10-18）。
+  /// 默认桌宠：**熊猫**（图鉴第一只，用户 2026-10-27）。
   ///
-  /// 生肖 / 龙 / 麒麟等旧物种已从桌宠图鉴移除，只保留为登录头像插画；
-  /// 老存档里的物种会在 [load] 里自动迁到小Q。
-  String speciesId = PetSpecies.qqBoy.id;
+  /// 生肖等旧物种已从桌宠图鉴移除，只保留为登录头像插画；
+  /// 老存档里已删除的物种 id 会在 [load] 里自动迁到第一只。
+  String speciesId = PetSpecies.pets.first.id;
   int level = 1;
   int exp = 0;
   int coins = 0;
   double mood = 80;
   double hunger = 80;
 
-  final Set<String> unlockedSpecies = {PetSpecies.qqBoy.id};
-  final Set<String> ownedOutfits = {PetOutfits.none.id};
-
-  /// 多部位穿搭：部位 → 单品 id（QQ秀式，用户 2026-10-18）
-  final Map<PetOutfitSlot, String> equippedSlots = {};
-
-  /// 兼容旧接口：已穿戴的第一件单品 id（没有则 none）
-  String get equippedOutfit =>
-      equippedSlots.isEmpty ? PetOutfits.none.id : equippedSlots.values.first;
-
-  /// PetView 用：部位名 → 单品 id
-  Map<String, String> get equippedOutfitsByName => {
-    for (final e in equippedSlots.entries) e.key.name: e.value,
-  };
+  final Set<String> unlockedSpecies = {PetSpecies.pets.first.id};
 
   bool enabled = true;
 
@@ -90,7 +77,7 @@ class PetService extends ChangeNotifier {
   PetSpeciesInfo get species {
     // 自定义皮肤路径为空时不要拿「自定义」去画（会落回旧的动物团子），
     // 直接回退 QQ 小人。
-    if (isCustomPet && customPetPath.isEmpty) return PetSpecies.qqBoy;
+    if (isCustomPet && customPetPath.isEmpty) return PetSpecies.pets.first;
     return PetSpecies.byId(speciesId);
   }
 
@@ -131,49 +118,14 @@ class PetService extends ChangeNotifier {
             unlockedSpecies
               ..clear()
               ..addAll(us.map((e) => '$e'))
-              ..add(PetSpecies.qqBoy.id);
-          }
-          final of = j['outfits'];
-          if (of is List) {
-            ownedOutfits
-              ..clear()
-              ..addAll(of.map((e) => '$e'))
-              ..add(PetOutfits.none.id);
-            // 2026-10-27：换装从六部位收敛成三类（节日头饰/眼镜/衣服），
-            // 旧档里的 bow / hoodie / book / moon 这些 id 已经不存在了。
-            // 不清理的话「已拥有」列表会一直带着一堆永远点不到的幽灵单品。
-            ownedOutfits.removeWhere(
-              (id) => id != PetOutfits.none.id && PetOutfits.byId(id) == null,
-            );
-          }
-          // ── 多部位穿搭恢复（兼容旧版单件 equipped）──────────────
-          equippedSlots.clear();
-          final eq = j['equippedSlots'];
-          if (eq is Map) {
-            for (final e in eq.entries) {
-              final slot = PetOutfitSlot.values
-                  .where((s) => s.name == '${e.key}')
-                  .firstOrNull;
-              final item = PetOutfits.byId('${e.value}');
-              if (slot != null &&
-                  item != null &&
-                  item.slot == slot &&
-                  ownedOutfits.contains(item.id)) {
-                equippedSlots[slot] = item.id;
-              }
-            }
-          } else {
-            final legacy = PetOutfits.byId('${j['equipped'] ?? ''}');
-            if (legacy != null && ownedOutfits.contains(legacy.id)) {
-              equippedSlots[legacy.slot] = legacy.id;
-            }
+              ..add(PetSpecies.pets.first.id);
           }
           // 自定义皮肤文件丢了（换机 / 清理缓存）→ 回退到阿汪，避免空白桌宠
           if (speciesId == PetSpecies.custom.id) {
             final ok =
                 customPetPath.isNotEmpty && File(customPetPath).existsSync();
             if (!ok) {
-              speciesId = PetSpecies.qqBoy.id;
+              speciesId = PetSpecies.pets.first.id;
               customPetPath = '';
               needPersist = true;
             }
@@ -187,19 +139,19 @@ class PetService extends ChangeNotifier {
             posX = 0.0;
             needPersist = true;
           }
-          // 2026-10-18：生肖 / 龙 / 麒麟等旧宠物全部下线（只留作登录头像）
-          // ⇒ 老存档里的物种自动迁到 QQ 秀小人「小Q」。
+          // 2026-10-27：图鉴只剩熊猫 / 少年 / 少女，老存档里的
+          // blob_cat / qq_boy 这类 id 直接迁到第一只。
           if (speciesId != PetSpecies.custom.id &&
               !PetSpecies.pets.any((p) => p.id == speciesId)) {
-            speciesId = PetSpecies.qqBoy.id;
-            unlockedSpecies.add(PetSpecies.qqBoy.id);
+            speciesId = PetSpecies.pets.first.id;
+            unlockedSpecies.add(speciesId);
             needPersist = true;
           }
         }
       }
       // 免费物种（price <= 0）默认就是解锁的。
-      // 2026-10-27 新增的熊猫/少年/少女定价 0（用户要求「放在前面」当主形象），
-      // 老存档里没有它们的 id，不补这一步会显示成"锁着 · 0 币"的怪状态。
+      // 三只形象都是 0 币，老存档里没有它们的 id，
+      // 不补这一步会显示成"锁着 · 0 币"的怪状态。
       for (final sp in PetSpecies.pets) {
         if (sp.price <= 0 && unlockedSpecies.add(sp.id)) needPersist = true;
       }
@@ -238,11 +190,6 @@ class PetService extends ChangeNotifier {
           'lastPlayMs': lastPlayMs,
           'usageMinutes': usageMinutes,
           'unlocked': unlockedSpecies.toList(),
-          'outfits': ownedOutfits.toList(),
-          'equipped': equippedOutfit,
-          'equippedSlots': {
-            for (final e in equippedSlots.entries) e.key.name: e.value,
-          },
         }),
       );
     } catch (e) {
@@ -358,7 +305,7 @@ class PetService extends ChangeNotifier {
   Future<void> clearCustomPet() async {
     final old = customPetPath;
     customPetPath = '';
-    if (speciesId == PetSpecies.custom.id) speciesId = PetSpecies.qqBoy.id;
+    if (speciesId == PetSpecies.custom.id) speciesId = PetSpecies.pets.first.id;
     notifyListeners();
     await _persist();
     if (old.isNotEmpty) {
@@ -412,34 +359,7 @@ class PetService extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool ownsOutfit(PetOutfitInfo o) =>
-      o.id == PetOutfits.none.id || ownedOutfits.contains(o.id);
 
-  /// 购买（若未拥有）并穿戴到对应部位；[PetOutfits.none] = 清空该部位。
-  Future<bool> buyOutfit(PetOutfitInfo o) async {
-    if (o.id == PetOutfits.none.id) {
-      equippedSlots.remove(o.slot);
-      await _persist();
-      notifyListeners();
-      return true;
-    }
-    if (!ownedOutfits.contains(o.id)) {
-      if (level < o.unlockLevel || coins < o.price) return false;
-      coins -= o.price;
-      ownedOutfits.add(o.id);
-    }
-    equippedSlots[o.slot] = o.id;
-    await _persist();
-    notifyListeners();
-    return true;
-  }
-
-  /// 清空某个部位（不代扣任何费用）
-  Future<void> clearOutfitSlot(PetOutfitSlot slot) async {
-    if (equippedSlots.remove(slot) == null) return;
-    await _persist();
-    notifyListeners();
-  }
 
   String get statusLine {
     if (hunger < 25) return '肚子咕咕叫…';
