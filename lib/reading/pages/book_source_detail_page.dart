@@ -1029,8 +1029,30 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
     }
   }
 
-  String _safeFileName(String s) =>
-      s.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').trim();
+  /// 章节名 → 安全文件名（导出章节时拼成 `'<名字>.txt'`）。
+  ///
+  /// 2026-10-26 修复：原来只替换非法字符再 trim ✗ —— 没有长度上限、
+  /// 没去尾部点/空格、没滤控制字符 ✗。部分书源会把整段标题（甚至带
+  /// 换行/制表符）塞进章节名，拼出来的路径会撞 Windows 260 字符上限，
+  /// 或者因尾部点被系统吃掉而打不开 → 导出直接失败。
+  /// 规则与 `book_download_service.dart` 的 `_sanitize` 对齐：
+  /// 非法字符 → `_`；去尾部点/空格；挡 `.` / `..`；按 UTF-8 字节截断
+  /// （中文 3 字节/字），并回退到多字节字符边界避免截出半个汉字。
+  /// 上限留 180 字节，给调用方追加的 `.txt` 和上层目录留余量。
+  String _safeFileName(String s, {int maxBytes = 180}) {
+    var name = s.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1f]'), '_').trim();
+    name = name.replaceAll(RegExp(r'[. ]+$'), '');
+    if (name.isEmpty || name == '.' || name == '..') return 'chapter';
+    final bytes = utf8.encode(name);
+    if (bytes.length <= maxBytes) return name;
+    var cut = maxBytes;
+    while (cut > 0 && (bytes[cut] & 0xC0) == 0x80) {
+      cut--;
+    }
+    final trimmed =
+        utf8.decode(bytes.sublist(0, cut), allowMalformed: true).trim();
+    return trimmed.isEmpty ? 'chapter' : trimmed;
+  }
 
   /// 目录区（slivers 形态，见 build 里的说明）。
   List<Widget> _tocSlivers() {

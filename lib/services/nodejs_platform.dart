@@ -2,55 +2,20 @@
 //
 // Node.js 跨平台抽象层
 // -----------------------------------------------------------------------------
-// 三端用各自的 Node.js 嵌入方案：
-//   - **Windows**: Process.start(node.exe) + 按需下载 zip
-//   - **iOS**:     platform channel → Swift → NodeMobile.xcframework
-//   - **Android**: platform channel → Kotlin → libnode (JNI)
+// 目前只有 **iOS** 有实现（platform channel → Swift → NodeMobile.xcframework）。
+// Windows / Android 的实现从未落地；原先为 Windows 预留的"运行时 zip 下载"
+// 接口（`NodeDownloadConfig` / `isNodeRuntimeInstalled` /
+// `downloadAndExtractNodeRuntime`）已于 2026-10-26 删除 —— 全仓无调用方，
+// 留着只会让人误以为支持 Windows。
 //
 // 跨端统一接口在 [NodeJSPlatform] 抽象类里。
 // NodeJSManager 用 `Platform.isXxx` 选具体实现。
 
 import 'dart:async';
 
-/// Node.js 下载配置
-///
-/// `version.json` 里的字段。当前**只对 Windows 有意义**（iOS / Android 不需要下载 runtime）
-class NodeDownloadConfig {
-  final String version;
-  final String mirror;
-  final String downloadUrl;
-  final String exeRelativePathInZip;
-  final int zipSizeHintMb;
-  final String minAppVersion;
-
-  NodeDownloadConfig({
-    required this.version,
-    required this.mirror,
-    required this.downloadUrl,
-    required this.exeRelativePathInZip,
-    required this.zipSizeHintMb,
-    required this.minAppVersion,
-  });
-
-  factory NodeDownloadConfig.fromJson(Map<String, dynamic> json) {
-    return NodeDownloadConfig(
-      version: json['version'] as String,
-      mirror: json['mirror'] as String? ?? '',
-      downloadUrl: json['download_url'] as String,
-      exeRelativePathInZip:
-          json['exe_relative_path_in_zip'] as String? ?? '',
-      zipSizeHintMb: json['zip_size_hint_mb'] as int? ?? 0,
-      minAppVersion: json['min_app_version'] as String? ?? '1.0.0',
-    );
-  }
-}
-
 /// Node.js 平台抽象接口
 ///
-/// **三端必须实现**的核心方法（启动/停止/加载源/路径）。
-///
-/// **仅 Windows 实现**的运行时下载方法（iOS 用 NodeMobile framework，
-/// Android 用 libnode 静态库，都不需要运行时下载）。
+/// **各端必须实现**的核心方法（启动/停止/加载源/路径）。
 abstract class NodeJSPlatform {
   // ============================================================
   // 运行时状态
@@ -112,15 +77,8 @@ abstract class NodeJSPlatform {
   Future<String?> getLastSourceCachePath() async => null;
 
   // ============================================================
-  // 运行时下载（仅 Windows）
+  // 端口注入
   // ============================================================
-
-  /// Node.js 运行时是否已就绪
-  ///
-  /// - Windows: 检查 `<AppSupport>/node-runtime/node.exe` 是否存在
-  /// - iOS:     永远返回 `true`（NodeMobile.xcframework 嵌进 bundle）
-  /// - Android: 永远返回 `true`（libnode.a 编译进 APK）
-  Future<bool> isNodeRuntimeInstalled();
 
   /// 由 [NodeJSManager] 在启动 HTTP server 后注入端口
   /// Node.js 通过 `--native-port $port` 拿到这个端口，回调通知 Dart
@@ -150,14 +108,4 @@ abstract class NodeJSPlatform {
 
   /// HTTP server 收到 `/onMessage` 时调用
   void onMessage(String message);
-
-  /// 下载并解压 Node.js 运行时
-  ///
-  /// **仅 Windows 需要**。iOS / Android 端直接返回。
-  /// [cfg] 由调用方提供（默认从 `version.json` 加载）
-  /// [onProgress] 进度回调 0.0~1.0
-  Future<void> downloadAndExtractNodeRuntime(
-    NodeDownloadConfig cfg, {
-    void Function(double progress)? onProgress,
-  });
 }

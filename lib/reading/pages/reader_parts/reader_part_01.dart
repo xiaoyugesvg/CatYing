@@ -610,6 +610,14 @@ mixin _ReaderPart01 on _BookSourceReaderPageState {
     _eyeTimer?.cancel();
     _tapTimer?.cancel();
     _pageCtrl.dispose();
+    // 🆕 **补上两个 TTS 音色输入框控制器的释放** ✓ —— 原来这里只放了
+    //   `_scrollReadCtrl` / `_pageCtrl` ✗，`_ttsNarratorCtl` / `_ttsDialogueCtl`
+    //   （声明在 `book_source_reader_page.dart`）**从进页面到销毁从未被 dispose** ✗
+    //   → 每进出一次阅读器泄漏 2 个 `TextEditingController`（含其内部
+    //   `ChangeNotifier` 监听链）✓；TV 盒子常年不关机，属于**累积型**泄漏 ✗。
+    //   这两个控制器只被阅读器自己的 TTS 设置弹层使用 ✓，随页面销毁释放安全 ✓
+    _ttsNarratorCtl.dispose();
+    _ttsDialogueCtl.dispose();
     super.dispose();
   }
 

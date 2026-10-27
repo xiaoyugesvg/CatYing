@@ -2,19 +2,22 @@
 //
 // Node.js 管理器 - **跨平台单例**
 // -----------------------------------------------------------------------------
-// 三端用各自的 Node.js 嵌入方案：
-//   - **Windows**: Process.start(node.exe) + 按需下载 zip
-//   - **iOS**:     platform channel → Swift → NodeMobile.xcframework
-//   - **Android**: platform channel → Kotlin → libnode（占位，未实现）
+// ⚠️ **当前只有 iOS 真正实现了嵌入 Node**（NodeMobile.xcframework）。
+//   - **iOS**:     platform channel → Swift → NodeMobile.xcframework ✓ 已实现
+//   - **Windows**: 未实现（原先的 `Process.start(node.exe)` + 运行时 zip 下载
+//                  整条链路已于 2026-10-26 删除：全仓无调用方、`version.json`
+//                  只被同样无人调用的函数读取、加载页进度条永远不动，
+//                  属于"看起来支持 Windows"的死代码 ✗）
+//   - **Android**: 未实现（原计划 Kotlin → libnode / JNI）
 //
-// 跨端通用的部分（HTTP server 收通知、UI ValueNotifier、源管理 HTTP 调用）留在
-// 本文件。各端平台实现在 [nodejs_platform_*.dart] 里。
+//   非 iOS 平台在构造时**不会**去初始化 iOS 实现，只记一条 `unsupported_platform`
+//   日志；所有透传方法会在 `startNodeJS()` 处返回 false，不会崩 ✓。
+//
+// 跨端通用的部分（HTTP server 收通知、源管理 HTTP 调用）留在本文件。
+// 各端平台实现在 [nodejs_platform_*.dart] 里。
 //
 // **目录布局**：
 // ```
-//   <AppSupport>/node-runtime/     # Windows 专用：node.exe
-//   <AppSupport>/nodejs/main.js    # Windows: rootBundle 解压
-//   <Documents>/nodejs/source/     # Windows 源目录
 //   <Documents>/nodejs-project/src/source/  # iOS 源目录
 // ```
 
@@ -25,7 +28,6 @@ import 'dart:typed_data' show BytesBuilder;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show ValueNotifier;
-import 'package:flutter/services.dart' show rootBundle;
 
 import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/nodejs_platform.dart';
@@ -40,10 +42,6 @@ class NodeJSManager {
   // ============================================================
   late final NodeJSPlatform _platform;
   NodeJSPlatform get platform => _platform;
-
-  // UI ValueNotifier
-  final ValueNotifier<double?> nodeDownloadProgress = ValueNotifier(null);
-  final ValueNotifier<String?> nodeDownloadStatus = ValueNotifier(null);
 
   // HTTP server 状态（跨端统一）
   HttpServer? _httpServer;
@@ -118,6 +116,17 @@ class NodeJSManager {
   /// 2. 把 HTTP server 端口注入 platform 实现
   /// 3. 调 platform.startNodeJS()
   Future<bool> startNodeJS() async {
+    // 🆕 **非 iOS 直接短路** ✓ —— 全仓只有 iOS 有实现（`nodejs_platform_ios.dart`），
+    //   原来在 Windows / Android 上照样往下走：先 bind 一个本地 HTTP server（白占端口、
+    //   白占资源），再走一个根本不存在的 MethodChannel → `MissingPluginException`
+    //   被 iOS 实现的 `catch` 兜成 false。结果虽然也是 false ✓，但日志里全是
+    //   "startNodeJS 异常"，排查时极具误导性 ✗。这里显式返回并说明原因 ✓
+    if (!Platform.isIOS) {
+      AppLog.instance.nodejs('start_skipped_unsupported_platform', fields: {
+        'os': Platform.operatingSystem,
+      });
+      return false;
+    }
     // 1. 起 HTTP server
     if (_httpServer == null) {
       final started = await _startLocalWebServer();
@@ -220,19 +229,6 @@ class NodeJSManager {
   /// 停止某个小程序的 Node 后端（页面关闭时调用）
   Future<void> stopMiniAppService(String appId) =>
       _platform.stopMiniAppService(appId);
-
-  /// 当前平台的 NodeDownloadConfig（iOS 无需下载运行时）
-  NodeDownloadConfig? get nodeDownloadConfig => null;
-
-  /// 公开 API：加载 Node.js 下载配置（从 rootBundle 读 version.json）
-  ///
-  /// **跨端统一**：三端都会读同一个 version.json，但只有 Windows 用得上。
-  static Future<NodeDownloadConfig> loadNodeDownloadConfigStatic() async {
-    final raw = await rootBundle
-        .loadString('assets/nodejs-runtime/version.json');
-    final json = jsonDecode(raw) as Map<String, dynamic>;
-    return NodeDownloadConfig.fromJson(json);
-  }
 
   /// 检查本地端口是否可达
   ///
@@ -514,20 +510,6 @@ class NodeJSManager {
     }
   }
 
-  /// Windows 专用：检查 node.exe 是否就绪
-  Future<bool> isNodeRuntimeInstalled() => _platform.isNodeRuntimeInstalled();
-
-  /// Windows 专用：下载 + 解压 Node.js runtime
-  /// iOS / Android 直接返回
-  Future<void> downloadAndExtractNodeRuntime(
-    NodeDownloadConfig cfg, {
-    void Function(double progress)? onProgress,
-  }) =>
-      _platform.downloadAndExtractNodeRuntime(
-        cfg,
-        onProgress: onProgress,
-      );
-
   // ============================================================
   // 本地 HTTP 服务器（跨端统一用 dart:io）
   // ============================================================
@@ -744,14 +726,4 @@ class NodeJSManager {
         ..close();
     }
   }
-}
-
-/// 公开版本，供 UI 层访问下载配置
-///
-/// Windows 端使用。其他端直接返回 Windows 端的 version.json（但用不上）
-Future<NodeDownloadConfig> loadNodeDownloadConfigPublic() async {
-  final raw = await rootBundle
-      .loadString('assets/nodejs-runtime/version.json');
-  final json = jsonDecode(raw) as Map<String, dynamic>;
-  return NodeDownloadConfig.fromJson(json);
 }

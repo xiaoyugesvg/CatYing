@@ -1,3 +1,10 @@
+// ⚠️ 本文件的 269 个抽象方法声明是「跨 part 调用」的类型契约，**不是死代码**。
+//    方法体已按 P0.1 拆到 `reader_parts/` 下 7 个 `mixin ... on 本类` 里；
+//    基类必须保留全部签名，任意 part 才能调用任意方法（顺序无关，这是拆分
+//    方案成立的前提）。副作用：若某方法只被「它自己所在的 mixin」调用，分析器
+//    会判定基类这份声明未被引用 → 报 `unused_element`（实测 130 条）与
+//    `unused_element_parameter`（19 条）。逐条删除会破坏跨 part 调用，故统一豁免。
+// ignore_for_file: unused_element, unused_element_parameter
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

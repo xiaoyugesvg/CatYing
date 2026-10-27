@@ -14,11 +14,14 @@ import 'package:tvbox/services/scene_recovery.dart';
 import 'package:tvbox/services/spider_service.dart';
 
 /// 加载阶段 - 对应 Swift LoadingPhase
+///
+/// 注：原 `downloadingNodeJS` 阶段已于 2026-10-26 删除 —— 全仓无任何地方
+/// 给它赋值（Windows 运行时下载链路已移除），保留只会让加载页多一个
+/// 永远走不到的进度条分支。
 enum LoadingPhase {
   idle,
   loadingConfig,
   startingNodeJS,
-  downloadingNodeJS,
   downloadingSource,
   verifyingMD5,
   loadingSource,
@@ -40,8 +43,6 @@ extension LoadingPhaseDesc on LoadingPhase {
         return '正在加载配置...';
       case LoadingPhase.startingNodeJS:
         return '正在启动 Node.js 运行时...';
-      case LoadingPhase.downloadingNodeJS:
-        return '首次启动需要下载 Node.js 运行时...';
       case LoadingPhase.downloadingSource:
         return '正在下载源文件...';
       case LoadingPhase.verifyingMD5:

@@ -1,4 +1,7 @@
 import 'dart:io';
+// `AppExitResponse` 定义在 dart:ui（Flutter 的 widgets 层只是转发），
+// 不显式导入的话 `didRequestAppExit` 的返回类型会报 "isn't a type"。
+import 'dart:ui' show AppExitResponse;
 
 // ⚠️ `kIsWeb` 在 **`foundation.dart`** ✓ —— 我原以为 `material.dart` 会一并导出 ✗
 //（实测报 `Undefined name 'kIsWeb'` ✗ ⇒ `error=1` ✓）⇒ 必须显式导入 ✓
@@ -35,6 +38,7 @@ import 'package:tvbox/common/appearance_sync.dart';
 import 'package:tvbox/common/theme_mode_store.dart';
 import 'package:tvbox/services/main_tab_controller.dart';
 import 'package:tvbox/services/media_proxy_service.dart';
+import 'package:tvbox/models/cache_store.dart';
 import 'package:tvbox/pages/content_view.dart';
 // ✅ **隐藏 WebView 的挂载点**（本轮 ✓）—— 见下方根 builder 里的说明 ✓
 import 'package:tvbox/reading/source/webview_image_fetcher.dart';
@@ -104,6 +108,30 @@ class _TVBoxAppState extends State<TVBoxApp> with WidgetsBindingObserver {
     // 只需触发重建：build 里会现读 platformBrightness，
     // 再经 ThemeModeStore.syncFromPlatform + AppearanceSync 落地。
     if (mounted) setState(() {});
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Hive 的 `put` 是"先进写队列、再落盘"。切后台时刷一次，
+    // 避免「刚收藏就切走 / 被系统回收」丢掉最后一次写入。
+    // 只 flush 不 close：paused 之后 App 还会回来，箱不能关。
+    if (state == AppLifecycleState.paused) {
+      CacheStore.instance.flush();
+      return;
+    }
+    // detached = 引擎即将脱离宿主视图，这是移动端能拿到的最后时机。
+    // 刷盘 + 关箱，让文件句柄正常释放（关箱后读写会静默跳过，不会抛）。
+    if (state == AppLifecycleState.detached) {
+      CacheStore.instance.close();
+    }
+  }
+
+  /// 桌面端（Windows）点关闭窗口时触发 —— 这是**唯一可靠**的"退出前"钩子。
+  /// 移动端不会调到这里（系统直接杀进程）。
+  @override
+  Future<AppExitResponse> didRequestAppExit() async {
+    await CacheStore.instance.close();
+    return AppExitResponse.exit;
   }
 
   @override

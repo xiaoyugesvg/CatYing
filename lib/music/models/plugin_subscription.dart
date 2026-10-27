@@ -69,6 +69,27 @@ class PluginSubscriptionStore {
       'https://gcore.jsdelivr.net/gh/hebijunge/musicfree-plugins@master/plugins-gcore.json';
   static const String _seededKey = 'music.pluginSubscriptions.seeded.v1';
 
+  /// 旧镜像基址（GitHub Pages，国内经常不可达）
+  static const String legacyGhPagesBase =
+      'https://hebijunge.github.io/musicfree-plugins/';
+
+  /// 新镜像基址（jsDelivr gcore）
+  static const String jsDelivrGhBase =
+      'https://gcore.jsdelivr.net/gh/hebijunge/musicfree-plugins@master/';
+
+  /// 把**旧 github.io 镜像地址**改写成等价的 jsDelivr 地址；非旧地址返回 `null`。
+  ///
+  /// 路径部分原样保留，所以 `plugins-gcore.json`、`plugins/xxx.plugin.v1.js`
+  /// 这类都适用。返回值 `null` 表示"这条不该动"，调用方据此决定是否写盘。
+  static String? mirrorToJsDelivr(String url) {
+    final u = url.trim();
+    if (u.isEmpty || !u.startsWith(legacyGhPagesBase)) return null;
+    final rest = u.substring(legacyGhPagesBase.length);
+    if (rest.isEmpty) return null;
+    final next = '$jsDelivrGhBase$rest';
+    return next == u ? null : next;
+  }
+
   final List<PluginSubscription> _items = [];
   final revision = ValueNotifier<int>(0);
 
@@ -119,6 +140,29 @@ class PluginSubscriptionStore {
         );
       }
       await prefs.setBool(_seededKey, true);
+      dirty = true;
+    }
+
+    // ── 存量迁移：旧 github.io 镜像 → jsDelivr（2026-10-27）──────────
+    //
+    // 为什么必须有 ✗：内置地址换成 jsDelivr 之后，**只有首启用户**能种到新地址；
+    // 已安装用户的 prefs 里存的是旧 github.io 地址，而 `_seededKey` 已是 true
+    // ⇒ 上面的种子逻辑整段跳过 ⇒ 订阅条目还在、但拉清单长期失败（github.io
+    // 在国内经常不可达），用户唯一的出路是「手动删掉订阅再加一遍」✗✗。
+    // 这里把存量地址**就地改写成等价的 jsDelivr 地址** ✓：
+    //   · 只改前缀匹配旧镜像的条目，用户自填的其它地址一律不动 ✓
+    //   · 路径部分原样保留（plugins-gcore.json / plugins/xxx.js 都适用）✓
+    //   · 幂等：已是新地址的不会再匹配，不会重复写盘 ✓
+    var migrated = 0;
+    for (var i = 0; i < _items.length; i++) {
+      final rewritten = mirrorToJsDelivr(_items[i].url);
+      if (rewritten != null) {
+        _items[i] = _items[i].copyWith(url: rewritten);
+        migrated++;
+      }
+    }
+    if (migrated > 0) {
+      debugPrint('[MusicSub] 已把 $migrated 条旧 github.io 订阅迁移到 jsDelivr');
       dirty = true;
     }
     revision.value++;

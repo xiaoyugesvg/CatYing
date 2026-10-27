@@ -176,12 +176,31 @@ class CacheStore {
   Box<dynamic>? _cacheItemsBox;
   bool _initialized = false;
 
-  Future<void> init() async {
-    if (_initialized) return;
+  /// 是否已关闭（`close()` 之后为 true）。
+  ///
+  /// 关闭后所有读写**静默跳过** —— 否则会抛 `Box has already been closed`。
+  /// 这个异常几乎必然发生在退出流程里（没人接得住），只会变成一条难查的崩溃日志。
+  bool _closed = false;
 
-    _collectsBox = await Hive.openBox(_collectsBoxName);
-    _recordsBox = await Hive.openBox(_recordsBoxName);
-    _cacheItemsBox = await Hive.openBox(_cacheItemsBoxName);
+  bool get isClosed => _closed;
+
+  List<Box<dynamic>?> get _allBoxes =>
+      [_collectsBox, _recordsBox, _cacheItemsBox];
+
+  Future<void> init() async {
+    if (_initialized && !_closed) return;
+
+    // 三个箱互不依赖 → 并行打开。原来是三次串行 `await`，
+    // 等于白等两次磁盘往返（首次开箱要读箱文件索引）。
+    final boxes = await Future.wait<Box<dynamic>>([
+      Hive.openBox(_collectsBoxName),
+      Hive.openBox(_recordsBoxName),
+      Hive.openBox(_cacheItemsBoxName),
+    ]);
+    _collectsBox = boxes[0];
+    _recordsBox = boxes[1];
+    _cacheItemsBox = boxes[2];
+    _closed = false;
 
     favorites.value = _loadFromBox<VodCollect>(_collectsBox!);
     records.value = _loadFromBox<VodRecord>(_recordsBox!);
@@ -189,8 +208,46 @@ class CacheStore {
     _initialized = true;
   }
 
+  /// 把三个箱里**挂起的写入**刷到磁盘。
+  ///
+  /// 为什么需要 ✓：Hive 的 `put` 是"先进写队列、再落盘"。App 在落盘前被系统
+  /// 杀掉（iOS 后台回收 / OOM / 用户强杀）时，**最后那一次写入就没了** ✗。
+  /// 在 `AppLifecycleState.paused` 刷一次，代价几毫秒，换来"切后台即落盘" ✓。
+  Future<void> flush() async {
+    if (_closed) return;
+    for (final box in _allBoxes) {
+      if (box == null || !box.isOpen) continue;
+      try {
+        await box.flush();
+      } catch (e) {
+        AppLog.instance.log('[CacheStore] flush fail: $e');
+      }
+    }
+  }
+
+  /// 关闭三个箱：**先 flush 再 close**，释放文件句柄。
+  ///
+  /// 这是"只开不关"的补齐 —— 全仓原来没有任何一处 `close()`。
+  /// **幂等** ✓；只在**进程真的要退出**时调用（桌面关窗 / `detached`），
+  /// 关闭后读写由 `_closed` 静默跳过，不会抛"箱已关闭"。
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
+    for (final box in _allBoxes) {
+      if (box == null || !box.isOpen) continue;
+      try {
+        await box.flush();
+        await box.close();
+      } catch (e) {
+        AppLog.instance.log('[CacheStore] close fail: $e');
+      }
+    }
+    AppLog.instance.log('[CacheStore] 三个箱已 flush + close');
+  }
+
   /// 单条写入（key = bizKey），避免全量 clear+put
   Future<void> _putBoxItem<T>(Box<dynamic> box, String key, T item) async {
+    if (_closed) return;
     try {
       await box.put(key, (item as dynamic).toJson());
     } catch (e) {
@@ -199,6 +256,7 @@ class CacheStore {
   }
 
   Future<void> _deleteBoxItem(Box<dynamic> box, String key) async {
+    if (_closed) return;
     try {
       await box.delete(key);
     } catch (e) {
@@ -217,6 +275,7 @@ class CacheStore {
     String vodId,
     String sourceKey,
   ) async {
+    if (_closed) return;
     try {
       final stale = <dynamic>[];
       for (final k in box.keys) {
@@ -392,6 +451,7 @@ class CacheStore {
 
   Future<void> clearHistory() async {
     records.value = [];
+    if (_closed) return;
     await _recordsBox!.clear();
   }
 
@@ -416,6 +476,7 @@ class CacheStore {
   static const int _maxCacheItems = 100;
 
   Future<void> setCacheItem(String key, String value) async {
+    if (_closed) return;
     final box = _cacheItemsBox!;
     final item = CacheItem(key: key, value: value);
     await box.put(key, item.toJson());
@@ -442,6 +503,7 @@ class CacheStore {
   }
 
   String? getCacheItem(String key) {
+    if (_closed) return null;
     final raw = _cacheItemsBox!.get(key);
     if (raw is Map) {
       return raw['value'] as String?;
@@ -496,6 +558,7 @@ class CacheStore {
   }
 
   Future<void> removeCacheItem(String key) async {
+    if (_closed) return;
     await _cacheItemsBox!.delete(key);
   }
 
@@ -505,7 +568,7 @@ class CacheStore {
   /// 之前「缓存大小」只统计了图片/临时目录，导致显示值明显偏小。
   int cacheItemsByteSize() {
     final box = _cacheItemsBox;
-    if (box == null) return 0;
+    if (_closed || box == null) return 0;
     var total = 0;
     for (final k in box.keys) {
       final raw = box.get(k);
@@ -520,7 +583,7 @@ class CacheStore {
   /// 业务缓存条目数（用于设置页展示「N 项」）
   int cacheItemsCount() {
     final box = _cacheItemsBox;
-    if (box == null) return 0;
+    if (_closed || box == null) return 0;
     return box.length;
   }
 
@@ -529,6 +592,7 @@ class CacheStore {
   /// **不动**收藏（vod_collects）与观看历史（vod_records）—— 那两个是用户数据，
   /// 有各自的清理入口。清空后相关页面下次会重新联网获取。
   Future<void> clearItemsCache() async {
+    if (_closed) return;
     try {
       await _cacheItemsBox?.clear();
       AppLog.instance.log('[CacheStore] business cache cleared');
@@ -540,7 +604,7 @@ class CacheStore {
   /// 按 key 前缀统计业务缓存字节数（如 `tmdb:` 前缀的刮削缓存）。
   int cacheItemsByteSizeByPrefix(String prefix) {
     final box = _cacheItemsBox;
-    if (box == null) return 0;
+    if (_closed || box == null) return 0;
     var total = 0;
     for (final k in box.keys) {
       final raw = box.get(k);
@@ -555,6 +619,7 @@ class CacheStore {
 
   /// 按 key 前缀删除业务缓存条目（如清 `tmdb:` 刮削缓存时用）。
   Future<void> clearItemsByPrefix(String prefix) async {
+    if (_closed) return;
     try {
       final box = _cacheItemsBox;
       if (box == null) return;
@@ -575,6 +640,7 @@ class CacheStore {
   }
 
   List<CacheItem> _loadCacheItems() {
+    if (_closed) return const [];
     final box = _cacheItemsBox!;
     final items = <CacheItem>[];
     for (var i = 0; i < box.length; i++) {

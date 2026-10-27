@@ -920,9 +920,42 @@ class PeerTransferService extends ChangeNotifier {
     return d;
   }
 
-  String _sanitizeFilename(String name) {
-    final clean = name.replaceAll(RegExp(r'[/\\]'), '_').trim();
-    return clean.isEmpty ? 'file.bin' : clean;
+  /// 净化对端传来的文件名（来源是 `X-Filename` 请求头，**对端完全可控**）。
+  ///
+  /// 2026-10-26 修复：原来只把 `/` `\` 换成 `_` 再 trim ✗，漏了
+  /// Windows 保留字符 `: * ? " < > |`、控制字符、**尾部点/空格**，
+  /// 也没有长度上限 ✗ —— 对端传 `第1章:开端.epub` 过来，Windows 上
+  /// `File(...).openWrite()` 直接抛 `FileSystemException`；而在 Linux/macOS
+  /// 上同样的名字**能写成功**，所以这个问题在开发机上完全看不见 ✗。
+  /// 仓库里 `book_download_service.dart` / `download_service.dart` /
+  /// `music/services/download_service.dart` 三处净化都是对的，
+  /// 只有这里退化成了"只挡路径分隔符" —— 现按同一套规则补齐：
+  ///   非法字符 → `_`；去尾部点/空格；挡掉 `.` / `..`；按 UTF-8 **字节**
+  ///   截断（中文 3 字节/字，Android ext4 NAME_MAX=255 字节）并保留扩展名。
+  String _sanitizeFilename(String name, {int maxBytes = 180}) {
+    var clean = name.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1f]'), '_').trim();
+    // Windows 会静默吃掉文件名末尾的点和空格（`a.txt.` → 打不开），先自己去掉
+    clean = clean.replaceAll(RegExp(r'[. ]+$'), '');
+    // `.` / `..` 会解析到上级目录；空名兜底成 file.bin（与原行为一致）
+    if (clean.isEmpty || clean == '.' || clean == '..') return 'file.bin';
+
+    // 按字节截断，且保留扩展名（否则对端传来的类型信息就丢了）
+    final dot = clean.lastIndexOf('.');
+    final hasExt = dot > 0 && clean.length - dot <= 8;
+    final ext = hasExt ? clean.substring(dot) : '';
+    final base = hasExt ? clean.substring(0, dot) : clean;
+    var bytes = utf8.encode(base);
+    final budget = maxBytes - utf8.encode(ext).length;
+    if (bytes.length > budget) {
+      var cut = budget < 0 ? 0 : budget;
+      // 回退到多字节字符首字节，避免截断出半个汉字（乱码）
+      while (cut > 0 && (bytes[cut] & 0xC0) == 0x80) {
+        cut--;
+      }
+      bytes = bytes.sublist(0, cut);
+    }
+    final trimmed = utf8.decode(bytes, allowMalformed: true).trim();
+    return '${trimmed.isEmpty ? 'file' : trimmed}$ext';
   }
 
   String _extOf(String filename) {

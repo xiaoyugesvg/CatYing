@@ -121,8 +121,9 @@ flutter:
     # drpy 标准源运行时（TVBox `api=drpy2.min.js` + `ext=站点.js`）
     #   见 lib/services/drpy_service.dart / assets/nodejs-project/src/drpy_host.js
     - assets/drpy/
-    # Node.js 运行时的版本元信息（不内嵌 node.exe，启动时按需下载）
-    - assets/nodejs-runtime/version.json
+    # 注：assets/nodejs-runtime/version.json 已于 2026-10-26 移除 ——
+    #   它只服务于「Windows 按需下载 node.exe」那条死链路，全仓无调用方。
+    #   （Python 运行时的 version.json 仍保留，见下方 assets/python-runtime/）
     # Python spider 源适配层（spider_runner.py / src/ / pylib/）
     #   stdlib + site-packages 由 CI 打进 Runner.app/python-home，不随 Flutter assets
     - assets/python-project/

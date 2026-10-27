@@ -740,26 +740,6 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
   }
 
   // ============================================================
-  // 运行时检查（iOS 永远 true）
-  // ============================================================
-
-  @override
-  Future<bool> isNodeRuntimeInstalled() async {
-    // iOS: NodeMobile.xcframework 嵌进 bundle，永远 true
-    return true;
-  }
-
-  @override
-  Future<void> downloadAndExtractNodeRuntime(
-    NodeDownloadConfig cfg, {
-    void Function(double progress)? onProgress,
-  }) async {
-    // iOS 不需要下载运行时
-    if (onProgress != null) onProgress(1.0);
-    return;
-  }
-
-  // ============================================================
   // 小程序 Node 后端（manifest.json 的 `node`）
   // ============================================================
 

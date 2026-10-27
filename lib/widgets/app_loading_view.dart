@@ -6,7 +6,6 @@ import 'package:get/get.dart';
 import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/pages/settings/sub/data_source_settings_page.dart';
 import 'package:tvbox/services/app_state.dart';
-import 'package:tvbox/services/nodejs_manager.dart';
 import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/widgets/circular_logo_progress.dart';
 
@@ -135,35 +134,6 @@ class _AppLoadingViewState extends State<AppLoadingView> {
 
   Widget _buildProgress(AppState appState) {
     final phase = appState.loadingPhase.value;
-    final downloading = phase == LoadingPhase.downloadingNodeJS;
-    if (downloading) {
-      final mgr = NodeJSManager.instance;
-      return ValueListenableBuilder<double?>(
-        valueListenable: mgr.nodeDownloadProgress,
-        builder: (ctx, p, _) {
-          final value = p ?? 0.0;
-          return ValueListenableBuilder<String?>(
-            valueListenable: mgr.nodeDownloadStatus,
-            builder: (ctx2, status, __) {
-              String label = phase.description;
-              if (status == 'downloading') {
-                label = '下载源运行时';
-              } else if (status == 'extracting') {
-                label = '解压中';
-              } else if (status == 'error') {
-                label = '下载失败';
-              }
-              return CircularLogoProgress(
-                progress: value > 0 ? value : null,
-                percentText: '${(value * 100).toStringAsFixed(0)}%',
-                caption: label,
-                failed: status == 'error',
-              );
-            },
-          );
-        },
-      );
-    }
     final indeterminate = phase.isLoading;
     final failed = phase.isFailed;
     // 内部阶段不展示技术文案，只留 Logo + 转圈
