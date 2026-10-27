@@ -4,6 +4,7 @@ import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:get/get.dart';
 import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/models/local_python_source.dart';
+import 'package:tvbox/models/local_js_source.dart';
 import 'package:tvbox/models/source_bean.dart';
 import 'package:tvbox/models/subscription.dart';
 import 'package:tvbox/services/api_config.dart';
@@ -140,34 +141,158 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
       LocalPythonSources.instance.sources
           .firstWhereOrNull((s) => s.sourceKey == bean.key);
 
-  /// 长按本地 Python 源 → **卡片式**菜单（用户 2026-10-20：
-  /// 「本地 py 源这个上面也加个长按弹窗分享、编辑、删除等」）
+  /// 本地 JS 源 bean → 本地脚本（key 带 `localjs_` 前缀）
+  LocalJsSource? _jsOf(SourceBean bean) => LocalJsSources.instance.sources
+      .firstWhereOrNull((s) => s.sourceKey == bean.key);
+
+  /// 长按本地源 → **卡片式**菜单（Python / JS 各一套动作）。
+  ///
+  /// 用户 2026-10-20：「本地 py 源这个上面也加个长按弹窗分享、编辑、删除等」；
+  /// 2026-10-27 新增本地 JS 源后，长按同样给改名 / 分享 / 删除。
   Future<void> _localSourceMenu(SourceBean bean) async {
-    final local = _localOf(bean);
-    if (local == null) return;
+    final py = _localOf(bean);
+    if (py != null) {
+      await showCardActions(
+        context,
+        title: bean.name,
+        subtitle: '本地 Python · ${py.key}.py',
+        actions: [
+          CardAction(
+            icon: Icons.drive_file_rename_outline,
+            label: '编辑',
+            onTap: () => _renameLocal(py),
+          ),
+          CardAction(
+            icon: Icons.ios_share_rounded,
+            label: '分享',
+            onTap: () => _shareLocal(py),
+          ),
+          CardAction(
+            icon: Icons.delete_outline_rounded,
+            label: '删除',
+            danger: true,
+            onTap: () => _deleteLocal(py),
+          ),
+        ],
+      );
+      return;
+    }
+    final js = _jsOf(bean);
+    if (js == null) return;
     await showCardActions(
       context,
       title: bean.name,
-      subtitle: '本地 Python · ${local.key}.py',
+      subtitle: '本地 JS · ${js.key}.js',
       actions: [
         CardAction(
           icon: Icons.drive_file_rename_outline,
           label: '编辑',
-          onTap: () => _renameLocal(local),
+          onTap: () => _renameJs(js),
         ),
         CardAction(
           icon: Icons.ios_share_rounded,
           label: '分享',
-          onTap: () => _shareLocal(local),
+          onTap: () => _shareJs(js),
         ),
         CardAction(
           icon: Icons.delete_outline_rounded,
           label: '删除',
           danger: true,
-          onTap: () => _deleteLocal(local),
+          onTap: () => _deleteJs(js),
         ),
       ],
     );
+  }
+
+  Future<void> _renameJs(LocalJsSource local) async {
+    final ctrl = TextEditingController(text: local.name);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        title: Text(
+          '重命名',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontHeadline,
+          ),
+        ),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          style: TextStyle(color: AppTheme.textPrimary),
+          decoration: const InputDecoration(hintText: '显示名称'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty) return;
+    final r = await LocalJsSources.instance.rename(local.key, name);
+    if (!r.ok) {
+      AppToast.error(r.message ?? '改名失败');
+      return;
+    }
+    await ApiConfig.instance.reloadLocalVideoSources();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _shareJs(LocalJsSource local) async {
+    final code = await LocalJsSources.instance.readCode(local.key);
+    if (code == null || code.isEmpty) {
+      AppToast.error('找不到脚本文件');
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: code));
+    AppToast.message('脚本内容已复制到剪贴板');
+  }
+
+  Future<void> _deleteJs(LocalJsSource local) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        title: Text(
+          '删除本地源？',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontHeadline,
+          ),
+        ),
+        content: Text(
+          '将删除脚本文件，不可恢复。',
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: AppTheme.fontSubhead,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await LocalJsSources.instance.remove(local.key);
+    await ApiConfig.instance.reloadLocalVideoSources();
+    if (!mounted) return;
+    setState(() {});
+    AppToast.message('已删除');
   }
 
   Future<void> _renameLocal(LocalPythonSource local) async {
