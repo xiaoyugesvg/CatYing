@@ -78,6 +78,11 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
   /// 否则用户看到的就是一片空白（内置的 CatPawPlay 包体 8MB，冷启动更明显）。
   bool _nodeStarting = false;
 
+  /// manifest.json 缺失/损坏时的可见提示。
+  /// 以前这里是 `if (raw.isEmpty) return;` 直接返回 —— WebView 里什么都没有，
+  /// 用户看到的就是纯白屏，根本不知道是包有问题（典型：把海阔规则 zip 当小程序装）。
+  String _manifestError = '';
+
   /// 本页自己的 appId（`AntBridge.appId` 是全局的，别的页面会覆盖它）
   String _ownerAppId = '';
 
@@ -141,10 +146,34 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
 
   Future<void> _loadManifestThenEntry() async {
     await _initManifest();
+    // manifest 有问题就别再往下走了：没有 appId/permissions/entry，
+    // 加载出来的只会是一片空白（这也是以前白屏的直接原因）。
+    if (_manifestError.isNotEmpty) return;
     // 先拉起小程序自带的 Node 后端，再加载页面 —— 页面脚本一进来就会
     // `ant.resolveService(...)`（LX音乐等），晚一步就会拿到 SERVICE_NOT_FOUND。
     await _startNodeService();
     await _loadEntry();
+  }
+
+  /// 探一下本机 Node 服务某个路径的 HTTP 状态码（0 = 连接层失败）。
+  ///
+  /// 只用于入口路径兜底：某些小程序的 SPA 挂在 `prefix/` 下，
+  /// 裸 `prefix` 会命中后端自己的鉴权/404 分支，返回一坨 JSON。
+  /// 用 `dart:io` 的 HttpClient 而不是 dio —— 这里不需要拦截器/代理，
+  /// 目标就是 127.0.0.1，走系统代理反而会失败。
+  Future<int> _probeStatus(String url) async {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+    try {
+      final req = await client.getUrl(Uri.parse(url));
+      final res = await req.close();
+      await res.drain<void>();
+      return res.statusCode;
+    } catch (e) {
+      AppLog.instance.log('[MiniAppWeb] 入口探测失败 $url: $e');
+      return 0;
+    } finally {
+      client.close(force: true);
+    }
   }
 
   /// manifest 声明了 `node` 就把它拉起来，并登记到 ant 桥的地址表。
@@ -200,6 +229,21 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
         var path = _entry.substring('node://'.length);
         if (path.isEmpty) path = '/';
         if (!path.startsWith('/')) path = '/$path';
+        // 🔴 2026-10-27（CatPawPlay 打开是裸 JSON `{"errorCode":401,...}`）：
+        //   它的 UI 挂在 fastify 的 prefix `/website` 下，首页实际是
+        //   **`/website/`**（prefix + "/"）。裸 `/website` 匹配不到 prefix 路由，
+        //   会掉进主 API 的「路径首段必须是 token / 白名单」校验，
+        //   直接回 `{errorCode:401, success:false, errorMessage:"Unauthorized"}`
+        //   —— WebView 就把这串 JSON 当页面显示出来了，看着像"登录问题"。
+        //   所以先探一下：401/404 且末段不像文件名（没有扩展名）就补尾斜杠。
+        if (!path.endsWith('/') && !path.split('/').last.contains('.')) {
+          final code = await _probeStatus('$_nodeUrl$path');
+          if (code == 401 || code == 404) {
+            AppLog.instance.log(
+                '[MiniAppWeb] 入口 $path 返回 $code，补尾斜杠重试');
+            path = '$path/';
+          }
+        }
         await _controller.loadRequest(Uri.parse('$_nodeUrl$path'));
         return;
       }
@@ -235,7 +279,13 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
           if (await f.exists()) raw = await f.readAsString();
         }
       }
-      if (raw.isEmpty) return;
+      if (raw.isEmpty || raw == '{}') {
+        if (mounted) {
+          setState(() => _manifestError =
+              '这个小程序缺少 manifest.json，无法打开。\n请删除后重新导入正确的 zip 包。');
+        }
+        return;
+      }
       final map = jsonDecode(raw) as Map<String, dynamic>;
       final appId = (map['appId'] ?? '').toString();
       final entry = (map['entry'] ?? 'index.html').toString();
@@ -259,6 +309,9 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
       }
     } catch (e) {
       AppLog.instance.log('[MiniAppWeb] manifest 解析失败: $e');
+      if (mounted) {
+        setState(() => _manifestError = 'manifest.json 格式错误，无法打开。\n$e');
+      }
     }
   }
 
@@ -337,6 +390,36 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
                         backgroundColor: AppTheme.borderLight,
                         valueColor: AlwaysStoppedAnimation<Color>(
                             AppTheme.accentColor),
+                      ),
+                    ),
+                  // manifest 缺失/损坏：给一张可见的说明卡，别让用户对着白屏猜
+                  if (_manifestError.isNotEmpty)
+                    Positioned.fill(
+                      child: ColoredBox(
+                        color: AppTheme.backgroundPrimary,
+                        child: Center(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 32),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.error_outline,
+                                    size: 44,
+                                    color: AppTheme.textSecondary),
+                                const SizedBox(height: 14),
+                                Text(
+                                  _manifestError,
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: AppTheme.textSecondary,
+                                    fontSize: 13,
+                                    height: 1.6,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   // 后端启动中（Node 运行时 + 小程序服务）：盖一层提示，

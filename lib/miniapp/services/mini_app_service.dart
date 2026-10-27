@@ -358,6 +358,21 @@ class MiniAppService extends GetxService {
           .last
           .replaceAll('.zip', '');
       var manifestBody = await _unpackZipToDir(bytes, fallbackId);
+      // 必须先校验包结构：小程序包最少要有 manifest.json，
+      // 否则 rawJson 会退化成 '{}'，打开后 _initManifest 拿不到东西 → 白屏。
+      // 典型误装：海阔视界(Hiker)规则包，里面只有一个 rule.json。
+      final probe = manifestBody.trim();
+      if (probe.isEmpty || probe == '{}') {
+        try {
+          final d = await _appDir(fallbackId);
+          if (await d.exists()) await d.delete(recursive: true);
+        } catch (_) {}
+        return (
+          ok: false,
+          error: '这个包里没有 manifest.json，不是小程序包。\n'
+              '（海阔视界规则请到「设置 → 海阔源管理」导入，不要在这里装）',
+        );
+      }
       final realId = _manifestAppId(manifestBody) ?? fallbackId;
       if (realId != fallbackId) {
         manifestBody = await _unpackZipToDir(bytes, realId);

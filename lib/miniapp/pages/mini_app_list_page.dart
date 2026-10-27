@@ -150,6 +150,14 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
       case _AppSort.newest:
         list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     }
+    // 内置小程序（随 App 打包的那几个）永远排在最前面：
+    // 它们是"开箱即用"的入口，排在用户自己装的后面等于藏起来了。
+    // 只调显示顺序，不动 service.apps 里的真实排序（整理弹层要按真实顺序）。
+    if (list.any((a) => isBuiltinAppId(a.id))) {
+      final builtin = list.where((a) => isBuiltinAppId(a.id)).toList();
+      final rest = list.where((a) => !isBuiltinAppId(a.id)).toList();
+      list = [...builtin, ...rest];
+    }
     return list;
   }
 
