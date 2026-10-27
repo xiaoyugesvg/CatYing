@@ -277,16 +277,21 @@ lx.on('x', () => lx.utils.crypto.md5('abc'));
 /**
  * 用第三方音源解析播放地址。
  *
- * body: { action:'resolveBySource', source:{...}, song:{id,name,artists,album} }
+ * body: { action:'resolveBySource', source:{...}, song:{id,name,artists,album}, quality? }
  *
  * Dart 侧负责"从存储里取源、按顺序逐个试"；Node 只做**解析**这一件事。
  * 这样源列表的事实来源只有一个（Dart 的 ThirdPartySourceStore），
  * Node 侧不需要再存一份，避免两边不一致。
+ *
+ * [quality] 是用户当前选的音质（LX 码率串，Dart 侧 `AudioQuality.lxQuality`
+ * 已换算过）。**可空** —— 空则沿用音源自己的默认档（音源管理页「测试」按钮）。
  */
-async function resolveBySourceAction(source, song) {
-    const r = await resolveSource(source, song);
+async function resolveBySourceAction(source, song, quality) {
+    const r = await resolveSource(source, song, quality);
     return r.ok
-        ? { ok: true, url: r.url, kind: r.kind }
+        // ⚠️ 带上 `quality`（**实际**用的档位，Node 侧可能已按源支持度降级）——
+        //    Dart 侧 UI 要显示真的那一档，而不是用户设置里写的那个
+        ? { ok: true, url: r.url, kind: r.kind, quality: r.quality || '' }
         : { ok: false, error: r.error, kind: r.kind };
 }
 
@@ -454,7 +459,7 @@ async function handleMusicApi(body) {
     //    原来它们落在 isKg / isQq 分支里被当成"该平台不支持" → **腾讯/酷狗的
     //    歌走第三方源回退时必然失败**（返回"不支持"而不是去解析）✗
     if (action === 'resolveBySource') {
-        return resolveBySourceAction(body.source, body.song);
+        return resolveBySourceAction(body.source, body.song, body.quality);
     }
     if (action === 'searchByMusicFree') {
         return searchByMusicFreeAction(body.source, body.keyword, body.page, body.type);
@@ -698,7 +703,7 @@ async function handleMusicApi(body) {
             return albumSongs(body.id);
         // ── 第三方音源解析（模板法 / 脚本法）─────────────
         case 'resolveBySource':
-            return resolveBySourceAction(body.source, body.song);
+            return resolveBySourceAction(body.source, body.song, body.quality);
         // ── MusicFree 插件的其它能力（搜索 / 歌词）──────────
         //
         // ⚠️ 这两个**只对 `kind:'musicfree'` 的源有效** ——

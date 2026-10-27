@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
+import 'package:tvbox/common/app_version.dart';
 import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/widgets/common_widgets.dart';
@@ -12,7 +13,8 @@ import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 class AboutSettingsPage extends StatelessWidget {
   const AboutSettingsPage({super.key});
 
-  static const String appVersion = '1.0.0';
+  /// 版本号来自 `lib/common/app_version.dart`（唯一来源），不再在本文件硬编码。
+  static const String appVersion = kAppVersion;
 
   @override
   Widget build(BuildContext context) {

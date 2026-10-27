@@ -1,5 +1,6 @@
 ﻿import 'dart:io';
 
+import 'package:flutter/gestures.dart' show DragStartBehavior;
 import 'package:flutter/material.dart';
 import 'package:tvbox/common/floating_nav_spec.dart';
 import 'package:tvbox/reading/services/settings_service.dart';
@@ -359,12 +360,35 @@ class _JellyNavBarState extends State<JellyNavBar>
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(_floatingRadius),
-                child: useBlur
-                    ? BackdropFilter(
-                        filter: JellyTheme.glassFilter,
-                        child: navBody,
-                      )
-                    : navBody,
+                // ── 模糊层 / 内容层拆开（2026-10-27，修「横向滑动不顺」）──────
+                //
+                // 原来是 `BackdropFilter(child: navBody)`：navBody 里**含可横向
+                // 滑动的内容**（影视底栏中间那段）。滚动会让整棵子树每帧重绘，
+                // 而 BackdropFilter 是逐帧执行的 —— sigma=15 的高斯模糊
+                // 每帧重算一次、面积还是整条栏 ⇒ 真机上拖底栏直接掉帧，
+                // 手感"发涩/不顺"。
+                //
+                // 拆开以后：模糊层是个**没有子节点**的静态层（只模糊背景），
+                // 内容层单独一个 RepaintBoundary。滚动只重绘内容层，
+                // 模糊层的栅格可以被合成器直接复用 ⇒ 滑动不再触发模糊。
+                // 视觉输出与拆之前**完全一致**（模糊底 → 半透明底色 → 内容）。
+                child: Stack(
+                  children: [
+                    if (useBlur)
+                      Positioned.fill(
+                        child: RepaintBoundary(
+                          child: BackdropFilter(
+                            filter: JellyTheme.glassFilter,
+                            // 不要 child：只把背景模糊掉，底色由内容层画
+                          ),
+                        ),
+                      ),
+                    // ⚠️ navBody 必须是**非定位**子节点：只有 Positioned 子节点时
+                    // Stack 会取 constraints.biggest（这里 = 整屏高），栏会被拉满屏。
+                    // 它自带 height=floatingBarHeight，正好用来定 Stack 的高度。
+                    RepaintBoundary(child: navBody),
+                  ],
+                ),
               ),
             ),
           );
@@ -685,10 +709,16 @@ class _JellyNavBarState extends State<JellyNavBar>
         if (!scrollable) return band;
         // 项太多：横向滑动（高度不变，胶囊外形与间距完全不受影响）
         // ClampingScrollPhysics：不要 iOS 那种回弹拖影，滑动"无痕"
+        //
+        // DragStartBehavior.down（2026-10-27）：默认的 `.start` 要等手指走过
+        // 触摸斜率（~18pt）才认下这一拖，内容在那之前**纹丝不动**，然后突然
+        // 追上手指 —— 手感就是"粘一下再动"。改成 `.down` 后从按下点开始
+        // 跟手，起步不再有那一下迟滞。
         return SingleChildScrollView(
           controller: _scrollCtrl,
           scrollDirection: Axis.horizontal,
           physics: const ClampingScrollPhysics(),
+          dragStartBehavior: DragStartBehavior.down,
           child: band,
         );
       },
@@ -774,6 +804,8 @@ class _JellyNavBarState extends State<JellyNavBar>
                         scrollDirection: Axis.horizontal,
                         // 关掉回弹：滑动不留任何视觉痕迹
                         physics: const ClampingScrollPhysics(),
+                        // 见 _buildNavContent 里的说明：`.down` 才跟手
+                        dragStartBehavior: DragStartBehavior.down,
                         child: mid,
                       )
                     : mid,

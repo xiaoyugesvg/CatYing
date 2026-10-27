@@ -245,7 +245,10 @@ class _SourcePickerSheetState extends State<SourcePickerSheet> {
     final kindTag = r.kind == 'musicfree'
         ? 'MusicFree'
         : (r.kind == 'script' ? '洛雪' : '模板');
-    final quality = (s?.quality ?? '').trim();
+    // 音质标签显示**这次实际拿到的**档位（各源支持的档位不同，Node 侧
+    // 会按 `qualitys` 降级，所以同一个用户在两个源上可能分别是 flac / 320k）。
+    // 没有回报时才退回音源默认档（模板法 / 老脚本）。
+    final quality = (r.quality.isNotEmpty ? r.quality : (s?.quality ?? '')).trim();
     final isActive = _picked == r;
 
     return InkWell(

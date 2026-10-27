@@ -8,6 +8,7 @@ import 'package:tvbox/models/source_bean.dart';
 import 'package:tvbox/models/subscription.dart';
 import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/local_python_sources.dart';
+import 'package:tvbox/services/local_js_sources.dart';
 import 'package:tvbox/services/source_kind.dart';
 import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/widgets/card_action_sheet.dart';
@@ -265,9 +266,10 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   Future<void> _moveSource(String fromKey, String toKey) async {
     if (fromKey == toKey) return;
     final isLocal =
-        fromKey.startsWith('localpy_') && toKey.startsWith('localpy_');
+        (fromKey.startsWith('localpy_') || fromKey.startsWith('localjs_')) &&
+        (toKey.startsWith('localpy_') || toKey.startsWith('localjs_'));
     if (isLocal) {
-      // 本地源顺序存在 LocalPythonSources 里（订阅线路表不管本地源）
+      // 本地源顺序存在各自 service 里（订阅线路表不管本地源）
       final visible = _filteredSourcesFrom(
         List<SourceBean>.of(ApiConfig.instance.localVideoSources),
       ).map((s) => s.key).toList();
@@ -276,7 +278,11 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
       if (from < 0 || to < 0) return;
       final moved = visible.removeAt(from);
       visible.insert(to.clamp(0, visible.length), moved);
-      await LocalPythonSources.instance.reorderWithin(visible);
+      if (fromKey.startsWith('localjs_')) {
+        await LocalJsSources.instance.reorderWithin(visible);
+      } else {
+        await LocalPythonSources.instance.reorderWithin(visible);
+      }
       await ApiConfig.instance.reloadLocalVideoSources();
       return;
     }
@@ -597,7 +603,8 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   Future<void> _selectSource(SourceBean source) async {
     // 选本地源 ⇒ 顺手打开「本地爬虫」开关（与本地源管理页同一语义），
     // 否则主页源会被订阅线路覆盖。
-    if (source.key.startsWith('localpy_') &&
+    if ((source.key.startsWith('localpy_') ||
+            source.key.startsWith('localjs_')) &&
         !ApiConfig.instance.localSourcesEnabled.value) {
       await ApiConfig.instance.setLocalSourcesEnabled(true);
     }
@@ -613,7 +620,10 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
     if (!_tabInited) {
       _tabInited = true;
       final key = _selectedKey;
-      if (key != null && key.startsWith('localpy_')) _tab = 0;
+      if (key != null &&
+          (key.startsWith('localpy_') || key.startsWith('localjs_'))) {
+        _tab = 0;
+      }
     }
     // 面板高度 = 1/3 屏 × 1.2（用户要求"变成现在的 1.2 倍"）：
     // 1/3 屏时标题+搜索框占掉大半，源网格只剩一点点高（看起来"底部遮住一部分"），

@@ -207,11 +207,20 @@ class BuiltinSourcesService {
   ///
   /// ⚠️ 仍然可用的源**不在此列**、保持启用：
   ///   `hywmusic`（`103.79.184.97` 实测 tx/wy 均返回真直链，卡密 200）
+  ///
+  /// 2026-10-27 新增 `sixyin`（**不是"内置版本旧了"，是上游主动下架**）：
+  ///   · 线上三个镜像（jsDelivr / ghproxy / gh-proxy）拉到的 `sixyin/latest.js`
+  ///     与随包的 `assets/music/lx/sixyin.js` **逐字节相同**（332677 B）
+  ///   · 两者都抛「脚本错误，加载音源信息失败，请前往 http://www.sixyin.com
+  ///     下载最新版本！」—— 这句是脚本自己写的强制升级提示，说明作者已停止
+  ///     对外分发；换版本解决不了，只能按失效源处理（默认禁用，文件保留，
+  ///     用户想手动开仍然可以）。
   static const Set<String> _deadLxPaths = {
     'stellarwave',
     'huanyin',
     'ikun',
     'huibq',
+    'sixyin',
   };
 
   /// 命中失效源名单？（按洛雪源 path 判断）

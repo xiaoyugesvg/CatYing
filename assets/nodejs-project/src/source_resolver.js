@@ -101,6 +101,101 @@ async function loadPluginCached(source) {
 /** 播放地址常见的字段名（`urlPath` 没命中时按顺序兜底找） */
 const URL_KEYS = ['url', 'src', 'play_url', 'playUrl', 'link', 'location', 'data'];
 
+// ── 洛雪(LX)脚本加载缓存 ──────────────────────────────────────
+// `loadScript` 现在带「异步注册宽限期」（见 lx_engine.js 的 REGISTER_GRACE_MS）：
+// 有些源要等一次网络才 `lx.on('request', …)`，所以加载可能花几百毫秒。
+// 而 `resolveByScript` 每次取址都会重新加载 —— 不缓存的话切歌/换源时
+// 这几百毫秒会被反复付一遍。按脚本内容 hash 缓存，LRU 上限 12（同 MusicFree）。
+const LX_CACHE_LIMIT = 12;
+const _lxCache = new Map();
+
+async function loadLxCached(script) {
+    const key = _mfPluginKey(script, null);
+    const hit = _lxCache.get(key);
+    if (hit) {
+        // LRU：命中后挪到队尾
+        _lxCache.delete(key);
+        _lxCache.set(key, hit);
+        return hit;
+    }
+    const loaded = await loadScript(script);
+    // 失败结果**不缓存**：脚本/网络修好后应能立刻重试
+    if (loaded && loaded.ok) {
+        _lxCache.set(key, loaded);
+        if (_lxCache.size > LX_CACHE_LIMIT) {
+            const oldest = _lxCache.keys().next().value;
+            if (oldest !== undefined) _lxCache.delete(oldest);
+        }
+    }
+    return loaded;
+}
+
+/**
+ * LX 的音质阶梯（低 → 高）。
+ *
+ * ⚠️ 这是**洛雪自己的**一套，和网易云的 `standard/higher/exhigh/lossless/hires`
+ * 完全不是一回事：LX 用码率串，而且没有 192k 这一档。Dart 侧在
+ * `AudioQuality.lxQuality` 里做过一次映射，这里只负责「按阶梯降级」。
+ */
+const LX_QUALITY_LADDER = [
+    '128k', '192k', '320k', 'flac', 'flac24bit', 'hires', 'atmos', 'master',
+];
+
+/**
+ * 把「用户想要的音质」收敛到「这个源真正支持的音质」。
+ *
+ * ── 为什么必须收敛（而不是直接把用户的档位丢给脚本）────────────
+ * 几乎每个 LX 脚本都会做 `qualitys.includes(quality)` 之类的检查，查不到就
+ * 抛「不支持的音质」或者静默回落 128k。用户设了「无损」却拿到 128k，
+ * 比拿到 flac 但稍低一档更糟 —— 所以这里**主动降到最近的可用档**。
+ *
+ * 规则：取「不超过 desired 的最高可用档」；若 desired 比所有可用档都低，
+ * 取最低档（宁可给好一点，也不给空）。
+ *
+ * @param desired    用户想要的（'hires' / 'flac' / '320k' …）
+ * @param supported  源声明支持的档位数组；空/非数组 = 不做收敛
+ * @returns {string} 最终要用的音质串
+ */
+function clampQuality(desired, supported) {
+    const want = String(desired || '').trim() || '320k';
+    if (!Array.isArray(supported) || supported.length === 0) return want;
+    const list = supported.map((q) => String(q)).filter(Boolean);
+    if (list.length === 0) return want;
+    if (list.includes(want)) return want;
+
+    const rank = (q) => {
+        const i = LX_QUALITY_LADDER.indexOf(q);
+        // 未知档位（源自定义的）按「最高」处理，避免被误降级
+        return i < 0 ? LX_QUALITY_LADDER.length : i;
+    };
+    const wantRank = rank(want);
+    let best = null;
+    for (const q of list) {
+        if (rank(q) <= wantRank) {
+            if (best === null || rank(q) > rank(best)) best = q;
+        }
+    }
+    if (best !== null) return best;
+    // 全都比 desired 高 → 取最低的那档
+    return list.reduce((a, b) => (rank(b) < rank(a) ? b : a));
+}
+
+/**
+ * 从脚本上报的 `inited.sources[provider].qualitys` 里取该平台支持的档位。
+ *
+ * ⚠️ `qualitys` **不在** `inited` 顶层 —— 实测（`lx.js` / `stellarwave.js`）：
+ *     inited = { status, openDevTools, sources: { kw: { qualitys: [...] }, … } }
+ * 按平台分开声明（同一个源对不同平台的支持度不同）。
+ * 没有 `inited`（如 `flower.js` / `juhe.js` 这类老式脚本）时返回 null → 不收敛。
+ */
+function supportedQualitiesOf(loaded, provider) {
+    const ini = loaded && loaded.inited;
+    if (!ini || !ini.sources || typeof ini.sources !== 'object') return null;
+    const meta = ini.sources[provider];
+    if (!meta || !Array.isArray(meta.qualitys)) return null;
+    return meta.qualitys;
+}
+
 /** 把模板里的占位符替换成真实值 */
 function fillTemplate(template, song, quality) {
     const name = song && song.name ? String(song.name) : '';
@@ -168,16 +263,18 @@ function findUrlDeep(obj, depth = 0) {
  *
  * @param source  ThirdPartySource（JSON）
  * @param song    { id, name, artists, album }
+ * @param quality 用户想要的音质串（可空 → 用 source.quality）
  * @returns {Promise<{ok:boolean, url?:string, error?:string, tried?:string}>}
  */
-async function resolveByTemplate(source, song) {
+async function resolveByTemplate(source, song, quality) {
     const template = String(source.template || '').trim();
     if (!template) {
         return { ok: false, error: '音源没有配置模板 URL' };
     }
 
-    const quality = source.quality || '320k';
-    const url = fillTemplate(template, song, quality);
+    // 用户设置优先，音源默认档兜底
+    const q = quality || source.quality || '320k';
+    const url = fillTemplate(template, song, q);
     const headers = Object.assign(
         {
             'User-Agent':
@@ -209,7 +306,7 @@ async function resolveByTemplate(source, song) {
         } catch (_) {
             // 不是 JSON：有些源直接返回地址纯文本
             const t = text.trim();
-            if (/^https?:\/\//i.test(t)) return { ok: true, url: t, tried: url };
+            if (/^https?:\/\//i.test(t)) return { ok: true, url: t, tried: url, quality: q };
             return { ok: false, error: '音源返回的内容不是 JSON，也不像播放地址', tried: url };
         }
 
@@ -252,7 +349,7 @@ async function resolveByTemplate(source, song) {
         if (typeof found !== 'string' || !/^https?:\/\//i.test(found)) {
             return { ok: false, error: '在响应里没找到播放地址（检查取值路径）', tried: url };
         }
-        return { ok: true, url: found, tried: url };
+        return { ok: true, url: found, tried: url, quality: q };
     } catch (e) {
         const msg =
             e && e.code === 'ECONNABORTED' ? '音源请求超时' : (e && e.message) || String(e);
@@ -893,13 +990,13 @@ function detectMusicFreePlatform(script) {
  * 参数 { musicInfo: { id, name, singer }, quality } 的**旧结构保留**，
  * 因为已按那个结构写的脚本不能弄坏（两者同时在 payload 里）。
  */
-async function resolveByScript(source, song, action = 'musicUrl') {
+async function resolveByScript(source, song, action = 'musicUrl', prefQuality) {
     const script = String(source.script || '');
     if (!script.trim()) {
         return { ok: false, error: '音源没有脚本内容' };
     }
 
-    const loaded = await loadScript(script);
+    const loaded = await loadLxCached(script);
     if (!loaded.ok) {
         return { ok: false, error: loaded.error };
     }
@@ -932,7 +1029,20 @@ async function resolveByScript(source, song, action = 'musicUrl') {
     }
 
     const provider = providerCodeOf(song && song.source);
-    const quality = (source && source.quality) || '320k';
+
+    // ── 音质：用户设置 → 按源声明的档位收敛 ────────────────────────
+    //
+    // 🔴 原来这里是 `(source && source.quality) || '320k'` —— 即**只认音源
+    //    自己的默认档**，用户设置页选的音质根本到不了脚本。第三方源于是
+    //    永远 320k（音源默认值），"无损 / Hi-Res"形同虚设。
+    //
+    // 现在：调用方给了 `prefQuality`（用户设置，Dart 侧已映射成 LX 码率串）就用它，
+    // 再按 `inited.sources[provider].qualitys` 降级到该平台真正支持的档位。
+    const quality = clampQuality(
+        prefQuality || (source && source.quality) || '320k',
+        supportedQualitiesOf(loaded, provider),
+    );
+
     const id = song && song.id != null ? String(song.id) : '';
     const name = song && song.name ? String(song.name) : '';
     const singers = song && song.artists ? String(song.artists) : '';
@@ -975,6 +1085,27 @@ async function resolveByScript(source, song, action = 'musicUrl') {
         source: provider,
     };
 
+    // ── `_types`：各音质档 → 该档的**原生标识** ────────────────────
+    //
+    // 🔴 原来写死 `{}`。而脚本读的是
+    //     `musicInfo?.hash || musicInfo?._types?.[quality]?.hash`
+    //   （`stellarwave.js` 的「星海主后端」「海棠API」两处都是这个写法）。
+    //   `{}` 意味着**只有 `musicInfo.hash` 有值时才走得通**，一旦那首歌
+    //   拿不到 hash，脚本就没有任何退路。
+    //
+    // ⚠️ 我们只能填**一个** hash：Dart 侧的 Song 只有一个原生 id
+    //   （`songmid`），而 LX 的 `_types` 本意是"每个音质档一个不同的
+    //   hash"（酷狗的高/低音质 hash 不同）。要拿到逐档 hash 得先搜一次歌，
+    //   那是另一个量级的工作。所以这里只填**当前要用的那一档**，值就是
+    //   我们手上这个 id —— 语义正确（"这一档用这个 id"），且比空对象强。
+    const types = {};
+    if (quality) {
+        types[quality] = {
+            hash: (song && song.songmid) ? String(song.songmid) : id,
+            size: 0,
+        };
+    }
+
     // 旧结构（已按 {musicInfo, quality} 写的脚本靠它）
     // + 新结构（Beans / LX 通用写法）
     const payload = Object.assign({}, musicInfo, {
@@ -983,7 +1114,7 @@ async function resolveByScript(source, song, action = 'musicUrl') {
         quality,
         musicInfo,
         info: { type: quality, musicInfo },
-        _types: {},
+        _types: types,
         meta: {},
     });
 
@@ -999,7 +1130,9 @@ async function resolveByScript(source, song, action = 'musicUrl') {
             error: '脚本执行成功，但没从返回值里找到播放地址（支持 url/musicUrl/data.url/result.url 等 20+ 种字段）',
         };
     }
-    return { ok: true, url };
+    // ⚠️ 把**实际用的档位**回传：Dart 侧 UI 要显示真的那一档，
+    //    而不是用户设置里写的（源可能把它降级了，见 clampQuality）
+    return { ok: true, url, quality };
 }
 
 /** 平台码：网易 wy / QQ tx / 酷狗 kg（LX 脚本按这个分派） */
@@ -1080,7 +1213,7 @@ function extractPlayableUrl(raw, depth = 0) {
  *
  * @returns {Promise<{ok, url?, error?, kind?}>}
  */
-async function resolveSource(source, song) {
+async function resolveSource(source, song, quality) {
     if (!source || typeof source !== 'object') {
         return { ok: false, error: '音源数据无效' };
     }
@@ -1102,11 +1235,11 @@ async function resolveSource(source, song) {
         kind === 'musicfree'
             ? await resolveMusicFree(source, song)
             : (kind === 'script'
-                ? await resolveByScript(source, song)
-                : await resolveByTemplate(source, song));
+                ? await resolveByScript(source, song, 'musicUrl', quality)
+                : await resolveByTemplate(source, song, quality));
     return Object.assign({ kind }, r);
 }
 
 // ⚠️ searchByMusicFree / lyricByMusicFree 已经在声明处 `export async function`
 // 导出过了 —— 不要在这里重复列出（重复导出是 SyntaxError）。
-export { resolveSource, resolveByTemplate, resolveByScript, fillTemplate, pickByPath };
+export { resolveSource, resolveByTemplate, resolveByScript, fillTemplate, pickByPath, clampQuality };

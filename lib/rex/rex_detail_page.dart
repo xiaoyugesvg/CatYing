@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
@@ -87,10 +89,22 @@ class _RexDetailPageState extends State<RexDetailPage> {
       _streamsError = null;
     });
     try {
-      final streams = await _service.resource(widget.module, _item);
+      // 解析线路走 Node/模块，底层 receiveTimeout 可长达 90s；弱网下用户会
+      // 一直卡在「解析线路中」。这里加一个 25s 的页面级上限，超时就提示重试
+      //（底层请求不会被真正取消，但结果已不再等待，UI 可继续操作）。
+      final streams = await _service
+          .resource(widget.module, _item)
+          .timeout(const Duration(seconds: 25));
       if (!mounted) return;
       setState(() {
         _streams = streams;
+        _streamsLoading = false;
+      });
+    } on TimeoutException {
+      if (!mounted) return;
+      setState(() {
+        _streams = const [];
+        _streamsError = '解析线路超时（25 秒）：可能是网络慢或模块响应慢，点「重新解析」再试';
         _streamsLoading = false;
       });
     } catch (e) {
@@ -187,8 +201,27 @@ class _RexDetailPageState extends State<RexDetailPage> {
                                     : CachedNetworkImage(
                                         imageUrl: _item.cover,
                                         fit: BoxFit.cover,
+                                        // 部分图床防盗链会挡空 UA，带一个移动端 UA 提升命中率
+                                        httpHeaders: const {
+                                          'User-Agent':
+                                              'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+                                        },
                                         errorBuilder: (_, __, ___) =>
-                                            _posterPlaceholder(),
+                                            // 详情封面加载失败：回退到列表里的原封面（已知能显示），
+                                            // 仍失败才用灰色占位，避免封面直接变灰
+                                            (widget.item.cover.isNotEmpty &&
+                                                    widget.item.cover != _item.cover)
+                                                ? CachedNetworkImage(
+                                                    imageUrl: widget.item.cover,
+                                                    fit: BoxFit.cover,
+                                                    httpHeaders: const {
+                                                      'User-Agent':
+                                                          'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+                                                    },
+                                                    errorBuilder: (_, __, ___) =>
+                                                        _posterPlaceholder(),
+                                                  )
+                                                : _posterPlaceholder(),
                                       ),
                               ),
                             ),

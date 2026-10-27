@@ -678,12 +678,30 @@ class RexService {
     }
   }
 
-  /// App 能不能真的把这串当图片加载（空串/相对路径/[object Object] 都不行）
+  /// 常见图片扩展名：用于判断一个 http(s) 地址是否"真的像图片"
+  static const Set<String> _imgExts = {
+    '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg',
+    '.avif', '.ico', '.tif', '.tiff',
+  };
+
+  /// App 能不能真的把这串当图片加载。
+  ///
+  /// 只靠「http(s) 前缀」不够：详情接口经常把**详情页地址**
+  /// （如 `https://site/detail/123`）塞进 cover 返回，这种地址会被
+  /// CachedNetworkImage 拉成 200 但解码失败 → 灰底占位，把列表里正常的
+  /// 封面顶掉（用户 2026-10-26 反馈「加载完播放列表封面没了」的根因）。
+  ///
+  /// 所以这里要求：data:image 内联图，或 http(s) 地址**路径带图片扩展名**。
+  /// 无扩展名的（网页 / 接口地址 / 纯 ID）一律视为不可用 → 保留列表里的封面。
   bool _imageUsable(String url) {
     final u = url.trim().toLowerCase();
-    return u.startsWith('http://') ||
-        u.startsWith('https://') ||
-        u.startsWith('data:image');
+    if (u.isEmpty) return false;
+    if (u.startsWith('data:image')) return true;
+    if (!u.startsWith('http://') && !u.startsWith('https://')) return false;
+    final path = Uri.tryParse(u)?.path.split('?').first ?? '';
+    final dot = path.lastIndexOf('.');
+    if (dot <= 0) return false; // 没有扩展名（如 /detail/123）→ 当作网页，不可用
+    return _imgExts.contains(path.substring(dot));
   }
 
   RexItem _fixItem(RexItem it, String site) {

@@ -22,6 +22,7 @@ import 'package:tvbox/services/player_prefs.dart';
 import 'package:tvbox/services/ad_filter_service.dart';
 import 'package:tvbox/services/parse_service.dart';
 import 'package:tvbox/services/parse_store.dart';
+import 'package:tvbox/services/web_sniff_service.dart';
 import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/webhome/webhtv_site_health_page.dart';
 import 'package:tvbox/pages/play/sniff_player_page.dart';
@@ -832,8 +833,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
         }
 
         String? resolvedUrl;
-        final urlValue = result['url'];
-        if (urlValue is String && urlValue.isNotEmpty) {
+        final urlValue = result['url'];        if (urlValue is String && urlValue.isNotEmpty) {
           resolvedUrl = urlValue;
         } else if (urlValue is List) {
           for (int i = 0; i < urlValue.length - 1; i += 2) {
@@ -847,6 +847,23 @@ class DetailController extends GetxController with WidgetsBindingObserver {
         }
 
         if (_spiderResolveToken != token) return;
+
+        // ── 源声明的播放形态（CatVod 约定）──────────────────────────
+        //   `parse == 0` → `url` 就是**可直接播放的直链**
+        //   `parse == 1` → `url` 是**需要解析/嗅探的网页**
+        //   （`jx` 是同一语义的旧字段，两个都认；缺失按"未声明"处理）
+        //
+        // 🔴 原来这两个字段**完全没读**，只按"地址有没有影视后缀"猜。
+        // 两头都会错：
+        //   · `parse:0` + 无后缀直链 —— 典型是解析接口直接吐 m3u8 文本
+        //     （`nm_free.php?url=…`）。被判成网页 → 塞进 WebView 嗅探 →
+        //     打开的是 m3u8 文本页，**必然失败**；
+        //   · `parse:1` + 网页恰好落在主流站点域名下 → App 又用自己的
+        //     解析接口解一遍，可能把源已经给好的地址解歪。
+        final parseFlag = _intFlag(result['parse']);
+        final jxFlag = _intFlag(result['jx']);
+        final sourceWantsParse = parseFlag == 1 || jxFlag == 1;
+        final sourceSaysDirect = !sourceWantsParse && parseFlag == 0;
 
         if (resolvedUrl != null && resolvedUrl.isNotEmpty) {
           // 相对播放地址 → 用源 api 的 host 补成绝对（方案 B，见 [_absolutizePlayUrl]）
@@ -908,7 +925,11 @@ class DetailController extends GetxController with WidgetsBindingObserver {
           var playCandidate = resolvedUrl;
           // 2026-10-15：是否解析改由 SniffFilter 统一判定（内置主流站点 +
           // 用户在「播放设置 → 嗅探设置」里追加的域名，减去屏蔽域名）。
+          // 2026-10-27：**源已经声明"这是要解析/嗅探的网页"时，跳过 App 自己
+          // 的解析接口** —— 源给的就是解析站的地址，再套一层 App 的解析只会
+          // 把地址解歪，或者白跑一次请求。
           if (!_looksLikeDirectMedia(playCandidate) &&
+              !sourceWantsParse &&
               SniffFilter.shouldParse(playCandidate) &&
               ParseService.instance.enabled) {
             isResolving.value = true;
@@ -935,12 +956,47 @@ class DetailController extends GetxController with WidgetsBindingObserver {
           }
           if (_spiderResolveToken != token) return;
           playHeaders.value = headers;
+
+          // ── 源声明「这是直链」(parse:0) 但地址没有影视后缀 ──────────
+          //
+          // 典型：解析接口直接返回 m3u8 文本（`xxx/nm_free.php?url=…`），
+          // 地址本身没有 `.m3u8`。按后缀判定会把它当网页丢给嗅探页，
+          // 而嗅探页是用 WebView 打开它 —— 打开一个 m3u8 文本页，
+          // 什么都播不出来。
+          //
+          // 这里用**响应类型 + 开头字节**确认一次（`#EXTM3U` / `ftyp`）：
+          //   · 是媒体 → 直接交给播放器（本次修复的主要收益）；
+          //   · 不是 / 探测失败 → 退回原来的嗅探逻辑，**不比改动前差**。
+          var directConfirmed = _looksLikeDirectMedia(playCandidate);
+          if (!directConfirmed && sourceSaysDirect) {
+            isResolving.value = true;
+            try {
+              directConfirmed = await WebSniffService.instance
+                  .looksLikeMediaByMime(playCandidate);
+            } finally {
+              if (_spiderResolveToken == token) isResolving.value = false;
+            }
+            if (_spiderResolveToken != token) return;
+            if (directConfirmed) {
+              AppLog.instance.log(
+                  '[Play] 源声明 parse=0 + 响应类型确认是媒体 → 直链播放: $playCandidate');
+            }
+          }
+
           // 解析完（或跳过解析）后**仍是网页地址**：嗅探开关开着就交给嗅探页
           // 抓页面里的 m3u8/mp4。详情页**不**同时挂内嵌 WebView，避免和嗅探页
           // 双重加载同一网页（双份解码 + 双份声音）——用户 2026-10-15。
-          if (!_looksLikeDirectMedia(playCandidate) &&
-              PlayerPrefs.instance.sniffEnabled.value) {
+          if (!directConfirmed && PlayerPrefs.instance.sniffEnabled.value) {
             _autoSniff(playCandidate);
+            return;
+          }
+          // 源明说要解析/嗅探，但嗅探总开关关着 ⇒ 这个地址给播放器只会黑屏
+          // 等 15 秒。直接给出能操作的提示，别让用户对着黑屏猜（2026-10-27）。
+          if (!directConfirmed && sourceWantsParse) {
+            AppLog.instance.w(
+                '[Play] 源声明 parse=1（需解析/嗅探）但嗅探开关关闭: $playCandidate');
+            setPlaybackError('这个源返回的是网页播放页，需要开启嗅探才能播放'
+                '（播放设置 → 嗅探设置 → 打开嗅探）');
             return;
           }
           // ── 地址形态兜底（用户 2026-10-15）────────────────────────────
@@ -987,6 +1043,22 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   /// `.webm/.mov/.m4s/.mpd/.avi` 等能直接播的地址会被误判成"网页"→ 送去解析
   /// 或被弹去嗅探页，等于白白打断一次播放。
   bool _looksLikeDirectMedia(String url) => SniffFilter.isDirectMedia(url);
+
+  /// 读 `playerContent` 里的 `parse` / `jx` 标志（CatVod 约定）→ int。
+  ///
+  /// 各家源给的类型五花八门：`1` / `"1"` / `true` / 缺失。
+  /// **缺失返回 -1**（不是 0）—— 0 在 CatVod 里是"这是直链"的**明确声明**，
+  /// 而"没给这个字段"完全是另一回事，混为一谈会让老源全被当成 parse=0。
+  int _intFlag(Object? v) {
+    if (v == null) return -1;
+    if (v is bool) return v ? 1 : 0;
+    if (v is num) return v.toInt();
+    final s = v.toString().trim().toLowerCase();
+    if (s.isEmpty) return -1;
+    if (s == 'true') return 1;
+    if (s == 'false') return 0;
+    return int.tryParse(s) ?? -1;
+  }
 
   /// 能直接交给播放器/阅读器的**地址形态白名单前缀**。
   ///

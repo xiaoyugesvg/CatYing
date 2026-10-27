@@ -296,8 +296,8 @@ class SpiderService {
   ///
   /// ── 为什么需要（用户 2026-10-15「TVBox 源内容加载不出来 / 播放不了」）───
   /// `/spider/<key>/<type>/<action>` 里的 **type 必须与引擎实际注册的一致**
-  /// —— 引擎是按各模块 `meta.type` 挂路由的（见 assets/nodejs-project/src/spider/
-  /// 下每个源导出的 `meta`）。而调用方的 type 来自订阅配置的 `sites[].type`，
+  /// —— 引擎是按各模块 `meta.type` 挂路由的（见 Node 侧 spider 源导出的
+  /// `meta`）。而调用方的 type 来自订阅配置的 `sites[].type`，
   /// **两者未必相等**：
   ///   · 实测整包 TVBox 源那条线路声明 `type=4`，引擎按模块 meta 注册的是 `3`
   ///     ⇒ `POST /spider/omnibox_Makka聚合/4/init` 404 `Route ... not found`；

@@ -1161,7 +1161,11 @@ class RssReader {
       }
       var resp = await send(headers);
       var status = resp.statusCode ?? 0;
-      if (status == 401 || status == 403 || status == 406 || status == 429) {
+      if (status == 400 ||
+          status == 401 ||
+          status == 403 ||
+          status == 406 ||
+          status == 429) {
         // 换一套「桌面浏览器」身份再试一次：不少站点只放行 PC UA + Referer
         final retry = Map<String, String>.from(headers)
           ..['User-Agent'] = _desktopUa
@@ -1171,7 +1175,7 @@ class RssReader {
         status = resp.statusCode ?? 0;
       }
       if (status >= 400) {
-        throw RssHttpException(status, _originOf(url));
+        throw RssHttpException(status, _originOf(url), url: url);
       }
       // 吸收登录/校验 cookie，后续请求（含规则引擎里的 java.ajax）共用
       if (source.enabledCookieJar) {
@@ -1566,10 +1570,13 @@ class RssReader {
 
 /// HTTP 状态异常（可读文案：不再把 DioException 原文甩到界面上）。
 class RssHttpException implements Exception {
-  RssHttpException(this.statusCode, this.origin);
+  RssHttpException(this.statusCode, this.origin, {this.url = ''});
 
   final int statusCode;
   final String origin;
+
+  /// 完整请求地址（排障用：同一站点不同路径失败原因可能不同）
+  final String url;
 
   String get hint {
     switch (statusCode) {
@@ -1586,7 +1593,7 @@ class RssHttpException implements Exception {
   }
 
   @override
-  String toString() => hint;
+  String toString() => url.isEmpty ? hint : '$hint（$url）';
 }
 
 /// 极简算术求值器（递归下降；只允许数字与 `+ - * / ( )`）。

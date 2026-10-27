@@ -23,18 +23,31 @@ class ReadingPetOverlay extends StatefulWidget {
 class _ReadingPetOverlayState extends State<ReadingPetOverlay>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final _pet = PetService.instance;
+
+  /// 待机动画（呼吸/眨眼）。
+  ///
+  /// 🔴 2026-10-27 重构：原来这里是 `..repeat()` —— **构造即无限循环**。
+  ///   而这个组件挂在 `app.dart` 的根 Stack 上（覆盖所有路由），于是：
+  ///     · 桌宠被关掉时（build 返回 `SizedBox.shrink()`）**ticker 还在跑**，
+  ///       每帧调度一次、什么都不画 ⇒ 白耗电；
+  ///     · App 切到后台也照跑（`_resumed` 只用来算猫币，没管动画）。
+  ///   现在改成**按需启停**（见 [_syncTicker]）：不可见/后台/未加载时 `stop()`。
   late final AnimationController _anim = AnimationController(
     vsync: this,
     duration: const Duration(seconds: 4),
-  )..repeat();
+  );
 
   Timer? _syncTimer;
   Timer? _usageTimer;
   Timer? _bubbleTimer;
+
+  /// 点击弹一下的复位定时器（原来是个裸 Timer，页面销毁时没取消）
+  Timer? _bounceTimer;
+
   String? _bubble;
   bool _dragging = false;
 
-  /// App 是否在前台（前台才累计使用时长发猫币）
+  /// App 是否在前台（前台才累计使用时长发猫币，也才跑待机动画）
   bool _resumed = true;
 
   /// 点一下弹一下（互动反馈）
@@ -42,13 +55,31 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
 
   static const _bubbleMaxWidth = 180.0;
 
+  /// 按当前状态启停待机动画。
+  ///
+  /// 只在「已加载 + 已开启 + App 在前台」时才转 —— 这三个条件任何一个不满足，
+  /// 桌宠都是看不见的，继续跑 ticker 纯属白烧 GPU/电量。
+  void _syncTicker() {
+    final shouldRun = _pet.isLoaded && _pet.enabled && _resumed;
+    if (shouldRun == _anim.isAnimating) return;
+    if (shouldRun) {
+      _anim.repeat();
+    } else {
+      _anim.stop();
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // 开关/换装/加载完成都会 notify ⇒ 顺带校正动画启停
+    _pet.addListener(_syncTicker);
+    _syncTicker();
     _pet.load().then((_) {
       if (!mounted) return;
       _pet.syncReading();
+      _syncTicker();
     });
     _syncTimer = Timer.periodic(const Duration(seconds: 45), (_) {
       _pet.syncReading();
@@ -62,9 +93,11 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _pet.removeListener(_syncTicker);
     _syncTimer?.cancel();
     _usageTimer?.cancel();
     _bubbleTimer?.cancel();
+    _bounceTimer?.cancel();
     _anim.dispose();
     super.dispose();
   }
@@ -72,6 +105,8 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _resumed = state == AppLifecycleState.resumed;
+    // 后台不跑待机动画
+    _syncTicker();
     if (state == AppLifecycleState.resumed) {
       _pet.load();
       _pet.syncReading();
@@ -96,7 +131,8 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
   Future<void> _onTap() async {
     // 互动反馈：先弹一下
     setState(() => _bounce = true);
-    Timer(const Duration(milliseconds: 180), () {
+    _bounceTimer?.cancel();
+    _bounceTimer = Timer(const Duration(milliseconds: 180), () {
       if (mounted) setState(() => _bounce = false);
     });
     // 用户 2026-10-25：点宠物 → 直接开对话（文字 / 系统听写），
@@ -168,10 +204,12 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                   ),
                 ),
                 const SizedBox(height: 12),
+                // 长按菜单只要文字（用户 2026-10-27）—— 原来三个按钮/条目
+                // 都带图标，去掉后整块只剩文字，视线不再被图标打断。
                 Row(
                   children: [
                     Expanded(
-                      child: OutlinedButton.icon(
+                      child: OutlinedButton(
                         onPressed: () {
                           Get.back();
                           _feed();
@@ -179,13 +217,12 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppTheme.textPrimary,
                         ),
-                        icon: const Icon(Icons.restaurant_rounded, size: 18),
-                        label: const Text('喂食 10 币'),
+                        child: const Text('喂食 10 币'),
                       ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: OutlinedButton.icon(
+                      child: OutlinedButton(
                         onPressed: () {
                           Get.back();
                           _onTap();
@@ -193,8 +230,7 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppTheme.textPrimary,
                         ),
-                        icon: const Icon(Icons.favorite_rounded, size: 18),
-                        label: const Text('摸摸'),
+                        child: const Text('摸摸'),
                       ),
                     ),
                   ],
@@ -203,10 +239,6 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                 ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    Icons.menu_book_rounded,
-                    color: AppTheme.textSecondary,
-                  ),
                   title: Text(
                     '宠物中心 / 图鉴 / 换装',
                     style: TextStyle(color: AppTheme.textPrimary),
@@ -219,10 +251,6 @@ class _ReadingPetOverlayState extends State<ReadingPetOverlay>
                 ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    Icons.visibility_off_rounded,
-                    color: AppTheme.textSecondary,
-                  ),
                   title: Text(
                     '隐藏悬浮桌宠',
                     style: TextStyle(color: AppTheme.textPrimary),

@@ -10,6 +10,7 @@ import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/widgets/card_action_sheet.dart';
 import 'package:tvbox/widgets/home_search_bar.dart';
 import 'package:tvbox/miniapp/models/mini_app.dart';
+import 'package:tvbox/miniapp/services/builtin_mini_apps.dart';
 import 'package:tvbox/miniapp/services/market_subscription_store.dart';
 import 'package:tvbox/miniapp/services/mini_app_service.dart';
 import 'package:tvbox/miniapp/pages/mini_app_detail_page.dart';
@@ -548,7 +549,9 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
   /// 程序副标题：影视 N / 频道 N / 在线站点…
   String _appTag(MiniApp app) {
     if (app.isWebApp) {
-      return app.source.startsWith('http') ? '在线站点' : '本地网页程序';
+      final base = app.source.startsWith('http') ? '在线站点' : '本地网页程序';
+      // 随 App 打包的内置程序：标出来，用户才知道删了还能装回来
+      return isBuiltinAppId(app.id) ? '内置 · $base' : base;
     }
     if (app.isMaiyou) return '直播订阅 · 麦优';
     final parsed = app.parsed;
@@ -1319,11 +1322,170 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
                   _importMaiyouDialog();
                 },
               ),
+              // 内置程序：随 App 打包、正常情况首次启动就已经装好了；
+              // 这个入口用于「手滑删了想装回来」或「内置包更新后手动重装」。
+              const SizedBox(height: AppTheme.spacingMD),
+              _AddTile(
+                icon: Icons.inventory_2_outlined,
+                title: '内置程序',
+                subtitle: '随 App 打包的程序（删了可在这里装回）',
+                onTap: () {
+                  Get.back();
+                  _showBuiltinSheet();
+                },
+              ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  // ── 内置程序（assets/miniapps/*.zip）─────────────────────────
+  void _showBuiltinSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: AppTheme.textSecondary.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Text(
+                '内置程序',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontTitle3,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '这些程序随 App 一起打包，不需要联网下载',
+                style: TextStyle(color: AppTheme.textTertiary, fontSize: 12),
+              ),
+              const SizedBox(height: AppTheme.spacingLG),
+              // 安装状态跟着 apps 变，所以用 Obx 包一层
+              Obx(() {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final b in kBuiltinMiniApps) ...[
+                      _builtinRow(b),
+                      if (b != kBuiltinMiniApps.last)
+                        const SizedBox(height: AppTheme.spacingMD),
+                    ],
+                  ],
+                );
+              }),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _builtinRow(BuiltinMiniApp b) {
+    final installed = service.isInstalled(b.appId);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundCard,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.glassBorderSoft, width: 0.6),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(11),
+              color: _tintFor(b.appId),
+            ),
+            child: Text(
+              b.name.isNotEmpty ? b.name.characters.first : '内',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  b.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  installed ? '已安装 · v${b.version}' : b.description,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: () => _installBuiltin(b, force: installed),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.accentColor,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              minimumSize: const Size(0, 34),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: Text(
+              installed ? '重新安装' : '安装',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _installBuiltin(BuiltinMiniApp b, {bool force = false}) async {
+    AppToast.message(force ? '正在重装 ${b.name}…' : '正在安装 ${b.name}…');
+    final r = await service.installBuiltin(b.appId, force: force);
+    if (!mounted) return;
+    if (r.ok) {
+      AppToast.message('${b.name} 已就绪');
+    } else {
+      AppToast.message(r.error ?? '安装失败');
+    }
   }
 
   Future<void> _importMaiyouDialog() async {

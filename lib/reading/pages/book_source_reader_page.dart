@@ -877,7 +877,7 @@ Timer? _ttsTimerHandle;
   void _evictIfNeeded();
   Widget _selectionMenu(BuildContext ctx, SelectableRegionState state);
   int _paragraphIndexForSelection(String sel);
-  Future<void> _addPurifyFromSelection(String raw);
+  Future<void> _addPurifyFromSelection(String raw, {bool fromParagraph = false});
   Future<void> _showPurifyRuleEditor({String seedPattern = '', String seedName = ''});
   Future<void> _showSelectionTools(String sel);
   Widget _toolBtn(IconData icon, String label, VoidCallback onTap);
@@ -1018,7 +1018,8 @@ Timer? _ttsTimerHandle;
   Future<void> _onParagraphLongPress(int i);
   Future<void> _translateParagraph(String text);
   String _searchSeed(String t);
-  Widget _longPressAction(IconData icon, String label, VoidCallback onTap);
+  /// 长按菜单里的一个动作（**纯文字，不带图标**，见实现处说明）
+  Widget _longPressAction(String label, VoidCallback onTap);
   Future<String?> _showNoteInput(String text);
   Map<String, dynamic> _presetSnapshot();
   void _applyPresetMap(Map<String, dynamic> m);

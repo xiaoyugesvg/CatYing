@@ -108,12 +108,22 @@ class MusicResolveResult {
   /// 在这里被**丢掉**，插件要求 headers 的源等于白解析。
   final Map<String, String> headers;
 
+  /// **实际用到的音质**（LX 码率串：`128k` / `320k` / `flac` / `flac24bit` …）。
+  ///
+  /// 为什么不直接用调用方传进来的那个档位：Node 侧会按音源声明的
+  /// `qualitys` **降级**（见 `source_resolver.js` 的 `clampQuality`）——
+  /// 用户选 Hi-Res、源只支持到 flac，实际拿到的就是 flac。UI 要显示
+  /// **真的那一档**，否则又变成"设置写着无损、其实给的是 320k"。
+  /// 空串 = 源没回报（老脚本 / 模板法）。
+  final String quality;
+
   const MusicResolveResult({
     required this.ok,
     this.url = '',
     this.kind = '',
     this.message = '',
     this.headers = const {},
+    this.quality = '',
   });
 }
 
@@ -1181,8 +1191,26 @@ class MusicApi {
   /// 所以这里把源**整体**传过去，Node 不囤一份。
   Future<MusicResolveResult> resolveBySource(
     ThirdPartySource source,
-    Song song,
-  ) async {
+    Song song, {
+
+    /// 用户当前选的音质（设置页「音质」，来自 [SettingsStore.audioQuality]）。
+    ///
+    /// 传 `null` = 沿用 [ThirdPartySource.quality]（音源自己的默认档，
+    /// 音源管理页的「测试」按钮就是这种情形 —— 没有播放上下文）。
+    ///
+    /// ── 🔴 为什么必须加这个参数（修的真 bug）──────────────────────
+    /// 之前整条链路**一格音质参数都没有**：
+    ///   · `player_manager._load` 手里有 `wantQuality`
+    ///   · → `UnblockService.resolve/testOne/resolveAll` **没有这个参数**
+    ///   · → `resolveBySource(source, song)` **没有这个参数**
+    ///   · → Node 侧 `source.quality || '320k'`
+    /// 结果：**设置里的「无损 / Hi-Res」对第三方源完全无效**，
+    /// 不管选哪档，第三方源永远按音源默认的 320k 取址。
+    AudioQuality? quality,
+  }) async {
+    // LX / MusicFree 都吃码率串，统一在 Dart 侧换算好（见 [AudioQuality.lxQuality]）
+    final wantQ = quality?.lxQuality;
+
     // ── QuickJS 实验引擎（2026-10-21）──────────────────────────
     //   · auto    → 先试 QuickJS（只支持 axios/he 的插件），不支持再走 Node
     //   · quickjs → 只走 QuickJS（失败就返回明确错误，便于对比测试）
@@ -1193,7 +1221,8 @@ class MusicApi {
         final q = await MfQuickJsEngine.instance.resolveMedia(
           source,
           song,
-          source.quality,
+          // 没传音质时仍用音源默认档（原来是写死 source.quality，现在两路一致）
+          wantQ ?? source.quality,
         );
         if (q != null) {
           return MusicResolveResult(
@@ -1201,6 +1230,8 @@ class MusicApi {
             url: q.url,
             kind: 'musicfree',
             headers: q.headers,
+            // QuickJS 不走 Node 的降级逻辑，用的就是我们要的那个档位
+            quality: wantQ ?? source.quality,
           );
         }
       } catch (_) {
@@ -1218,6 +1249,9 @@ class MusicApi {
     final r = await _call({
       'action': 'resolveBySource',
       'source': source.toJson(),
+      // ⚠️ 只在**显式传了音质**时才带上：不传就让 Node 侧走
+      //    `source.quality` 的旧逻辑（音源管理页「测试」按钮依赖这条）。
+      'quality': ?wantQ,
       'song': {
         'id': song.id,
         'name': song.name,
@@ -1270,6 +1304,8 @@ class MusicApi {
           ? (m['headers'] as Map)
               .map((k, v) => MapEntry(k.toString(), v.toString()))
           : const {},
+      // 实际生效的音质（Node 侧可能已按源支持的档位降级）
+      quality: (m['quality'] ?? '').toString(),
     );
   }
 

@@ -1581,6 +1581,7 @@ class ZlibraryService extends ChangeNotifier {
       throw ZlibraryException('unavailable', '图书功能暂不可用，请等待恢复');
     }
     Object? lastError;
+    bool reachedParse = false; // 至少一个镜像「拿到 HTML 但解析 0 条」→ 页面结构变了
     // 最多试 3 个镜像（当前节点优先）：每个最多 6s，整体 ~18s 封顶，
     // 避免镜像不可达时 WebView 逐个 30s 超时 → 主页"正在加载"卡几分钟。
     //
@@ -1622,6 +1623,7 @@ class ZlibraryService extends ChangeNotifier {
       }
       final books = _parseHomeHtml(htmlStr);
       if (books.isEmpty) {
+        reachedParse = true; // 节点可达但页面结构变了 → 这才是「解析为空」
         _log('$domain 解析到 0 条，HTML 长度=${htmlStr.length}，切下一镜像');
         continue;
       }
@@ -1651,9 +1653,18 @@ class ZlibraryService extends ChangeNotifier {
     // 现在本函数**不再擅自判定"节点不可用"** ✓：可达性交给真正能验证的路径
     //（搜索成功会 `_setUnavailable(false)`；失败才置 true ✓）。
     // 这里只如实说明"推荐解析不出来"，不再谎报节点全挂 ✓。
-    _log('首页推荐全部失败（节点可达性未知，可能是解析失效）: $lastError');
+    _log('首页推荐全部失败（reachedParse=$reachedParse，lastError=$lastError）');
+    // 区分两种失败（两者此前被混成一句「推荐解析为空」误导用户）：
+    //  · reachedParse=true  → 至少拿到过一次 HTML，说明节点可达，是页面结构变了
+    //  · reachedParse=false → 全程拿不到 HTML，节点真的连不上 / 网络或代理问题
+    // 注意保持 code='fail'：_friendlyError 会把 'unavailable' 码覆盖成通用文案，
+    // 只有 'fail'（走 default 分支）才会显示这里的自定义消息。
     throw ZlibraryException(
-        'fail', '推荐解析为空：页面结构可能已变更（可稍后重试，或检查节点）');
+      'fail',
+      reachedParse
+          ? '推荐解析为空：页面结构可能已变更（可稍后重试，或检查节点）'
+          : '推荐加载失败：所有节点暂时无法连接（请检查网络或代理）',
+    );
   }
 
   /// 客户端语言匹配：[Book.language]（如 'chinese'/'english'）与目标语言值

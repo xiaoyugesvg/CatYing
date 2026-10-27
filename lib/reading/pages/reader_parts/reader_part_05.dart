@@ -2,7 +2,11 @@ part of '../book_source_reader_page.dart';
 
 mixin _ReaderPart05 on _BookSourceReaderPageState {
 @override
-  /// 长按段落 → 菜单：📌 加书签 / 🖍 划线 / ✍️ 划线+批注
+  /// 长按段落 → 菜单（**纯文字，无图标**）：
+  ///   第一行 加书签 / 划线 / 划线+批注
+  ///   第二行 复制 / 搜索 / 净化 / 朗读 / 翻译
+  ///
+  /// 「净化」= 用这一段建一条替换规则（与选区工具条同一面板）。
   Future<void> _onParagraphLongPress(int i) async {
     if (_paragraphs.isEmpty || i < 0 || i >= _paragraphs.length) return;
     final text = _paragraphs[i];
@@ -36,7 +40,6 @@ mixin _ReaderPart05 on _BookSourceReaderPageState {
                   children: [
                     Expanded(
                       child: _longPressAction(
-                        Icons.bookmark_add_rounded,
                         '加书签',
                         () => Navigator.pop(ctx, 'bookmark'),
                       ),
@@ -44,7 +47,6 @@ mixin _ReaderPart05 on _BookSourceReaderPageState {
                     const SizedBox(width: 10),
                     Expanded(
                       child: _longPressAction(
-                        Icons.border_color_rounded,
                         '划线',
                         () => Navigator.pop(ctx, 'highlight'),
                       ),
@@ -52,7 +54,6 @@ mixin _ReaderPart05 on _BookSourceReaderPageState {
                     const SizedBox(width: 10),
                     Expanded(
                       child: _longPressAction(
-                        Icons.edit_note_rounded,
                         '划线+批注',
                         () => Navigator.pop(ctx, 'note'),
                       ),
@@ -60,15 +61,16 @@ mixin _ReaderPart05 on _BookSourceReaderPageState {
                   ],
                 ),
                 const SizedBox(height: 8),
-                // 第二行：对齐 Legado 的选中菜单（复制 / 搜索 / 朗读 / 翻译）
+                // 第二行：对齐 Legado 的选中菜单，再补上「净化」
                 //
                 // 「翻译这段」原来单独占一行、还只有一个 Expanded ⇒ 会被拉成
                 // 一整条超宽按钮，和上面三列完全不齐（看着像坏了）。并到这一行。
+                // 这一行现在 5 个：复制 / 搜索 / 净化 / 朗读 / 翻译（净化紧跟搜索，
+                // 与选区工具条里的顺序一致）。
                 Row(
                   children: [
                     Expanded(
                       child: _longPressAction(
-                        Icons.copy_rounded,
                         '复制',
                         () => Navigator.pop(ctx, 'copy'),
                       ),
@@ -76,7 +78,6 @@ mixin _ReaderPart05 on _BookSourceReaderPageState {
                     const SizedBox(width: 10),
                     Expanded(
                       child: _longPressAction(
-                        Icons.search_rounded,
                         '搜索',
                         () => Navigator.pop(ctx, 'search'),
                       ),
@@ -84,7 +85,13 @@ mixin _ReaderPart05 on _BookSourceReaderPageState {
                     const SizedBox(width: 10),
                     Expanded(
                       child: _longPressAction(
-                        Icons.headphones_rounded,
+                        '净化',
+                        () => Navigator.pop(ctx, 'purify'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _longPressAction(
                         '朗读',
                         () => Navigator.pop(ctx, 'tts'),
                       ),
@@ -93,7 +100,6 @@ mixin _ReaderPart05 on _BookSourceReaderPageState {
                     // 走 Google 免 Key 端点，见 TranslateService
                     Expanded(
                       child: _longPressAction(
-                        Icons.translate_rounded,
                         '翻译',
                         () => Navigator.pop(ctx, 'translate'),
                       ),
@@ -151,6 +157,10 @@ mixin _ReaderPart05 on _BookSourceReaderPageState {
       case 'tts':
         await _tts.speak(text);
         _toast('正在朗读这一段');
+      case 'purify':
+        // 段落 → 创建净化规则（和选区工具条的「净化」同一个面板，
+        // 差别只在超长段落给空规则而不是直接拒绝，见 _addPurifyFromSelection）
+        await _addPurifyFromSelection(text, fromParagraph: true);
       case 'translate':
         await _translateParagraph(text);
     }
@@ -214,26 +224,33 @@ mixin _ReaderPart05 on _BookSourceReaderPageState {
   }
 
 @override
-  Widget _longPressAction(IconData icon, String label, VoidCallback onTap) {
+  /// 长按菜单里的一个动作 —— **只要文字，不要图标**（用户 2026-10-27）。
+  ///
+  /// 原来是「图标在上、文字在下」两行：7 个动作挤成两排（3 列 + 4 列），
+  /// 图标占掉大半高度，动作名反而像附属说明。去掉图标后文字居中、字号不变，
+  /// 视线直接落在动作上，也顺带把按钮高度收了一截。
+  ///
+  /// ⚠️ 用 `FittedBox(scaleDown)` 而不是 `ellipsis`：用户把系统字号调大时，
+  /// 「划线+批注」这类 5 个字在 3 列布局里会超宽 —— 省略号会把意思截断，
+  /// 等比缩小至少还能读全。
+  Widget _longPressAction(String label, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+        alignment: Alignment.center,
         decoration: BoxDecoration(
           color: _fg.withValues(alpha: 0.06),
           borderRadius: BorderRadius.circular(14),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 22, color: _fg),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              style: TextStyle(fontSize: AppTheme.fontFootnote, color: _fg),
-            ),
-          ],
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            label,
+            maxLines: 1,
+            style: TextStyle(fontSize: AppTheme.fontFootnote, color: _fg),
+          ),
         ),
       ),
     );

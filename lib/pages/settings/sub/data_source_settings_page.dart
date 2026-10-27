@@ -15,6 +15,7 @@ import 'package:tvbox/pages/settings/controller.dart';
 import 'package:tvbox/pages/settings/sub/cf_sites_page.dart';
 import 'package:tvbox/pages/settings/sub/engine_settings_page.dart';
 import 'package:tvbox/pages/settings/sub/local_python_sources_page.dart';
+import 'package:tvbox/pages/settings/sub/local_js_sources_page.dart';
 import 'package:tvbox/pages/settings/sub/parse_settings_page.dart';
 import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 import 'package:tvbox/pages/settings/sub/tg_source_page.dart';
@@ -299,6 +300,18 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
                 if (mounted) setState(() {});
               },
             ),
+          ),
+        ),
+        _card(
+          SettingsRow(
+            icon: Icons.code_rounded,
+            title: '本地 JS 源',
+            subtitle: 'CatVod / drpy / TVBox 的 .js 脚本',
+            value: '管理',
+            onTap: () async {
+              await Get.to(() => const LocalJsSourcesPage());
+              if (mounted) setState(() {});
+            },
           ),
         ),
         Obx(

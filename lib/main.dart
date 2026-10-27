@@ -131,6 +131,53 @@ void main() async {
     return true; // 已处理：不让它把 App 带走
   };
 
+  // ── 先把**第一帧**顶上去（2026-10-27，修"启动黑屏"）─────────────────
+  //
+  // 问题：`runApp` 之前串行跑了几十个 `await`（Hive / prefs / 书源 / 源实例化 /
+  //   音乐播放器 / Hive 缓存箱…）。这段时间**一帧 Flutter 都还没画**，
+  //   屏幕上一直是**原生启动屏**（浅 #F7F5F1 / 深 #1C1C1E）——深色模式下
+  //   就是一片近黑，而且没有任何"正在加载"的迹象 ⇒ 用户感知成"先黑屏再出加载页"。
+  //
+  // 修法：把这一帧提前。先 `runApp` 一个**自包含**的启动页（不读任何服务，
+  //   只用系统明暗选底色），于是原生启动屏立刻被替换成"Logo + 转圈"；
+  //   初始化链**顺序一字未动**地继续跑，跑完再把真正的 `TVBoxApp` 挂上去。
+  //
+  // ⚠️ 刻意**不**把初始化链拆开重排：那条链里"谁必须早于谁"的注释有几十处
+  //   （书源要早于 SourceManager、下载清单要早于 PlayerManager、ParseStore 要早于
+  //   ApiConfig 首次加载…），重排等于重新验证一遍全部启动语义，风险远大于收益。
+  //   这里只是把它整段搬进函数，执行顺序完全不变。
+  final booted = ValueNotifier<bool>(false);
+  runApp(_BootGate(booted: booted));
+
+  // 等这一帧**真正画出来**再往下跑。
+  // 不加这句的话，`_initAppServices()` 会立刻在同一个微任务里同步执行到第一个
+  // await —— 链首的 `MediaKit.ensureInitialized()` 是同步调用，会把首帧一直
+  // 往后推，"提前画启动页"就等于白做。
+  //
+  // ⚠️ 必须带超时：如果启动瞬间 App 被切到后台（iOS 可能不产帧），
+  //   `endOfFrame` 会一直挂着 ⇒ 初始化链永远不开始 = 新的"永久启动页"。
+  //   等不到就照常往下走（退化成改动前的行为，不会更糟）。
+  await WidgetsBinding.instance.endOfFrame
+      .timeout(const Duration(milliseconds: 600), onTimeout: () {});
+
+  try {
+    await _initAppServices();
+  } catch (e, s) {
+    // 初始化链里任何一步抛出来，都**不能**让启动页永远转下去 ——
+    // 那等于把"永久黑屏"换了个皮（用户只能强杀）。这里记日志后照样挂载界面：
+    // 真出问题时错误会经 ErrorWidget / 软件日志暴露出来，而不是一片静默。
+    AppLog.instance.log('[启动] 初始化链异常，仍继续挂载界面: $e');
+    AppLog.instance.log('$s');
+  }
+
+  // 初始化完成 → 换掉启动页，挂上真正的 App（`TVBoxApp` 内部会再显示
+  // `AppLoadingView` 等配置加载，视觉上是连续的）
+  booted.value = true;
+}
+
+/// 原来的 `main()` 初始化链 —— **内容与顺序与原实现完全一致**，只是搬进函数，
+/// 好让 [main] 能在它之前先把第一帧画出来。
+Future<void> _initAppServices() async {
   // ── 启动期「恢复类」步骤的超时保护（2026-10-14，N4）──────────────
   //   下面这几步都是**读文件**（Documents 下的镜像 / json / prefs）：万一
   //   文件句柄耗尽或文件系统异常导致读不返回，`await` 会永久挂住 `main()`
@@ -485,6 +532,108 @@ void main() async {
   // 设置项整体快照：低频周期写（崩溃时最多丢 15s 内的改动），
   // 配合启动期的 PrefsMirror.restoreIfLost() 形成完整兜底闭环。
   PrefsMirror.startAutoSnapshot();
+}
 
-  runApp(const TVBoxApp());
+/// 首帧闸门：初始化链跑完之前显示启动页，跑完换成真正的 App。
+///
+/// 为什么用 `ValueListenableBuilder` 而不是调两次 `runApp`：
+/// 两次 `runApp` 会先拆掉整棵树再挂新的，中间那一帧在部分机型上会闪一下
+/// 纯背景色；这里只是把子树换掉，不会出现空帧。
+class _BootGate extends StatelessWidget {
+  const _BootGate({required this.booted});
+
+  final ValueNotifier<bool> booted;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: booted,
+      builder: (context, done, child) =>
+          done ? const TVBoxApp() : const _BootSplash(),
+    );
+  }
+}
+
+/// 首帧启动页 —— **完全自包含**：不碰 GetX、不碰 AppTheme、不读任何服务。
+///
+/// 因为这一帧的目的就是"在任何服务初始化之前先画点东西"，
+/// 一旦它依赖了还没注册的服务（`Get.find` 会直接抛），就等于把黑屏换成闪退。
+/// 所以这里的**颜色 / 字号 / 字体全部写死**，一个字都不从设置里读。
+///
+/// 底色取原生启动屏的同一组颜色（`LaunchBackground`：浅 #F7F5F1 / 深 #1C1C1E），
+/// 并按**系统明暗**选（原生启动屏也是按系统明暗显示的）—— 从启动屏切到这一帧
+/// 时颜色不跳。图案与 `AppLoadingView` 的 `CircularLogoProgress` 同款
+/// （猫爪 + 猫影），所以这里切到正式加载页时视觉是连续的。
+class _BootSplash extends StatelessWidget {
+  const _BootSplash();
+
+  /// = `ios/Runner/Assets.xcassets/LaunchBackground.colorset` 的两个色值
+  static const Color _bgLight = Color(0xFFF7F5F1);
+  static const Color _bgDark = Color(0xFF1C1C1E);
+
+  /// 与 `CircularLogoProgress` 里写死的那几个颜色一致
+  static const Color _logoBg = Color(0xFFFFF8F0);
+  static const Color _paw = Color(0xFFD4A574);
+  static const Color _logoText = Color(0xFF3A2A1A);
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight =
+        MediaQuery.platformBrightnessOf(context) == Brightness.light;
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      // 包内自带 MiSans；不指定的话这一帧会用系统字体，切到正式界面时"猫影"
+      // 两个字会跳一下字形。
+      theme: ThemeData(fontFamily: 'MiSans'),
+      home: ColoredBox(
+        color: isLight ? _bgLight : _bgDark,
+        child: Center(
+          child: SizedBox(
+            width: 132,
+            height: 132,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  width: 132,
+                  height: 132,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 3.2,
+                    strokeCap: StrokeCap.round,
+                    valueColor: const AlwaysStoppedAnimation<Color>(_paw),
+                    backgroundColor: _paw.withValues(alpha: 0.18),
+                  ),
+                ),
+                Container(
+                  width: 96,
+                  height: 96,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _logoBg,
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: const Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.pets, size: 30, color: _paw),
+                      SizedBox(height: 2),
+                      Text(
+                        '猫影',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: _logoText,
+                          letterSpacing: 2,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

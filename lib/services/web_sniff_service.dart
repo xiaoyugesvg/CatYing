@@ -19,6 +19,10 @@
 // 拿不到。这类只能靠 WebView 内 hook，或整体迁移到 flutter_inappwebview
 // 做资源请求拦截（shouldInterceptRequest 能拿到所有 frame 的网络请求）。
 
+import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
@@ -45,6 +49,22 @@ class WebSniffService {
 
   /// 单次 MIME 探测的超时（只取响应头，不能拖慢整个嗅探）
   static const Duration _mimeTimeout = Duration(seconds: 4);
+
+  /// 单页最多读多少字节。
+  ///
+  /// 🔴 原来 `_get` 用 `_client.get<String>(url)` —— dio 会把响应体**整个**
+  /// 读进内存，没有任何上限。嗅探的输入是**用户/源给的任意网页**，其中
+  /// 不乏几 MB 的压缩包目录页、几百 MB 的日志页，甚至一个误配的媒体直链
+  /// （那不是网页，但 URL 会被当页面去取）。iOS 上直接 OOM 崩掉。
+  /// 这里给 2 MB 上限：正常播放页远小于此，超了就截断（截断的 HTML 仍能
+  /// 扫出前面的媒体地址，比整页丢掉更有用）。
+  static const int _maxPageBytes = 2 * 1024 * 1024;
+
+  /// MIME 探测时读多少个字节（`Range: bytes=0-127`）。
+  ///
+  /// 不能只读 1 字节：Content-Type 不明时（很多 CDN 把 m3u8 发成
+  /// `application/octet-stream` 或 `text/plain`）只能靠**开头字节**判断。
+  static const int _mimePeekBytes = 128;
 
   Dio? _dio;
   Dio get _client => _dio ??= _createDio();
@@ -153,13 +173,19 @@ class WebSniffService {
     return null;
   }
 
-  /// 用 `Content-Type` 判断这个地址是不是媒体（不下载内容，只取响应头）。
+  /// 用 `Content-Type`（+ 开头字节）判断这个地址是不是媒体。
   ///
-  /// 只发一个带 `Range: bytes=0-0` 的 GET：响应头一到就取消响应体，
-  /// 对 m3u8 也只读几十字节，不会把整段视频拉下来。
+  /// 只发一个带 `Range: bytes=0-127` 的 GET：响应头一到就取消响应体，
+  /// 最多读 128 字节，不会把整段视频拉下来。
   ///
   /// 判定口径（对齐 res-sniffer 的默认插件 + 常见 CDN）：
-  ///   `video/*` / `audio/*` / `*mpegurl` / `dash+xml` / `ms-sstr`。
+  ///   1. `video/*` / `audio/*` / `*mpegurl` / `dash+xml` / `ms-sstr` → 是；
+  ///   2. Content-Type 不明或不可信（空 / `octet-stream` / `text/plain`）
+  ///      → **看开头字节**：`#EXTM3U` = HLS 播放列表，`ftyp` = MP4。
+  ///
+  /// 第 2 步是 2026-10-27 补的：不少 CDN 把 m3u8 发成
+  /// `application/octet-stream`（甚至 `text/plain`），只认 Content-Type
+  /// 会把这些直链**全部漏掉** —— 而它们恰恰是最常见的"无后缀直链"。
   Future<bool> looksLikeMediaByMime(String url, {String? referer}) async {
     if (!_isHttp(url)) return false;
     ResponseBody? body;
@@ -171,7 +197,7 @@ class WebSniffService {
           receiveTimeout: _mimeTimeout,
           sendTimeout: _mimeTimeout,
           headers: {
-            'Range': 'bytes=0-0',
+            'Range': 'bytes=0-${_mimePeekBytes - 1}',
             if (referer != null && referer.isNotEmpty) 'Referer': referer,
           },
           // 403/404/5xx 也要拿到响应头而不是抛异常
@@ -179,7 +205,17 @@ class WebSniffService {
         ),
       );
       body = resp.data;
-      return _isMediaMime(resp.headers.value('content-type') ?? '');
+      final contentType = resp.headers.value('content-type') ?? '';
+      if (_isMediaMime(contentType)) return true;
+      // Content-Type 不可信时才去读字节（多读一次流，别浪费在网络正常的情况）
+      if (!_mayHidePlaylist(contentType)) return false;
+      final head = await _readHead(body!.stream, _mimePeekBytes);
+      final byBytes = _looksLikeMediaBytes(head);
+      if (byBytes) {
+        AppLog.instance.log(
+            '[WebSniff] 按开头字节识别为媒体（Content-Type="$contentType"）: $url');
+      }
+      return byBytes;
     } catch (e) {
       AppLog.instance.log('[WebSniff] MIME 探测失败 $url: $e');
       return false;
@@ -201,22 +237,105 @@ class WebSniffService {
         ct.contains('ms-sstr');
   }
 
+  /// 这种 Content-Type 下**媒体可能被藏起来**（需要看字节才能确定）。
+  ///
+  /// ⚠️ 不要包含 `text/html` —— 网页就是网页，读字节也救不回来，
+  /// 放进来只会白白多读一次流。
+  static bool _mayHidePlaylist(String contentType) {
+    final ct = contentType.toLowerCase();
+    if (ct.isEmpty) return true; // 没给 Content-Type 的服务器不少
+    return ct.contains('octet-stream') || ct.startsWith('text/plain');
+  }
+
+  /// 开头字节 → 是否媒体。
+  ///
+  ///   · `#EXTM3U` —— HLS 播放列表（m3u8），最常见；
+  ///   · `....ftyp` —— MP4 / MOV 的 box 头（偏移 4 处是 `ftyp`）；
+  ///   · `#EXTINF` —— 少数不带 `#EXTM3U` 头的切片列表。
+  static bool _looksLikeMediaBytes(List<int> head) {
+    if (head.isEmpty) return false;
+    // 只取前面一小段，避免把二进制转成巨大的字符串
+    final text = String.fromCharCodes(
+      head.length > 64 ? head.sublist(0, 64) : head,
+    ).trimLeft();
+    if (text.startsWith('#EXTM3U') || text.startsWith('#EXTINF')) return true;
+    if (head.length >= 8) {
+      final tag = String.fromCharCodes(head.sublist(4, 8));
+      if (tag == 'ftyp') return true;
+    }
+    return false;
+  }
+
+  /// 从流里读最多 [max] 字节（读够就停，不把剩余内容拉下来）。
+  ///
+  /// ⚠️ `ResponseBody.stream` 是**单订阅**流：只能 listen 一次，
+  /// 而且读够之后必须主动 `cancel()`，否则连接会一直挂着。
+  static Future<List<int>> _readHead(Stream<List<int>> stream, int max) async {
+    final buf = BytesBuilder(copy: false);
+    final done = Completer<void>();
+    late final StreamSubscription<List<int>> sub;
+    sub = stream.listen(
+      (chunk) {
+        buf.add(chunk);
+        if (buf.length >= max && !done.isCompleted) done.complete();
+      },
+      onDone: () {
+        if (!done.isCompleted) done.complete();
+      },
+      onError: (_) {
+        if (!done.isCompleted) done.complete();
+      },
+      cancelOnError: true,
+    );
+    // 短超时：读不到字节就当没读到，不能拖住整个嗅探
+    await done.future.timeout(const Duration(seconds: 2), onTimeout: () {});
+    try {
+      await sub.cancel();
+    } catch (_) {}
+    final bytes = buf.takeBytes();
+    return bytes.length > max ? bytes.sublist(0, max) : bytes;
+  }
+
   // ============================================================
   // 内部
   // ============================================================
 
+  /// 取一个网页的 HTML（**带上限**，见 [_maxPageBytes]）。
+  ///
+  /// 原来是 `_client.get<String>(url)`：dio 会把响应体整个读进内存，
+  /// 而这里取的地址来自"用户/源给的任意页面"—— 撞上大文件就直接 OOM。
+  /// 现在改成流式读 + 硬上限，超了截断（截断的 HTML 仍能扫出前面的地址）。
   Future<String?> _get(String url, {String? referer}) async {
+    ResponseBody? body;
     try {
-      final resp = await _client.get<String>(
+      final resp = await _client.get<ResponseBody>(
         url,
-        options: Options(headers: {
-          if (referer != null && referer.isNotEmpty) 'Referer': referer,
-        }),
+        options: Options(
+          responseType: ResponseType.stream,
+          headers: {
+            if (referer != null && referer.isNotEmpty) 'Referer': referer,
+          },
+        ),
       );
-      return resp.data;
+      body = resp.data;
+      // Content-Length 明显超大就干脆不读（省流量，也避免读一半再截断）
+      final declared = int.tryParse(resp.headers.value('content-length') ?? '');
+      if (declared != null && declared > _maxPageBytes) {
+        AppLog.instance.log(
+            '[WebSniff] 页面过大（$declared B > $_maxPageBytes），跳过: $url');
+        return null;
+      }
+      final head = await _readHead(body!.stream, _maxPageBytes);
+      // allowMalformed：GBK 等非 UTF-8 页面会解出乱码，但不会抛异常 ——
+      // 乱码里照样能正则出 ASCII 的 http 地址，比直接放弃有用
+      return utf8.decode(head, allowMalformed: true);
     } catch (e) {
       AppLog.instance.log('[WebSniff] 取页面失败 $url: $e');
       return null;
+    } finally {
+      try {
+        await body?.stream.listen(null).cancel();
+      } catch (_) {}
     }
   }
 

@@ -75,6 +75,15 @@ const REQUEST_TIMEOUT_MS = 12000;
 /** 响应体最大字节数（防止脚本拉一个巨大文件） */
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
+/**
+ * 脚本**异步注册** handler 的宽限时长。
+ *
+ * 有的源顶层先 await 一次网络（拉配置/校验版本）才 `lx.on('request', …)`，
+ * 同步执行完时 handlers 还是空的。给一个上限，等到出现 handler 就立刻走，
+ * 所以同步注册的源完全不受影响。见 loadScript 里的说明。
+ */
+const REGISTER_GRACE_MS = 600;
+
 // ============================================================
 // lx.utils.crypto
 // ============================================================
@@ -664,6 +673,32 @@ export async function loadScript(script, opts) {
             filename: 'lx-source.js',
             displayErrors: true,
         });
+
+        // ── 异步注册宽限期（2026-10-27 修的真 bug）─────────────────
+        //
+        // 🔴 有些源**不在顶层同步注册** handler，而是先 `await` 一次网络
+        //    （拉配置 / 校验版本），拿到结果后才 `lx.on('request', …)`。
+        //    原来 `vm.runInContext` 一返回就取快照 ⇒ `actions = []` ⇒
+        //    `resolveByScript` 直接判「脚本没有注册任何 action」，
+        //    源**永远用不了**，但报错看着像"脚本坏了"。
+        //
+        // 实测（`assets/music/lx/lx.js`，内置 64KB 那个）：
+        //    返回时 actions=[] → 再等 300ms 后 handlers={request} + inited 已到。
+        //
+        // 所以这里给一个**有上限**的宽限：一旦出现任何非 `__` 开头的 handler
+        // 就立刻继续（正常同步注册的源完全不受影响，代价是 0ms）。
+        if (!Object.keys(handlers).some((k) => !k.startsWith('__'))) {
+            const deadline = Date.now() + REGISTER_GRACE_MS;
+            while (Date.now() < deadline) {
+                await new Promise((r) => setTimeout(r, 40));
+                if (Object.keys(handlers).some((k) => !k.startsWith('__'))) break;
+            }
+            // 再让出一个 tick：`lx.send('inited')` 常紧跟在注册之后，
+            // 这样 sources / qualitys 元信息也能一起拿到。
+            if (Object.keys(handlers).some((k) => !k.startsWith('__'))) {
+                await new Promise((r) => setTimeout(r, 60));
+            }
+        }
 
         // 兼容两种写法：lx.on(...) 注册 / module.exports = { ... }
         const exported = sandbox.module && sandbox.module.exports;

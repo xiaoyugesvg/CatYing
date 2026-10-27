@@ -83,6 +83,14 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
   /// 正在做 MIME 复核的地址（防同一地址每轮重复探测）
   final Set<String> _mimeProbing = <String>{};
 
+  /// XHR/fetch 上报的**无后缀**候选（hook 的 `u:` 通道）。
+  ///
+  /// 不立刻探测：一个页面可能有几十条 API 请求，逐条 MIME 探测等于把站点
+  /// 当靶子打，而且会拖慢首屏。攒着，在第 5 轮兜底时统一批量复核
+  /// （见 [_probeLastCandidates]）。上限 [_maxUnverified] 条，超出丢弃。
+  final List<String> _unverified = <String>[];
+  static const int _maxUnverified = 24;
+
   /// 最近一轮 `__sniff.all()` 的候选（第 5 轮要做一次 MIME 兜底复核）
   List<String> _lastCandidates = const [];
 
@@ -111,20 +119,51 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
   // @EXT@ 由 Dart 侧按**用户当前生效的后缀清单**填入（见 _extAlternation），
   // 不再硬编码 —— 用户在「嗅探设置 → 影视直链后缀」加/删的后缀这里同步生效。
   var MEDIA = /\.(@EXT@)(\?|#|$)/i;
+  // 明显不是媒体的后缀：这类 XHR（页面 API / 图片 / 脚本）不要上报，
+  // 否则每条都要过一次 JS 桥到 Dart，纯属浪费。
+  var NOT_MEDIA = /\.(?:js|css|json|html?|xml|txt|png|jpe?g|gif|webp|svg|ico|bmp|woff2?|ttf|eot|map|wasm)(\?|#|$)/i;
   var reported = {};
+  // 无后缀候选的**上报配额**：页面自己的 API 请求可能成百上千，不限流会把
+  // JS 通道刷爆。40 条足够覆盖「一个页面只有一两个真流」的实际情形。
+  var unverifiedLeft = 40;
+  function post(msg){
+    try{
+      if (window.SniffMedia && window.SniffMedia.postMessage){
+        window.SniffMedia.postMessage(msg);
+      }
+    }catch(e){}
+  }
   function report(u, trusted){
     try{
       if (!u || typeof u !== 'string') return;
       if (!/^https?:\/\//i.test(u)) return;
-      // 可信来源（video/audio 元素的 src）允许**没有后缀**：原生侧会用
-      // 响应头 Content-Type 复核（`/play?id=…` 这类扩展名被藏起来的直链）。
-      // XHR/fetch 仍然只收影视后缀，否则会把整页 API 请求都报上去。
-      if (trusted !== 1 && !MEDIA.test(u)) return;
+      // ① 可信来源（video/audio/source 元素）允许**没有后缀**：原生侧会用
+      //    响应头 / 开头字节复核（`/play?id=…` 这类扩展名被藏起来的直链）。
+      if (trusted === 1){
+        if (reported[u]) return;
+        reported[u] = 1;
+        post('t:' + u);
+        return;
+      }
+      // ② 带影视后缀的 XHR/fetch —— 直接上报（这条路径原来就有）
+      if (MEDIA.test(u)){
+        if (reported[u]) return;
+        reported[u] = 1;
+        post(u);
+        return;
+      }
+      // ③ 无后缀的 XHR/fetch（2026-10-27 新增）：
+      //    原来这类**直接丢弃** —— 于是 hls.js 用 XHR 拉 `/play?id=abc`
+      //    这种被藏起来的流时，hook 一个字都不报，全靠轮询扫 HTML，
+      //    而 HTML 里根本没有这个地址 ⇒ 必然漏。
+      //    现在上报并打 `u:` 标记，由原生侧**限流 + 按响应类型复核**再决定
+      //    要不要用（不是无条件当播放地址）。
+      if (NOT_MEDIA.test(u)) return;
+      if (unverifiedLeft <= 0) return;
       if (reported[u]) return;
       reported[u] = 1;
-      if (window.SniffMedia && window.SniffMedia.postMessage){
-        window.SniffMedia.postMessage((trusted === 1 ? 't:' : '') + u);
-      }
+      unverifiedLeft--;
+      post('u:' + u);
     }catch(e){}
   }
   try{
@@ -182,18 +221,48 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
   /// WebView 实现（flutter_inappwebview），本脚本逻辑可原样复用。
   static const String _sniffTemplate = r'''
 (function(){
-  var found = [], seen = {};
+  // ── 候选分三档，按**信号强度**排序（2026-10-27）──────────────
+  //   ① media —— 带影视后缀的地址（最高信号）
+  //   ② perf  —— Resource Timing 里的无后缀请求：页面**真的去请求过**它，
+  //              极可能就是那个被藏起来的流
+  //   ③ other —— iframe 的 src / data-* 属性：可能只是播放器页，最低信号
+  //
+  // 为什么要分三档：原来只有一个数组 + `all()` 只取前 30 条，而 iframe 属性
+  // 是**不过后缀检查**就 push 的 ⇒ 广告多的页面上，iframe 垃圾会把真正的
+  // 媒体地址挤到 30 名之外**静默丢掉**。
+  // （实测踩过：40 个无后缀 iframe 就能把 Resource Timing 里找到的真流挤没。）
+  var media = [], perf = [], other = [], seen = {};
   var MEDIA = /https?:\/\/[^\s"'<>\\]+?\.(?:@EXT@)(?:\?[^\s"'<>\\]*)?/gi;
-  function push(u){ if(u && !seen[u] && /^https?:\/\//i.test(u)){ seen[u]=1; found.push(u); } }
+  var MEDIA_ONE = /\.(?:@EXT@)(\?|#|$)/i;
+  var NOT_MEDIA = /\.(?:js|css|json|html?|xml|txt|png|jpe?g|gif|webp|svg|ico|bmp|woff2?|ttf|eot|map|wasm)(\?|#|$)/i;
+  var MAX_MEDIA = 30, MAX_PERF = 12, MAX_OTHER = 12;
+  // bucket: 'media' | 'perf' | 'other'
+  function push(u, bucket){
+    if (!u || typeof u !== 'string') return;
+    if (!/^https?:\/\//i.test(u)) return;
+    var isMediaExt = MEDIA_ONE.test(u);
+    // 明显不是媒体的后缀（.html/.js/.png…）直接丢 —— iframe 的 src 大多是
+    // 播放器页（.html），不滤掉会白占名额
+    if (!isMediaExt && NOT_MEDIA.test(u)) return;
+    if (seen[u]) return;
+    seen[u] = 1;
+    var b = isMediaExt ? 'media' : (bucket === 'other' ? 'other' : 'perf');
+    if (b === 'media') { if (media.length < MAX_MEDIA) media.push(u); }
+    else if (b === 'perf') { if (perf.length < MAX_PERF) perf.push(u); }
+    else { if (other.length < MAX_OTHER) other.push(u); }
+  }
   function pushMedia(text){
     if(!text) return;
     var m; MEDIA.lastIndex = 0;
-    while((m = MEDIA.exec(text)) !== null){ push(m[0]); }
+    while((m = MEDIA.exec(text)) !== null){ push(m[0], 'media'); }
   }
   function scanDoc(doc, depth){
     if(!doc || depth > 2) return;
     try{
-      doc.querySelectorAll('video,audio').forEach(function(m){ push(m.currentSrc || m.src); });
+      doc.querySelectorAll('video,audio').forEach(function(m){
+        // 元素 src 是"页面明确在播的东西"，没有后缀也按 perf 级处理
+        push(m.currentSrc || m.src, 'perf');
+      });
       pushMedia(doc.documentElement ? doc.documentElement.outerHTML : '');
       var frames = doc.querySelectorAll('iframe');
       for(var i=0;i<frames.length;i++){
@@ -203,7 +272,7 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
           ['src','data-src','data-url','data-video','data-file','data-original'].forEach(function(a){
             var v = f.getAttribute && f.getAttribute(a);
             if(!v) return;
-            push(v);
+            push(v, 'other');
             try{ pushMedia(decodeURIComponent(v)); }catch(e2){ pushMedia(v); }
           });
         }catch(e){}
@@ -215,16 +284,46 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
       }
     }catch(e){}
   }
+  // ── Resource Timing 补全（2026-10-27）──────────────────────────
+  // 🔴 为什么必须有这一层：webview_flutter 4.x **没有** document-start
+  //    注入能力（`WebViewController` 上根本没有 addUserScript /
+  //    setUserScripts，只有 runJavaScript），所以 hook 只能等到
+  //    onPageStarted / onPageFinished 才装上 —— 而首屏那批请求（包括
+  //    hls.js 用 XHR 拉流）早就发完了，hook 一个字都抓不到；靠轮询扫
+  //    HTML 也扫不出来（地址是 JS 运行时拼的）。
+  //
+  //    `performance.getEntriesByType('resource')` 是**事后可查**的：
+  //    页面加载完照样能列出所有已发生的请求（含 XHR/fetch 拉的无后缀流），
+  //    正好把这个洞补上 —— 不需要任何注入时机上的魔法。
+  function pushPerf(){
+    try{
+      var es = performance.getEntriesByType('resource');
+      if (!es || !es.length) return;
+      // 只看最近 200 条：老页面可能攒了几千条，全扫一遍没必要
+      var from = es.length > 200 ? es.length - 200 : 0;
+      for (var i = from; i < es.length; i++){
+        var n = es[i] && es[i].name;
+        if (!n) continue;
+        push(n, 'perf');
+      }
+    }catch(e){}
+  }
+  function scanAll(){ scanDoc(document, 0); pushPerf(); }
   window.__sniff = {
-    scan: function(){ scanDoc(document, 0); return found.length; },
-    get: function(){ scanDoc(document, 0); return found.length ? found[0] : ''; },
+    scan: function(){ scanAll(); return media.length + perf.length + other.length; },
+    // 按信号强度取第一个
+    get: function(){
+      scanAll();
+      return media.length ? media[0] : (perf.length ? perf[0] : (other.length ? other[0] : ''));
+    },
     // 取足够多：前几个常是切片广告，原生侧会逐个过 SniffFilter 挑正片，
     // 截取太少会把排在后面的正片漏掉（2026-10-15）。
-    all: function(){ scanDoc(document, 0); return found.slice(0, 30); }
+    // 分桶后按 media → perf → other 拼接，总长有上限（2026-10-27）。
+    all: function(){ scanAll(); return media.concat(perf, other); }
   };
   var tries = 0;
   var timer = setInterval(function(){
-    scanDoc(document, 0);
+    scanAll();
     // ⚠️ 不能"一抓到就停"：第一个命中的常是切片广告（/ads/x.m3u8 之类），
     // 提前停扫就轮不到正片。固定扫满 16 轮，候选全部交给原生侧
     // （SniffFilter：影视后缀 + 黑/白名单）挑选，2026-10-15。
@@ -273,6 +372,7 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
     _autoSwitched = false;
     _mimeProbing.clear();
     _lastCandidates = const [];
+    _unverified.clear(); // 换了页面，上一页的 XHR 候选全部作废
     setState(() {
       _sniffedUrl = null;
       _hint = '正在嗅探页面里的视频地址…';
@@ -294,10 +394,17 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
         onMessageReceived: (msg) {
           final raw = msg.message;
           if (raw.isEmpty) return;
-          // `t:` 前缀 = 来自 video/audio 元素的**可信**候选，可能没有媒体后缀，
-          // 需要原生侧用 Content-Type 复核（见 _onTrustedCandidate）。
+          // 三种前缀，分别对应 hook 里的三条上报路径：
+          //   `t:` —— 来自 video/audio/source 元素的**可信**候选，可能没有
+          //          媒体后缀，需要原生侧用 Content-Type 复核；
+          //   `u:` —— 来自 XHR/fetch 的**无后缀**候选（`/play?id=…` 这类），
+          //          同样要复核，但**不立刻探测**（页面 API 请求可能几十条，
+          //          逐条探测等于把站点当靶子打），攒着在第 5 轮统一批量复核；
+          //   无前缀 —— 带影视后缀的候选，直接过规则。
           if (raw.startsWith('t:')) {
             _onTrustedCandidate(raw.substring(2));
+          } else if (raw.startsWith('u:')) {
+            _onUnverified(raw.substring(2));
           } else {
             _onSniffed(raw);
           }
@@ -364,6 +471,9 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
     _sniffTries = 0;
     // 每轮嗅探重置网络层兜底标记（「重新嗅探」/ 复用重载都会重新进来）
     _httpSniffStarted = false;
+    // XHR 上报候选也清空：重新嗅探要的是"现在这一轮"的候选，
+    // 留着上一轮的会拿过期地址去探测（2026-10-27）
+    _unverified.clear();
     _sniffTimer?.cancel();
     // 页面已完成 → 再补一次 hook 注入（幂等：脚本内有 window.__sniffHooked
     // 守卫）。onPageStarted 那次可能早于文档就绪而没被保留，补这一次保证
@@ -477,18 +587,42 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
     _onSniffed(u, mediaVerified: true);
   }
 
+  /// 收下 XHR/fetch 上报的**无后缀**候选（不探测，攒着）。
+  ///
+  /// 判定放在第 5 轮批量做（[_probeLastCandidates]）：那时页面基本加载完，
+  /// 候选也收得差不多了，一次并发 6 个探测，代价可控。
+  void _onUnverified(String url) {
+    if (!mounted || _autoSwitched) return;
+    final u = url.trim();
+    if (u.isEmpty) return;
+    // 有影视后缀的走正常路径（理论上不会进这里，hook 侧已分流）
+    if (SniffFilter.isDirectMedia(u)) {
+      _onSniffed(u);
+      return;
+    }
+    if (_unverified.contains(u)) return;
+    if (_unverified.length >= _maxUnverified) return;
+    _unverified.add(u);
+  }
+
   /// 第 5 轮兜底：把 `__sniff.all()` 里**没有影视后缀**的候选拿去问服务器
   /// 的 Content-Type（最多 6 个并发）。覆盖 `<video src="/play?id=…">` 这种
   /// 页面加载时就已经存在、不会触发 src setter 的写法。
+  ///
+  /// 2026-10-27 起**顺带复核 hook 的 `u:` 通道**（XHR/fetch 拉的无后缀流）——
+  /// 那批地址轮询扫 HTML 是扫不到的，只有 hook 能看见，而 hook 又抓不到
+  /// 首屏（见 `_sniffTemplate` 里 pushPerf 的说明）。
   Future<void> _probeLastCandidates() async {
     if (!mounted || _autoSwitched) return;
-    final batch = _lastCandidates
-        .where((u) => !SniffFilter.isDirectMedia(u))
-        .toSet()
-        .take(6)
-        .toList();
+    // 用 Set 字面量去重（保持插入顺序：页面候选在前，XHR 候选在后）
+    final batch = <String>{
+      ..._lastCandidates.where((u) => !SniffFilter.isDirectMedia(u)),
+      // 无后缀 XHR 候选排在后面：它们命中率低于"元素 src"，先给前者机会
+      ..._unverified.where((u) => !SniffFilter.isDirectMedia(u)),
+    }.take(10).toList();
     if (batch.isEmpty) return;
-    AppLog.instance.log('[SniffPlayer] MIME 兜底复核 ${batch.length} 个无后缀候选');
+    AppLog.instance.log('[SniffPlayer] MIME 兜底复核 ${batch.length} 个无后缀候选'
+        '（页面候选 ${_lastCandidates.length} / XHR 上报 ${_unverified.length}）');
     final checks = await Future.wait(
       batch.map(
         (u) => WebSniffService.instance.looksLikeMediaByMime(

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -15,6 +16,7 @@ import 'package:tvbox/services/live_service.dart';
 import 'package:tvbox/services/network_manager.dart';
 import 'package:tvbox/services/parse_store.dart';
 import 'package:tvbox/miniapp/models/mini_app.dart';
+import 'package:tvbox/miniapp/services/builtin_mini_apps.dart';
 
 /// 「程序」模块服务：管理导入的 TVBox 生态小程序配置。
 ///
@@ -108,28 +110,33 @@ class MiniAppService extends GetxService {
         AppLog.instance.log('[MiniApp] prefs 为空，已从文件备份恢复列表');
       }
     }
-    if (raw.isEmpty) return;
-    try {
-      final list = jsonDecode(raw);
-      if (list is List) {
-        apps.assignAll(
-          list
-              .whereType<Map>()
-              .map((e) => MiniApp.fromJson(Map<String, dynamic>.from(e)))
-              .toList(),
-        );
-        // 重启后把已装程序的影视源重新注册进视频源列表
-        for (final app in apps) {
-          // 老数据里可能只有 app.group、没有分组清单：补进 tab 列表
-          if (app.group.isNotEmpty && !groups.contains(app.group)) {
-            groups.add(app.group);
+    if (raw.isNotEmpty) {
+      try {
+        final list = jsonDecode(raw);
+        if (list is List) {
+          apps.assignAll(
+            list
+                .whereType<Map>()
+                .map((e) => MiniApp.fromJson(Map<String, dynamic>.from(e)))
+                .toList(),
+          );
+          // 重启后把已装程序的影视源重新注册进视频源列表
+          for (final app in apps) {
+            // 老数据里可能只有 app.group、没有分组清单：补进 tab 列表
+            if (app.group.isNotEmpty && !groups.contains(app.group)) {
+              groups.add(app.group);
+            }
+            _registerVideoSources(app);
           }
-          _registerVideoSources(app);
         }
+      } catch (e) {
+        AppLog.instance.w('[MiniApp] 读取列表失败: $e');
       }
-    } catch (e) {
-      AppLog.instance.w('[MiniApp] 读取列表失败: $e');
     }
+    // 内置小程序：首次启动自动装进列表。
+    // ⚠️ 必须**不阻塞**：包体有几 MB，解包要几百毫秒，而这里是 main() 的
+    //    启动链路（ensureLoaded 被 await），卡在这里会拉长黑屏时间。
+    unawaited(seedBuiltins());
   }
 
   Future<void> _persist() async {
@@ -155,7 +162,13 @@ class MiniAppService extends GetxService {
     final trimmed = url.trim();
     if (trimmed.isEmpty) return (ok: false, error: '地址不能为空');
     try {
-      final body = await NetworkManager.instance.getString(trimmed);
+      // 🔴 2026-10-27 修（复核遗留）：这里原来直连 `NetworkManager.getString`，
+      //   而「智能导入 / 市场」都走 `_downloadWithMirrors`。后果是**手动粘贴
+      //   raw.githubusercontent.com 的配置地址基本必失败**（国内直连不通），
+      //   用户只能自己去加 ghproxy 前缀。统一走镜像回退，非 github 地址
+      //   候选列表只有原地址一个，行为不变。
+      final body =
+          await _downloadWithMirrors(trimmed, asBytes: false) as String;
       if (body.trim().isEmpty) return (ok: false, error: '下载内容为空');
       return await importRaw(body, source: trimmed);
     } catch (e) {
@@ -242,7 +255,7 @@ class MiniAppService extends GetxService {
       final outPath = Uri.file(
         '$basePath${f.name}',
       ).normalizePath().toFilePath();
-      if (!outPath.startsWith(basePath)) {
+      if (!_withinDir(outPath, basePath)) {
         continue; // 越界条目：静默丢弃（这是攻击/坏包场景，不是用户操作）
       }
       final out = File(outPath);
@@ -251,6 +264,24 @@ class MiniAppService extends GetxService {
     }
     final mf = File('${dir.path}/manifest.json');
     return await mf.exists() ? await mf.readAsString() : '{}';
+  }
+
+  /// 判断 [path] 是否落在 [dirPath] 目录内（分隔符归一化后再比）。
+  ///
+  /// 🔴 2026-10-27 修：原来直接 `outPath.startsWith(basePath)`，而
+  ///   `Uri.file(...).normalizePath().toFilePath()` 在 **Windows 上返回反斜杠**
+  ///   （`C:\a\b\manifest.json`），和 `basePath` 末尾那个 `/` 对不上 ⇒
+  ///   **每一条都被判成越界、整个 zip 解出来是空目录**（静默失败）。
+  ///   iOS/Android 路径本来就用 `/`，所以真机一直没暴露；桌面端 zip 安装
+  ///   （以及内置小程序安装）因此完全失效。归一化后两边都成立。
+  ///
+  /// ⚠️ 不要改成"只比字符串前缀"而省掉 normalizePath：`..` 必须在**比较之前**
+  ///   被吃掉，否则 `a/../../evil` 这种会绕过校验。
+  static bool _withinDir(String path, String dirPath) {
+    final p = path.replaceAll('\\', '/');
+    var d = dirPath.replaceAll('\\', '/');
+    if (!d.endsWith('/')) d = '$d/';
+    return p.startsWith(d);
   }
 
   // ── 下载（带 GitHub 镜像回退）────────────────────────────────
@@ -365,6 +396,179 @@ class MiniAppService extends GetxService {
 
   /// 该 appId 是否已安装
   bool isInstalled(String appId) => apps.any((a) => a.id == appId);
+
+  // ── 内置小程序（随 App 打包）──────────────────────────────────
+  //
+  // 装法与「本地文件」完全一致，只是包体来自 assets：
+  //   assets/miniapps/xxx.zip → 解包到 <Documents>/miniapps/<appId>/
+  //
+  // 三个状态位：
+  //   · `_kBuiltinVer`     appId → 已装的内置包版本（决定要不要覆盖更新）
+  //   · `_kBuiltinRemoved` 用户主动删掉的内置 appId（删了别再自动装回来）
+
+  static const String _kBuiltinVer = 'miniapp_builtin_ver_v1';
+  static const String _kBuiltinRemoved = 'miniapp_builtin_removed_v1';
+
+  /// 覆盖更新时要**保留**的数据文件（相对小程序目录）。
+  /// 小程序自己的数据（如 CatPawPlay 的收藏/设置）就写在这些文件里，
+  /// 整目录覆盖会把它们冲掉，所以先读出来、解包后再写回。
+  static const List<String> _builtinKeepFiles = <String>[
+    'default.db.json',
+    'db.json',
+    'config.json',
+    'data.json',
+  ];
+
+  Map<String, int> _builtinVersions(SharedPreferences p) {
+    try {
+      final raw = p.getString(_kBuiltinVer) ?? '';
+      if (raw.trim().isEmpty) return <String, int>{};
+      final m = jsonDecode(raw);
+      if (m is! Map) return <String, int>{};
+      return m.map((k, v) => MapEntry(k.toString(), int.tryParse('$v') ?? 0));
+    } catch (_) {
+      return <String, int>{};
+    }
+  }
+
+  Set<String> _builtinRemoved(SharedPreferences p) =>
+      (p.getStringList(_kBuiltinRemoved) ?? const <String>[]).toSet();
+
+  /// 还没装上的内置小程序（「内置程序」弹层用来显示「安装」按钮）
+  List<BuiltinMiniApp> get uninstalledBuiltins =>
+      kBuiltinMiniApps.where((b) => !isInstalled(b.appId)).toList();
+
+  /// 启动时调用：把没装过的内置小程序装进列表。
+  ///
+  /// 幂等、可重复调用（版本没变就直接返回，不做任何 IO）。
+  Future<void> seedBuiltins() async {
+    for (final b in kBuiltinMiniApps) {
+      try {
+        await _seedOneBuiltin(b);
+      } catch (e) {
+        AppLog.instance.w('[MiniApp] 内置程序 ${b.appId} 安装失败: $e');
+      }
+    }
+  }
+
+  /// 安装/更新一个内置小程序。
+  ///
+  /// [force] = true：用户点「重新安装」/「安装」，无视"删过"标记，强制覆盖。
+  Future<({bool ok, String? error})> installBuiltin(
+    String appId, {
+    bool force = false,
+  }) async {
+    final b = builtinById(appId);
+    if (b == null) return (ok: false, error: '没有这个内置程序');
+    try {
+      return await _seedOneBuiltin(b, force: force);
+    } catch (e) {
+      return (ok: false, error: '安装失败: $e');
+    }
+  }
+
+  Future<({bool ok, String? error})> _seedOneBuiltin(
+    BuiltinMiniApp b, {
+    bool force = false,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final removed = _builtinRemoved(prefs);
+    final versions = _builtinVersions(prefs);
+    final idx = apps.indexWhere((a) => a.id == b.appId);
+    final seededVer = versions[b.appId] ?? 0;
+
+    // 用户删过 → 不再自动装（除非他自己点了「安装」）
+    if (!force && idx < 0 && removed.contains(b.appId)) {
+      return (ok: false, error: '已被删除');
+    }
+    // 已是最新内置版本 → 什么都不用做
+    if (!force && idx >= 0 && seededVer >= b.version) {
+      return (ok: true, error: null);
+    }
+    // 已经装着同 appId 的程序、但**不是**我们装的（seededVer==0，
+    // 比如用户自己从「本地文件」装了同一个包）→ 不覆盖人家的东西，只记版本
+    if (!force && idx >= 0 && seededVer == 0) {
+      versions[b.appId] = b.version;
+      try {
+        await prefs.setString(_kBuiltinVer, jsonEncode(versions));
+      } catch (_) {}
+      return (ok: true, error: null);
+    }
+
+    // ── 读 assets 里的 zip ──────────────────────────────────
+    final data = await rootBundle.load(b.assetZip);
+    final bytes = data.buffer.asUint8List(
+      data.offsetInBytes,
+      data.lengthInBytes,
+    );
+    if (bytes.length <= 4 || bytes[0] != 0x50 || bytes[1] != 0x4B) {
+      return (ok: false, error: '内置包损坏（不是 zip）');
+    }
+
+    // ── 覆盖前先把它自己的数据文件捞出来 ────────────────────
+    final dir = await _appDir(b.appId);
+    final kept = <String, List<int>>{};
+    if (idx >= 0) {
+      for (final name in _builtinKeepFiles) {
+        try {
+          final f = File('${dir.path}/$name');
+          if (await f.exists()) kept[name] = await f.readAsBytes();
+        } catch (_) {}
+      }
+    }
+
+    // ── 解包（内部会先清空目录）────────────────────────────
+    var manifestBody = await _unpackZipToDir(bytes, b.appId);
+    final realId = _manifestAppId(manifestBody) ?? b.appId;
+    if (realId != b.appId) {
+      // 包里 appId 与注册表不一致：按包里的 appId 重解一次，避免目录错位
+      AppLog.instance.w(
+        '[MiniApp] 内置包 appId 不一致（注册表 ${b.appId} / 包内 $realId），按包内 id 安装',
+      );
+      manifestBody = await _unpackZipToDir(bytes, realId);
+    }
+    final finalDir = await _appDir(realId);
+
+    // ── 数据文件写回 ───────────────────────────────────────
+    for (final e in kept.entries) {
+      try {
+        await File('${finalDir.path}/${e.key}').writeAsBytes(e.value);
+      } catch (err) {
+        AppLog.instance.w('[MiniApp] 恢复数据文件 ${e.key} 失败: $err');
+      }
+    }
+
+    final name = _manifestName(manifestBody) ?? b.name;
+    final app = MiniApp(
+      id: realId,
+      name: name,
+      type: 'webapp',
+      source: finalDir.path,
+      rawJson: manifestBody.isEmpty ? '{}' : manifestBody,
+      createdAt: idx >= 0
+          ? apps[idx].createdAt
+          : DateTime.now().millisecondsSinceEpoch,
+      // 已装过就保留用户自己分的组
+      group: idx >= 0 ? apps[idx].group : b.group,
+    );
+    if (idx >= 0) {
+      apps[idx] = app;
+    } else {
+      apps.add(app);
+    }
+
+    versions[realId] = b.version;
+    removed.remove(realId); // 又装上了，撤销"用户删过"的标记
+    try {
+      await prefs.setString(_kBuiltinVer, jsonEncode(versions));
+      await prefs.setStringList(_kBuiltinRemoved, removed.toList());
+    } catch (_) {}
+    await _persist();
+    AppLog.instance.log(
+      '[MiniApp] 内置程序 ${b.appId} 已就绪（v${b.version}）→ ${finalDir.path}',
+    );
+    return (ok: true, error: null);
+  }
 
   /// 安装市场项 → `type=webapp` 的网页型小程序
   /// - `url` 指向 **manifest.json**（在线站点型）：按 manifest 打开**远端页面**；
@@ -705,6 +909,18 @@ class MiniAppService extends GetxService {
   /// 删除程序（同时从视频源列表移除其注册的源）
   Future<void> remove(MiniApp app) async {
     apps.removeWhere((a) => a.id == app.id);
+    // 内置小程序：记一笔"用户删过"，否则下次启动 seedBuiltins() 又装回来了
+    if (isBuiltinAppId(app.id)) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final removed = _builtinRemoved(prefs);
+        if (removed.add(app.id)) {
+          await prefs.setStringList(_kBuiltinRemoved, removed.toList());
+        }
+      } catch (e) {
+        AppLog.instance.w('[MiniApp] 记录内置程序删除失败: $e');
+      }
+    }
     ApiConfig.instance.sourceBeanList.removeWhere(
       (s) => s.key.startsWith('${app.id}_'),
     );

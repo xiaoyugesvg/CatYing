@@ -186,6 +186,9 @@ class RoomSession extends ChangeNotifier {
   Future<bool> connect() async {
     if (mode == RoomMode.lan) return false; // 局域网模式不需要连服务器
     if (_socket?.connected == true) return true;
+    // 已有连接在飞：直接返回，避免并发建两条 socket（用户连点「连接」时
+    // 第二次调用会把第一次的 socket dispose 掉，导致前一次白白等 10s 超时）。
+    if (connecting) return false;
     final url = serverUrl.trim();
     if (url.isEmpty) {
       error = '先填房间服务器地址';

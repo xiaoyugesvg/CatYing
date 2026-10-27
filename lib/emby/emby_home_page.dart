@@ -278,9 +278,6 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
     );
   }
 
-  /// 顶栏服务器菜单里的「管理服务器…」项
-  static const String _kManageServers = '__manage_servers__';
-
   Widget _header(EmbyServer? server, List<EmbyServer> servers) {
     return Padding(
       // 右侧只留 4：右上角两个圆形按钮要贴近屏幕边（用户 2026-10-18）
@@ -308,59 +305,53 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
                 // 服务器 = 源：无论几个服务器都做成可点的切换入口
                 // （以前只有 >1 个时才可点，单服务器时"花花"就是个死胶囊）
                 Flexible(
-                  child: PopupMenuButton<String>(
-                    tooltip: '切换服务器',
-                    color: AppTheme.backgroundSecondary,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(
-                        AppTheme.glassRadiusCard,
-                      ),
-                    ),
-                    onSelected: (id) async {
-                      if (id == _kManageServers) {
-                        await _openSettings();
-                        return;
-                      }
-                      await _store.setActive(id);
-                      if (mounted) setState(() {});
-                      await _refresh();
-                    },
-                    itemBuilder: (_) => [
-                      for (final s in servers)
-                        PopupMenuItem(
-                          value: s.id,
-                          child: Row(
-                            children: [
-                              Icon(
-                                s.id == _store.activeId
-                                    ? Icons.check_circle_rounded
-                                    : Icons.circle_outlined,
-                                size: 16,
-                                color: s.id == _store.activeId
-                                    ? AppTheme.accentColor
-                                    : AppTheme.textTertiary,
-                              ),
-                              const SizedBox(width: 8),
-                              Flexible(child: Text(s.name)),
-                            ],
+                  child: servers.isEmpty
+                      // 一个服务器都没有 ⇒ 菜单里没东西可选，点胶囊直接进管理页添加
+                      ? GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: _openSettings,
+                          child: _serverChip('添加服务器'),
+                        )
+                      // 有服务器 ⇒ 菜单**只列服务器**（用户 2026-10-27：
+                      // 「点开只要添加的源，不用那个管理」）。
+                      // 原来末尾还挂着一条「管理服务器」—— 顶栏右侧那个齿轮
+                      // 本来就是 Emby 管理，菜单里再来一条纯属重复。
+                      : PopupMenuButton<String>(
+                          tooltip: '切换服务器',
+                          color: AppTheme.backgroundSecondary,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(
+                              AppTheme.glassRadiusCard,
+                            ),
                           ),
-                        ),
-                      if (servers.isNotEmpty) const PopupMenuDivider(),
-                      const PopupMenuItem(
-                        value: _kManageServers,
-                        child: Row(
-                          children: [
-                            Icon(Icons.settings_outlined, size: 16),
-                            SizedBox(width: 8),
-                            Text('管理服务器'),
+                          onSelected: (id) async {
+                            await _store.setActive(id);
+                            if (mounted) setState(() {});
+                            await _refresh();
+                          },
+                          itemBuilder: (_) => [
+                            for (final s in servers)
+                              PopupMenuItem(
+                                value: s.id,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      s.id == _store.activeId
+                                          ? Icons.check_circle_rounded
+                                          : Icons.circle_outlined,
+                                      size: 16,
+                                      color: s.id == _store.activeId
+                                          ? AppTheme.accentColor
+                                          : AppTheme.textTertiary,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Flexible(child: Text(s.name)),
+                                  ],
+                                ),
+                              ),
                           ],
+                          child: _serverChip(server?.name ?? '未选择'),
                         ),
-                      ),
-                    ],
-                    child: _serverChip(
-                      server?.name ?? (servers.isEmpty ? '添加服务器' : '未选择'),
-                    ),
-                  ),
                 ),
               ],
             ),

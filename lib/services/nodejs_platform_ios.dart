@@ -28,6 +28,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/services/local_js_sources.dart';
 import 'package:tvbox/services/nodejs_platform.dart';
 import 'package:tvbox/reading/services/settings_service.dart';
 
@@ -421,6 +422,15 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       AppLog.instance.log('[IOSNodeJS] 规范化 URL（移除 .md5 后缀）: $normalizedUrl');
     }
 
+    // ── 本地 JS 源 / file:// ─────────────────────────────────────
+    // 本地源（Documents/local_js/ljs_*.js）在 SpiderService 里以**相对标识**
+    // `ljs_xxx.js` 出现（api 不能存绝对路径：iOS 沙盒 UUID 重装后会变）。
+    // 这里解析成真实文件并直接载入 Node 槽位，不再走网络下载分支。
+    final localPath = await _resolveLocalJsPath(normalizedUrl);
+    if (localPath != null) {
+      return _loadLocalJsFile(localPath);
+    }
+
     final uri = Uri.tryParse(normalizedUrl);
     if (uri == null) return (false, '无效的 URL');
     // 远程源安全：优先 HTTPS；http 明文可被中间人替换 JS（MD5 同通道也能被改）
@@ -559,6 +569,61 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       onSpiderPortChanged.value = 0;
     }
     return true;
+  }
+
+  /// 把 `ljs_*.js` / `file://` / 绝对路径 解析成本地文件真实路径；不是本地源返回 null。
+  ///
+  /// 本地 JS 源的 api 是 `ljs_<hash>.js`（相对标识），真实路径由
+  /// [LocalJsSources.pathOf] 按当前 Documents 目录拼出来。
+  Future<String?> _resolveLocalJsPath(String raw) async {
+    final s = raw.trim();
+    if (s.isEmpty) return null;
+    // 本地 JS 源标识：ljs_<hash>.js
+    final m = RegExp(r'^(ljs_[A-Za-z0-9]+)\.js$').firstMatch(s);
+    if (m != null) {
+      final key = m.group(1)!;
+      final p = await LocalJsSources.instance.pathOf(key);
+      if (await File(p).exists()) return p;
+      AppLog.instance.w('[IOSNodeJS] 本地 JS 源文件不存在: $p');
+      return null;
+    }
+    // file:// 或绝对路径（调试 / 手动指定用）
+    String? candidate;
+    if (s.startsWith('file://')) {
+      try {
+        candidate = Uri.parse(s).toFilePath();
+      } catch (_) {
+        candidate = null;
+      }
+    } else if (RegExp(r'^[a-zA-Z]:[\\/]').hasMatch(s) ||
+        s.startsWith('/') ||
+        s.startsWith('\\\\')) {
+      candidate = s;
+    }
+    if (candidate != null && await File(candidate).exists()) return candidate;
+    return null;
+  }
+
+  /// 把本地 .js 复制进独立缓存目录（index.js）后载入 Node 槽位。
+  Future<(bool success, String? message)> _loadLocalJsFile(String path) async {
+    try {
+      final bytes = await File(path).readAsBytes();
+      if (bytes.isEmpty) return (false, '本地脚本为空: $path');
+      _sourceLoadGeneration++;
+      final sourcePath = await _cacheDirFor('localjs:$path');
+      _lastSourceCachePath = sourcePath;
+      final indexJSPath = '$sourcePath/index.js';
+      final configJSPath = '$sourcePath/index.config.js';
+      await File(indexJSPath).writeAsBytes(bytes, flush: true);
+      // 兜底配置：本地源通常自带 /config；缺失时 Node 需要一个最小可用的文件
+      if (!await File(configJSPath).exists()) {
+        await File(configJSPath).writeAsString('module.exports = { color: [] };');
+      }
+      AppLog.instance.log('[IOSNodeJS] 载入本地 JS 源: $path → $sourcePath');
+      return await _sendLoadCommandToNodeJS(sourcePath);
+    } catch (e) {
+      return (false, '本地脚本载入失败: $e');
+    }
   }
 
   Future<(bool success, String? message)> _sendLoadCommandToNodeJS(

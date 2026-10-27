@@ -1575,7 +1575,8 @@ mixin _ReaderPart01 on _BookSourceReaderPageState {
   }
 
 @override
-  /// 长按选中后的浮动工具条 —— 对齐 Legado：一排小图标，贴着选区弹，不铺满底部。
+  /// 长按选中后的浮动工具条 —— 对齐 Legado：一排小按钮，贴着选区弹，不铺满底部。
+  /// 按钮只用文字，不带图标（与段落长按菜单统一，见 item()）。
   ///
   /// 用 [TextSelectionToolbar] 是为了拿系统算好的锚点（选区上方/下方）。
   Widget _selectionMenu(BuildContext ctx, SelectableRegionState state) {
@@ -1596,19 +1597,21 @@ mixin _ReaderPart01 on _BookSourceReaderPageState {
       state.clearSelection();
     }
 
-    Widget item(IconData icon, String label, VoidCallback onTap) {
+    // 纯文字（用户 2026-10-25 要求：长按 / 选区菜单一律只要文字，不要图标）。
+    //
+    // 原来是「18px 图标 + 11px 文字」上下叠。去掉图标后不能只删 Icon —— 11px
+    // 是当图标副标题用的字号，单行时小得发虚，所以提到 13；同时把上下 padding
+    // 从 6 加到 9，让单行文字也有接近原来那根工具条的高度，不至于贴着选区边。
+    Widget item(String label, VoidCallback onTap) {
       return InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(10),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 18, color: _fg),
-              const SizedBox(height: 2),
-              Text(label, style: TextStyle(fontSize: 11, color: _fg)),
-            ],
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          child: Text(
+            label,
+            maxLines: 1,
+            style: TextStyle(fontSize: 13, color: _fg),
           ),
         ),
       );
@@ -1628,20 +1631,20 @@ mixin _ReaderPart01 on _BookSourceReaderPageState {
         child: child,
       ),
       children: [
-        item(Icons.copy_rounded, '复制', () {
+        item('复制', () {
           final t = _selectedText;
           close();
           if (t.trim().isEmpty) return;
           Clipboard.setData(ClipboardData(text: t));
           _toast('已复制');
         }),
-        item(Icons.bookmark_add_outlined, '书签', () {
+        item('书签', () {
           final t = _selectedText;
           close();
           final pi = _paragraphIndexForSelection(t);
           _showAddBookmark(pi < 0 ? 0 : pi);
         }),
-        item(Icons.search_rounded, '搜索', () {
+        item('搜索', () {
           final t = _selectedText;
           close();
           if (t.trim().isEmpty) return;
@@ -1652,12 +1655,12 @@ mixin _ReaderPart01 on _BookSourceReaderPageState {
             ),
           );
         }),
-        item(Icons.cleaning_services_outlined, '净化', () {
+        item('净化', () {
           final t = _selectedText;
           close();
           _addPurifyFromSelection(t);
         }),
-        item(Icons.more_horiz_rounded, '更多', () {
+        item('更多', () {
           final t = _selectedText;
           close();
           _showSelectionTools(t);
@@ -1678,15 +1681,28 @@ mixin _ReaderPart01 on _BookSourceReaderPageState {
   }
 
 @override
-  /// 选区 → 打开「创建替换规则」面板（预填选中的文字）
-  Future<void> _addPurifyFromSelection(String raw) async {
+  /// 选区 / 段落 → 打开「创建替换规则」面板（预填要净化的文字）
+  ///
+  /// [fromParagraph]：来自**段落长按菜单**（不是选区）。唯一区别在超长分支 ——
+  /// 整段常超过 200 字，直接弹「选中的文字太长」等于点了个坏按钮，所以
+  /// 这种情况改成打开空规则面板并提示用户自己填要删的那句。
+  Future<void> _addPurifyFromSelection(
+    String raw, {
+    bool fromParagraph = false,
+  }) async {
     final t = raw.trim();
     if (t.isEmpty) {
-      _toast('先选中要净化的文字');
+      _toast(fromParagraph ? '这一段是空的，没法建规则' : '先选中要净化的文字');
       return;
     }
     if (t.length > 200) {
-      _toast('选中的文字太长（最多 200 字），净化会误伤');
+      if (!fromParagraph) {
+        _toast('选中的文字太长（最多 200 字），净化会误伤');
+        return;
+      }
+      // 整段当规则 = 把正文整段删掉，必误伤 ⇒ 只给空面板
+      _toast('这一段太长（${t.length} 字），已打开规则面板，请把要删掉的那句填进「替换规则」');
+      await _showPurifyRuleEditor(seedName: '段落净化');
       return;
     }
     await _showPurifyRuleEditor(seedPattern: t);

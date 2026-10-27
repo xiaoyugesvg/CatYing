@@ -25,6 +25,14 @@ class SourceResolveResult {
   /// 🔴 不透传到播放器的话，要求 headers 的源会"地址拿到了但播不了"。
   final Map<String, String> headers;
 
+  /// **实际拿到的音质**（LX 码率串 `128k`/`320k`/`flac`/`flac24bit`…）。
+  ///
+  /// 🔴 注意：这**不一定等于**用户设置里选的那档 —— Node 侧会按音源声明的
+  /// `qualitys` 降级（`clampQuality`）。播放器/弹窗要显示这个字段，
+  /// 而不是 `source.quality`（那是音源的默认档，跟这次实际取到的无关）。
+  /// 空串 = 源没回报（模板法 / 老脚本）。
+  final String quality;
+
   const SourceResolveResult({
     required this.ok,
     this.url = '',
@@ -32,6 +40,7 @@ class SourceResolveResult {
     this.kind = '',
     this.source,
     this.headers = const {},
+    this.quality = '',
   });
 }
 
@@ -150,6 +159,10 @@ class UnblockService {
   Future<SourceResolveResult> resolve(
     Song song, {
     void Function(int index, int total, String sourceName)? onProgress,
+
+    /// 用户当前选的音质（见 [AudioQuality.lxQuality]）。
+    /// 不传 = 各音源自己的默认档。透传到 Node 侧，别在这层做换算。
+    AudioQuality? quality,
   }) async {
     attempts.clear();
 
@@ -183,7 +196,8 @@ class UnblockService {
       final s = list[i];
       onProgress?.call(i + 1, list.length, s.name);
       try {
-        final r = await MusicApi.instance.resolveBySource(s, song);
+        final r = await MusicApi.instance
+            .resolveBySource(s, song, quality: quality);
         if (r.ok && r.url.isNotEmpty) {
           return SourceResolveResult(
             ok: true,
@@ -191,6 +205,7 @@ class UnblockService {
             kind: r.kind,
             source: s,
             headers: r.headers, // ← 必须透传（见字段注释）
+            quality: r.quality, // ← 实际生效的档位（可能被降级过）
           );
         }
         // 记下每个源的失败原因 —— 全失败时一起展示，
@@ -228,6 +243,9 @@ class UnblockService {
     Song song, {
     void Function(int done, int total)? onProgress,
 
+    /// 用户当前选的音质（透传到 Node 侧，见 [AudioQuality.lxQuality]）。
+    AudioQuality? quality,
+
     /// 已经在前置阶段（平台固定源逐个试）刚试过、确认失败的源 id ——
     /// 全源回退时跳过，避免对同一个源几秒内连打两次。
     Set<String>? excludeIds,
@@ -261,7 +279,8 @@ class UnblockService {
         final s = sources[i];
         await _gate.acquire();
         try {
-          final r = await MusicApi.instance.resolveBySource(s, song);
+          final r = await MusicApi.instance
+              .resolveBySource(s, song, quality: quality);
           if (r.ok && r.url.isNotEmpty) {
             slots[i] = SourceResolveResult(
               ok: true,
@@ -269,6 +288,7 @@ class UnblockService {
               kind: r.kind,
               source: s,
               headers: r.headers,
+              quality: r.quality,
             );
           } else {
             // ⚠️ 必须走 `_record`（带上"属于哪首歌"），
@@ -294,9 +314,17 @@ class UnblockService {
   }
 
   /// 只试某一个音源（音源管理页的"测试"按钮用）
-  Future<SourceResolveResult> testOne(ThirdPartySource s, Song song) async {
+  ///
+  /// [quality] 不传时用音源自己的默认档 —— 管理页的「测试」没有播放上下文，
+  /// 测的就该是"这个源按它自己的配置能给出什么"。播放链路则会传用户设置。
+  Future<SourceResolveResult> testOne(
+    ThirdPartySource s,
+    Song song, {
+    AudioQuality? quality,
+  }) async {
     try {
-      final r = await MusicApi.instance.resolveBySource(s, song);
+      final r = await MusicApi.instance
+          .resolveBySource(s, song, quality: quality);
       if (r.ok && r.url.isNotEmpty) {
         return SourceResolveResult(
           ok: true,
@@ -304,6 +332,7 @@ class UnblockService {
           kind: r.kind,
           source: s,
           headers: r.headers,
+          quality: r.quality,
         );
       }
       return SourceResolveResult(

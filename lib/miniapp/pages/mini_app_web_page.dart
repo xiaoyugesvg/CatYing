@@ -14,6 +14,20 @@ import 'package:tvbox/services/webview_page_color.dart';
 import 'package:tvbox/widgets/ad_block_bubble.dart';
 import 'package:tvbox/miniapp/services/ant_bridge.dart';
 
+/// 判断 [path] 是否落在 [dirPath] 目录内（分隔符归一化后再比）。
+///
+/// 🔴 2026-10-27：原来直接 `target.startsWith(base)`，但
+///   `Uri.file(...).normalizePath().toFilePath()` 在 **Windows 上返回反斜杠**
+///   路径，与末尾带 `/` 的 base 对不上 ⇒ 本地小程序在桌面端会**一律被判越界、
+///   入口页永远加载不出来**（iOS 路径本来就是 `/`，所以真机没暴露）。
+///   详见 `mini_app_service.dart` 的 `_withinDir` 同款说明。
+bool _withinDir(String path, String dirPath) {
+  final p = path.replaceAll('\\', '/');
+  var d = dirPath.replaceAll('\\', '/');
+  if (!d.endsWith('/')) d = '$d/';
+  return p.startsWith(d);
+}
+
 /// 小程序 WebView 页：加载远端/本地小程序页面 + 官方 ant SDK v4 桥注入。
 ///
 /// - manifest 由服务层传入（`manifestJson`）或从本地目录读取
@@ -54,6 +68,15 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
 
   /// 本次打开是否真的把这个小程序的后端拉起来了（dispose 时据此停止）
   bool _nodeStarted = false;
+
+  /// 后端基址（`http://127.0.0.1:<port>`）；空 = 未就绪。
+  /// manifest 的 `entry` 写成 `node://<path>` 时，入口页就从这个地址加载。
+  String _nodeUrl = '';
+
+  /// 正在拉起 Node 后端（首次会顺带启动 Node 运行时，可能要几秒）。
+  /// 这段时间页面还没东西可显示，用它盖一层「正在启动」的提示，
+  /// 否则用户看到的就是一片空白（内置的 CatPawPlay 包体 8MB，冷启动更明显）。
+  bool _nodeStarting = false;
 
   /// 本页自己的 appId（`AntBridge.appId` 是全局的，别的页面会覆盖它）
   String _ownerAppId = '';
@@ -135,6 +158,7 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
       return;
     }
     try {
+      if (mounted) setState(() => _nodeStarting = true);
       final url = await NodeJSManager.instance.startMiniAppService(
         appId: _ownerAppId.isEmpty ? AntBridge.appId : _ownerAppId,
         dir: local,
@@ -143,6 +167,7 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
       );
       if (url != null && url.isNotEmpty) {
         _nodeStarted = true;
+        _nodeUrl = url;
         final owner = _ownerAppId.isEmpty ? AntBridge.appId : _ownerAppId;
         AntBridge.registerService(owner, url);
         AppLog.instance.log('[MiniAppWeb] node 后端已就绪: $owner → $url');
@@ -151,6 +176,8 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
       }
     } catch (e) {
       AppLog.instance.log('[MiniAppWeb] node 后端异常: $e');
+    } finally {
+      if (mounted) setState(() => _nodeStarting = false);
     }
   }
 
@@ -160,6 +187,20 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
       final remote = widget.remoteUrl?.trim() ?? '';
       if (remote.isNotEmpty) {
         await _controller.loadRequest(Uri.parse(remote));
+        return;
+      }
+      // 入口声明为 `node://<path>`：直接打开本小程序的 Node 后端页面。
+      // 用于「整个 UI 由 Node 服务提供」的小程序（如 CatPawPlay：SPA 在 /website，
+      // 根路径 `/` 是 404）。`node:///website` → `http://127.0.0.1:<port>/website`。
+      if (_entry.startsWith('node://')) {
+        if (_nodeUrl.isEmpty) {
+          AppLog.instance.log('[MiniAppWeb] 入口为 node:// 但 Node 后端未就绪');
+          return;
+        }
+        var path = _entry.substring('node://'.length);
+        if (path.isEmpty) path = '/';
+        if (!path.startsWith('/')) path = '/$path';
+        await _controller.loadRequest(Uri.parse('$_nodeUrl$path'));
         return;
       }
       final local = widget.localRoot?.trim() ?? '';
@@ -172,7 +213,7 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
         //   做法同 zip slip：规范化后校验仍在 localRoot 内，越界就拒绝加载。
         final base = local.endsWith('/') ? local : '$local/';
         final target = Uri.file('$base$_entry').normalizePath().toFilePath();
-        if (target.startsWith(base)) {
+        if (_withinDir(target, base)) {
           await _controller.loadFile(target);
         } else {
           AppLog.instance.log('[MiniAppWeb] 入口页越界，已拒绝加载: $_entry');
@@ -296,6 +337,34 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
                         backgroundColor: AppTheme.borderLight,
                         valueColor: AlwaysStoppedAnimation<Color>(
                             AppTheme.accentColor),
+                      ),
+                    ),
+                  // 后端启动中（Node 运行时 + 小程序服务）：盖一层提示，
+                  // 否则这段时间就是一片空白。
+                  if (_nodeStarting)
+                    Positioned.fill(
+                      child: ColoredBox(
+                        color: AppTheme.backgroundPrimary,
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              CircularProgressIndicator(
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  AppTheme.accentColor,
+                                ),
+                              ),
+                              const SizedBox(height: 14),
+                              Text(
+                                '正在启动小程序服务…',
+                                style: TextStyle(
+                                  color: AppTheme.textSecondary,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   // 去广告悬浮球：点它 → 点页面上的广告 → 存规则（重启后仍生效）

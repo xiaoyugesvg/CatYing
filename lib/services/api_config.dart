@@ -6,6 +6,7 @@ import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/local_python_sources.dart';
+import 'package:tvbox/services/local_js_sources.dart';
 import 'package:tvbox/services/moontv_converter.dart';
 import 'package:tvbox/services/prefs_mirror.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -284,14 +285,17 @@ class ApiConfig extends GetxController {
       // 每次都同步一次开关（默认关）：保证冷启动 / 切订阅时口径一致
       localSourcesEnabled.value = prefs.getBool(_kLocalSourcesEnabled) ?? false;
       await LocalPythonSources.instance.load(force: true);
-      final list = LocalPythonSources.instance.sources
-          .map((e) => e.toSourceBean())
-          .toList();
+      await LocalJsSources.instance.load(force: true);
+      final list = <SourceBean>[
+        ...LocalPythonSources.instance.sources.map((e) => e.toSourceBean()),
+        ...LocalJsSources.instance.sources.map((e) => e.toSourceBean()),
+      ];
       localVideoSources.assignAll(list);
 
       // 当前主页源是本地源：开关关闭 ⇒ 立刻回到订阅激活的第一条线路
       final cur = homeSourceBean.value;
-      if (cur != null && cur.key.startsWith('localpy_')) {
+      if (cur != null &&
+          (cur.key.startsWith('localpy_') || cur.key.startsWith('localjs_'))) {
         if (!localSourcesEnabled.value) {
           homeSourceBean.value = sourceBeanList.firstOrNull;
           await prefs.remove(_kLocalHomeApi);
@@ -363,8 +367,8 @@ class ApiConfig extends GetxController {
     final prefs = await SharedPreferences.getInstance();
     // 仍写一份全局键，兼容旧逻辑/旧数据
     await prefs.setString(AppConstants.homeApi, source.key);
-    // 本地 Python 源：全局锁定，不随订阅切换
-    if (source.key.startsWith('localpy_')) {
+    // 本地源（Python / JS）：全局锁定，不随订阅切换
+    if (source.key.startsWith('localpy_') || source.key.startsWith('localjs_')) {
       await prefs.setString(_kLocalHomeApi, source.key);
     } else {
       await prefs.remove(_kLocalHomeApi);

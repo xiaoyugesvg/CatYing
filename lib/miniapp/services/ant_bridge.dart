@@ -8,6 +8,7 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:tvbox/common/app_version.dart' as ver;
 import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/models/cache_store.dart';
 import 'package:tvbox/models/movie_sort.dart';
@@ -389,12 +390,13 @@ class AntBridge {
 
   // ────────────────────────── env ──────────────────────────
 
-  /// App 版本号 / 构建号 —— **必须与 `pubspec.yaml` 的 `version:` 保持一致**。
+  /// App 版本号 / 构建号 —— 取自 `lib/common/app_version.dart`（唯一来源）。
   ///
-  /// 为什么写成常量：Dart 运行时读不到 pubspec，本项目也没引入 `package_info_plus`。
-  /// 改版本号时两处一起改（`version: 1.0.0+1` ⇒ `'1.0.0'` / `1`）。
-  static const String kAppVersion = '1.0.0';
-  static const int kAppBuildNumber = 1;
+  /// 为什么是常量而不是运行时读：Dart 运行时读不到 pubspec，本项目也没引入
+  /// `package_info_plus`。改版本号请改 `app_version.dart` + `pubspec.yaml` 两处
+  /// （后者没法 import Dart，只能手改）。
+  static const String kAppVersion = ver.kAppVersion;
+  static const int kAppBuildNumber = ver.kAppBuildNumber;
 
   /// 真实设备与应用信息。
   ///

@@ -59,13 +59,14 @@ class SniffFilter {
   /// 判定顺序（任一不过即丢弃）：
   ///   1. 必须 http(s)（嗅探发生在 WebView 里，rtmp/rtsp 走不到这条链路）；
   ///   2. 必须带**当前生效清单**里的影视后缀（用户可自定义，见 [mediaExtensions]）；
-  ///   3. 黑名单关键词（小写子串）命中 → 丢弃（切片广告多为 /ads/、/ad/ 等）；
-  ///   4. 白名单非空时，必须命中白名单关键词之一。
+  ///   3. **内置广告守卫** [looksLikeAdUrl]（用户白名单显式放行时跳过）；
+  ///   4. 黑名单关键词（小写子串）命中 → 丢弃（切片广告多为 /ads/、/ad/ 等）；
+  ///   5. 白名单非空时，必须命中白名单关键词之一。
   ///
   /// [mediaVerified]：地址**没有**影视后缀、但已经由服务端 `Content-Type`
   /// 确认是视频/音频/播放列表（见 `WebSniffService.looksLikeMediaByMime`）。
   /// 这类扩展名被藏起来的直链（`/play?id=…`、`/stream/abc`）很常见，
-  /// 只靠后缀会全部漏掉；已验证过就跳过第 2 步，但**黑/白名单照旧生效**。
+  /// 只靠后缀会全部漏掉；已验证过就跳过第 2 步，但**黑/白名单与广告守卫照旧生效**。
   static bool acceptSniffUrl(String raw, {bool mediaVerified = false}) {
     final url = raw.trim();
     if (url.isEmpty) return false;
@@ -77,20 +78,94 @@ class SniffFilter {
     if (!mediaVerified && !isDirectMedia(url)) return false;
 
     final prefs = PlayerPrefs.instance;
-    for (final kw in prefs.sniffBlacklist) {
-      if (kw.isNotEmpty && lower.contains(kw)) return false;
-    }
+
+    // 先算白名单：用户显式放行的地址，允许绕过**内置**广告守卫
+    //（但用户黑名单仍然优先，保持原有"黑名单最高"的语义）。
+    var whitelisted = false;
     if (prefs.sniffWhitelist.isNotEmpty) {
-      var ok = false;
       for (final kw in prefs.sniffWhitelist) {
         if (kw.isNotEmpty && lower.contains(kw)) {
-          ok = true;
+          whitelisted = true;
           break;
         }
       }
-      if (!ok) return false;
     }
+
+    // 内置广告守卫（用户 2026-10-27：「嗅探要不能嗅探到广告」）。
+    // 用户黑名单是"关键词子串"，出厂为空 ⇒ 默认一个广告都挡不住；
+    // 这里再叠一层**保守**的内置判定（整域名 / 整路径段），
+    // 挡住最常见的贴片广告直链（/ads/、/preroll/、ad_720p.mp4、doubleclick…）。
+    if (!whitelisted && looksLikeAdUrl(url)) return false;
+
+    for (final kw in prefs.sniffBlacklist) {
+      if (kw.isNotEmpty && lower.contains(kw)) return false;
+    }
+    if (prefs.sniffWhitelist.isNotEmpty && !whitelisted) return false;
     return true;
+  }
+
+  /// 已知广告 / 追踪域名（**后缀**匹配：`x.doubleclick.net` 也算命中）。
+  static const List<String> kBuiltinAdHosts = [
+    'doubleclick.net',
+    'googlesyndication.com',
+    'googleadservices.com',
+    'adservice.google.com',
+    '2mdn.net',
+    'adsystem.com',
+    'adnxs.com',
+    'taboola.com',
+    'outbrain.com',
+    'criteo.com',
+    'criteo.net',
+    'moatads.com',
+    'amazon-adsystem.com',
+    'scorecardresearch.com',
+  ];
+
+  /// 路径里**整段**等于这些词的视为广告（注意：是整段相等，不是子串，
+  /// 否则 `load` / `road` / `download` 这类正常词会被误杀）。
+  static const Set<String> kBuiltinAdSegments = {
+    'ad',
+    'ads',
+    'adv',
+    'advert',
+    'adverts',
+    'advertisement',
+    'advertising',
+    'preroll',
+    'pre-roll',
+    'midroll',
+    'postroll',
+    'vast',
+    'vpaid',
+    'banner',
+    'banners',
+    'guanggao',
+    'gg',
+    'advideo',
+    'ad_video',
+    'ad-video',
+  };
+
+  /// 内置广告直链判定（保守）：命中已知广告域名，或路径里出现广告整段 /
+  /// `ad_720p.mp4` 这类广告视频命名。
+  ///
+  /// 只做**整域名后缀**与**整路径段**匹配 —— 宁可漏掉个别广告，也不能把
+  /// 正常正片地址误杀（正片地址被误杀 = 用户看不到内容，比看到广告更糟）。
+  static bool looksLikeAdUrl(String raw) {
+    final uri = Uri.tryParse(raw.trim());
+    if (uri == null) return false;
+    final host = uri.host.toLowerCase();
+    for (final d in kBuiltinAdHosts) {
+      if (host == d || host.endsWith('.$d')) return true;
+    }
+    for (final seg in uri.pathSegments) {
+      final s = seg.toLowerCase();
+      if (kBuiltinAdSegments.contains(s)) return true;
+      // 广告视频常见命名：ad_720p.mp4 / ad-1080p.m3u8
+      if (s.startsWith('ad_') || s.startsWith('ad-')) return true;
+    }
+    return false;
   }
 
   /// 该网页地址是否要先过解析接口。

@@ -1,7 +1,8 @@
 name: tvbox
 description: 跨平台 TVBox 视频播放器（iOS 巨魔 / Android / Windows）。基于 Flutter + Node.js 远程源 + media_kit 视频播放。
 publish_to: 'none'
-version: 1.0.0+1
+# 改版本号时必须同步改 lib/common/app_version.dart（那份是 Dart 侧唯一来源）
+version: 2.0.0+2
 
 environment:
   sdk: '>=3.12.0'
@@ -111,12 +112,17 @@ flutter:
   config:
     enable-swift-package-manager: false
   assets:
+    # 内置小程序包（zip，结构与「本地文件」安装的一致）。
+    #   注册表见 lib/miniapp/services/builtin_mini_apps.dart；
+    #   首次启动由 MiniAppService.seedBuiltins() 解包到 Documents/miniapps/<appId>/。
+    - assets/miniapps/
     - assets/nodejs-project/dist/
     - assets/nodejs-project/src/
-    - assets/nodejs-project/src/spider/
-    - assets/nodejs-project/src/spider/video/
-    - assets/nodejs-project/src/spider/book/
-    - assets/nodejs-project/src/spider/pan/
+    # ⚠️ 2026-10-27 清理：原 `assets/nodejs-project/src/spider/{,video,book,pan}/`
+    #   是 TVBox 整包 spider 的**内置示例脚本**，但 esbuild 入口 `src/main.js`
+    #   从未 require 过它们（全仓只有 drpy_host.js 的注释提到 `/spider/` 路由），
+    #   属于 tree-shaken 的死资产 —— 只白占包体积，故连同 pubspec 声明一并删除。
+    #   （Node 源仍可由「设置 → 本地 JS 源」导入 .js，或由订阅下发。）
     - assets/nodejs-project/src/util/
     # drpy 标准源运行时（TVBox `api=drpy2.min.js` + `ext=站点.js`）
     #   见 lib/services/drpy_service.dart / assets/nodejs-project/src/drpy_host.js

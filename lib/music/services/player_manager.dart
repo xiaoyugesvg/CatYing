@@ -609,7 +609,10 @@ class MusicPlayerManager extends ChangeNotifier {
         if (one.ok && one.url.isNotEmpty) {
           url = one.url;
           fromSource = plugin.name;
-          quality = one.source?.quality ?? '';
+          // 🔴 用**实际解析出来的**档位（`one.quality`），不是音源的默认档。
+          //    后者（`one.source?.quality`）跟这次取址无关 —— 用户设了无损、
+          //    源却只给到 flac/320k，UI 却仍显示音源默认值，等于又骗一次。
+          quality = one.quality.isNotEmpty ? one.quality : (one.source?.quality ?? '');
           sourceHeaders = one.headers.isNotEmpty
               ? one.headers
               : (one.source?.headers ?? const {});
@@ -651,13 +654,15 @@ class MusicPlayerManager extends ChangeNotifier {
           }
           if (bound == null) continue; // 源被删/被禁用，跳过
           lastError.value = '正在用「${bound.name}」…';
-          final one = await UnblockService.instance.testOne(bound, song);
+          final one = await UnblockService.instance
+              .testOne(bound, song, quality: wantQuality);
           switching.value = false;
           if (epoch != _loadEpoch) return;
           if (one.ok && one.url.isNotEmpty) {
             url = one.url;
             fromSource = one.source?.name ?? bound.name;
-            quality = one.source?.quality ?? '';
+            // 同插件来源：显示**实际**档位，不是音源默认档
+            quality = one.quality.isNotEmpty ? one.quality : (one.source?.quality ?? '');
             sourceHeaders =
                 one.headers.isNotEmpty ? one.headers : (one.source?.headers ?? const {});
             fromBound = true;
@@ -723,6 +728,8 @@ class MusicPlayerManager extends ChangeNotifier {
         notifyListeners();
         final results = await UnblockService.instance.resolveAll(
           song,
+          // 用户在设置里选的音质 —— 不传的话第三方源永远按音源默认的 320k 取址
+          quality: wantQuality,
           // 固定源刚试过的不再重复试（它们这一轮都给不出地址）
           excludeIds: triedBoundIds.isEmpty ? null : triedBoundIds,
           onProgress: (done, total) {

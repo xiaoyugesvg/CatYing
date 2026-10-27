@@ -83,6 +83,31 @@ enum AudioQuality {
         AudioQuality.hires => 1900000,
       };
 
+  /// 映射到**洛雪(LX)音质串**（`128k` / `320k` / `flac` / `flac24bit` / `hires`）。
+  ///
+  /// ── 为什么需要这张表 ─────────────────────────────────────────
+  /// [level] 是**网易云**的参数（`standard/higher/exhigh/lossless/hires`），
+  /// 而 LX 脚本认的是**码率串**。直接把 `exhigh` 丢给脚本，脚本查
+  /// `MUSIC_QUALITIES[quality]` 查不到 → 要么抛「不支持的音质」，
+  /// 要么静默回落 128k（更糟：用户以为设了无损）。
+  ///
+  /// ── 映射依据（LX 的阶梯比网易粗，没有 192k 这一档）──────────
+  ///   standard(128k) → `128k`
+  ///   higher(192k)   → `320k`  ← 向上取整：LX 无 192k，而「较高」的意图
+  ///                              是「比标准好」，取下一档才不辜负它
+  ///   exhigh(320k)   → `320k`
+  ///   lossless       → `flac`
+  ///   hires          → `hires` ← 源不支持时由 Node 侧按阶梯降级
+  ///                              （`hires → flac24bit → flac → 320k`，
+  ///                              见 `source_resolver.js` 的 `clampQuality`）
+  String get lxQuality => switch (this) {
+        AudioQuality.standard => '128k',
+        AudioQuality.higher => '320k',
+        AudioQuality.exhigh => '320k',
+        AudioQuality.lossless => 'flac',
+        AudioQuality.hires => 'hires',
+      };
+
   static const storageKey = 'music.audioQuality';
 
   static AudioQuality fromName(String? name) =>
