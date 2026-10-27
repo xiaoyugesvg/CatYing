@@ -216,14 +216,124 @@ class AiService extends ChangeNotifier {
       }
       if (status == 401) throw 'API Key 无效（401）$detail';
       if (status == 402) throw '额度不足（402）$detail';
+      if (status == 403) throw '没有权限（403）$detail';
+      if (status == 404) {
+        // 用户 2026-10-27 截图：OpenRouter 的 `xxx:free` 下架后返回 404，
+        // Dio 会把 MDN 那整段英文说明塞进 e.message，用户只看到一坨乱码。
+        // 这里只留服务端给的中文/短原因（OpenRouter 会直接告诉你该换哪个模型）。
+        throw '模型不存在或该免费版已下架（404）$detail';
+      }
       if (status == 429) throw '请求太频繁（429）$detail';
       if (status != null && status >= 500) throw 'AI 服务端错误（$status）$detail';
-      throw '请求失败：${e.message ?? e}$detail';
+      throw '请求失败（${status ?? '无状态码'}）$detail';
     } catch (e) {
       throw '请求异常：$e';
     } finally {
       // 局部新建的 Dio 内部持有 HttpClient，不显式关闭会泄漏连接池
       dio.close(force: true);
     }
+  }
+
+  /// 「模型列表」接口地址（OpenAI 兼容的 `GET {base}/models`）。
+  ///
+  /// 各家挂载点不一样：填了完整 `.../chat/completions` 的去掉尾段；
+  /// 以 `/v1`、`/v4` 结尾的直接接 `/models`；其余按 OpenAI 惯例补 `/v1/models`。
+  String _modelsEndpointOf(String b0) {
+    final b = _stripUserInfo(b0).replaceAll(RegExp(r'/+$'), '');
+    if (b.isEmpty) return '';
+    if (b.endsWith('/chat/completions')) {
+      return b.replaceFirst(RegExp(r'/chat/completions$'), '/models');
+    }
+    if (b.endsWith('/v1') || b.endsWith('/v4')) return '$b/models';
+    return '$b/v1/models';
+  }
+
+  /// 拉取该服务商**当前账号可用**的模型列表（`GET {base}/models`）。
+  ///
+  /// 用户 2026-10-27：「每不同的 AI 可以选哪些模型……特别是哪些是免费的」。
+  /// 免费判定：id 带 `:free` 后缀，或返回体里 `pricing.prompt`/`completion`
+  /// 都是 0（OpenRouter 这类网关会给出单价）。失败抛中文可读错误。
+  Future<List<({String id, bool free})>> fetchModels({
+    String? baseUrlOverride,
+    String? apiKeyOverride,
+  }) async {
+    final rawBase = (baseUrlOverride ?? baseUrl).trim();
+    final key = (apiKeyOverride ?? apiKey).trim();
+    final baseUserInfo = _userInfoOf(rawBase);
+    final auth = baseUserInfo.isNotEmpty
+        ? 'Basic ${base64Encode(utf8.encode(baseUserInfo))}'
+        : key.toLowerCase().startsWith('basic:')
+            ? 'Basic ${base64Encode(utf8.encode(key.substring(6).trim()))}'
+            : 'Bearer ${key.toLowerCase().startsWith('bearer:') ? key.substring(7).trim() : key}';
+    if (key.isEmpty && baseUserInfo.isEmpty) throw '请先填写 API Key';
+    final primary = _modelsEndpointOf(rawBase);
+    if (primary.isEmpty) throw '请先填写接口地址';
+    // 少数网关的模型列表不在 /v1 下：主地址 404 时退回「直接拼 /models」
+    final candidates = <String>[
+      primary,
+      if (!primary.endsWith('/v1/models')) '${_stripUserInfo(rawBase).replaceAll(RegExp(r'/+$'), '')}/models',
+    ];
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 30),
+      headers: {'Accept': 'application/json', 'Authorization': auth},
+    ));
+    applyGlobalProxy(dio);
+    try {
+      String? lastErr;
+      for (final url in candidates) {
+        try {
+          final resp = await dio.get<dynamic>(url);
+          final list = _extractModelList(resp.data);
+          if (list != null && list.isNotEmpty) return list;
+          lastErr = '接口没有返回模型列表';
+        } on DioException catch (e) {
+          final status = e.response?.statusCode;
+          if (status == 401) throw 'API Key 无效（401），无法读取模型列表';
+          if (status == 404 && url != candidates.last) {
+            lastErr = '404';
+            continue; // 换下一个挂载点再试
+          }
+          lastErr = status == 404 ? '该服务商不支持 /models 列表' : '拉取失败（${status ?? '无状态码'}）';
+        }
+      }
+      throw lastErr ?? '拉取模型列表失败';
+    } finally {
+      dio.close(force: true);
+    }
+  }
+
+  /// 兼容两种返回：`{data:[{id,...}]}`（OpenAI 系）与 `{models:[{name,...}]}`（Gemini）
+  static List<({String id, bool free})>? _extractModelList(dynamic data) {
+    List<dynamic>? arr;
+    if (data is Map) {
+      final d = data['data'] ?? data['models'];
+      if (d is List) arr = d;
+    } else if (data is List) {
+      arr = data;
+    }
+    if (arr == null) return null;
+    final out = <({String id, bool free})>[];
+    for (final e in arr) {
+      if (e is! Map) continue;
+      var id = (e['id'] ?? e['name'] ?? e['model'] ?? '').toString().trim();
+      if (id.isEmpty) continue;
+      // Gemini 的 name 形如 `models/gemini-2.5-flash`，用时要去掉前缀
+      if (id.startsWith('models/')) id = id.substring('models/'.length);
+      var free = id.toLowerCase().endsWith(':free');
+      final pricing = e['pricing'];
+      if (pricing is Map) {
+        final p = pricing['prompt']?.toString().trim();
+        final c = pricing['completion']?.toString().trim();
+        bool zero(String? v) => v == null || v.isEmpty || v == '0' || v == '0.0' || v == '0.00';
+        if (zero(p) && zero(c)) free = true;
+      }
+      out.add((id: id, free: free));
+    }
+    out.sort((a, b) {
+      if (a.free != b.free) return a.free ? -1 : 1;
+      return a.id.compareTo(b.id);
+    });
+    return out;
   }
 }

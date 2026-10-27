@@ -253,7 +253,13 @@ class SpiderService {
     // csp_ 占位不是路径基址：拼进 URL 会产出 `csp_xxx/play` 这种非法路径，
     // 必须退化为标准 /{key}/{type}/{action} 形态。
     if (a.toLowerCase().startsWith('csp_')) return '';
-    return a.startsWith('http') ? '' : a;
+    if (a.startsWith('http')) return '';
+    // 本地 JS 源（`ljs_xxx.js`，见 LocalJsSource.api）：它只是引擎里的
+    // 「脚本标识」，**不是路径基址** —— 引擎照样在
+    // `/spider/<key>/<type>/<action>` 下注册路由。
+    // 原来把它当 apiBase ⇒ 拼出 `ljs_xxx.js/home` ⇒ 必然 404。
+    if (RegExp(r'^ljs_[A-Za-z0-9]+\.js$').hasMatch(a)) return '';
+    return a;
   }
 
   /// 「主源脚本」地址（整包就是一个 js spider 的配置）：由 AppState 在加载主源时
@@ -873,7 +879,17 @@ class SpiderService {
       }
       final (loaded, msg) = await NodeJSManager.instance.loadSource(script);
       if (!loaded) {
-        AppLog.instance.w('[SpiderService] 脚本载入失败 $script: ${msg ?? "未知错误"}');
+        // 用户 2026-10-27（「脚本源加载失败:ljs_xxx.js 这是为啥？」）：
+        // 原来这里把 Node 侧的真实原因（load-error.txt 里的
+        // `Cannot use import statement outside a module` /
+        // `Cannot find module '../../util/req.js'`）**只写进日志**，
+        // 上层 `_dispatchScript` 又 `??=` 覆盖成一句「脚本源加载失败: 文件名」，
+        // 用户完全看不出为什么。这里把真实原因存进 lastError 透传到 UI。
+        final detail = (msg ?? '').trim();
+        lastError = detail.isEmpty
+            ? '脚本源加载失败：$script'
+            : '脚本源加载失败：$script\n$detail';
+        AppLog.instance.w('[SpiderService] 脚本载入失败 $script: $detail');
         return null;
       }
       _loadedScriptUrl = script;
@@ -889,6 +905,7 @@ class SpiderService {
       return _loadedScriptKey.isNotEmpty ? _loadedScriptKey : fallback;
     } catch (e) {
       AppLog.instance.w('[SpiderService] 脚本载入异常 $script: $e');
+      lastError = '脚本源载入异常：$e';
       return null;
     }
   }
