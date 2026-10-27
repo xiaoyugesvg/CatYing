@@ -709,7 +709,8 @@ class _TgHomePageState extends State<TgHomePage> {
         slivers: [
           if (!_searching && _bannerItems.isNotEmpty)
             SliverToBoxAdapter(child: _banner()),
-          if (!_searching) SliverToBoxAdapter(child: _groupStrip()),
+          // 2026-10-27 用户：群组/频道横滑条与左上角下拉（切换面板里已是
+          // 两列卡片）重复，去掉这条 tab 栏，统一从左上角切换。
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
@@ -890,61 +891,6 @@ class _TgHomePageState extends State<TgHomePage> {
                     ),
                   ),
                 ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  // ── 群组横滑 ───────────────────────────────────────────
-  Widget _groupStrip() {
-    final all = [
-      ..._channels,
-      ..._dialogs.map((d) => {
-            'peer': d['peer'],
-            'title': d['title'],
-            'mode': 'login',
-          }),
-    ];
-    if (all.length <= 1) return const SizedBox.shrink();
-    return SizedBox(
-      height: 42,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        itemCount: all.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (context, i) {
-          final d = all[i];
-          final peer = (d['peer'] ?? '').toString();
-          final on = peer == _peer;
-          return GestureDetector(
-            onTap: () async {
-              if (on) return;
-              setState(() {
-                _peer = peer;
-                _title = (d['title'] ?? peer).toString();
-                _mode = (d['mode'] ?? 'public').toString();
-              });
-              await _reloadItems();
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 13),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color:
-                    on ? AppTheme.accentOnSurface : AppTheme.backgroundTertiary,
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Text(
-                (d['title'] ?? peer).toString(),
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: on ? FontWeight.w600 : FontWeight.w400,
-                  color: on ? Colors.white : AppTheme.textSecondary,
-                ),
               ),
             ),
           );
