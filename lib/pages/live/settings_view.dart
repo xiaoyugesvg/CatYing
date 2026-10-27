@@ -130,7 +130,10 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       // 不透明底，避免路由切换时与下层设置页叠影
-      backgroundColor: Colors.transparent,
+      // ⚠️ 2026-10-27 用户截图：这里原来写的是 Colors.transparent（注释和
+      //    代码相反），路由切换时上层卡片半透明、下层的「外观主题」等
+      //    直接透出来，看着像两层页面叠在一起。改成不透明底色。
+      backgroundColor: AppTheme.backgroundPrimary,
       appBar: AppBar(
         leading: IconButton(
           icon: Icon(

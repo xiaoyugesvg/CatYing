@@ -33,6 +33,34 @@ class _Provider {
 }
 
 const List<_Provider> _providers = [
+  // OpenRouter 放第一个（用户 2026-10-27：「将 openrouter 放在第一个」）。
+  // 聚合网关，带 `:free` 后缀的模型真免费（有限速）。
+  // ⚠️ 2026-10-27：原来的默认模型 `deepseek/deepseek-chat-v3-0324:free`
+  //   已被官方下架（返回 404「This model is unavailable for free」），
+  //   换成官方的**免费路由** `openrouter/free` —— 它会自动挑一个当前
+  //   可用的免费模型，不会因为某个免费模型下架就整个失效。
+  _Provider(
+    'OpenRouter',
+    'https://openrouter.ai/api/v1',
+    'openrouter/free',
+    '免费路由 openrouter/free',
+    [
+      _ModelItem('openrouter/free', free: true),
+      _ModelItem('nvidia/nemotron-3-ultra-550b-a55b:free', free: true),
+      _ModelItem(
+          'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', free: true),
+      _ModelItem('nvidia/nemotron-3.5-lightning:free', free: true),
+      _ModelItem('nvidia/nemotron-3.5-super-vl:free', free: true),
+      _ModelItem('nvidia/nemotron-3.5-content-safety:free', free: true),
+      _ModelItem('cohere/north-mini-code:free', free: true),
+      _ModelItem('poolside/laguna-s-2.1:free', free: true),
+      _ModelItem('dots-studio/dots-3-note-preview:free', free: true),
+      _ModelItem('xingchen-agi/xing4.0-29b-a4b:free', free: true),
+      _ModelItem('google/gemma-4-31b-it:free', free: true),
+      _ModelItem('thinkingmachines/inkling:free', free: true),
+      _ModelItem('deepseek/deepseek-chat'),
+    ],
+  ),
   _Provider('DeepSeek', 'https://api.deepseek.com', 'deepseek-chat', '便宜、中文好', [
     _ModelItem('deepseek-chat'),
     _ModelItem('deepseek-reasoner'),
@@ -111,24 +139,6 @@ const List<_Provider> _providers = [
       _ModelItem('Qwen/Qwen2.5-7B-Instruct', free: true),
       _ModelItem('Qwen/Qwen3-8B', free: true),
       _ModelItem('deepseek-ai/DeepSeek-V3'),
-    ],
-  ),
-  // OpenRouter：聚合网关，带 `:free` 后缀的模型真免费（有限速）。
-  // ⚠️ 2026-10-27：原来的默认模型 `deepseek/deepseek-chat-v3-0324:free`
-  //   已被官方下架（返回 404「This model is unavailable for free」），
-  //   换成官方的**免费路由** `openrouter/free` —— 它会自动挑一个当前
-  //   可用的免费模型，不会因为某个免费模型下架就整个失效。
-  _Provider(
-    'OpenRouter',
-    'https://openrouter.ai/api/v1',
-    'openrouter/free',
-    '免费路由 openrouter/free',
-    [
-      _ModelItem('openrouter/free', free: true),
-      _ModelItem('google/gemma-4-31b-it:free', free: true),
-      _ModelItem('nvidia/nemotron-3.5-lightning:free', free: true),
-      _ModelItem('thinkingmachines/inkling:free', free: true),
-      _ModelItem('deepseek/deepseek-chat'),
     ],
   ),
 ];

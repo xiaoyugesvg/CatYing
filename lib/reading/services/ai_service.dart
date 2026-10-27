@@ -217,6 +217,14 @@ class AiService extends ChangeNotifier {
       if (status == 401) throw 'API Key 无效（401）$detail';
       if (status == 402) throw '额度不足（402）$detail';
       if (status == 403) throw '没有权限（403）$detail';
+      if (status == 400) {
+        // 用户 2026-10-27 截图：OpenRouter 的免费模型返回
+        // 400「Provider returned error」——是**上游服务商**这一次请求失败
+        // （免费模型共享池，限速/临时故障很常见），不是配置写错。
+        throw '请求被拒绝（400）$detail\n'
+            '提示：免费模型由上游服务商提供，限速或临时故障很常见，'
+            '换一个模型再试即可（点「选择模型」）。';
+      }
       if (status == 404) {
         // 用户 2026-10-27 截图：OpenRouter 的 `xxx:free` 下架后返回 404，
         // Dio 会把 MDN 那整段英文说明塞进 e.message，用户只看到一坨乱码。
