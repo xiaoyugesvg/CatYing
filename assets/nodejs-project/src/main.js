@@ -245,8 +245,33 @@ function writeLoadErrorFile(dir, stage, err) {
     }
 }
 
-function loadScript(path) {
+// ── CatVodOpen 插件兼容层（懒加载，见 src/spider_compat.js）──────────
+//
+// 官方那批 `.js` 源是 ESM + fastify 插件形态，直接 `require` 必抛
+// `Cannot use import statement outside a module`。以前的做法是人工把脚本
+// 转成 CJS —— 那只是绕路（只解决那一个文件）。这里改成宿主侧兼容：
+//   ① ESM→CJS 转换  ② util/*.js 虚拟模块  ③ fastify 插件 → 本 App 契约
+// 命中不了（普通 CJS 源）就走原来的 `require(index.js)`，现有源零影响。
+let spiderCompatCache = null;
+
+/**
+ * 载入序号：`loadScript` 改成 async 之后（兼容层要 await），
+ * 连续两次切源有可能交错 —— 慢的那次（要转换+起 server）结束时
+ * 会把**更新的**那次覆盖掉，表现为「切了源但内容还是上一个」。
+ * 每次载入领一个号，await 回来后对不上就放弃。
+ */
+let __loadSeq = 0;
+
+/** 懒加载兼容层：只在真遇到 ESM 源码时才求值，启动路径零风险 */
+async function getSpiderCompat() {
+    if (spiderCompatCache) return spiderCompatCache;
+    spiderCompatCache = await import('./spider_compat.js');
+    return spiderCompatCache;
+}
+
+async function loadScript(path) {
     console.log('loadScript called with path:', path);
+    const seq = ++__loadSeq;
     const indexJSPath = path + '/index.js';
     const indexConfigJSPath = path + '/index.config.js';
 
@@ -257,6 +282,90 @@ function loadScript(path) {
     try {
         delete require.cache[require.resolve(indexConfigJSPath)];
     } catch (e) {}
+
+    // 先读源码判断形态：ESM 语法（行首 import/export）走兼容层，
+    // 否则保持原样 require —— 绝大多数现有源都走这条，行为完全不变。
+    let srcText = null;
+    try {
+        srcText = require('fs').readFileSync(indexJSPath, 'utf8');
+    } catch (e) {
+        // 读不到就交给下面的 require 去抛原生错误（路径/权限信息更准确）
+        srcText = null;
+    }
+
+    let compat = null;
+    if (srcText != null && srcText.length > 0) {
+        try {
+            compat = await getSpiderCompat();
+        } catch (e) {
+            console.log('compat layer unavailable, fallback to require:', e && e.message);
+            compat = null;
+        }
+    }
+
+    if (compat && compat.looksLikeEsm(srcText)) {
+        let config = {};
+        try {
+            const configModule = require(indexConfigJSPath);
+            config = configModule.default || configModule;
+        } catch (e) {
+            console.log('Config load skipped:', e.message);
+        }
+
+        let loaded = null;
+        try {
+            loaded = await compat.loadCatVodPlugin({
+                dir: path,
+                file: indexJSPath,
+                text: srcText,
+                config: config,
+            });
+        } catch (e) {
+            console.error('ERROR loading CatVodOpen plugin:', e && e.message);
+            writeLoadErrorFile(path, 'cat-compat(esm/plugin)', e);
+            throw e;
+        }
+
+        // 并发保护：await 期间可能有更新的载入插队 ⇒ 放弃本次，
+        // 否则会把新源顶掉（表现就是「切了源内容没变」）。
+        // ⚠️ 必须在**赋值给 sourceModule 之前**判断，否则先覆盖再回滚。
+        if (seq !== __loadSeq) {
+            console.log('loadScript 已被更新的载入取代，丢弃本次: ' + path);
+            try {
+                if (loaded && loaded.module && typeof loaded.module.stop === 'function') {
+                    loaded.module.stop();
+                }
+            } catch (_) {}
+            return;
+        }
+
+        sourceModule = loaded.module;
+        console.log(
+            'index.js loaded via cat-compat (' + loaded.kind + ')' +
+                (loaded.key ? ' key=' + loaded.key : '')
+        );
+
+        try {
+            const result = sourceModule.start(config);
+            if (result && typeof result.then === 'function') {
+                result.catch((e) =>
+                    console.error('ERROR in sourceModule.start() async:', e.message)
+                );
+            }
+            console.log('sourceModule.start(config) initiated');
+        } catch (e) {
+            console.error('ERROR in sourceModule.start(config):', e.message);
+            writeLoadErrorFile(path, 'sourceModule.start(config)', e);
+            throw e;
+        }
+        return;
+    }
+
+    // 同上：上面的 `await getSpiderCompat()` 也可能让更新的载入插队
+    if (seq !== __loadSeq) {
+        console.log('loadScript 已被更新的载入取代，丢弃本次: ' + path);
+        return;
+    }
 
     try {
         sourceModule = require(indexJSPath);
@@ -312,7 +421,11 @@ function handleNativeMessage(msg) {
                     }
                 } catch (e) {}
                 spiderPort = 0;
-                loadScript(data.path);
+                // loadScript 已改为 async（兼容层要 await）；这里不阻塞原生回调，
+                // 失败原因由 loadScript 内部写进源目录的 load-error.txt。
+                loadScript(data.path).catch((e) => {
+                    console.error('loadScript failed:', e && e.message);
+                });
                 break;
             case 'nativeServerPort':
                 nativeServerPort = data.port;
@@ -654,10 +767,22 @@ const mgmtServer = createServer((req, res) => {
                 // 单槽位：载入 CatVod 整包源前，先关掉驻留的 drpy 宿主
                 // （没加载过就别为它白 import 一次）
                 try { if (drpyHostCache) drpyHostCache.stopDrpy(); } catch (_) {}
-                loadScript(sourcePath);
-
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: true, message: 'Source loaded from path' }));
+                // loadScript 现在是 async（CatVodOpen 插件兼容层要 await）：
+                // 必须等它真的结束再回响应，否则 500/200 会先于真实结果发出，
+                // Dart 侧看到的永远是「成功」。
+                loadScript(sourcePath).then(
+                    () => {
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: true, message: 'Source loaded from path' }));
+                    },
+                    (e) => {
+                        console.error('ERROR in /source/loadPath:', e && e.message);
+                        if (!res.writableEnded) {
+                            res.writeHead(500, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ error: (e && e.message) || String(e) }));
+                        }
+                    }
+                );
             } catch (e) {
                 console.error('ERROR in /source/loadPath:', e.message);
                 res.writeHead(500, { 'Content-Type': 'application/json' });
