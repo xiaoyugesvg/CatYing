@@ -140,6 +140,15 @@ class VideoPlayerWidget extends StatefulWidget {
   /// 弹出解析线路列表，切线路后用新线路重新解析当前集。
   final VoidCallback? onSwitchParse;
 
+  /// 底栏「解析 / 嗅探」**统一面板**回调（2026-10-28）。
+  ///
+  /// 传了它就用**一个**按钮（`auto_fix_high`）取代原来并列的「嗅探」「解析」
+  /// 两个按钮，点开是同一个面板：嗅探开关 + 立即嗅探 + 解析开关 + 线路切换。
+  /// 用户 2026-10-28：「将嗅探开关和解析切换放在一个按钮以及弹出面板呢？」
+  ///
+  /// 与 [onSniff]/[onSwitchParse] 是**互斥**关系：优先用这个。
+  final VoidCallback? onOpenParseSniff;
+
   /// 抖音模式（短剧模式）下，无剧集可切（电影）时的上/下一部电影回调。
   /// 有剧集时切集走 [onPlayNext]/[onPlayPrevious]，电影时用这两个。
   final VoidCallback? onDramaNextMovie;
@@ -199,6 +208,7 @@ class VideoPlayerWidget extends StatefulWidget {
     this.onPlayPrevious,
     this.onSniff,
     this.onSwitchParse,
+    this.onOpenParseSniff,
     this.onDramaNextMovie,
     this.onDramaPrevMovie,
     this.onSelectEpisode,
@@ -3993,30 +4003,45 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                   setState(() => _showEpisodeSheet = true);
                                 },
                               ),
-                            // 嗅探：打开 WebView 手动抓媒体地址（详情页才传）
-                            if (widget.onSniff != null)
+                            // 「解析 / 嗅探」统一入口（2026-10-28）：一个按钮 + 一个
+                            // 面板（嗅探开关 / 立即嗅探 / 解析开关 / 线路切换）。
+                            // 优先于下面两个旧按钮 —— 详情页现在只传这一个。
+                            if (widget.onOpenParseSniff != null)
                               _iconButton(
-                                icon: Icons.travel_explore,
+                                icon: Icons.auto_fix_high_rounded,
                                 size: 22,
                                 width: 36,
                                 onTap: () {
                                   _scheduleHideControls();
-                                  widget.onSniff!();
+                                  widget.onOpenParseSniff!();
                                 },
-                              ),
-                            // 解析：切换解析线路（详情页才传）
-                            // 图标用**奖章/VIP 样式**（用户 2026-10-14：不要 ⇄，
-                            // 换成 VIP 这种）—— 解析接口本身就是"会员级"能力。
-                            if (widget.onSwitchParse != null)
-                              _iconButton(
-                                icon: Icons.workspace_premium_rounded,
-                                size: 22,
-                                width: 36,
-                                onTap: () {
-                                  _scheduleHideControls();
-                                  widget.onSwitchParse!();
-                                },
-                              ),
+                              )
+                            else ...[
+                              // 嗅探：打开 WebView 手动抓媒体地址（详情页才传）
+                              if (widget.onSniff != null)
+                                _iconButton(
+                                  icon: Icons.travel_explore,
+                                  size: 22,
+                                  width: 36,
+                                  onTap: () {
+                                    _scheduleHideControls();
+                                    widget.onSniff!();
+                                  },
+                                ),
+                              // 解析：切换解析线路（详情页才传）
+                              // 图标用**奖章/VIP 样式**（用户 2026-10-14：不要 ⇄，
+                              // 换成 VIP 这种）—— 解析接口本身就是"会员级"能力。
+                              if (widget.onSwitchParse != null)
+                                _iconButton(
+                                  icon: Icons.workspace_premium_rounded,
+                                  size: 22,
+                                  width: 36,
+                                  onTap: () {
+                                    _scheduleHideControls();
+                                    widget.onSwitchParse!();
+                                  },
+                                ),
+                            ],
                             // 弹幕开关 / 播放器核心切换：**2026-10-14 已移到顶栏**
                             // （见 `_buildHeaderBar` 里对应说明）。
                             // 短剧模式：纯竖屏全屏

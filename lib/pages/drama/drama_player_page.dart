@@ -18,6 +18,7 @@ import 'package:tvbox/widgets/app_player.dart';
 import 'package:tvbox/widgets/ios_av_player.dart';
 import 'package:tvbox/widgets/ks_player.dart';
 import 'package:tvbox/widgets/mpv_app_player.dart';
+import 'package:tvbox/widgets/parse_sniff_sheet.dart';
 import 'package:tvbox/pages/detail/controller.dart';
 
 /// 短剧专用播放页（2026-10-23 重做）。
@@ -565,6 +566,17 @@ class _DramaPlayerPageState extends State<DramaPlayerPage> {
         ),
         const SizedBox(height: 12),
         _pill(icon: Icons.forum_outlined, onTap: _showDanmuTip),
+        const SizedBox(height: 12),
+        // 解析 / 嗅探统一面板（2026-10-28）：短剧源也可能返回网页播放页，
+        // 这里给同一个入口，切线路后由 DetailController 重解当前集。
+        _pill(
+          icon: Icons.auto_fix_high_rounded,
+          onTap: () => ParseSniffSheet.show(
+            context,
+            onSniff: _c.openSniff,
+            onPickLine: (url) => _c.selectParseLine(url),
+          ),
+        ),
         const SizedBox(height: 12),
         _pill(
           icon: Icons.keyboard_arrow_up_rounded,

@@ -720,6 +720,35 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   String _rawPlayUrl = '';
   String get rawPlayUrl => _rawPlayUrl;
 
+  /// 用户是否**主动**在「解析 / 嗅探」面板里选过解析线路（2026-10-28）。
+  ///
+  /// 为什么需要：Spider / 聚合源常自带一个解析地址（`parse:1`，如
+  /// `…/jiexi.php?url=<爱奇艺页面>`），旧逻辑会**跳过 App 自己的解析**
+  /// 直接打开它 —— 那个解析站一旦「IP 使用次数超限」，用户就彻底没法播。
+  /// 用户在面板里选了线路，就表示「用我的解析线路」，这里据此强制走
+  /// [ParseService]（并把解析站地址里 `url=` 的内层原始地址取出来重新解）。
+  bool _forceUserParse = false;
+
+  /// 从解析站地址里取出内层原始地址（`?url=` / `?v=`），取不到原样返回。
+  ///
+  /// 例：`https://www.playm3u8.cn/jiexi.php?url=https://v.qq.com/x/1.html`
+  /// → `https://v.qq.com/x/1.html`。这样换成用户的线路时，解的是**原始页面**
+  /// 而不是「解析站的解析结果」。
+  String _innerUrlOf(String url) {
+    try {
+      final uri = Uri.tryParse(url.trim());
+      if (uri == null) return url;
+      for (final k in const ['url', 'v', 'vid', 'link', 'u']) {
+        final inner = uri.queryParameters[k];
+        if (inner != null && inner.trim().isNotEmpty) {
+          final v = inner.trim();
+          if (v.startsWith('http://') || v.startsWith('https://')) return v;
+        }
+      }
+    } catch (_) {}
+    return url;
+  }
+
   /// 底栏「嗅探」：用 WebView 打开当前网页，手动抓里面的媒体地址。
   void openSniff() {
     final url = _rawPlayUrl.isNotEmpty ? _rawPlayUrl : (playUrl.value ?? '');
@@ -745,9 +774,18 @@ class DetailController extends GetxController with WidgetsBindingObserver {
 
   /// 底栏「解析」选中某条线路后：记住选择，并用新线路**重解当前集**。
   /// 传空串 = 自动（按列表顺序依次尝试）。
+  ///
+  /// 2026-10-28：同时置 `_forceUserParse` —— 用户既然主动选了线路，
+  /// 即使是「源自带解析地址」的聚合源，也要改用**用户的解析管理**重解。
   Future<void> selectParseLine(String url) async {
     await ParseStore.instance.setActive(url);
     ApiConfig.instance.parseBeanList.value = ParseStore.instance.list;
+    // 用户主动选线路 = 明确要用解析：解析总开关若关着，顺手打开，
+    // 否则 ParseService.enabled 为 false，选了也不生效（2026-10-28）。
+    if (!PlayerPrefs.instance.parseEnabled.value) {
+      await PlayerPrefs.instance.setParseEnabled(true);
+    }
+    _forceUserParse = true;
     AppLog.instance.log('[Parse] 切换解析线路 → ${url.isEmpty ? '自动' : url}');
     retryCurrentEpisode();
   }
@@ -928,14 +966,22 @@ class DetailController extends GetxController with WidgetsBindingObserver {
           // 2026-10-27：**源已经声明"这是要解析/嗅探的网页"时，跳过 App 自己
           // 的解析接口** —— 源给的就是解析站的地址，再套一层 App 的解析只会
           // 把地址解歪，或者白跑一次请求。
+          // 2026-10-28：但用户在「解析 / 嗅探」面板里**主动选过线路**时例外 ——
+          // 聚合源自带的解析站常常"IP 使用次数超限"，这时必须改用用户的
+          // 解析管理。解析目标取解析站地址里 `url=` 的内层原始页面，避免套娃。
+          final userForced = _forceUserParse;
           if (!_looksLikeDirectMedia(playCandidate) &&
-              !sourceWantsParse &&
-              SniffFilter.shouldParse(playCandidate) &&
+              (!sourceWantsParse || userForced) &&
+              (SniffFilter.shouldParse(playCandidate) || userForced) &&
               ParseService.instance.enabled) {
             isResolving.value = true;
             try {
-              final outcome =
-                  await ParseService.instance.parseOutcome(playCandidate);
+              final target =
+                  userForced ? _innerUrlOf(playCandidate) : playCandidate;
+              final outcome = await ParseService.instance.parseOutcome(
+                target,
+                only: userForced ? ParseStore.instance.activeBean : null,
+              );
               if (outcome != null && outcome.url.isNotEmpty) {
                 AppLog.instance.log(
                     '[Play] 「${outcome.sourceName}」解析 → ${outcome.url}'
@@ -1161,14 +1207,20 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     // 2026-10-15：是否解析统一由 SniffFilter 判定（内置主流站点 +
     // 用户追加域名 - 屏蔽域名），且解析总开关开启。不在解析范围内的
     // 网页不请求解析接口，直接交给下面的自动嗅探。
+    // 2026-10-28：用户在面板里主动选过线路时，强制走用户的解析管理。
+    final userForced = _forceUserParse;
     if (!_looksLikeDirectMedia(candidate) &&
-        SniffFilter.shouldParse(candidate) &&
+        (SniffFilter.shouldParse(candidate) || userForced) &&
         ParseService.instance.enabled) {
       // 解析期间挂"解析中"标记：详情页据此显示文案，且不启动 15 秒
       // "地址获取超时"计时（解析慢时误报错误会打断观看）。
       isResolving.value = true;
       try {
-        final outcome = await ParseService.instance.parseOutcome(candidate);
+        final target = userForced ? _innerUrlOf(candidate) : candidate;
+        final outcome = await ParseService.instance.parseOutcome(
+          target,
+          only: userForced ? ParseStore.instance.activeBean : null,
+        );
         // 期间又切了集 / 换了线路 ⇒ 这次结果作废（别把新集顶回去）
         if (_playbackStartToken != token) return;
         if (outcome != null && outcome.url.isNotEmpty) {

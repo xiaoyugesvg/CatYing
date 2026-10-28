@@ -66,6 +66,10 @@ class _DramaPageState extends State<DramaPage> {
   String? _error;
   String _scanHint = '';
 
+  /// 软提示（非致命）：刷新失败但已回落到缓存时显示一行说明，
+  /// 不清空页面、不挡住已有内容（2026-10-28）。
+  String _softHint = '';
+
   /// 已经「因为缓存列表为空而自动重扫过一次」的源 —— 防止死循环
   final Set<String> _autoRescanned = {};
 
@@ -204,16 +208,27 @@ class _DramaPageState extends State<DramaPage> {
   /// 换源现在是「点了就重扫」，用户连点几个源时会有多个请求在飞 ——
   /// 用 [_loadGen] 作代次号，回来的旧结果直接丢弃，避免后到的慢请求
   /// 把新源的内容盖掉（2026-10-27）。
-  Future<void> _load({bool rescan = false}) async {
+  ///
+  /// 2026-10-28：刷新失败**不再清空页面** —— 扫描异常 / 分类为空时一律回落到
+  /// 上次缓存（分类 + 第一页列表），只多显示一行 [_softHint]。
+  /// 用户原话：「短剧现在刷新，连原先明明有都没法出现了」。
+  Future<void> _load({bool rescan = false, bool clearFirst = false}) async {
     final gen = ++_loadGen;
+    // 已有内容时**不整屏 loading、不清空**：刷新过程中旧内容继续可见，
+    // 新数据回来再替换（否则每次刷新都会白闪一下，失败还全空）。
+    // 换源（clearFirst）例外 —— 旧源的内容不能挂在新源名下。
+    final keepContent = !clearFirst && _groups.isNotEmpty;
     setState(() {
-      _loading = true;
+      _loading = !keepContent;
       _error = null;
-      _groups = [];
-      _videos.clear();
-      _page = 1;
-      _hasMore = true;
+      _softHint = '';
       _scanHint = '';
+      if (!keepContent) {
+        _groups = [];
+        _videos.clear();
+        _page = 1;
+        _hasMore = true;
+      }
     });
     _keywords = await DramaSettings.keywords();
     if (!mounted || gen != _loadGen) return;
@@ -233,15 +248,18 @@ class _DramaPageState extends State<DramaPage> {
     if (!mounted || gen != _loadGen) return;
 
     // ── 缓存优先：这个源上次扫到的短剧分类直接用 ────────────────
-    if (!rescan) {
-      final cached = await _groupsFromCache(source.key);
-      if (!mounted || gen != _loadGen) return;
-      if (cached != null) {
-        setState(() {
-          _groups = cached;
-          _groupIdx = 0;
-          _loading = false;
-        });
+    //
+    // 刷新（rescan）时也先铺缓存：切源 / 下拉时立刻有内容，随后再扫。
+    // 扫描失败就停在这份缓存上（见 _showCacheFallback），不会变空白。
+    final cached = await _groupsFromCache(source.key);
+    if (!mounted || gen != _loadGen) return;
+    if (cached != null) {
+      setState(() {
+        _groups = cached;
+        _groupIdx = 0;
+        _loading = false;
+      });
+      if (!rescan) {
         await _loadPage(1, gen: gen);
         if (!mounted || gen != _loadGen) return;
         // 缓存里的分类可能已经失效（源改版 / 分类被删）→ 列表空着。
@@ -253,29 +271,52 @@ class _DramaPageState extends State<DramaPage> {
         }
         return;
       }
+      // rescan：先把上次的第一页铺上（不发请求），再继续往下扫描刷新
+      await _applyCachedList(cached.first);
+      if (!mounted || gen != _loadGen) return;
     }
 
     // 只扫这一个源（不再并发扫所有源）
     setState(() => _scanHint = '正在扫描「${source.name}」的分类…');
-    final found = await _probeSource(source);
+    final probe = await _probeSource(source);
     if (!mounted || gen != _loadGen) return;
 
-    if (found.isEmpty) {
-      setState(() {
-        _loading = false;
-        _scanHint = '';
-        _error = '「${source.name}」没有匹配短剧关键词的分类\n'
-            '点左上角源名换一个源，或在「设置」里改关键词';
-      });
+    // ── 扫描失败（网络 / 接口异常）：回落到缓存，绝不清空 ─────────
+    if (!probe.ok) {
+      await _showCacheFallback(
+        source,
+        gen: gen,
+        hint: '「${source.name}」扫描失败（网络或接口异常），先显示上次缓存的内容',
+        errorText: '「${source.name}」扫描失败\n${probe.error}',
+      );
       return;
     }
+
+    // ── 扫描成功，但没有任何分类命中短剧关键词 ───────────────────
+    if (probe.groups.isEmpty) {
+      // 源返回的分类列表本身就是空的 → 更可能是接口异常，提示不同文案
+      final emptySorts = probe.sortCount == 0;
+      await _showCacheFallback(
+        source,
+        gen: gen,
+        hint: emptySorts
+            ? '「${source.name}」返回的分类为空（接口可能异常），先显示上次缓存的内容'
+            : '「${source.name}」现在没有匹配短剧关键词的分类，先显示上次缓存的内容',
+        errorText: emptySorts
+            ? '「${source.name}」返回的分类为空\n接口可能异常，请稍后点「重试」'
+            : '「${source.name}」没有匹配短剧关键词的分类\n'
+                '点左上角源名换一个源，或在「设置」里改关键词',
+      );
+      return;
+    }
+
     // 落盘：保留其他源的缓存，整组替换这个源的
     final oldRows = await DramaSettings.cachedGroups();
     if (!mounted || gen != _loadGen) return;
     final merged = <Map<String, String>>[
       for (final r in oldRows)
         if (r['source'] != source.key) r,
-      for (final g in found)
+      for (final g in probe.groups)
         {
           'source': g.source.key,
           'id': g.sort.id,
@@ -286,7 +327,7 @@ class _DramaPageState extends State<DramaPage> {
     await DramaSettings.saveGroups(merged);
     if (!mounted || gen != _loadGen) return;
     setState(() {
-      _groups = found;
+      _groups = probe.groups;
       _groupIdx = 0;
       _scanHint = '';
     });
@@ -295,17 +336,78 @@ class _DramaPageState extends State<DramaPage> {
     await _loadPage(1, gen: gen);
   }
 
-  Future<List<_DramaGroup>> _probeSource(SourceBean s) async {
+  /// 把「源 · 分类」的第一页缓存直接铺到列表上（**不发网络请求**）。
+  ///
+  /// 刷新 / 切源时先让旧内容立刻可见，随后再扫分类、拉新列表覆盖。
+  Future<bool> _applyCachedList(_DramaGroup g) async {
+    final cached = await DramaSettings.cachedList(g.source.key, g.sort.id);
+    if (cached == null || cached.isEmpty || !mounted) return false;
+    setState(() {
+      _videos
+        ..clear()
+        ..addAll(cached.map(Video.fromJson));
+      _page = 1;
+      _hasMore = false;
+      _loading = false;
+      _loadingMore = false;
+      _error = null;
+    });
+    return true;
+  }
+
+  /// 扫描失败 / 无匹配时的统一兜底：有缓存就显示缓存（+ 一行软提示），
+  /// 没缓存才把 [errorText] 摆到空页上。
+  Future<void> _showCacheFallback(
+    SourceBean source, {
+    required int gen,
+    required String hint,
+    required String errorText,
+  }) async {
+    final cached = await _groupsFromCache(source.key);
+    if (!mounted || gen != _loadGen) return;
+    if (cached != null) {
+      setState(() {
+        _groups = cached;
+        _groupIdx = 0;
+        _loading = false;
+        _scanHint = '';
+        _error = null;
+        _softHint = hint;
+      });
+      // 已经铺过缓存（内容还在）就不再重复请求，避免二次失败盖掉提示
+      if (_videos.isEmpty) await _loadPage(1, gen: gen);
+      return;
+    }
+    setState(() {
+      _loading = false;
+      _scanHint = '';
+      _softHint = '';
+      _error = errorText;
+    });
+  }
+
+  Future<({List<_DramaGroup> groups, bool ok, String error, int sortCount})>
+      _probeSource(SourceBean s) async {
     try {
       final r = await SourceService.instance
           .getSort(s)
           .timeout(const Duration(seconds: 12));
-      return [
-        for (final sort in r.$1)
-          if (_keywords.any(sort.name.contains)) _DramaGroup(s, sort),
-      ];
-    } catch (_) {
-      return const [];
+      return (
+        groups: [
+          for (final sort in r.$1)
+            if (_keywords.any(sort.name.contains)) _DramaGroup(s, sort),
+        ],
+        ok: true,
+        error: '',
+        sortCount: r.$1.length,
+      );
+    } catch (e) {
+      return (
+        groups: const <_DramaGroup>[],
+        ok: false,
+        error: e.toString().split('\n').first,
+        sortCount: 0,
+      );
     }
   }
 
@@ -338,14 +440,42 @@ class _DramaPageState extends State<DramaPage> {
         _loadingMore = false;
         _error = null;
       });
+      // 第一页落盘：下次刷新失败时兜底（2026-10-28）
+      if (page == 1 && list.isNotEmpty) {
+        await DramaSettings.saveList(
+          g.source.key,
+          g.sort.id,
+          [for (final v in list) v.toJsonLite()],
+        );
+      }
     } catch (e) {
       if (!mounted) return;
+      if (page > 1) {
+        setState(() => _loadingMore = false);
+        return;
+      }
+      // 第一页失败：有缓存就显示缓存，**不把页面清空**（2026-10-28）
+      final cached = await DramaSettings.cachedList(g.source.key, g.sort.id);
+      if (!mounted) return;
+      if (gen != null && gen != _loadGen) return;
+      if (cached != null) {
+        setState(() {
+          _videos
+            ..clear()
+            ..addAll(cached.map(Video.fromJson));
+          _page = 1;
+          _hasMore = false;
+          _loading = false;
+          _loadingMore = false;
+          _error = null;
+          _softHint = '「${g.sort.name}」加载失败，先显示上次缓存的内容';
+        });
+        return;
+      }
       setState(() {
         _loading = false;
         _loadingMore = false;
-        if (page == 1) {
-          _error = '「${g.sort.name}」加载失败：${e.toString().split('\n').first}';
-        }
+        _error = '「${g.sort.name}」加载失败：${e.toString().split('\n').first}';
       });
     }
   }
@@ -400,7 +530,8 @@ class _DramaPageState extends State<DramaPage> {
     // 缓存里的分类一旦失效就停在「这个短剧分类还没有内容」。
     // 顺手把自动重扫标记清掉：这次是用户主动换源，允许再兜底一次。
     _autoRescanned.remove(picked.key);
-    await _load(rescan: true);
+    // clearFirst：换源后旧源的内容不能挂在新源名下（哪怕只是扫描那几秒）
+    await _load(rescan: true, clearFirst: true);
   }
 
   /// 顶部幻灯片：只取有封面的条目，最多 8 张
@@ -641,6 +772,45 @@ class _DramaPageState extends State<DramaPage> {
                   style: TextStyle(
                     fontSize: AppTheme.fontCaption,
                     color: isDark ? Colors.white54 : Colors.black45,
+                  ),
+                ),
+              ),
+            ),
+          // 刷新失败但已回落到缓存：一行软提示，不挡内容（2026-10-28）
+          if (_softHint.isNotEmpty)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.orange.withValues(alpha: 0.12)
+                        : Colors.orange.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline_rounded,
+                          size: 14,
+                          color: isDark
+                              ? Colors.orange.shade200
+                              : Colors.orange.shade800),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          _softHint,
+                          style: TextStyle(
+                            fontSize: AppTheme.fontCaption,
+                            height: 1.4,
+                            color: isDark
+                                ? Colors.orange.shade200
+                                : Colors.orange.shade900,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),

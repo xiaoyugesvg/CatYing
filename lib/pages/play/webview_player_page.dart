@@ -28,12 +28,20 @@ class WebviewPlayerPage extends StatefulWidget {
   /// 那些页面是按竖屏排版的，横过来只露出一半（用户 2026-10-18 反馈）。
   final bool forceLandscape;
 
+  /// 「解析 / 嗅探」面板入口（2026-10-28）。
+  ///
+  /// 网页兜底播放时**没有** VideoPlayerWidget 的底栏，用户看不到解析/嗅探
+  /// 入口 —— 而「解析站 IP 超限」这类页面恰恰最需要换解析线路。传了它就在
+  /// 右上角叠一个小按钮，点开统一面板。
+  final VoidCallback? onOpenParseSniff;
+
   const WebviewPlayerPage({
     super.key,
     required this.url,
     this.title,
     this.embedded = false,
     this.forceLandscape = true,
+    this.onOpenParseSniff,
   });
 
   @override
@@ -216,6 +224,27 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
     super.dispose();
   }
 
+  /// 右上角「解析 / 嗅探」小按钮（仅内嵌模式、且调用方传了回调时显示）
+  Widget _parseSniffButton() {
+    return GestureDetector(
+      onTap: widget.onOpenParseSniff,
+      child: Container(
+        width: 34,
+        height: 34,
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.45),
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
+        ),
+        child: const Icon(
+          Icons.auto_fix_high_rounded,
+          size: 18,
+          color: Colors.white,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final body = Column(
@@ -312,7 +341,14 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
         aspectRatio: 4 / 3,
         child: ColoredBox(
           color: Colors.black,
-          child: body,
+          child: Stack(
+            children: [
+              Positioned.fill(child: body),
+              // 网页兜底播放没有底栏 → 右上角补一个「解析 / 嗅探」入口
+              if (widget.onOpenParseSniff != null)
+                Positioned(top: 6, right: 6, child: _parseSniffButton()),
+            ],
+          ),
         ),
       );
     }

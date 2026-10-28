@@ -30,6 +30,7 @@ import 'package:tvbox/widgets/ks_player.dart';
 import 'package:tvbox/widgets/mpv_app_player.dart';
 import 'package:tvbox/widgets/video_player.dart';
 import 'package:tvbox/widgets/video_player_pip.dart';
+import 'package:tvbox/widgets/parse_sniff_sheet.dart';
 import 'package:tvbox/widgets/window_fullscreen.dart';
 import 'package:tvbox/pages/drama/drama_player_page.dart';
 import 'package:tvbox/pages/play/webview_player_page.dart';
@@ -1067,6 +1068,8 @@ class _DetailPageState extends State<DetailPage> {
         url: url,
         title: _controller.vodInfo.value?.name,
         embedded: true,
+        // 网页兜底播放没有底栏 → 右上角补「解析 / 嗅探」入口（2026-10-28）
+        onOpenParseSniff: _openParseSniffSheet,
       );
     }
     final headers = _controller.playHeaders.isNotEmpty
@@ -1081,6 +1084,8 @@ class _DetailPageState extends State<DetailPage> {
         url: url,
         title: _controller.vodInfo.value?.name,
         embedded: true,
+        // 网页兜底播放没有底栏 → 右上角补「解析 / 嗅探」入口（2026-10-28）
+        onOpenParseSniff: _openParseSniffSheet,
       );
     }
 
@@ -1177,17 +1182,11 @@ class _DetailPageState extends State<DetailPage> {
       },
       onSetSkipIntro: (s) => _controller.setSkipIntroSeconds(s),
       onSetSkipOutro: (s) => _controller.setSkipOutroSeconds(s),
-      // 底栏「嗅探 / 解析」——用户 2026-10-14 要求加在播放器下面的工具栏：
-      //   嗅探 = 打开 WebView 手动抓页面里的媒体地址；
-      //   解析 = 弹层切换解析线路（选中后用新线路重解当前集）。
-      // 2026-10-15：两个总开关关闭时传 null，VideoPlayerWidget 内部会
-      // 自动隐藏对应按钮（本方法在 Obx 内被调用，开关切换实时显隐）。
-      onSniff: PlayerPrefs.instance.sniffEnabled.value
-          ? _controller.openSniff
-          : null,
-      onSwitchParse: PlayerPrefs.instance.parseEnabled.value
-          ? _openParseLineSheet
-          : null,
+      // 底栏「解析 / 嗅探」统一入口（2026-10-28）：一个按钮 + 一个面板。
+      // 面板里同时有嗅探开关、立即嗅探、解析开关和线路切换 ——
+      // 用户 2026-10-28：「将嗅探开关和解析切换放在一个按钮以及弹出面板呢？」
+      // 恒传（不再依赖两个总开关），否则会出现"开了嗅探却看不到按钮"。
+      onOpenParseSniff: _openParseSniffSheet,
       // 播放器错误（原生 onError / 加载失败）以前无处可去，只表现为白转圈；
       // 这里接进控制器的错误态，详情页即可显示文案 + 重试。
       onError: () => _controller.setPlaybackError('播放失败，请点重试或切换其他线路'),
@@ -1205,81 +1204,22 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
-  /// 底栏「解析」：弹出解析线路列表；选中后用新线路重解当前集。
+  /// 底栏「解析 / 嗅探」统一面板（2026-10-28）。
   ///
-  /// 线路来自 [ApiConfig.parseBeanList]（= ParseStore 的持久化列表，订阅下发的
-  /// 只并入不清空）。第一项是「自动」= 按顺序依次尝试。
-  Future<void> _openParseLineSheet() async {
-    final lines = ApiConfig.instance.parseBeanList;
-    final active = ParseStore.instance.activeUrl;
-    final picked = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: AppTheme.backgroundSecondary,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) {
-        return SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const _SheetGrabber(),
-              _SheetHeader(
-                title: '解析线路',
-                subtitle: '选中后会用新线路重新解析当前集',
-                trailing: '${lines.length} 条',
-              ),
-              if (lines.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 10, 24, 26),
-                  child: Text(
-                    '还没有解析线路。\n可在 设置 → 订阅管理 → 解析线路管理 里添加。',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: AppTheme.textTertiary,
-                      fontSize: 12,
-                      height: 1.6,
-                    ),
-                  ),
-                )
-              else
-                ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxHeight: MediaQuery.of(ctx).size.height * 0.5,
-                  ),
-                  child: ListView.separated(
-                    shrinkWrap: true,
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                    itemCount: lines.length + 1,
-                    separatorBuilder: (_, __) => const SizedBox(height: 6),
-                    itemBuilder: (c, i) {
-                      if (i == 0) {
-                        return _SheetOptionTile(
-                          title: '自动（按顺序尝试）',
-                          subtitle: '按线路列表顺序依次尝试，谁先返回用谁',
-                          selected: active.isEmpty,
-                          onTap: () => Navigator.of(ctx).pop(''),
-                        );
-                      }
-                      final b = lines[i - 1];
-                      return _SheetOptionTile(
-                        title: b.name.isEmpty ? b.url : b.name,
-                        subtitle: b.url,
-                        selected: active == b.url,
-                        onTap: () => Navigator.of(ctx).pop(b.url),
-                      );
-                    },
-                  ),
-                ),
-              const SizedBox(height: 10),
-            ],
-          ),
-        );
-      },
+  /// 一个入口里同时管：
+  ///   · 嗅探总开关 + 「立即嗅探当前页」（原来要先去设置里开开关，按钮才会
+  ///     出现在底栏 —— 用户 2026-10-28「嗅探打开后也没有嗅探按钮」）；
+  ///   · 解析总开关 + 解析线路切换（线路来自 [ParseStore]，与
+  ///     「设置 → 订阅管理 → 解析线路管理」是**同一份**持久化列表）。
+  ///
+  /// 选线路后用新线路重解当前集，见 [DetailController.selectParseLine]。
+  Future<void> _openParseSniffSheet() async {
+    await ParseSniffSheet.show(
+      context,
+      onSniff: _controller.openSniff,
+      onPickLine: (url) => _controller.selectParseLine(url),
     );
-    if (picked == null) return; // null = 用户取消；'' = 选了「自动」
-    await _controller.selectParseLine(picked);
+    if (mounted) setState(() {});
   }
 
   /// 判断播放 URL 是否为"网页播放器页"（需 WebView 兜底）而非直链媒体。
@@ -2829,14 +2769,16 @@ class _SheetOptionTile extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.leading,
-    this.selected = false,
     required this.onTap,
   });
 
   final String title;
   final String? subtitle;
   final Widget? leading;
-  final bool selected;
+
+  /// 目前所有调用方都不需要"选中态"（解析线路的选中态已改到
+  /// `ParseSniffSheet` 里）；保留字段让样式分支不动，恒 false。
+  final bool selected = false;
   final VoidCallback onTap;
 
   @override

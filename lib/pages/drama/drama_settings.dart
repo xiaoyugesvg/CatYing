@@ -19,6 +19,10 @@ class DramaSettings {
   static const _kKeywords = 'drama_keywords_v1';
   static const _kSources = 'drama_source_keys_v1';
   static const _kGroups = 'drama_groups_v1';
+  static const _kListCache = 'drama_list_cache_v1';
+
+  /// 列表缓存最多保留几个「源 · 分类」（LRU，防止无限膨胀）
+  static const int _listCacheMax = 12;
 
   /// 短剧页当前看的源（单源模式）。
   ///
@@ -193,6 +197,64 @@ class DramaSettings {
     try {
       final sp = await SharedPreferences.getInstance();
       await sp.setString(_kGroups, jsonEncode(rows));
+    } catch (_) {}
+  }
+
+  // ============================================================
+  // 第一页列表缓存（2026-10-28）
+  // ============================================================
+  //
+  // 用户 2026-10-28：「刷新，连原先明明有都没法出现了…选中的不能缓存一哈吗？」
+  // 分类缓存只解决了「扫哪几个分类」，**列表本身**每次都还要打一次接口；
+  // 站点抖动时列表拉空 → 页面直接变「这个短剧分类还没有内容」。
+  // 这里把每个「源 · 分类」的第一页落盘，刷新失败时先显示上次内容。
+
+  static String _listKey(String sourceKey, String sortId) =>
+      '$sourceKey|$sortId';
+
+  static Future<Map<String, dynamic>> _listCacheMap() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final raw = sp.getString(_kListCache);
+      if (raw == null || raw.isEmpty) return <String, dynamic>{};
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+    } catch (_) {}
+    return <String, dynamic>{};
+  }
+
+  /// 取某个「源 · 分类」上次缓存的第一页；没有返回 null。
+  static Future<List<Map<String, dynamic>>?> cachedList(
+    String sourceKey,
+    String sortId,
+  ) async {
+    final all = await _listCacheMap();
+    final rows = all[_listKey(sourceKey, sortId)];
+    if (rows is! List || rows.isEmpty) return null;
+    return [
+      for (final e in rows)
+        if (e is Map) Map<String, dynamic>.from(e),
+    ];
+  }
+
+  /// 存某个「源 · 分类」的第一页（超过上限时按插入顺序淘汰最旧的）。
+  static Future<void> saveList(
+    String sourceKey,
+    String sortId,
+    List<Map<String, dynamic>> rows,
+  ) async {
+    if (rows.isEmpty) return;
+    try {
+      final all = await _listCacheMap();
+      final key = _listKey(sourceKey, sortId);
+      // 重新插入到末尾 = 最近使用
+      all.remove(key);
+      all[key] = rows;
+      while (all.length > _listCacheMax) {
+        all.remove(all.keys.first);
+      }
+      final sp = await SharedPreferences.getInstance();
+      await sp.setString(_kListCache, jsonEncode(all));
     } catch (_) {}
   }
 }
