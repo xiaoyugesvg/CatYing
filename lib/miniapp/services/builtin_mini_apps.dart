@@ -39,16 +39,9 @@ class BuiltinMiniApp {
   final String description;
 }
 
-/// 全部内置小程序
-const List<BuiltinMiniApp> kBuiltinMiniApps = <BuiltinMiniApp>[
-  BuiltinMiniApp(
-    appId: 'catpawplay',
-    name: 'CatPawPlay',
-    assetZip: 'assets/miniapps/catpawplay.zip',
-    version: 1,
-    description: 'Node 后端 + 网页界面（内置，无需联网安装）',
-  ),
-];
+/// 全部内置小程序（当前未内置任何小程序；保留注册表机制，后续要加内置程序
+/// 时在此追加条目即可，见文件顶部说明）。
+const List<BuiltinMiniApp> kBuiltinMiniApps = <BuiltinMiniApp>[];
 
 /// 按 appId 找内置项（不是内置的返回 null）
 BuiltinMiniApp? builtinById(String appId) {

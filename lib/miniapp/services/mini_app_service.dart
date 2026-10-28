@@ -425,7 +425,7 @@ class MiniAppService extends GetxService {
   static const String _kBuiltinRemoved = 'miniapp_builtin_removed_v1';
 
   /// 覆盖更新时要**保留**的数据文件（相对小程序目录）。
-  /// 小程序自己的数据（如 CatPawPlay 的收藏/设置）就写在这些文件里，
+  /// 小程序自己的数据（如收藏/设置）就写在这些文件里，
   /// 整目录覆盖会把它们冲掉，所以先读出来、解包后再写回。
   static const List<String> _builtinKeepFiles = <String>[
     'default.db.json',
