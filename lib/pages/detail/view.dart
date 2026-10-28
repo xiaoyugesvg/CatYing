@@ -20,7 +20,6 @@ import 'package:tvbox/services/tmdb_service.dart';
 import 'package:tvbox/services/detail_page_controller.dart';
 import 'package:tvbox/services/player_fullscreen_controller.dart';
 import 'package:tvbox/services/player_prefs.dart';
-import 'package:tvbox/services/parse_store.dart';
 import 'package:tvbox/services/play_route.dart';
 import 'package:tvbox/services/sniff_filter.dart';
 import 'package:tvbox/widgets/common_widgets.dart';
@@ -966,17 +965,57 @@ class _DetailPageState extends State<DetailPage> {
         _playerErrorTimer = null;
         return _buildPlayerWidget(isFull: isFull, isPip: isPip);
       } else if (_controller.errorMessage.value != null) {
-        // 解析失败（Spider 地址解析失败 / 上下文缺失等）：必须给出可见提示，
-        // 旧逻辑在这里只渲染转圈 → 用户看到无限 loading，既无文案也无重试入口。
+        // 解析失败（Spider 地址解析失败 / 上下文缺失 / 网页播放页没开嗅探等）：
+        // 不要把播放区整块换成纯错误页——那样底栏「嗅 / 解」按钮也跟着没了，
+        // 用户既看不到入口、也点不动，等于死循环（用户 2026-10-28）。
+        // 改成在播放区**内部**显示错误文案 + 重试 + 直接开「嗅探 / 解析」入口。
         _playerErrorTimer?.cancel();
         _playerErrorTimer = null;
+        final msg = _controller.errorMessage.value!;
         return AspectRatio(
           aspectRatio: 4 / 3,
           child: Container(
             color: Colors.black,
-            child: AppError(
-              message: _controller.errorMessage.value!,
-              onRetry: () => _controller.retryCurrentEpisode(),
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.error_outline_rounded,
+                    color: Colors.white70, size: 40),
+                const SizedBox(height: 14),
+                Text(
+                  msg,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    _errorActionButton(
+                      '重试',
+                      Icons.refresh_rounded,
+                      () => _controller.retryCurrentEpisode(),
+                    ),
+                    _errorActionButton(
+                      '嗅',
+                      Icons.travel_explore_rounded,
+                      () => _openSniffSheet(),
+                    ),
+                    _errorActionButton(
+                      '解',
+                      Icons.workspace_premium_rounded,
+                      () => _openParseSheet(),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
         );
@@ -1068,8 +1107,9 @@ class _DetailPageState extends State<DetailPage> {
         url: url,
         title: _controller.vodInfo.value?.name,
         embedded: true,
-        // 网页兜底播放没有底栏 → 右上角补「解析 / 嗅探」入口（2026-10-28）
-        onOpenParseSniff: _openParseSniffSheet,
+        // 网页兜底播放没有底栏 → 右上角补「嗅探 / 解析」两个入口（2026-10-28）
+        onSniff: _openSniffSheet,
+        onSwitchParse: _openParseSheet,
       );
     }
     final headers = _controller.playHeaders.isNotEmpty
@@ -1084,8 +1124,9 @@ class _DetailPageState extends State<DetailPage> {
         url: url,
         title: _controller.vodInfo.value?.name,
         embedded: true,
-        // 网页兜底播放没有底栏 → 右上角补「解析 / 嗅探」入口（2026-10-28）
-        onOpenParseSniff: _openParseSniffSheet,
+        // 网页兜底播放没有底栏 → 右上角补「嗅探 / 解析」两个入口（2026-10-28）
+        onSniff: _openSniffSheet,
+        onSwitchParse: _openParseSheet,
       );
     }
 
@@ -1182,11 +1223,10 @@ class _DetailPageState extends State<DetailPage> {
       },
       onSetSkipIntro: (s) => _controller.setSkipIntroSeconds(s),
       onSetSkipOutro: (s) => _controller.setSkipOutroSeconds(s),
-      // 底栏「解析 / 嗅探」统一入口（2026-10-28）：一个按钮 + 一个面板。
-      // 面板里同时有嗅探开关、立即嗅探、解析开关和线路切换 ——
-      // 用户 2026-10-28：「将嗅探开关和解析切换放在一个按钮以及弹出面板呢？」
-      // 恒传（不再依赖两个总开关），否则会出现"开了嗅探却看不到按钮"。
-      onOpenParseSniff: _openParseSniffSheet,
+      // 底栏「嗅探」「解析」两个独立按钮（2026-10-28 改为常驻、不依赖开关）：
+      // 分别打开对应面板，面板开关与「设置」实时同步。
+      onSniff: _openSniffSheet,
+      onSwitchParse: _openParseSheet,
       // 播放器错误（原生 onError / 加载失败）以前无处可去，只表现为白转圈；
       // 这里接进控制器的错误态，详情页即可显示文案 + 重试。
       onError: () => _controller.setPlaybackError('播放失败，请点重试或切换其他线路'),
@@ -1204,22 +1244,61 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
-  /// 底栏「解析 / 嗅探」统一面板（2026-10-28）。
-  ///
-  /// 一个入口里同时管：
-  ///   · 嗅探总开关 + 「立即嗅探当前页」（原来要先去设置里开开关，按钮才会
-  ///     出现在底栏 —— 用户 2026-10-28「嗅探打开后也没有嗅探按钮」）；
-  ///   · 解析总开关 + 解析线路切换（线路来自 [ParseStore]，与
-  ///     「设置 → 订阅管理 → 解析线路管理」是**同一份**持久化列表）。
-  ///
-  /// 选线路后用新线路重解当前集，见 [DetailController.selectParseLine]。
-  Future<void> _openParseSniffSheet() async {
+  /// 底栏「嗅探」按钮 → 只开嗅探面板（嗅探总开关 + 播放带 Referer +
+  /// 「开启嗅探并嗅探 / 立即嗅探当前页」）。面板开关与「设置」实时同步。
+  Future<void> _openSniffSheet() async {
     await ParseSniffSheet.show(
       context,
+      section: ParseSniffSection.sniff,
       onSniff: _controller.openSniff,
+    );
+    if (mounted) setState(() {});
+  }
+
+  /// 底栏「解析」按钮 → 只开解析面板（解析总开关 + 脚本内置优先级 +
+  /// 线路列表；选中即重解当前集，见 [DetailController.selectParseLine]）。
+  Future<void> _openParseSheet() async {
+    await ParseSniffSheet.show(
+      context,
+      section: ParseSniffSection.parse,
       onPickLine: (url) => _controller.selectParseLine(url),
     );
     if (mounted) setState(() {});
+  }
+
+  /// 错误态下的操作按钮（重试 / 嗅 / 解），统一圆角样式，保证失败页也能
+  /// 直接进嗅探 / 解析，不再"顶掉播放器导致死循环"（2026-10-28）。
+  Widget _errorActionButton(String label, IconData icon, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.2),
+            width: 0.5,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 17, color: Colors.white),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// 判断播放 URL 是否为"网页播放器页"（需 WebView 兜底）而非直链媒体。

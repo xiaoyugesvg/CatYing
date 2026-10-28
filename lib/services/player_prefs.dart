@@ -224,7 +224,7 @@ class PlayerPrefs {
         VLCBufferMode.fromStoredValue(prefs.getInt('play_vlc_buffer_mode') ?? 0);
     avAutoNext.value = prefs.getBool('av_auto_next') ?? true;
     webviewForceLandscape.value =
-        prefs.getBool('webview_force_landscape') ?? true;
+        prefs.getBool('webview_force_landscape') ?? false;
     webviewEnableJs.value = prefs.getBool('webview_enable_js') ?? true;
 
     // 嗅探 / 解析规则：

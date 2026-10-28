@@ -2,7 +2,12 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 
+import 'package:tvbox/pages/play/sniff_player_page.dart';
+import 'package:tvbox/services/parse_service.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/parse_sniff_sheet.dart';
 import 'package:tvbox/widgets/video_player.dart';
 
 /// URL 直播放页（ant.player.open 用）。
@@ -31,6 +36,12 @@ class _MiniAppPlayerPageState extends State<MiniAppPlayerPage> {
 
   /// TG 播放失败的具体原因（null = 探测通过 / 非 TG 不探测）
   String? _probeError;
+
+  /// 解析后替换的直链（null = 用 widget.url）。小程序 / RSS 这类纯 URL
+  /// 播放页没有详情页控制器，解析成功就靠它重载播放器（2026-10-28）。
+  String? _overrideUrl;
+
+  String get _effectiveUrl => _overrideUrl ?? widget.url;
 
   /// 是不是 TG 源的取流地址（本机回环 `/tg/…` 或远程 `…/tg/…`）
   bool get _isTg => widget.url.contains('/tg/');
@@ -111,14 +122,53 @@ class _MiniAppPlayerPageState extends State<MiniAppPlayerPage> {
       return _error(_probeError!);
     }
     return VideoPlayerWidget(
-      key: ValueKey('ant_player_${widget.url}'),
-      url: widget.url,
+      key: ValueKey('ant_player_${_effectiveUrl}'),
+      url: _effectiveUrl,
       videoTitle: widget.title.isEmpty ? '播放' : widget.title,
       headers: widget.headers,
       // 顶栏返回键由播放器自带、且**无条件显示**；不传 onBack 时点了
       // 什么都不会发生（只能靠系统手势退出）—— 2026-10-15 修复。
       // 从嗅探页进来时回到嗅探页，从小程序进来时回到小程序页。
       onBack: () => Navigator.of(context).maybePop(),
+      // 嗅探 / 解析：常驻按钮（2026-10-28）。小程序 / RSS 复用页没有详情页
+      // 控制器，这里用自包含逻辑 —— 嗅探打开嗅探页、解析用 ParseService 直解。
+      onSniff: _openSniff,
+      onSwitchParse: _openParse,
+    );
+  }
+
+  /// 嗅探：当前若是网页地址才嗅，否则提示。成功后由嗅探页自行跳转新播放页。
+  Future<void> _openSniff() async {
+    final url = _effectiveUrl;
+    if (!url.startsWith('http')) {
+      AppToast.message('当前地址不是网页，无法嗅探');
+      return;
+    }
+    Get.to(() => SniffPlayerPage(
+          url: url,
+          title: widget.title.isEmpty ? null : widget.title,
+          headers: widget.headers,
+        ));
+  }
+
+  /// 解析：选线路后用 ParseService 直解当前 URL，命中即重载播放器。
+  Future<void> _openParse() async {
+    await ParseSniffSheet.show(
+      context,
+      section: ParseSniffSection.parse,
+      onPickLine: (url) async {
+        final resolved =
+            await ParseService.instance.parse(_effectiveUrl, headers: widget.headers);
+        if (!mounted) return;
+        if (resolved != null && resolved != _effectiveUrl) {
+          setState(() => _overrideUrl = resolved);
+          AppToast.message('解析成功，已切换直链');
+        } else if (resolved == null) {
+          AppToast.message('解析失败，请换条线路或检查网络');
+        } else {
+          AppToast.message('该线路未解析出可用直链');
+        }
+      },
     );
   }
 

@@ -37,7 +37,7 @@ class _SniffSettingsPageState extends State<SniffSettingsPage> {
   @override
   Widget build(BuildContext context) {
     return SettingsSubPage(
-      title: '嗅探设置',
+      title: '嗅探 / 解析',
       action: TextButton(
         onPressed: _reset,
         child: Text('恢复默认',

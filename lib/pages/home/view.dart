@@ -294,7 +294,9 @@ class _HomePageState extends State<HomePage> {
                   .toList();
               return ListView.builder(
                 scrollDirection: Axis.horizontal,
-                padding: EdgeInsets.zero,
+                // 右侧留白：最后一枚分类芯片不与分隔线/筛选按钮贴死，
+                // 避免因贴边被视觉"吃掉"一截（2026-10-28）。
+                padding: const EdgeInsets.only(right: 4),
                 itemCount: sorts.length,
                 itemBuilder: (context, index) {
                   final sort = sorts[index];

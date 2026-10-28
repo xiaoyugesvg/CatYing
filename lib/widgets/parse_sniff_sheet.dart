@@ -1,22 +1,25 @@
 // lib/widgets/parse_sniff_sheet.dart
 //
-// 「解析 / 嗅探」统一面板（2026-10-28）。
+// 「嗅探 / 解析」面板（2026-10-28 初版，2026-10-28 重构）。
 //
 // ── 解决什么 ─────────────────────────────────────────────────
-// 用户 2026-10-28：「将嗅探开关和解析切换放在一个按钮以及弹出面板呢？」
-// 原来播放器底栏是**两个独立按钮**（嗅探 / 解析），而且只有当对应总开关
-// 已经打开时才出现 —— 用户开了嗅探却看不到按钮、想切解析线路又找不到入口，
-// 尤其在「官方聚合 → 爱奇艺链接 → 解析站 IP 超限」这种场景下完全没法自救。
+// 用户 2026-10-28 两版诉求：
+//   ①「将嗅探开关和解析切换放在一个按钮以及弹出面板」→ 初版合成一个按钮；
+//   ② 随后改为「嗅探和解析是单独的，不是要开嗅探才有按钮」→ 本版拆回两个
+//      独立按钮，但面板仍按 `section` 聚焦（嗅探区 / 解析区 / 两者），避免
+//      一个按钮里塞太多东西。
 //
-// 现在合成一个按钮，点开就是这个面板：
-//   · 嗅探开关（写 PlayerPrefs.sniffEnabled）+ 「立即嗅探当前页」
-//   · 解析开关（写 PlayerPrefs.parseEnabled）
-//   · 解析线路列表（唯一事实来源 = ParseStore，与「设置 → 解析线路管理」同一份）
-//     点一条 = 设为当前线路并回调，由调用方重新解析当前集。
+// 关键约束（来自用户 2026-10-28 长消息）：
+//   · 播放器上的「嗅探」「解析」两个按钮**无论设置开关是否打开都必须存在**
+//     （`video_player.dart` 底栏据此常驻显示，`onSniff`/`onSwitchParse` 不为
+//     null 即显示），否则「嗅探关着 → 按钮消失 → 点不开 → 死循环」。
+//   · 面板里的开关要和「设置」实时同步 —— 这里全部用 `Obx` 直读
+//     `PlayerPrefs` 的 Rx，任何一处改动另一处立刻反映。
 //
 // 面板本身不持有播放器状态，全部通过回调交给页面，避免和详情页/短剧页耦合。
 
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 
 import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/models/app_config.dart';
@@ -25,12 +28,28 @@ import 'package:tvbox/services/parse_service.dart';
 import 'package:tvbox/services/parse_store.dart';
 import 'package:tvbox/services/player_prefs.dart';
 
-class ParseSniffSheet extends StatefulWidget {
+/// 面板聚焦区域：决定只显示嗅探相关、还是只显示解析相关、还是全部。
+enum ParseSniffSection {
+  /// 两者都显示（详情页 WebView 兜底播放的右上角入口可用它）。
+  both,
+
+  /// 只显示嗅探区（底栏「嗅」按钮入口）。
+  sniff,
+
+  /// 只显示解析区（底栏「解析」按钮入口）。
+  parse,
+}
+
+class ParseSniffSheet extends StatelessWidget {
   const ParseSniffSheet({
     super.key,
+    this.section = ParseSniffSection.both,
     this.onSniff,
     this.onPickLine,
   });
+
+  /// 聚焦区域。
+  final ParseSniffSection section;
 
   /// 点「立即嗅探当前页」。null = 当前页面没有可嗅探的网页地址（按钮禁用）。
   final VoidCallback? onSniff;
@@ -41,6 +60,7 @@ class ParseSniffSheet extends StatefulWidget {
   /// 统一入口：从任意页面弹出这个面板。
   static Future<void> show(
     BuildContext context, {
+    ParseSniffSection section = ParseSniffSection.both,
     VoidCallback? onSniff,
     ValueChanged<String>? onPickLine,
   }) {
@@ -51,61 +71,32 @@ class ParseSniffSheet extends StatefulWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (_) => ParseSniffSheet(onSniff: onSniff, onPickLine: onPickLine),
+      builder: (_) => ParseSniffSheet(
+        section: section,
+        onSniff: onSniff,
+        onPickLine: onPickLine,
+      ),
     );
   }
 
-  @override
-  State<ParseSniffSheet> createState() => _ParseSniffSheetState();
-}
+  bool get _showSniff => section != ParseSniffSection.parse;
+  bool get _showParse => section != ParseSniffSection.sniff;
 
-class _ParseSniffSheetState extends State<ParseSniffSheet> {
-  late bool _sniff = PlayerPrefs.instance.sniffEnabled.value;
-  late bool _parse = PlayerPrefs.instance.parseEnabled.value;
-
-  /// 脚本内置解析优先（2026-10-28）：脚本声明 `parse:1` 时用它自己的解析，
-  /// 还是用下面这份线路列表。
-  late bool _preferScript = PlayerPrefs.instance.preferScriptParse.value;
-
-  List<ParseBean> get _lines => ParseStore.instance.list;
-  String get _active => ParseStore.instance.activeUrl;
-
-  Future<void> _toggleSniff(bool v) async {
-    setState(() => _sniff = v);
-    await PlayerPrefs.instance.setSniffEnabled(v);
-  }
-
-  Future<void> _toggleParse(bool v) async {
-    setState(() => _parse = v);
-    await PlayerPrefs.instance.setParseEnabled(v);
-  }
-
-  Future<void> _togglePreferScript(bool v) async {
-    setState(() => _preferScript = v);
-    await PlayerPrefs.instance.setPreferScriptParse(v);
-  }
-
-  void _sniffNow() {
-    final cb = widget.onSniff;
-    if (cb == null) return;
-    Navigator.of(context).pop();
-    cb();
-  }
-
-  Future<void> _pick(String url) async {
-    await ParseStore.instance.setActive(url);
-    // 与「解析线路管理」同一套同步：灌回 Rx + 清缓存，保证改完立即生效。
-    ApiConfig.instance.parseBeanList.value = ParseStore.instance.list;
-    ParseService.instance.clearCache();
-    if (!mounted) return;
-    Navigator.of(context).pop();
-    widget.onPickLine?.call(url);
+  String get _title {
+    switch (section) {
+      case ParseSniffSection.sniff:
+        return '嗅探';
+      case ParseSniffSection.parse:
+        return '解析线路';
+      case ParseSniffSection.both:
+        return '解析 / 嗅探';
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final lines = _lines;
-    final active = _active;
+    final lines = ParseStore.instance.list;
+    final active = ParseStore.instance.activeUrl;
     return SafeArea(
       top: false,
       child: Column(
@@ -126,7 +117,7 @@ class _ParseSniffSheetState extends State<ParseSniffSheet> {
             child: Row(
               children: [
                 Text(
-                  '解析 / 嗅探',
+                  _title,
                   style: TextStyle(
                     color: AppTheme.textPrimary,
                     fontSize: AppTheme.fontHeadline,
@@ -134,159 +125,240 @@ class _ParseSniffSheetState extends State<ParseSniffSheet> {
                   ),
                 ),
                 const Spacer(),
-                Text(
-                  '${lines.length} 条线路',
-                  style: TextStyle(
-                    color: AppTheme.textTertiary,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // ── 开关区 ─────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Container(
-              decoration: BoxDecoration(
-                color: AppTheme.backgroundTertiary,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Column(
-                children: [
-                  _switchRow(
-                    icon: Icons.travel_explore_rounded,
-                    title: '嗅探',
-                    subtitle: '网页播放页抓不到地址时，用网页嗅探找媒体链接',
-                    value: _sniff,
-                    onChanged: _toggleSniff,
-                  ),
-                  Divider(
-                    height: 0.5,
-                    indent: 46,
-                    endIndent: 12,
-                    color: AppTheme.textTertiary.withValues(alpha: 0.18),
-                  ),
-                  _switchRow(
-                    icon: Icons.workspace_premium_rounded,
-                    title: '解析',
-                    subtitle: '用解析线路把网页地址换成可播放直链',
-                    value: _parse,
-                    onChanged: _toggleParse,
-                  ),
-                  Divider(
-                    height: 0.5,
-                    indent: 46,
-                    endIndent: 12,
-                    color: AppTheme.textTertiary.withValues(alpha: 0.18),
-                  ),
-                  // 2026-10-28：脚本自带解析时的优先级（用户问「如果脚本有
-                  // 内置的咋弄？」）。开 = 尊重脚本；关 = 一律用下面的线路。
-                  _switchRow(
-                    icon: Icons.extension_rounded,
-                    title: '优先用脚本内置解析',
-                    subtitle: _preferScript
-                        ? '脚本声明要解析时，直接用它自己的解析站'
-                        : '一律用你的解析线路（会剥掉脚本解析地址的外壳重解）',
-                    value: _preferScript,
-                    onChanged: _togglePreferScript,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (_sniff)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton.tonalIcon(
-                  onPressed: widget.onSniff == null ? null : _sniffNow,
-                  icon: const Icon(Icons.radar_rounded, size: 18),
-                  label: Text(
-                    widget.onSniff == null ? '当前没有可嗅探的网页' : '立即嗅探当前页',
-                  ),
-                ),
-              ),
-            ),
-          // ── 线路列表 ───────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
-            child: Row(
-              children: [
-                Text(
-                  '解析线路',
-                  style: TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: AppTheme.fontFootnote,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const Spacer(),
-                Flexible(
-                  child: Text(
-                    !_parse
-                        ? '解析开关已关闭'
-                        : (_preferScript
-                            ? '选线路会自动改为优先用你的线路'
-                            : '选中后重新解析当前集'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.right,
+                if (_showParse)
+                  Text(
+                    '${lines.length} 条线路',
                     style: TextStyle(
                       color: AppTheme.textTertiary,
-                      fontSize: 11,
+                      fontSize: 12,
                     ),
                   ),
-                ),
               ],
             ),
           ),
-          ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.42,
-            ),
-            child: ListView.separated(
-              shrinkWrap: true,
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              itemCount: lines.length + 1,
-              separatorBuilder: (_, __) => const SizedBox(height: 6),
-              itemBuilder: (c, i) {
-                if (i == 0) {
-                  return _lineTile(
-                    title: '自动（按顺序尝试）',
-                    subtitle: '按线路列表顺序依次尝试，命中即用',
-                    selected: active.isEmpty,
-                    onTap: () => _pick(''),
-                  );
-                }
-                final b = lines[i - 1];
-                return _lineTile(
-                  title: b.name.trim().isEmpty ? b.url : b.name,
-                  subtitle: b.url,
-                  selected: active == b.url,
-                  onTap: () => _pick(b.url),
-                );
-              },
-            ),
-          ),
-          if (lines.isEmpty)
+
+          // ── 嗅探区 ─────────────────────────────────────────────
+          if (_showSniff) _sniffSection(context),
+
+          // 两个区都显示时，中间加一条分隔
+          if (_showSniff && _showParse)
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 4, 24, 16),
-              child: Text(
-                '还没有解析线路。\n可在 设置 → 订阅管理 → 解析线路管理 里添加。',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppTheme.textTertiary,
-                  fontSize: 12,
-                  height: 1.6,
-                ),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: Divider(
+                height: 0.5,
+                color: AppTheme.textTertiary.withValues(alpha: 0.18),
               ),
             ),
+
+          // ── 解析区 ─────────────────────────────────────────────
+          if (_showParse) _parseSection(context: context, lines: lines, active: active),
+
           const SizedBox(height: 8),
         ],
       ),
     );
+  }
+
+  /// 嗅探区：嗅探总开关（实时同步设置）+ 「立即嗅探当前页」。
+  Widget _sniffSection(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Column(
+          children: [
+            // 嗅探总开关：直读 PlayerPrefs（Obx），与「设置」实时同步。
+            Obx(() => _switchRow(
+                  icon: Icons.travel_explore_rounded,
+                  title: '自动嗅探',
+                  subtitle: '网页播放页抓不到地址时，用网页嗅探找媒体链接',
+                  value: PlayerPrefs.instance.sniffEnabled.value,
+                  onChanged: (v) => PlayerPrefs.instance.setSniffEnabled(v),
+                )),
+            Divider(
+              height: 0.5,
+              indent: 46,
+              endIndent: 12,
+              color: AppTheme.textTertiary.withValues(alpha: 0.18),
+            ),
+            // 「播发带 Referer」也归到嗅探区（防盗链，常和嗅探一起用）
+            Obx(() => _switchRow(
+                  icon: Icons.link_outlined,
+                  title: '播放带 Referer',
+                  subtitle: '用页面地址做防盗链，部分站点必须带才能播',
+                  value: PlayerPrefs.instance.sniffSendReferer.value,
+                  onChanged: (v) =>
+                      PlayerPrefs.instance.setSniffSendReferer(v),
+                )),
+            // 「立即嗅探当前页」：常驻显示（用户要求"不管设置有没有打开"
+            // 都要能点到）。嗅探关着时点它会先开嗅探再嗅探，避免死循环。
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              child: Obx(() {
+                final sniffOn = PlayerPrefs.instance.sniffEnabled.value;
+                final disabled = onSniff == null;
+                return SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.tonalIcon(
+                    onPressed: disabled
+                        ? null
+                        : () {
+                            // 没开嗅探 → 先开（写入即与设置同步），再嗅探
+                            if (!sniffOn) {
+                              PlayerPrefs.instance.setSniffEnabled(true);
+                            }
+                            Navigator.of(context).pop();
+                            onSniff!();
+                          },
+                    icon: const Icon(Icons.radar_rounded, size: 18),
+                    label: Text(disabled
+                        ? '当前没有可嗅探的网页'
+                        : (sniffOn
+                            ? '立即嗅探当前页'
+                            : '开启嗅探并嗅探')),
+                  ),
+                );
+              }),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 解析区：解析总开关（实时同步）+ 脚本内置优先级 + 线路列表。
+  Widget _parseSection({
+    required BuildContext context,
+    required List<ParseBean> lines,
+    required String active,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Column(
+          children: [
+            Obx(() => _switchRow(
+                  icon: Icons.workspace_premium_rounded,
+                  title: '解析接口',
+                  subtitle: '用解析线路把网页地址换成可播放直链',
+                  value: PlayerPrefs.instance.parseEnabled.value,
+                  onChanged: (v) => PlayerPrefs.instance.setParseEnabled(v),
+                )),
+            Divider(
+              height: 0.5,
+              indent: 46,
+              endIndent: 12,
+              color: AppTheme.textTertiary.withValues(alpha: 0.18),
+            ),
+            // 脚本自带解析时的优先级（尊重脚本 / 一律用你的线路）
+            Obx(() => _switchRow(
+                  icon: Icons.extension_rounded,
+                  title: '优先用脚本内置解析',
+                  subtitle: PlayerPrefs.instance.preferScriptParse.value
+                      ? '脚本声明要解析时，直接用它自己的解析站'
+                      : '一律用你的解析线路（会剥掉脚本解析地址的外壳重解）',
+                  value: PlayerPrefs.instance.preferScriptParse.value,
+                  onChanged: (v) =>
+                      PlayerPrefs.instance.setPreferScriptParse(v),
+                )),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
+              child: Row(
+                children: [
+                  Text(
+                    '解析线路',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: AppTheme.fontFootnote,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const Spacer(),
+                  Flexible(
+                    child: Obx(() => Text(
+                      !PlayerPrefs.instance.parseEnabled.value
+                          ? '解析开关已关闭'
+                          : (PlayerPrefs.instance.preferScriptParse.value
+                              ? '选线路会自动改为优先用你的线路'
+                              : '选中后重新解析当前集'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                        color: AppTheme.textTertiary,
+                        fontSize: 11,
+                      ),
+                    )),
+                  ),
+                ],
+              ),
+            ),
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.42,
+              ),
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                itemCount: lines.length + 1,
+                separatorBuilder: (_, __) => const SizedBox(height: 6),
+                itemBuilder: (c, i) {
+                  if (i == 0) {
+                    return _lineTile(
+                      title: '自动（按顺序尝试）',
+                      subtitle: '按线路列表顺序依次尝试，命中即用',
+                      selected: active.isEmpty,
+                      onTap: () => _pick('', context),
+                    );
+                  }
+                  final b = lines[i - 1];
+                  return _lineTile(
+                    title: b.name.trim().isEmpty ? b.url : b.name,
+                    subtitle: b.url,
+                    selected: active == b.url,
+                    onTap: () => _pick(b.url, context),
+                  );
+                },
+              ),
+            ),
+            if (lines.isEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 4, 24, 16),
+                child: Text(
+                  '还没有解析线路。\n可在 设置 → 订阅管理 → 解析线路管理 里添加。',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: 12,
+                    height: 1.6,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pick(String url, BuildContext context) async {
+    await ParseStore.instance.setActive(url);
+    // 与「解析线路管理」同一套同步：灌回 Rx + 清缓存，保证改完立即生效。
+    ApiConfig.instance.parseBeanList.value = ParseStore.instance.list;
+    ParseService.instance.clearCache();
+    if (url.isNotEmpty && !PlayerPrefs.instance.parseEnabled.value) {
+      // 用户主动选线路 = 明确要用解析：解析总开关若关着，顺手打开，
+      // 否则 ParseService.enabled 为 false，选了也不生效。
+      await PlayerPrefs.instance.setParseEnabled(true);
+    }
+    if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+    onPickLine?.call(url);
   }
 
   Widget _switchRow({

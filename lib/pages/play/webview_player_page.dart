@@ -28,12 +28,13 @@ class WebviewPlayerPage extends StatefulWidget {
   /// 那些页面是按竖屏排版的，横过来只露出一半（用户 2026-10-18 反馈）。
   final bool forceLandscape;
 
-  /// 「解析 / 嗅探」面板入口（2026-10-28）。
-  ///
-  /// 网页兜底播放时**没有** VideoPlayerWidget 的底栏，用户看不到解析/嗅探
-  /// 入口 —— 而「解析站 IP 超限」这类页面恰恰最需要换解析线路。传了它就在
-  /// 右上角叠一个小按钮，点开统一面板。
-  final VoidCallback? onOpenParseSniff;
+  /// 内嵌模式右上角的「嗅探」入口（2026-10-28）：网页兜底播放没有 VideoPlayerWidget
+  /// 底栏，用户看不到嗅探/解析入口 —— 而「解析站 IP 超限」这类页面恰恰最需要
+  /// 换线路。传了就显示右上角浮钮。
+  final VoidCallback? onSniff;
+
+  /// 内嵌模式右上角的「解析」入口。
+  final VoidCallback? onSwitchParse;
 
   const WebviewPlayerPage({
     super.key,
@@ -41,7 +42,8 @@ class WebviewPlayerPage extends StatefulWidget {
     this.title,
     this.embedded = false,
     this.forceLandscape = true,
-    this.onOpenParseSniff,
+    this.onSniff,
+    this.onSwitchParse,
   });
 
   @override
@@ -224,10 +226,39 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
     super.dispose();
   }
 
-  /// 右上角「解析 / 嗅探」小按钮（仅内嵌模式、且调用方传了回调时显示）
-  Widget _parseSniffButton() {
+  /// 内嵌模式右上角「嗅探 / 解析」两个浮钮（2026-10-28：拆成两个独立按钮，
+  /// 无论开关是否打开都常驻显示）。
+  Widget _sniffParseButtons() {
+    final children = <Widget>[];
+    if (widget.onSniff != null) {
+      children.add(_roundFab(
+        label: '嗅',
+        color: const Color(0xFF4c8dff),
+        onTap: widget.onSniff!,
+      ));
+    }
+    if (widget.onSwitchParse != null) {
+      children.add(_roundFab(
+        label: '解',
+        color: const Color(0xFFffd54a),
+        onTap: widget.onSwitchParse!,
+      ));
+    }
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: children
+          .map((w) => Padding(padding: const EdgeInsets.only(bottom: 8), child: w))
+          .toList(),
+    );
+  }
+
+  Widget _roundFab({
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
     return GestureDetector(
-      onTap: widget.onOpenParseSniff,
+      onTap: onTap,
       child: Container(
         width: 34,
         height: 34,
@@ -236,10 +267,15 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
           shape: BoxShape.circle,
           border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
         ),
-        child: const Icon(
-          Icons.auto_fix_high_rounded,
-          size: 18,
-          color: Colors.white,
+        child: Center(
+          child: Text(
+            label,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
         ),
       ),
     );
@@ -344,9 +380,13 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
           child: Stack(
             children: [
               Positioned.fill(child: body),
-              // 网页兜底播放没有底栏 → 右上角补一个「解析 / 嗅探」入口
-              if (widget.onOpenParseSniff != null)
-                Positioned(top: 6, right: 6, child: _parseSniffButton()),
+              // 网页兜底播放没有底栏 → 右上角补「嗅探 / 解析」两个入口
+              if (widget.onSniff != null || widget.onSwitchParse != null)
+                Positioned(
+                  top: 6,
+                  right: 6,
+                  child: _sniffParseButtons(),
+                ),
             ],
           ),
         ),

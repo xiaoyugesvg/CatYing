@@ -13,6 +13,7 @@ import 'package:tvbox/widgets/app_player.dart';
 import 'package:tvbox/widgets/ios_av_player.dart';
 import 'package:tvbox/widgets/ks_player.dart';
 import 'package:tvbox/widgets/mpv_app_player.dart';
+import 'package:tvbox/widgets/parse_sniff_sheet.dart';
 import 'package:tvbox/widgets/video_player.dart';
 
 /// 媒体库播放器页（独立模块 `lib/pages/media_library/`）
@@ -216,6 +217,17 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
           // 媒体库播放器：顶栏往下挪（避开状态栏）、底栏往上挪一点
           topBarTopPadding: 28,
           bottomBarBottomPadding: 16,
+          // 嗅探 / 解析：常驻按钮（2026-10-28），复用详情页控制器重解当前集。
+          onSniff: () => ParseSniffSheet.show(
+            context,
+            section: ParseSniffSection.sniff,
+            onSniff: () => widget.controller.openSniff(),
+          ),
+          onSwitchParse: () => ParseSniffSheet.show(
+            context,
+            section: ParseSniffSection.parse,
+            onPickLine: (url) => widget.controller.selectParseLine(url),
+          ),
           onPlayNext: () => _switchTo(_currentIndex + 1),
           onPlayPrevious: () => _switchTo(_currentIndex - 1),
           onSelectEpisode: (index) => _switchTo(index),
