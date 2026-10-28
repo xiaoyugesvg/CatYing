@@ -753,7 +753,9 @@ class _HomePageState extends State<HomePage> {
       return Container(
         margin: const EdgeInsets.fromLTRB(
           AppTheme.spacingLG,
-          0,
+          // 顶部留 8：与上面的分类标签行拉开距离，避免卡片顶边看起来"压住"
+          // 分类芯片（用户 2026-10-28 截图红框）。
+          AppTheme.spacingSM,
           AppTheme.spacingLG,
           AppTheme.spacingSM,
         ),
@@ -790,17 +792,42 @@ class _HomePageState extends State<HomePage> {
   ///   4. 源 filters 配置自带「全部/默认」首项时，**不再重复渲染固定「全部」**
   ///      （用户反馈：每个维度多了一列按钮，第二列点不动）——
   ///      直接渲染源返回的选项列表即可，与分类页筛选弹层样式一致。
+  /// 筛选组名的显示文本。
+  ///
+  /// TVBox 源的 `filters` 很常见**只给 key 不给 name**（`name` 为空串），
+  /// 原来直接渲染 `f.name` ⇒ 左侧固定宽度的组名列整块空白（用户 2026-10-28
+  /// 截图里红框圈的就是它）。这里按 key 映射成中文，再退回 key 本身，
+  /// 最后兜底「分类」，保证这一列永远有字。
+  static String _filterLabel(SortFilter f) {
+    final name = f.name.trim();
+    if (name.isNotEmpty) return name;
+    final key = f.key.trim();
+    const known = <String, String>{
+      'class': '类型',
+      'type': '类型',
+      'cate': '类型',
+      'category': '类型',
+      'area': '地区',
+      'region': '地区',
+      'year': '年份',
+      'lang': '语言',
+      'language': '语言',
+      'sort': '排序',
+      'letter': '字母',
+      'version': '版本',
+    };
+    final mapped = known[key.toLowerCase()];
+    if (mapped != null) return mapped;
+    return key.isNotEmpty ? key : '分类';
+  }
+
   Widget _filterRow(SortFilter f) {
     final selected = _controller.selectedFilters[f.key];
     final hasValidSelection =
         selected != null && f.values.any((v) => v.v == selected);
-    // 组名兜底：不少 TVBox 源的 filters 只给 key 不给 name（`name` 为空串），
-    // 原来直接渲染 f.name ⇒ 左侧固定 60pt 的组名列整块空白（用户 2026-10-28
-    // 截图 IMG_9547）。name 为空时退回 key，再不行给「分类」占位；
+    // 组名兜底：空 name → key 的中文映射 → key → 「分类」。
     // 文字色也从 textTertiary 提到 textSecondary（浅色卡片上更看得清）。
-    final label = f.name.trim().isNotEmpty
-        ? f.name.trim()
-        : (f.key.trim().isNotEmpty ? f.key.trim() : '分类');
+    final label = _filterLabel(f);
     return Row(
       // 顶部对齐：组名可能换行成两行，芯片列保持顶部对齐才整齐
       crossAxisAlignment: CrossAxisAlignment.start,
