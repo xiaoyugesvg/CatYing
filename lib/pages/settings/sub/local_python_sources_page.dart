@@ -18,6 +18,7 @@ import 'package:tvbox/widgets/card_action_sheet.dart';
 import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:tvbox/reading/widgets/swipe_action_tile.dart';
 import 'package:tvbox/pages/settings/sub/settings_shared.dart';
+import 'package:tvbox/pages/settings/sub/local_script_editor_page.dart';
 
 /// 设置 → 订阅管理 → 本地 Python 源
 ///
@@ -528,6 +529,31 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
       return;
     }
     await _afterChange();
+  }
+
+  /// 编辑脚本内容（2026-10-28）。
+  ///
+  /// 用户：「py 本地以及 js 本地源文件，加个修改脚本的功能呢」——
+  /// 原来只能导入 / 改名 / 分享 / 删除，改一行规则得去文件 App 里翻
+  /// `Documents/local_py/*.py`。这里给应用内编辑器，保存即写盘 + 重注册。
+  Future<void> _editScript(LocalPythonSource src) async {
+    final code = await LocalPythonSources.instance.readCode(src.key);
+    if (!mounted) return;
+    if (code == null) {
+      AppToast.error('找不到脚本文件');
+      return;
+    }
+    final saved = await Navigator.of(context).push<bool>(MaterialPageRoute(
+      settings: const RouteSettings(name: 'settings:localPyScript'),
+      builder: (_) => LocalScriptEditorPage(
+        title: src.name,
+        filename: '${src.key}.py',
+        initialCode: code,
+        language: 'python',
+        onSave: (c) => LocalPythonSources.instance.saveCode(src.key, c),
+      ),
+    ));
+    if (saved == true && mounted) await _afterChange();
   }
 
   Future<void> _shareKey(String key) async {
@@ -1316,8 +1342,13 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
           onTap: () => _probeOne(src),
         ),
         CardAction(
+          icon: Icons.code_rounded,
+          label: '改脚本',
+          onTap: () => _editScript(src),
+        ),
+        CardAction(
           icon: Icons.drive_file_rename_outline,
-          label: '编辑',
+          label: '改名',
           onTap: () => _renameKey(src.key, src.name),
         ),
         CardAction(

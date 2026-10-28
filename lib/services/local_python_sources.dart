@@ -523,6 +523,39 @@ class LocalPythonSources {
     }
   }
 
+  /// 修改某条本地源的脚本内容（用户 2026-10-28「加个修改脚本的功能」）。
+  ///
+  /// 写盘 + **重新注册**进引擎：Python 是常驻模块，只改文件不重注册的话
+  /// 解释器里跑的还是旧代码，用户会以为「改了没生效」。
+  /// 注册失败也**不删文件**（改动已经落盘），返回 ok=false 让 UI 提示重启。
+  Future<({bool ok, String? message})> saveCode(String key, String code) async {
+    await load();
+    final i = _sources.indexWhere((s) => s.key == key);
+    if (i < 0) return (ok: false, message: '源不存在');
+    final why = whyNotVideoSource(code);
+    if (why != null) return (ok: false, message: why);
+    try {
+      final dir = await directory();
+      if (!await dir.exists()) await dir.create(recursive: true);
+      await File('${dir.path}/$key.py').writeAsString(code, flush: true);
+    } catch (e) {
+      return (ok: false, message: '写入失败: $e');
+    }
+    if (PythonManager.instance.isIOS &&
+        await PythonManager.instance.ensureStarted()) {
+      final r = await PythonSourcesService.instance.registerSource(
+        'video',
+        key,
+        code,
+      );
+      if (!r.ok) {
+        return (ok: false, message: '已保存，但重新注册失败（重启后生效）：${r.message}');
+      }
+    }
+    AppLog.instance.log('[LocalPy] 已修改脚本 $key');
+    return (ok: true, message: null);
+  }
+
   /// 确保某条本地源已注册进当前解释器（重启/引擎重建后自愈用）。
   Future<bool> ensureRegistered(String key) async {
     if (!PythonManager.instance.isIOS) return false;

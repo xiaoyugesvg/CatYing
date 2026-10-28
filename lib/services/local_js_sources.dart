@@ -439,6 +439,28 @@ class LocalJsSources {
     }
   }
 
+  /// 修改某条本地源的脚本内容（用户 2026-10-28「加个修改脚本的功能」）。
+  ///
+  /// JS 是**单源按需加载**架构（同一时刻 Node 槽位里只有一份 index.js），
+  /// 这里只负责把文件写下去；下次选中 / 访问该源时 `loadSource` 会读新内容。
+  /// 如果改的正是当前源，UI 层会顺手 `loadSource` 一次让它立即生效。
+  Future<({bool ok, String? message})> saveCode(String key, String code) async {
+    await load();
+    final i = _sources.indexWhere((s) => s.key == key);
+    if (i < 0) return (ok: false, message: '源不存在');
+    final why = whyNotJsSource(code);
+    if (why != null) return (ok: false, message: why);
+    try {
+      final dir = await directory();
+      if (!await dir.exists()) await dir.create(recursive: true);
+      await File('${dir.path}/$key.js').writeAsString(code, flush: true);
+    } catch (e) {
+      return (ok: false, message: '写入失败: $e');
+    }
+    AppLog.instance.log('[LocalJs] 已修改脚本 $key');
+    return (ok: true, message: null);
+  }
+
   /// 记录一次使用（用于「频率」排序）
   Future<void> bumpUsage(String key) async {
     final i = _sources.indexWhere((s) => s.key == key);

@@ -13,6 +13,8 @@ import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/widgets/card_action_sheet.dart';
 import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:tvbox/pages/settings/sub/settings_shared.dart';
+import 'package:tvbox/pages/settings/sub/local_script_editor_page.dart';
+import 'package:tvbox/services/nodejs_manager.dart';
 
 /// 设置 → 订阅管理 → 本地 JS 源
 ///
@@ -252,6 +254,40 @@ class _LocalJsSourcesPageState extends State<LocalJsSourcesPage> {
     AppToast.message('已切换到「${src.name}」');
   }
 
+  /// 编辑脚本内容（2026-10-28）。
+  ///
+  /// 保存后若改的正是**当前源**，顺手让 Node 重新载入这份脚本 ——
+  /// JS 是单源槽位架构，不 reload 的话 Node 里跑的还是旧代码。
+  Future<void> _editScript(LocalJsSource src) async {
+    final code = await LocalJsSources.instance.readCode(src.key);
+    if (!mounted) return;
+    if (code == null) {
+      AppToast.error('找不到脚本文件');
+      return;
+    }
+    final saved = await Navigator.of(context).push<bool>(MaterialPageRoute(
+      settings: const RouteSettings(name: 'settings:localJsScript'),
+      builder: (_) => LocalScriptEditorPage(
+        title: src.name,
+        filename: '${src.key}.js',
+        initialCode: code,
+        language: 'javascript',
+        onSave: (c) => LocalJsSources.instance.saveCode(src.key, c),
+      ),
+    ));
+    if (saved != true || !mounted) return;
+    final active = ApiConfig.instance.homeSourceBean.value?.key == src.sourceKey;
+    if (active) {
+      try {
+        await NodeJSManager.instance.loadSource(src.api);
+        AppLog.instance.log('[LocalJs] 当前源已重新载入 ${src.api}');
+      } catch (e) {
+        AppLog.instance.w('[LocalJs] 重新载入失败: $e');
+      }
+    }
+    await _afterChange();
+  }
+
   Future<void> _rename(LocalJsSource src) async {
     final ctrl = TextEditingController(text: src.name);
     final name = await showDialog<String>(
@@ -392,8 +428,13 @@ class _LocalJsSourcesPageState extends State<LocalJsSourcesPage> {
           onTap: () => _select(src),
         ),
         CardAction(
+          icon: Icons.code_rounded,
+          label: '改脚本',
+          onTap: () => _editScript(src),
+        ),
+        CardAction(
           icon: Icons.drive_file_rename_outline,
-          label: '编辑',
+          label: '改名',
           onTap: () => _rename(src),
         ),
         CardAction(
