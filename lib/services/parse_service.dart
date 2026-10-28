@@ -99,7 +99,10 @@ class ParseService {
   List<ParseBean> _parsers() {
     final list = ApiConfig.instance.parseBeanList;
     return list
-        .where((p) => p.url.trim().isNotEmpty && (p.type == 0 || p.type == 1))
+        .where((p) =>
+            p.url.trim().isNotEmpty &&
+            (p.type == 0 || p.type == 1) &&
+            p.enabled)
         .toList();
   }
 
@@ -147,7 +150,8 @@ class ParseService {
       beans = [only];
     } else {
       final active = ParseStore.instance.activeBean;
-      beans = active == null
+      // 选中线路被禁用（或已被删除）→ 视为"自动"（huoyi 同款：禁用选中项回自动）
+      beans = (active == null || !active.enabled)
           ? all
           : [active, ...all.where((b) => b.url != active.url)];
     }
@@ -274,6 +278,18 @@ class ParseService {
         return null;
       }
 
+      // ── 302 链路：最终地址 ≠ 请求地址 ─────────────────────────
+      //
+      // dio 默认跟随重定向，`resp.data` 是**最终**响应的 body，但地址仍是
+      // `endpoint`。解析接口的常见形态是 302 到 CDN 直链（防盗链/负载
+      // 均衡），如果拿请求地址当播放地址/解析 base：
+      //   · 相对路径（`/hls/x/index.m3u8`）会按错误 base 补全；
+      //   · 部分服务器只对最终地址放行（校验 Host/签名）。
+      // dio 的 `resp.redirects` 记录了整条重定向链，取最后一跳。
+      final finalUrl = resp.redirects.isNotEmpty
+          ? resp.redirects.last.location.toString()
+          : endpoint;
+
       // ── 响应体**本身就是 m3u8 播放列表** ──────────────────────────
       //
       // 很多解析站（典型就是内置「牛马」那种 `xxx/nm_free.php?url=…`）
@@ -288,14 +304,14 @@ class ParseService {
         AppLog.instance.log(
             '[Parse] 接口「${bean.name}」直接返回 m3u8 文本 → 用请求地址播放');
         return ParseOutcome(
-          endpoint,
+          finalUrl,
           direct: true,
           sourceName: bean.name,
           headers: beanHeaders,
         );
       }
 
-      final extracted = _extractUrl(body, base: endpoint);
+      final extracted = _extractUrl(body, base: finalUrl);
       if (extracted == null || extracted.isEmpty) {
         AppLog.instance.log('[Parse] 接口「${bean.name}」未提取到地址');
         return null;
@@ -560,8 +576,17 @@ class ParseService {
     final alt = SniffFilter.mediaExtAlternation;
     if (_mediaAltCache != alt || _mediaReCache == null) {
       _mediaAltCache = alt;
+      // ① 影视后缀清单（用户可自定义）+ 音频直链后缀：
+      //    解析接口也可能返回音乐直链（音乐源），原来自定义清单不含音频
+      //    时这些地址扫不出来（2026-10-28 深挖）。
+      // ② 兼容协议相对地址 `//cdn/x.m3u8`：解析站 HTML 里也常见，
+      //    原来只认 http(s)://，`//` 开头的一个都扫不到。
+      final exts = <String>{
+        ...alt.split('|'),
+        ...kAudioExtensions.map((e) => e.replaceFirst('.', '').toLowerCase()),
+      }.where((e) => e.isNotEmpty).join('|');
       _mediaReCache = RegExp(
-        "https?://[^\\s\"'<>\\\\]+?\\.(?:$alt)(?:[?#][^\\s\"'<>\\\\]*)?",
+        "(?:https?:)?//[^\\s\"'<>\\\\]+?\\.(?:$exts)(?:[?#][^\\s\"'<>\\\\]*)?",
         caseSensitive: false,
       );
     }

@@ -958,18 +958,18 @@ class _DetailPageState extends State<DetailPage> {
           ),
         );
       }
-      if (url != null && url.isNotEmpty) {
+      // 🔴 错误态必须**排在 url 分支之前**（用户 2026-10-28 20:53 截图）。
+      //
+      // 原来顺序是「有 url → 播放器 / 否则 → 错误态」，于是：
+      //   · Spider 取址失败时 `playUrl` 已被上一集残留占位 → 走 url 分支 →
+      //     错误文案和「重试 / 嗅 / 解」按钮**全都不出现**，用户只看到一块黑屏；
+      //   · 播放器 onError 报的错同理被吞掉。
+      // 正确顺序：**先看有没有错误**，有错就显示错误态（带可操作按钮），
+      // 没错误再谈播放。
+      final errMsg = _controller.errorMessage.value;
+      if (errMsg != null && errMsg.isNotEmpty) {
         _playerErrorTimer?.cancel();
         _playerErrorTimer = null;
-        return _buildPlayerWidget(isFull: isFull, isPip: isPip);
-      } else if (_controller.errorMessage.value != null) {
-        // 解析失败（Spider 地址解析失败 / 上下文缺失 / 网页播放页没开嗅探等）：
-        // 不要把播放区整块换成纯错误页——那样底栏「嗅 / 解」按钮也跟着没了，
-        // 用户既看不到入口、也点不动，等于死循环（用户 2026-10-28）。
-        // 改成在播放区**内部**显示错误文案 + 重试 + 直接开「嗅探 / 解析」入口。
-        _playerErrorTimer?.cancel();
-        _playerErrorTimer = null;
-        final msg = _controller.errorMessage.value!;
         return AspectRatio(
           aspectRatio: 4 / 3,
           child: Container(
@@ -982,7 +982,7 @@ class _DetailPageState extends State<DetailPage> {
                     color: Colors.white70, size: 40),
                 const SizedBox(height: 14),
                 Text(
-                  msg,
+                  errMsg,
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     color: Colors.white70,
@@ -1011,12 +1011,25 @@ class _DetailPageState extends State<DetailPage> {
                       Icons.workspace_premium_rounded,
                       () => _openParseSheet(),
                     ),
+                    // 用户 2026-10-28 20:53：「解析不成功，我自己切换线路」。
+                    // 「解」进的是解析面板，还要再找一次线路；这里直接给一个
+                    // 「换线路」按钮，一步打开线路列表。
+                    _errorActionButton(
+                      '换线路',
+                      Icons.swap_horiz_rounded,
+                      () => _openParseSheet(),
+                    ),
                   ],
                 ),
               ],
             ),
           ),
         );
+      }
+      if (url != null && url.isNotEmpty) {
+        _playerErrorTimer?.cancel();
+        _playerErrorTimer = null;
+        return _buildPlayerWidget(isFull: isFull, isPip: isPip);
       } else {
         // 正在播但 URL 尚未就绪：超时后置错误，避免永久转圈。
         // ⚠️ 正在走解析接口取址时不启动这个计时 —— 解析本身可能要好几秒，
@@ -1041,11 +1054,43 @@ class _DetailPageState extends State<DetailPage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const CircularProgressIndicator(color: Colors.white),
-                  if (_controller.isResolving.value) ...[
-                    const SizedBox(height: 12),
-                    const Text('正在解析视频地址…',
-                        style: TextStyle(color: Colors.white70, fontSize: 13)),
-                  ],
+                  const SizedBox(height: 12),
+                  // ── 阶段文案（用户 2026-10-28 20:53）────────────────────
+                  // 原来只有 `isResolving` 为真时才显示「正在解析视频地址…」，
+                  // 其它等待状态就是**一个光秃秃的转圈**（截图里就那样），
+                  // 用户完全不知道 App 在干什么 —— 只看到"卡住了"。
+                  // 现在按阶段给明确文案，并**把「嗅 / 解 / 换线路」按钮
+                  // 直接摆在等待画面上**：等待期间用户就能自己换线路，
+                  // 不用先等失败。
+                  Text(
+                    _loadingStageText(),
+                    style: const TextStyle(
+                        color: Colors.white70, fontSize: 13, height: 1.4),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      _errorActionButton(
+                        '嗅',
+                        Icons.travel_explore_rounded,
+                        () => _openSniffSheet(),
+                      ),
+                      _errorActionButton(
+                        '解',
+                        Icons.workspace_premium_rounded,
+                        () => _openParseSheet(),
+                      ),
+                      _errorActionButton(
+                        '换线路',
+                        Icons.swap_horiz_rounded,
+                        () => _openParseSheet(),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -1053,6 +1098,17 @@ class _DetailPageState extends State<DetailPage> {
         );
       }
     });
+  }
+
+  /// 等待播放地址期间的阶段文案（用户 2026-10-28 20:53 反馈"看不出在干嘛"）。
+  ///
+  /// 三种等待要分清楚，否则用户只会觉得"转圈卡住"：
+  ///   · isResolving → 正在走解析接口取地址
+  ///   · sniffingUrl  → 正在嗅探网页里的媒体地址（由上面单独分支渲染）
+  ///   · 其余          → 正在准备/加载
+  String _loadingStageText() {
+    if (_controller.isResolving.value) return '正在解析视频地址…';
+    return '正在准备播放…';
   }
 
   /// 创建并返回播放器 widget
@@ -1082,6 +1138,98 @@ class _DetailPageState extends State<DetailPage> {
     await Future<void>.delayed(const Duration(milliseconds: 250));
   }
 
+  /// 网页兜底播放时，在网页上方叠一层「正在嗅探视频地址…」提示。
+  ///
+  /// 用户 2026-10-28 20:53 的核心不满：点播放后"转圈 → 停在网页 → 黑屏"，
+  /// **完全看不出 App 在做什么**。网页兜底的正确链路是：
+  ///   解析 → 网页加载 → **后台嗅探直链** → 交给原生播放器播放。
+  /// 中间这一步是隐形的，用户只看到网页，于是以为"进网页了，不会播"。
+  ///
+  /// 这里把嗅探状态显式画出来（半透明浮层，不阻断网页交互），
+  /// 并顺手把「换线路」摆在旁边 —— 嗅探失败时用户能立刻换线路。
+  /// 嗅探**放弃**时（[DetailController.sniffGaveUp]）转成静态提示：
+  /// 「未嗅探到直链」+ 换线路按钮，几秒后自动消失（2026-10-28）。
+  Widget _withSniffOverlay(Widget child) {
+    return Obx(() {
+      final sniffing = _controller.isWebSniffing.value;
+      final gaveUp = _controller.sniffGaveUp.value;
+      if (!sniffing && !gaveUp) return child;
+      return Stack(
+        children: [
+          child,
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.transparent,
+                    Colors.black.withValues(alpha: 0.75),
+                  ],
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (sniffing) ...[
+                    const SizedBox(
+                      width: 13,
+                      height: 13,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    const Flexible(
+                      child: Text(
+                        '正在嗅探视频地址…',
+                        style: TextStyle(color: Colors.white, fontSize: 12.5),
+                      ),
+                    ),
+                  ] else ...[
+                    const Icon(
+                      Icons.info_outline_rounded,
+                      size: 15,
+                      color: Colors.white70,
+                    ),
+                    const SizedBox(width: 8),
+                    const Flexible(
+                      child: Text(
+                        '未嗅探到直链，可换线路或直接观看网页',
+                        style: TextStyle(color: Colors.white, fontSize: 12.5),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(width: 10),
+                  // 嗅探不出结果时，用户不必等失败才能换线路。
+                  GestureDetector(
+                    onTap: _openParseSheet,
+                    child: const Text(
+                      '换线路',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        decoration: TextDecoration.underline,
+                        decorationColor: Colors.white70,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    });
+  }
+
   Widget _buildPlayerWidget({required bool isFull, required bool isPip}) {
     final url = _controller.playUrl.value!;
     // 内核切换过渡帧：只渲染空壳，**不要**在这里调 _ensurePlayer ——
@@ -1106,7 +1254,7 @@ class _DetailPageState extends State<DetailPage> {
     if (PlaybackSurface.needsWebFallback(url,
         confirmedMediaUrl: _controller.confirmedMediaUrl.value)) {
       // 内嵌模式: 4:3 固定高度(内部处理), 避免 Column 内高度塌陷致有声无画面
-      return PlaybackSurface.webFallback(
+      return _withSniffOverlay(PlaybackSurface.webFallback(
         url: url,
         title: _controller.vodInfo.value?.name,
         embedded: true,
@@ -1115,7 +1263,11 @@ class _DetailPageState extends State<DetailPage> {
         onSwitchParse: _openParseSheet,
         // 后台嗅探命中 → 同页切原生播放器（不再跳独立嗅探页）
         onMediaFound: _controller.onWebviewMediaFound,
-      );
+        // 后台嗅探进行中 → 播放区显示「正在嗅探视频地址…」（用户 2026-10-28）
+        onSniffState: (active) => _controller.isWebSniffing.value = active,
+        // 后台嗅探放弃（未命中）→ 浮层转「未嗅探到直链」静态提示
+        onSniffGaveUp: _controller.onWebviewSniffGaveUp,
+      ));
     }
     final headers = _controller.playHeaders.isNotEmpty
         ? Map<String, String>.from(_controller.playHeaders)
@@ -1125,7 +1277,7 @@ class _DetailPageState extends State<DetailPage> {
     final engine = PlayerPrefs.instance.vodEngine.value;
     if (engine == PlayerEngine.webview) {
       // 同上: 内嵌模式
-      return PlaybackSurface.webFallback(
+      return _withSniffOverlay(PlaybackSurface.webFallback(
         url: url,
         title: _controller.vodInfo.value?.name,
         embedded: true,
@@ -1134,7 +1286,11 @@ class _DetailPageState extends State<DetailPage> {
         onSwitchParse: _openParseSheet,
         // 后台嗅探命中 → 同页切原生播放器（不再跳独立嗅探页）
         onMediaFound: _controller.onWebviewMediaFound,
-      );
+        // 后台嗅探进行中 → 播放区显示「正在嗅探视频地址…」（用户 2026-10-28）
+        onSniffState: (active) => _controller.isWebSniffing.value = active,
+        // 后台嗅探放弃（未命中）→ 浮层转「未嗅探到直链」静态提示
+        onSniffGaveUp: _controller.onWebviewSniffGaveUp,
+      ));
     }
 
     // 把续播位置透传给 _ensurePlayer, 让 libmpv 通过 Media.start 参数

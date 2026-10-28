@@ -197,11 +197,16 @@ class ParseBean {
   final int type;
   final Map<String, String>? ext;
 
+  /// 启用/禁用（2026-10-28，对齐 huoyi ParseInterface.enabled）：
+  /// 禁用的线路不参与解析（自动/换线路都跳过），禁用当前选中项时选中回"自动"。
+  final bool enabled;
+
   const ParseBean({
     this.name = '',
     this.url = '',
     this.type = 0,
     this.ext,
+    this.enabled = true,
   });
 
   factory ParseBean.fromJson(Map<String, dynamic> json) {
@@ -210,6 +215,8 @@ class ParseBean {
       url: json['url'] as String? ?? '',
       type: _parseInt(json['type']),
       ext: _parseExtMap(json['ext']),
+      // 旧数据没有 enabled 字段 → 默认启用，不破坏已有线路
+      enabled: json['enabled'] as bool? ?? true,
     );
   }
 

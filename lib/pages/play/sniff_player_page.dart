@@ -7,6 +7,7 @@ import 'package:get/get.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import 'package:tvbox/common/system_ui.dart';
+import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/miniapp/pages/mini_app_player_page.dart';
 import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/app_log.dart';
@@ -94,6 +95,9 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
 
   /// 正在做 MIME 复核的地址（防同一地址每轮重复探测）
   final Set<String> _mimeProbing = <String>{};
+
+  /// MIME 批量复核是否进行中（防重入：周期复核可能重叠，避免并发把站点打爆）
+  bool _mimeProbingRunning = false;
 
   /// XHR/fetch 上报的**无后缀**候选（hook 的 `u:` 通道）。
   ///
@@ -535,10 +539,14 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
           });
         })
         .catchError((_) {
+          // 🔴 注入失败不静默放弃（与 webview_player_page 同款修复）：
+          // 页面禁 JS / runJavaScript 抛错时，转网络层兜底（HTTP 取页面 +
+          // iframe 递归扫媒体，不依赖 JS 注入）。
+          unawaited(_httpSniffFallback());
           _sniffing = false;
           if (mounted) {
             setState(() {
-              _hint = '嗅探脚本注入失败，可试试换解析接口或在网页内直接观看';
+              _hint = '嗅探脚本注入失败，正在尝试从页面 / iframe 直接找视频…';
             });
           }
         });
@@ -564,17 +572,24 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
             }
           }
           _sniffTries++;
-          // 第 5 轮（约 7.5 秒）还没结果 → 大概率播放器躲在**跨域 iframe** 里
-          // （WebView 注入不到子 frame）。转"网络层兜底"：Dart 直接取页面与
-          // iframe 的 HTML 扫媒体地址，Dart 发 HTTP 不受同源策略限制。
-          if (_sniffTries == 5) {
-            unawaited(_httpSniffFallback());
-            // 顺带对"有 video 元素但地址没有后缀"的候选做一次 MIME 复核
+          // 每 4 轮（约 6 秒）对"藏起后缀"的候选做一次 MIME 复核。
+          // 原来只在第 5 轮触发**一次** —— 若候选在第 6 轮之后才冒出来，
+          // 就再也不会被复核（典型：播放器先拉广告、十几秒后才拉正片）。
+          if (_sniffTries >= 5 && _sniffTries % 4 == 1) {
             unawaited(_probeLastCandidates());
           }
+          // ── 网络层兜底（跨域 iframe 的唯一出路）────────────────────
+          // 原来只在 `_sniffTries == 5` 触发**一次**：若第 5 轮时播放器
+          // 还没就绪（SPA 慢加载），HTTP 抓的是空壳，之后 `_httpSniffStarted`
+          // 锁死，再也不试。现在 `>= 5` 每轮调用（内部 `_httpSniffStarted`
+          // 守卫保证每份文档实际只跑一次）。
+          if (_sniffTries >= 5) unawaited(_httpSniffFallback());
           // 16 轮 × 1.5 秒 = 24 秒：慢页面 / 慢加载 / 需点播放才起播的站点
           // 之前 8 轮（12 秒）经常还没等到地址就放弃（2026-10-15）。
+          // 停止前补最后一次网络层兜底（SPA 播放器的媒体常在十几秒后才出现，
+          // 早前那次 HTTP 抓的可能是空壳；守卫会自动跳过已跑过的场景）。
           if (_sniffTries >= 16) {
+            unawaited(_httpSniffFallback());
             _stopSniffing();
             if (mounted) {
               setState(() {
@@ -584,7 +599,19 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
           }
         })
         .catchError((_) {
-          _stopSniffing();
+          // 🔴 一次失败不永久停（与 webview_player_page 同款修复）：
+          // 页面后续脚本可能补建 `__sniff`（解析站的 JS 常分段加载），
+          // 停了就再也抓不到。先走网络层兜底，继续轮询，16 次仍不可用才停。
+          _sniffTries++;
+          unawaited(_httpSniffFallback());
+          if (_sniffTries >= 16) {
+            _stopSniffing();
+            if (mounted) {
+              setState(() {
+                _hint = '嗅探脚本暂不可用，未找到可播放地址';
+              });
+            }
+          }
         });
   }
 
@@ -664,31 +691,43 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
   /// 那批地址轮询扫 HTML 是扫不到的，只有 hook 能看见，而 hook 又抓不到
   /// 首屏（见 `_sniffTemplate` 里 pushPerf 的说明）。
   Future<void> _probeLastCandidates() async {
-    if (!mounted || _autoSwitched) return;
+    if (!mounted || _autoSwitched || _mimeProbingRunning) return;
     // 用 Set 字面量去重（保持插入顺序：页面候选在前，XHR 候选在后）
-    final batch = <String>{
+    final pool = <String>{
       ..._lastCandidates.where((u) => !SniffFilter.isDirectMedia(u)),
       // 无后缀 XHR 候选排在后面：它们命中率低于"元素 src"，先给前者机会
       ..._unverified.where((u) => !SniffFilter.isDirectMedia(u)),
-    }.take(10).toList();
-    if (batch.isEmpty) return;
-    AppLog.instance.log('[SniffPlayer] MIME 兜底复核 ${batch.length} 个无后缀候选'
-        '（页面候选 ${_lastCandidates.length} / XHR 上报 ${_unverified.length}）');
-    final checks = await Future.wait(
-      batch.map(
-        (u) => WebSniffService.instance.looksLikeMediaByMime(
-          u,
-          referer: _currentUrl,
+    }.toList();
+    if (pool.isEmpty) return;
+    // 批次上限 10 个：先按"播放语义"排序（/hls/index、/live/… 优先），
+    // 否则页面统计/埋点接口（/api/track、/stat?id=…）会先把名额占满，
+    // 真流排不进 10 个就被丢 —— 与 WebSniffService.orderProbes 同一口径。
+    final batch = WebSniffService.orderProbes(pool).take(10).toList();
+    // 🔴 复核过的无后缀候选直接从 _unverified 移除：它们要么已命中、要么
+    // 已被确认不是媒体。原来复核后不清，攒满 [_maxUnverified] 后真流进不来。
+    _unverified.removeWhere(batch.contains);
+    _mimeProbingRunning = true;
+    try {
+      AppLog.instance.log('[SniffPlayer] MIME 兜底复核 ${batch.length} 个无后缀候选'
+          '（页面候选 ${_lastCandidates.length} / XHR 上报 ${_unverified.length}）');
+      final checks = await Future.wait(
+        batch.map(
+          (u) => WebSniffService.instance.looksLikeMediaByMime(
+            u,
+            referer: _currentUrl,
+          ),
         ),
-      ),
-    );
-    for (var i = 0; i < checks.length; i++) {
-      if (!checks[i] || !mounted || _autoSwitched) continue;
-      final u = batch[i];
-      if (!SniffFilter.acceptSniffUrl(u, mediaVerified: true)) continue;
-      setState(() => _hint = '按响应类型识别到视频，正在播放');
-      _onSniffed(u, mediaVerified: true);
-      return;
+      );
+      for (var i = 0; i < checks.length; i++) {
+        if (!checks[i] || !mounted || _autoSwitched) continue;
+        final u = batch[i];
+        if (!SniffFilter.acceptSniffUrl(u, mediaVerified: true)) continue;
+        setState(() => _hint = '按响应类型识别到视频，正在播放');
+        _onSniffed(u, mediaVerified: true);
+        return;
+      }
+    } finally {
+      _mimeProbingRunning = false;
     }
   }
 
@@ -895,7 +934,10 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
               value: _loadingProgress / 100.0,
               minHeight: 2,
               backgroundColor: Colors.white12,
-              valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+              // 跟随软件主题强调色（原硬编码 Colors.blue，换配色不变）
+              valueColor: AlwaysStoppedAnimation<Color>(
+                AppTheme.accentOnSurface,
+              ),
             ),
           Expanded(
             child: Stack(
@@ -971,6 +1013,10 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
                   icon: const Icon(Icons.refresh, color: Colors.white70),
                   tooltip: '重新嗅探',
                   onPressed: () {
+                    // 正在嗅探时点击也生效：先停掉旧轮询，否则 _startSniffing
+                    // 的 `_sniffing` 守卫直接 return，按钮看起来没反应
+                    _sniffTimer?.cancel();
+                    _sniffing = false;
                     _autoSwitched = false;
                     setState(() {
                       _sniffedUrl = null;

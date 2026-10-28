@@ -27,6 +27,7 @@ import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/parse_service.dart';
 import 'package:tvbox/services/parse_store.dart';
 import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/widgets/app_toast.dart';
 
 /// 面板聚焦区域：决定只显示嗅探相关、还是只显示解析相关、还是全部。
 enum ParseSniffSection {
@@ -322,9 +323,17 @@ class ParseSniffSheet extends StatelessWidget {
                   final b = lines[i - 1];
                   return _lineTile(
                     title: b.name.trim().isEmpty ? b.url : b.name,
-                    subtitle: b.url,
-                    selected: active == b.url,
-                    onTap: () => _pick(b.url, context),
+                    subtitle: b.enabled
+                        ? b.url
+                        : '已禁用 · ${b.url}（可在设置里启用）',
+                    selected: b.enabled && active == b.url,
+                    onTap: () {
+                      if (!b.enabled) {
+                        AppToast.message('该线路已禁用，请先在 设置 → 解析线路管理 里启用');
+                        return;
+                      }
+                      _pick(b.url, context);
+                    },
                   );
                 },
               ),

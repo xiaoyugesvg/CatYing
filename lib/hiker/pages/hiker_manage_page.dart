@@ -12,6 +12,7 @@ import 'package:tvbox/reading/widgets/swipe_action_tile.dart';
 import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/hiker/models/hiker_source.dart';
+import 'package:tvbox/hiker/services/clipboard_rule_match.dart';
 import 'package:tvbox/hiker/services/hiker_builtin.dart';
 import 'package:tvbox/hiker/services/hiker_files.dart';
 import 'package:tvbox/hiker/services/hiker_prefs.dart';
@@ -197,6 +198,9 @@ class _HikerManagePageState extends State<HikerManagePage> {
   /// 诊断结果缓存（key = 源 id）——列表重建时不重复扫规则文本
   final Map<String, List<HikerSourceDiagnosis>> _diagCache = {};
 
+  /// 本次进入页面是否已经检测过剪贴板（避免反复弹）
+  bool _clipboardChecked = false;
+
   @override
   void initState() {
     super.initState();
@@ -208,6 +212,152 @@ class _HikerManagePageState extends State<HikerManagePage> {
       });
     }
     _loadDiagnosisInputs();
+    _maybeDetectClipboard();
+  }
+
+  /// 进页面时看一次剪贴板：命中海阔分享口令/JSON/远程规则就弹确认框导入。
+  ///
+  /// 参考 huoyi `clipboard_rule_match.dart`；命中确认后复用现有导入链路
+  /// （`_doImport` / 下载导入），不新造逻辑。只弹一次，点取消本次不再打扰。
+  Future<void> _maybeDetectClipboard() async {
+    if (_clipboardChecked) return;
+    _clipboardChecked = true;
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      final text = data?.text;
+      if (text == null || text.trim().isEmpty) return;
+      final match = matchClipboardRule(text);
+      if (match == null || !mounted) return;
+      // 等页面数据加载完再弹，避免覆盖在列表刷新之上
+      if (!_store.loaded) {
+        await _store.load();
+      }
+      if (!mounted) return;
+
+      // ── 类型分流 ────────────────────────────────────────
+      switch (match.kind) {
+        case ClipboardMatchKind.hikerRuleText:
+          await _confirmClipboardImport(match, () async {
+            await _doImport(match.payload, from: '口令');
+          });
+        case ClipboardMatchKind.remoteRule:
+          await _confirmClipboardImport(match, () async {
+            await _importRemoteText(match.payload);
+          });
+        case ClipboardMatchKind.antPackageLink:
+          if (mounted) {
+            AppToast.message('这是小程序安装包链接，请到「程序」里导入，海阔页不处理');
+          }
+        case ClipboardMatchKind.cloudCode:
+          if (mounted) {
+            AppToast.message('云码需要配套云服务，当前版本暂不支持');
+          }
+      }
+    } catch (_) {
+      // 剪贴板读失败 / 页面已销毁：静默，不打扰用户
+    }
+  }
+
+  /// 命中口令后的确认框（AppTheme 风格，与页内其它弹窗一致）
+  Future<void> _confirmClipboardImport(
+    ClipboardRuleMatch match,
+    Future<void> Function() onConfirm,
+  ) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        icon: Icon(Icons.content_paste_search, color: AppTheme.accentColor),
+        title: Text(
+          '检测到海阔分享内容',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '类型：${match.label}',
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 13,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppTheme.backgroundTertiary,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                match.payload.length > 120
+                    ? '${match.payload.substring(0, 120)}…'
+                    : match.payload,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: 11,
+                  height: 1.4,
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('取消', style: TextStyle(color: AppTheme.textSecondary)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.accentColor,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('导入'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await onConfirm();
+    }
+  }
+
+  /// 从远程规则地址下载文本并导入（复用 `_importFromUrl` 同款网络层）。
+  Future<void> _importRemoteText(String url) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 60),
+        responseType: ResponseType.plain,
+      ),
+    );
+    applyGlobalProxy(dio);
+    try {
+      final resp = await dio.get<String>(url.trim());
+      final text = (resp.data ?? '').toString();
+      if (text.trim().isEmpty) {
+        AppToast.error('下载到的内容是空的');
+        return;
+      }
+      await _doImport(text, from: '口令链接');
+    } catch (e) {
+      AppToast.error('下载失败：$e');
+    } finally {
+      dio.close(force: true);
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   /// 诊断要用的两份清单（随包资源 / 文件区）。

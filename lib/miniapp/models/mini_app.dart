@@ -97,6 +97,9 @@ class MiniAppMarketEntry {
   final String description;
   final int size;
 
+  /// 包 MD5（市场条目可选；非空时安装后校验，防损坏/篡改）
+  final String md5;
+
   const MiniAppMarketEntry({
     required this.appId,
     required this.name,
@@ -105,6 +108,7 @@ class MiniAppMarketEntry {
     required this.author,
     required this.description,
     required this.size,
+    this.md5 = '',
   });
 
   /// zip 包（需要下载解包）
@@ -126,18 +130,20 @@ class MiniAppMarketEntry {
       author: (m['author'] ?? '').toString().trim(),
       description: (m['description'] ?? '').toString().trim(),
       size: (m['size'] is num) ? (m['size'] as num).toInt() : 0,
+      md5: (m['md5'] ?? '').toString().trim().toLowerCase(),
     );
   }
 }
 
-/// 判断一段文本是不是「小程序市场」清单（`{"apps":[…]}`）。
+/// 判断一段文本是不是「小程序市场」清单（`{"apps":[…]}` 或顶层数组）。
 /// 导入时据此决定：走市场（列出+安装）还是走单配置导入。
 bool looksLikeMiniAppMarket(String raw) {
   try {
     final decoded = jsonDecode(raw);
-    return decoded is Map &&
-        decoded['apps'] is List &&
-        (decoded['apps'] as List).isNotEmpty;
+    if (decoded is Map) return decoded['apps'] is List && decoded['apps'].isNotEmpty;
+    // 兼容（参考 huoyi market.dart）：部分市场直接返回条目数组
+    if (decoded is List) return decoded.isNotEmpty;
+    return false;
   } catch (_) {
     return false;
   }
@@ -147,12 +153,22 @@ bool looksLikeMiniAppMarket(String raw) {
 List<MiniAppMarketEntry> parseMiniAppMarket(String raw) {
   try {
     final decoded = jsonDecode(raw);
-    if (decoded is! Map || decoded['apps'] is! List) return const [];
-    return (decoded['apps'] as List)
-        .whereType<Map>()
-        .map(MiniAppMarketEntry.fromJson)
-        .whereType<MiniAppMarketEntry>()
-        .toList();
+    if (decoded is Map && decoded['apps'] is List) {
+      return (decoded['apps'] as List)
+          .whereType<Map>()
+          .map(MiniAppMarketEntry.fromJson)
+          .whereType<MiniAppMarketEntry>()
+          .toList();
+    }
+    // 兼容：顶层数组
+    if (decoded is List) {
+      return decoded
+          .whereType<Map>()
+          .map(MiniAppMarketEntry.fromJson)
+          .whereType<MiniAppMarketEntry>()
+          .toList();
+    }
+    return const [];
   } catch (_) {
     return const [];
   }

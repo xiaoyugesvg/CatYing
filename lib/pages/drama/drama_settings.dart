@@ -21,6 +21,9 @@ class DramaSettings {
   static const _kGroups = 'drama_groups_v1';
   static const _kListCache = 'drama_list_cache_v1';
 
+  /// 当前源选中的分类下标（按源分别记，2026-10-28）
+  static const _kGroupIdx = 'drama_group_idx_v1';
+
   /// 列表缓存最多保留几个「源 · 分类」（LRU，防止无限膨胀）
   static const int _listCacheMax = 12;
 
@@ -256,5 +259,53 @@ class DramaSettings {
       final sp = await SharedPreferences.getInstance();
       await sp.setString(_kListCache, jsonEncode(all));
     } catch (_) {}
+  }
+
+  // ============================================================
+  // 当前源选中的分类下标（2026-10-28）
+  // ============================================================
+  //
+  // 之前 _groupIdx 每次加载都重置成 0，于是重进短剧页一定打回第一个分类
+  // （往往就是失效的那个）。这里按源持久化「上次选中的分类」，重进时恢复。
+
+  static String _groupIdxKey(String sourceKey) => '$_kGroupIdx:$sourceKey';
+
+  static Future<int> readGroupIndex(String sourceKey) async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      return sp.getInt(_groupIdxKey(sourceKey)) ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  static Future<void> saveGroupIndex(String sourceKey, int idx) async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setInt(_groupIdxKey(sourceKey), idx);
+    } catch (_) {}
+  }
+
+  /// 取某个源下**任意一个**分类的缓存第一页（按最近使用倒序，取最后写入的）。
+  ///
+  /// 当"缓存 id 失效导致列表空、且本分类没有列表缓存"时，用同源其它分类的
+  /// 缓存兜底，至少不让页面彻底空白（2026-10-28 修复）。
+  static Future<List<Map<String, dynamic>>?> anyCachedList(
+    String sourceKey,
+  ) async {
+    final all = await _listCacheMap();
+    List<Map<String, dynamic>>? pick;
+    final prefix = '$sourceKey|';
+    for (final entry in all.entries) {
+      if (!entry.key.startsWith(prefix)) continue;
+      final rows = entry.value;
+      if (rows is List && rows.isNotEmpty) {
+        pick = [
+          for (final e in rows)
+            if (e is Map) Map<String, dynamic>.from(e),
+        ];
+      }
+    }
+    return pick;
   }
 }

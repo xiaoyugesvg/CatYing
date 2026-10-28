@@ -223,6 +223,9 @@ class _MiniAppPlayerPageState extends State<MiniAppPlayerPage> {
           Get.to(() => PlaybackSurface.webFallback(
                 url: outcome.url,
                 title: widget.title.isEmpty ? null : widget.title,
+                // 后台嗅探放弃（未命中）→ 提示别对网页干等（2026-10-28）
+                onSniffGaveUp: () => AppToast.message(
+                    '未嗅探到直链，可返回重试或换线路'),
               ));
         }
       },

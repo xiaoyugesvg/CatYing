@@ -62,6 +62,8 @@ class PlaybackSurface {
     VoidCallback? onSniff,
     VoidCallback? onSwitchParse,
     void Function(String url)? onMediaFound,
+    void Function(bool active)? onSniffState,
+    VoidCallback? onSniffGaveUp,
   }) {
     return WebviewPlayerPage(
       url: url,
@@ -71,6 +73,8 @@ class PlaybackSurface {
       onSniff: onSniff,
       onSwitchParse: onSwitchParse,
       onMediaFound: onMediaFound,
+      onSniffState: onSniffState,
+      onSniffGaveUp: onSniffGaveUp,
     );
   }
 }

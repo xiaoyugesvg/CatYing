@@ -22,6 +22,7 @@ import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/parse_service.dart';
 import 'package:tvbox/services/parse_store.dart';
 import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 
 class ParseSettingsPage extends StatefulWidget {
@@ -64,6 +65,26 @@ class _ParseSettingsPageState extends State<ParseSettingsPage> {
     await _sync();
   }
 
+  /// 启用 / 禁用线路（禁用当前选中项时选中自动回"自动"）
+  Future<void> _toggleEnabled(ParseBean b, bool value) async {
+    await ParseStore.instance.setEnabled(b.url, value);
+    await _sync();
+  }
+
+  /// 上移 / 下移线路（调整"优先顺序"，自动模式按顺序依次尝试）
+  Future<void> _move(ParseBean b, int delta) async {
+    await ParseStore.instance.move(b.url, delta);
+    await _sync();
+  }
+
+  /// 线路地址必须 http(s) 开头（huoyi 同款校验）：
+  /// 没有 scheme 的"地址"发请求必失败，存进去只是占一行，还干扰自动尝试。
+  bool _validHttpUrl(String url) {
+    final u = url.trim();
+    return u.isNotEmpty &&
+        (u.startsWith('http://') || u.startsWith('https://'));
+  }
+
   Future<void> _add() async {
     final name = await SettingsDialogs.editText(
       context: context,
@@ -78,9 +99,14 @@ class _ParseSettingsPageState extends State<ParseSettingsPage> {
       title: '线路地址',
       initial: '',
       hint: 'https://…/jx?url=',
-      helper: '支持 {url} 占位符 / url= 参数 / 直接拼接（与 TVBox 一致）',
+      helper: '支持 {url} 占位符 / url= 参数 / 直接拼接（与 TVBox 一致）。'
+          '地址需以 http:// 或 https:// 开头。',
     );
     if (url == null || url.trim().isEmpty) return;
+    if (!_validHttpUrl(url)) {
+      AppToast.message('线路地址需以 http:// 或 https:// 开头');
+      return;
+    }
     if (!mounted) return;
     final type = await _pickType(1);
     if (type == null) return;
@@ -112,9 +138,14 @@ class _ParseSettingsPageState extends State<ParseSettingsPage> {
       title: '线路地址',
       initial: b.url,
       hint: 'https://…/jx?url=',
-      helper: '支持 {url} 占位符 / url= 参数 / 直接拼接（与 TVBox 一致）',
+      helper: '支持 {url} 占位符 / url= 参数 / 直接拼接（与 TVBox 一致）。'
+          '地址需以 http:// 或 https:// 开头。',
     );
     if (url == null || url.trim().isEmpty) return;
+    if (!_validHttpUrl(url)) {
+      AppToast.message('线路地址需以 http:// 或 https:// 开头');
+      return;
+    }
     if (!mounted) return;
     final type = await _pickType(b.type);
     if (type == null) return;
@@ -128,6 +159,7 @@ class _ParseSettingsPageState extends State<ParseSettingsPage> {
         url: url.trim(),
         type: type,
         ext: _extOf(_parseHeaders(headerText)),
+        enabled: b.enabled,
       ),
       originalUrl: b.url, // 改了地址时把旧那条摘掉
     );
@@ -193,6 +225,23 @@ class _ParseSettingsPageState extends State<ParseSettingsPage> {
   Map<String, String>? _extOf(Map<String, String> headers) =>
       headers.isEmpty ? null : {'header': jsonEncode(headers)};
 
+  /// 行尾紧凑图标按钮（30×30 约束，tooltip 提示）
+  Widget _compactIcon(
+    IconData icon,
+    String tooltip,
+    VoidCallback onTap, {
+    Color? color,
+  }) {
+    return IconButton(
+      tooltip: tooltip,
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+      icon: Icon(icon, size: 17, color: color ?? AppTheme.textTertiary),
+      onPressed: onTap,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final lines = ApiConfig.instance.parseBeanList;
@@ -233,32 +282,41 @@ class _ParseSettingsPageState extends State<ParseSettingsPage> {
                     ? AppTheme.accentOnSurface
                     : AppTheme.textTertiary,
                 title: b.name.trim().isEmpty ? b.url : b.name,
-                subtitle:
-                    '${b.type == 1 ? '解析' : '嗅探'}'
-                    '${_headersOf(b).isNotEmpty ? ' · 带请求头' : ''} · ${b.url}',
+                // 副标题保持简短（类型/请求头），url 太长会撑高行、挤压 trailing
+                subtitle: '${b.type == 1 ? '解析' : '嗅探'}'
+                    '${_headersOf(b).isNotEmpty ? ' · 带请求头' : ''}'
+                    '${b.enabled ? '' : ' · 已禁用'}',
                 titleColor: active == b.url ? AppTheme.accentOnSurface : null,
+                // 行点击 = 选中当前线路；右侧开关 = 启用/禁用（huoyi 语义）
+                trailingSwitch: true,
+                switchValue: b.enabled,
+                onSwitchChanged: (v) => _toggleEnabled(b, v),
                 onTap: () => _select(b),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // 编辑（名称/地址/类型/请求头）——订阅下发的线路也能改
-                    GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () => _edit(b),
-                      child: Padding(
-                        padding: const EdgeInsets.all(8),
-                        child: Icon(Icons.edit_outlined,
-                            size: 18, color: AppTheme.textTertiary),
-                      ),
+                    // 上移/下移（调整优先顺序，huoyi 同款能力）
+                    _compactIcon(
+                      Icons.arrow_upward_rounded,
+                      '上移',
+                      () => _move(b, -1),
                     ),
-                    GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () => _remove(b),
-                      child: const Padding(
-                        padding: EdgeInsets.all(8),
-                        child: Icon(Icons.delete_outline,
-                            size: 18, color: Colors.redAccent),
-                      ),
+                    _compactIcon(
+                      Icons.arrow_downward_rounded,
+                      '下移',
+                      () => _move(b, 1),
+                    ),
+                    // 编辑（名称/地址/类型/请求头）——订阅下发的线路也能改
+                    _compactIcon(
+                      Icons.edit_outlined,
+                      '编辑',
+                      () => _edit(b),
+                    ),
+                    _compactIcon(
+                      Icons.delete_outline,
+                      '删除',
+                      () => _remove(b),
+                      color: Colors.redAccent,
                     ),
                   ],
                 ),

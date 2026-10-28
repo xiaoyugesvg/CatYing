@@ -157,6 +157,7 @@ class ParseStore {
         'url': b.url,
         'type': b.type,
         if (b.ext != null) 'ext': b.ext,
+        'enabled': b.enabled,
       });
 
   static List<ParseBean> _decode(List<String> raw) {
@@ -184,6 +185,8 @@ class ParseStore {
   ///
   /// ⚠️ 订阅下发的线路常常**不带 ext**（header）；此时保留本地已填的 ext，
   /// 否则用户手填的请求头会被订阅一次次清掉（2026-10-15）。
+  /// ⚠️ 同理，`enabled` 是**用户设置**（启用/禁用），订阅下发不覆盖 ——
+  /// 同 url 时保留本地 enabled（2026-10-28，对齐 huoyi enabled 语义）。
   Future<bool> absorb(Iterable<ParseBean> incoming) async {
     if (!_loaded) await load();
     var changed = false;
@@ -192,7 +195,8 @@ class ParseStore {
       if (url.isEmpty) continue;
       final i = _list.indexWhere((x) => x.url == url);
       if (i < 0) {
-        _list.add(ParseBean(name: b.name, url: url, type: b.type, ext: b.ext));
+        _list.add(ParseBean(
+            name: b.name, url: url, type: b.type, ext: b.ext, enabled: true));
         changed = true;
       } else {
         final local = _list[i];
@@ -201,7 +205,11 @@ class ParseStore {
             local.type != b.type ||
             !_sameExt(local.ext, mergedExt)) {
           _list[i] = ParseBean(
-              name: b.name, url: url, type: b.type, ext: mergedExt);
+              name: b.name,
+              url: url,
+              type: b.type,
+              ext: mergedExt,
+              enabled: local.enabled);
           changed = true;
         }
       }
@@ -225,14 +233,46 @@ class ParseStore {
       if (_activeUrl == oldUrl) _activeUrl = url; // 选中项跟着地址走
     }
 
-    final fresh =
-        ParseBean(name: bean.name, url: url, type: bean.type, ext: bean.ext);
+    final fresh = ParseBean(
+        name: bean.name,
+        url: url,
+        type: bean.type,
+        ext: bean.ext,
+        enabled: bean.enabled);
     final i = _list.indexWhere((x) => x.url == url);
     if (i < 0) {
       _list.add(fresh);
     } else {
       _list[i] = fresh;
     }
+    await _save();
+  }
+
+  /// 启用 / 禁用一条线路；禁用当前选中项时选中回到"自动"（huoyi 同款语义）。
+  Future<void> setEnabled(String url, bool enabled) async {
+    final i = _list.indexWhere((x) => x.url == url);
+    if (i < 0) return;
+    _list[i] = ParseBean(
+      name: _list[i].name,
+      url: _list[i].url,
+      type: _list[i].type,
+      ext: _list[i].ext,
+      enabled: enabled,
+    );
+    if (!enabled && _activeUrl == url) _activeUrl = '';
+    await _save();
+  }
+
+  /// 上移 / 下移一条线路（改变"优先顺序"；huoyi 同款能力）。
+  ///
+  /// [delta] -1 = 上移（更优先），+1 = 下移。越界时不动。
+  Future<void> move(String url, int delta) async {
+    final i = _list.indexWhere((x) => x.url == url);
+    if (i < 0) return;
+    final target = i + delta;
+    if (target < 0 || target >= _list.length) return;
+    final item = _list.removeAt(i);
+    _list.insert(target, item);
     await _save();
   }
 

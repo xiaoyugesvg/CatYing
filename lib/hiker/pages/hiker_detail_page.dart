@@ -102,6 +102,12 @@ class _Candidate {
   /// lazy 条目前面那截真实地址（规则 fn 里的 `input`）
   final String input;
 
+  /// 引擎返回的 `col_type`（剧照 / 线路标记识别用）
+  final String colType;
+
+  /// 引擎返回的封面（剧照横滑用）
+  final String pic;
+
   const _Candidate(
     this.url,
     this.note, {
@@ -109,6 +115,8 @@ class _Candidate {
     this.chain = const [],
     this.headers = const {},
     this.input = '',
+    this.colType = '',
+    this.pic = '',
   });
 
   bool get isDirect => !lazy && SniffFilter.isDirectMedia(url);
@@ -398,6 +406,8 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
           lazy: lazy,
           chain: chain,
           input: sp?.input ?? '',
+          colType: it.colType,
+          pic: it.pic,
         ),
       );
     }
@@ -486,6 +496,8 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
           lazy: lazy,
           chain: full,
           input: sp?.input ?? '',
+          colType: it.colType,
+          pic: it.pic,
         ),
       );
     }
@@ -1214,6 +1226,10 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
   /// 并带个「提示」按钮（点了只弹一句"不支持"），既误导又占地方；
   /// 现在这类**整行当纯文本标题**，其余可操作的排成三列卡片。
   Widget _candidateArea() {
+    // 详情里出现「播放线路：」标记 → 按海阔官方布局分区渲染
+    //（线路分组 / 标签 / 剧照 / 暂不可播，参考 huoyi hiker_miniapp 的 fromItems）。
+    // 没有标记时保持原有平铺，向后兼容。
+    if (_candidates.any(_isLineMarker)) return _groupedCandidates();
     final rows = <Widget>[];
     final pending = <_Candidate>[];
     void flush() {
@@ -1254,6 +1270,212 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
     return Column(mainAxisSize: MainAxisSize.min, children: rows);
   }
 
+  /// 「播放线路：」/「播放线路」开头的分节标记
+  static bool _isLineMarker(_Candidate c) =>
+      _isLabel(c) && c.note.startsWith('播放线路');
+
+  /// 「本片剧照」标记（或带图的分节条目兜底进剧照）
+  static bool _isStillsMarker(_Candidate c) =>
+      _isLabel(c) && c.note == '本片剧照';
+
+  /// 「标签：」开头的分节标记
+  static bool _isTagMarker(_Candidate c) =>
+      _isLabel(c) && c.note.startsWith('标签：');
+
+  /// 线路名：`播放线路：xxx` → xxx；空名回退「在线播放」
+  static String _lineName(_Candidate c) {
+    var name = c.note;
+    if (name.startsWith('播放线路：')) {
+      name = name.substring(5);
+    } else if (name.startsWith('播放线路')) {
+      name = name.substring(4);
+    }
+    final trimmed = name.trim();
+    return trimmed.isEmpty ? '在线播放' : trimmed;
+  }
+
+  /// `标签：A·B·C` → [A, B, C]（兼容 `、` 分隔）
+  static List<String> _splitTags(String note) {
+    final raw = note.startsWith('标签：')
+        ? note.substring(3)
+        : note.startsWith('标签:')
+        ? note.substring(3)
+        : note;
+    return [
+      for (final part in raw.split(RegExp(r'[·、]')))
+        if (part.trim().isNotEmpty) part.trim(),
+    ];
+  }
+
+  /// 详情含「播放线路：」标记时：按线路分组渲染 + 标签 / 剧照 / 暂不可播
+  ///（参考 huoyi hiker_miniapp 的 `HikerMiniappDetail.fromItems` 语义）。
+  Widget _groupedCandidates() {
+    final groups = <_LineGroup>[];
+    final tags = <String>[];
+    final stills = <String>[];
+    final unavailable = <_Candidate>[];
+    final plainLabels = <_Candidate>[];
+    _LineGroup? current;
+
+    for (final c in _candidates) {
+      if (_isLineMarker(c)) {
+        current = _LineGroup(_lineName(c));
+        groups.add(current);
+      } else if (_isStillsMarker(c)) {
+        if (c.pic.isNotEmpty) stills.add(c.pic);
+      } else if (_isTagMarker(c)) {
+        tags.addAll(_splitTags(c.note));
+      } else if (_isLabel(c)) {
+        // 其它不可点分节（如「立即播放」说明）保留原有居中样式
+        plainLabels.add(c);
+      } else if (!c.isOpenable && !c.lazy) {
+        // 非 http / 打不开的选集 → 暂不可播（huoyi `unavailable` 同义）
+        unavailable.add(c);
+      } else {
+        (current ??= _LineGroup('在线播放')).items.add(c);
+      }
+    }
+
+    final rows = <Widget>[
+      for (final label in plainLabels) _labelRow(label),
+      for (final group in groups) ...[
+        if (group.items.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          _sectionTitle('播放线路：${group.name}'),
+          ..._cardsRows(group.items),
+        ],
+      ],
+      if (tags.isNotEmpty) ...[
+        const SizedBox(height: 10),
+        _sectionTitle('标签'),
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final tag in tags)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: AppTheme.backgroundCard,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: AppTheme.borderLight),
+                  ),
+                  child: Text(
+                    tag,
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: AppTheme.fontFootnote,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+      if (stills.isNotEmpty) ...[
+        const SizedBox(height: 10),
+        _sectionTitle('本片剧照'),
+        const SizedBox(height: 8),
+        _stillsRow(stills),
+      ],
+      if (unavailable.isNotEmpty) ...[
+        const SizedBox(height: 10),
+        _sectionTitle('暂不可播选集'),
+        ..._cardsRows(unavailable, enabled: false),
+      ],
+    ];
+    return Column(mainAxisSize: MainAxisSize.min, children: rows);
+  }
+
+  /// 区块标题（左对齐加粗，贴合详情页现有字体体系）
+  Widget _sectionTitle(String text) {
+    return Text(
+      text,
+      style: TextStyle(
+        color: AppTheme.textPrimary,
+        fontSize: AppTheme.fontSubhead,
+        fontWeight: FontWeight.bold,
+      ),
+    );
+  }
+
+  /// 候选 3 列卡片行（复用平铺逻辑；[enabled] 为 false 时不可点）
+  List<Widget> _cardsRows(List<_Candidate> items, {bool enabled = true}) {
+    final rows = <Widget>[];
+    final pending = List.of(items);
+    while (pending.isNotEmpty) {
+      final n = pending.length >= 3 ? 3 : pending.length;
+      final slice = pending.sublist(0, n);
+      pending.removeRange(0, n);
+      rows.add(
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var i = 0; i < 3; i++) ...[
+                if (i > 0) const SizedBox(width: 8),
+                Expanded(
+                  child: i < slice.length
+                      ? _candidateCard(slice[i], enabled: enabled)
+                      : const SizedBox.shrink(),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+    return rows;
+  }
+
+  /// 剧照横向滑动条
+  Widget _stillsRow(List<String> stills) {
+    return SizedBox(
+      height: 128,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: stills.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final url = stills[index];
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: GestureDetector(
+              onTap: () => _previewStills(stills, index),
+              child: CachedNetworkImage(
+                imageUrl: url,
+                width: 88,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => Container(
+                  width: 88,
+                  color: AppTheme.backgroundTertiary,
+                  child: Icon(
+                    Icons.broken_image_outlined,
+                    size: 22,
+                    color: AppTheme.textTertiary,
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// 剧照预览（简单全屏看图）
+  Future<void> _previewStills(List<String> stills, int index) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => _StillsViewer(urls: stills, initialIndex: index),
+      ),
+    );
+  }
+
   /// 不可点的"分节标题/说明"条目
   static bool _isLabel(_Candidate c) =>
       c.url.isEmpty || c.url == 'hiker://empty';
@@ -1277,16 +1499,18 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
     );
   }
 
-  Widget _candidateCard(_Candidate c) {
+  Widget _candidateCard(_Candidate c, {bool enabled = true}) {
     final (label, icon) = _actionOf(c);
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () => _play(c),
-      onLongPress: () => _copy(c.url),
+      onTap: enabled ? () => _play(c) : null,
+      onLongPress: enabled ? () => _copy(c.url) : null,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
         decoration: BoxDecoration(
-          color: AppTheme.backgroundCard,
+          color: enabled
+              ? AppTheme.backgroundCard
+              : AppTheme.backgroundTertiary,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: AppTheme.borderLight),
         ),
@@ -1299,7 +1523,9 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
               style: TextStyle(
-                color: AppTheme.textPrimary,
+                color: enabled
+                    ? AppTheme.textPrimary
+                    : AppTheme.textTertiary,
                 fontSize: AppTheme.fontFootnote,
                 fontWeight: FontWeight.w600,
               ),
@@ -1408,4 +1634,70 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
   static String _short(String url) => url.length <= 70
       ? url
       : '${url.substring(0, 34)}…${url.substring(url.length - 30)}';
+}
+
+/// 剧照全屏预览（横向翻页，支持手势缩放）
+class _StillsViewer extends StatefulWidget {
+  const _StillsViewer({required this.urls, required this.initialIndex});
+
+  final List<String> urls;
+  final int initialIndex;
+
+  @override
+  State<_StillsViewer> createState() => _StillsViewerState();
+}
+
+class _StillsViewerState extends State<_StillsViewer> {
+  late final PageController _controller =
+      PageController(initialPage: widget.initialIndex);
+  late int _index = widget.initialIndex;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: Text(
+          '${_index + 1} / ${widget.urls.length}',
+          style: const TextStyle(color: Colors.white),
+        ),
+      ),
+      body: PageView.builder(
+        controller: _controller,
+        itemCount: widget.urls.length,
+        onPageChanged: (i) => setState(() => _index = i),
+        itemBuilder: (context, index) => Center(
+          child: InteractiveViewer(
+            maxScale: 4,
+            child: CachedNetworkImage(
+              imageUrl: widget.urls[index],
+              fit: BoxFit.contain,
+              errorBuilder: (_, _, _) => const Icon(
+                Icons.broken_image_outlined,
+                size: 48,
+                color: Colors.white38,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 一条播放线路（「播放线路：xxx」标记之后、下一个标记之前的可播候选）
+class _LineGroup {
+  _LineGroup(this.name);
+
+  final String name;
+  final List<_Candidate> items = [];
 }

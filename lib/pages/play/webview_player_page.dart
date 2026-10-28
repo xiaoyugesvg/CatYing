@@ -11,6 +11,7 @@ import 'package:tvbox/services/web_sniff_service.dart';
 import 'package:tvbox/pages/play/sniff_player_page.dart';
 import 'package:flutter/services.dart';
 import 'package:tvbox/common/system_ui.dart';
+import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/widgets/ad_block_bubble.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -50,6 +51,23 @@ class WebviewPlayerPage extends StatefulWidget {
   /// 「详情页 → 嗅探页 → 播放器页」三层跳转（用户 2026-10-28 要求）。
   final void Function(String url)? onMediaFound;
 
+  /// 后台嗅探状态变化回调（用户 2026-10-28 20:53）。
+  ///
+  /// 内嵌网页兜底播放时，网页在后台嗅探直链 —— 但用户**看不到**这件事，
+  /// 只看到一块网页（或纯黑），不知道 App 在干嘛。详情页据此在播放区
+  /// 显示「正在嗅探视频地址…」，让链路可见。
+  ///
+  /// 参数：true = 正在嗅探；false = 已停止/命中/未启动。
+  final void Function(bool active)? onSniffState;
+
+  /// 后台嗅探**放弃**回调（2026-10-28）：轮询到上限 / 注入失败仍未命中时
+  /// 触发一次（每份文档最多一次，命中过则不触发）。
+  ///
+  /// 让上层把「正在嗅探…」的转圈浮层换成「未嗅探到直链，可点换线路」的
+  /// 静态提示 —— 否则浮层直接消失，用户只会看到网页，不知道嗅探已经结束、
+  /// 不知道下一步该点什么（链路可见性的闭环）。
+  final VoidCallback? onSniffGaveUp;
+
   const WebviewPlayerPage({
     super.key,
     required this.url,
@@ -59,6 +77,8 @@ class WebviewPlayerPage extends StatefulWidget {
     this.onSniff,
     this.onSwitchParse,
     this.onMediaFound,
+    this.onSniffState,
+    this.onSniffGaveUp,
   });
 
   @override
@@ -83,6 +103,9 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
   int _sniffTries = 0;
   bool _mediaReported = false;
 
+  /// 是否已通知上层"嗅探放弃"（每份文档最多一次；命中过则不再通知）
+  bool _sniffGaveUpNotified = false;
+
   /// XHR/fetch 上报的无后缀候选（第 5 轮统一做 MIME 复核）
   final List<String> _unverified = <String>[];
 
@@ -98,6 +121,10 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
   /// 网络层兜底是否已发起（每份文档一次，见 [_httpSniffFallback]）
   bool _httpSniffStarted = false;
 
+  /// MIME 批量复核是否进行中（防重入：第 5/9 轮可能同时触发，避免并发
+  /// 重复探测同一批候选、把解析站打爆）。
+  bool _mimeFallbackRunning = false;
+
   /// 换文档 / 换集时把上一页的嗅探中间状态清干净。
   ///
   /// 🔴 不清 `_unverified` 会串集：上一页攒下的无后缀候选还留在列表里，
@@ -107,6 +134,8 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
     _mimeProbing.clear();
     _sniffTries = 0;
     _httpSniffStarted = false;
+    _mimeFallbackRunning = false;
+    _sniffGaveUpNotified = false;
   }
 
   @override
@@ -275,11 +304,18 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
     // 没有上层可切（独立全屏页）或 JS 被关掉时不做后台嗅探
     if (widget.onMediaFound == null) return;
     if (!PlayerPrefs.instance.webviewEnableJs.value) return;
-    // 「自动嗅探」总开关（默认关）：影视端（详情 / 短剧 / 媒体库）内嵌网页
-    // 也遵守 —— 关掉后网页照常显示、不再后台自动嗅探切原生；需要时用户点
-    // 「嗅」按钮走独立嗅探页（P1-1 深层语义，2026-10-28）。
-    if (!PlayerPrefs.instance.sniffEnabled.value) return;
+    // 「自动嗅探」总开关（默认关）**不再**拦这条路径（用户 2026-10-28 20:53）。
+    //
+    // 之前这里直接 `if (!sniffEnabled) return;`，而该开关默认是**关**的
+    // ⇒ 详情页内嵌网页兜底播放**永远不后台嗅探** ⇒ 用户点播放后看到的是
+    // 一块"网页"，而不是播放器画面（用户截图：转圈 → 停在网页 → 黑屏）。
+    //
+    // 语义澄清：「自动嗅探」开关管的是**主动嗅探**（用户按「嗅」后要不要
+    // 自动开跑），而网页兜底播放的后台嗅探是这条链路**拿直移的唯一途径**
+    // —— 没有它网页兜底根本不成立。所以这里无条件嗅探；
+    // 独立嗅探页（SniffPlayerPage）与小程序那条**主动**路径仍受开关约束。
     _sniffing = true;
+    _notifySniffState(true);
     _sniffTries = 0;
     _sniffTimer?.cancel();
     // 🔴 必须**串行**：`hookScript` 负责建 `window.__sniff`，
@@ -297,7 +333,13 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
           );
         })
         .catchError((_) {
+          // hook 注入失败（页面禁 JS / runJavaScript 抛错）：
+          // 🔴 原来直接置 false 放弃 —— 网页兜底就再也切不到原生播放器了。
+          // 转网络层兜底（HTTP 取页面 + iframe 递归扫媒体，不依赖 JS 注入）。
+          unawaited(_httpSniffFallback());
+          _notifySniffGaveUp();
           _sniffing = false;
+          _notifySniffState(false);
         });
   }
 
@@ -337,11 +379,25 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
       if (_sniffTries >= 6) unawaited(_httpSniffFallback());
       // 12 轮（18 秒）还没结果就停轮询，别一直空转。
       // ⚠️ `SniffMedia` 通道不受它影响 —— 之后页面自己上报的仍会处理。
-      if (_sniffTries >= 12) _stopSniffing();
+      // 停之前补最后一次网络层兜底（参考 huoyi 的持续轮询思路）：
+      // SPA 播放器的媒体常在十几秒后才出现，早前那次 HTTP 抓的可能是空壳。
+      if (_sniffTries >= 12) {
+        _notifySniffGaveUp();
+        unawaited(_httpSniffFallback());
+        _stopSniffing();
+      }
     }).catchError((_) {
-      // JS 侧直接不可用（页面禁注入 / `__sniff` 没建成）→ 直接走网络层兜底
+      // JS 侧暂时不可用（页面禁注入 / `__sniff` 没建成 / 注入脚本抛错）。
+      // 🔴 原来这里直接 `_stopSniffing()` —— 一次失败就**永久停嗅探**：
+      // 页面后续脚本可能补建 `__sniff`（解析站的 JS 常分段加载），
+      // 停了就再也抓不到。参考 huoyi 的无条件轮询：先走网络层兜底，
+      // 继续轮询，连续 12 次仍不可用才停。
+      _sniffTries++;
       unawaited(_httpSniffFallback());
-      _stopSniffing();
+      if (_sniffTries >= 12) {
+        _notifySniffGaveUp();
+        _stopSniffing();
+      }
     });
   }
 
@@ -434,21 +490,34 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
   }
 
   Future<void> _mimeFallback(List<String> candidates) async {
-    if (_mediaReported || !mounted) return;
-    final batch = <String>{
+    if (_mediaReported || !mounted || _mimeFallbackRunning) return;
+    final pool = <String>{
       ...candidates.where((u) => !SniffFilter.isDirectMedia(u)),
       ..._unverified.where((u) => !SniffFilter.isDirectMedia(u)),
-    }.take(8).toList();
-    if (batch.isEmpty) return;
-    final checks = await Future.wait(
-      batch.map((u) =>
-          WebSniffService.instance.looksLikeMediaByMime(u, referer: _loadedUrl)),
-    );
-    for (var i = 0; i < checks.length; i++) {
-      if (checks[i] && mounted) {
-        _reportMedia(batch[i], verified: true);
-        return;
+    }.toList();
+    if (pool.isEmpty) return;
+    // 批次上限只有 8 个：先按"播放语义"排序（/hls/index、/live/… 优先），
+    // 否则页面统计/埋点接口（/api/track、/stat?id=…）会先把名额占满，
+    // 真流排不进 8 个就被丢 —— 与 WebSniffService.orderProbes 同一口径。
+    final batch = WebSniffService.orderProbes(pool).take(8).toList();
+    // 🔴 复核过的无后缀候选直接从 _unverified 移除（2026-10-28 深挖）：
+    // 它们要么已命中、要么已被确认不是媒体。原来**复核后不清**，
+    // 页面垃圾请求攒满 24 条上限后，后续 JS 上报的真流就再也进不来。
+    _unverified.removeWhere(batch.contains);
+    _mimeFallbackRunning = true;
+    try {
+      final checks = await Future.wait(
+        batch.map((u) => WebSniffService.instance
+            .looksLikeMediaByMime(u, referer: _loadedUrl)),
+      );
+      for (var i = 0; i < checks.length; i++) {
+        if (checks[i] && mounted) {
+          _reportMedia(batch[i], verified: true);
+          return;
+        }
       }
+    } finally {
+      _mimeFallbackRunning = false;
     }
   }
 
@@ -476,6 +545,24 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
     _sniffing = false;
     _sniffTimer?.cancel();
     _sniffTimer = null;
+    _notifySniffState(false);
+  }
+
+  /// 通知上层「后台嗅探」是否在进行中（用户 2026-10-28 20:53：
+  /// 播放区要能显示「正在嗅探视频地址…」，让链路可见）。
+  void _notifySniffState(bool active) {
+    if (!mounted) return;
+    widget.onSniffState?.call(active);
+  }
+
+  /// 嗅探**放弃**时通知上层（每份文档一次；命中过就不通知）。
+  ///
+  /// 上层据此把转圈浮层换成"未嗅探到直链"提示，避免浮层静默消失后
+  /// 用户对着网页不知道发生了什么。
+  void _notifySniffGaveUp() {
+    if (_sniffGaveUpNotified || _mediaReported) return;
+    _sniffGaveUpNotified = true;
+    widget.onSniffGaveUp?.call();
   }
 
   @override
@@ -578,7 +665,10 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
             value: _loadingProgress / 100.0,
             minHeight: 2,
             backgroundColor: Colors.white12,
-            valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+            // 跟随软件主题强调色（原硬编码 Colors.blue，换配色不变）
+            valueColor: AlwaysStoppedAnimation<Color>(
+              AppTheme.accentOnSurface,
+            ),
           ),
         Expanded(
           child: Stack(
@@ -592,8 +682,10 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
                         controller: _controller,
                         pageUrl: widget.url,
                         // 内嵌（详情页 4:3 小窗）贴着右上角，别压住播放控件
+                        // ⚠️ top 让出「嗅/解」按钮组的高度（top:6 起、两钮 76）：
+                        // 原来 top:8 会正好盖在「嗅」按钮上（2026-10-28 深挖）。
                         margin: widget.embedded
-                            ? const EdgeInsets.only(right: 8, top: 8)
+                            ? const EdgeInsets.only(right: 8, top: 88)
                             : const EdgeInsets.only(right: 12, bottom: 96),
                       )
                     : const SizedBox.shrink(),

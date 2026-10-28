@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
@@ -36,9 +37,15 @@ class MiniAppService extends GetxService {
   }
 
   static const String _key = 'miniapp_list_v1';
-
   /// 程序分组名列表（允许空分组；顺序即 tab 顺序）
   static const String _kGroups = 'miniapp_groups_v1';
+
+  /// 下载包大小上限（128MB，参考 huoyi market.dart）：防超大/恶意响应撑爆内存
+  static const int _kMaxPackageBytes = 128 * 1024 * 1024;
+
+  /// 市场条目带 md5 时的校验（防损坏/篡改；crypto 包 md5）
+  static String _md5Hex(List<int> bytes) =>
+      crypto.md5.convert(bytes).toString();
 
   /// 文件级备份（Documents，独立于 prefs plist）。
   /// 与订阅同理：进程被硬打断时整个 plist 可能丢失 ⇒ 小程序列表也一起没。
@@ -263,7 +270,66 @@ class MiniAppService extends GetxService {
       await out.writeAsBytes(f.content as List<int>);
     }
     final mf = File('${dir.path}/manifest.json');
-    return await mf.exists() ? await mf.readAsString() : '{}';
+    if (mf.existsSync()) {
+      final body = await mf.readAsString();
+      return body.trim().isEmpty ? '{}' : body;
+    }
+    // ── 兼容性（参考 huoyi installer）：市场 zip 常把 manifest.json 放在
+    //   子目录（外层包一层作者名/版本号目录），或带 `__MACOSX` / 隐藏目录。
+    //   根目录没有时递归找（最多 3 层），找到后把该子目录内容**提升到包根**，
+    //   这样 `localRoot` 仍是解包根、`entry` 相对路径不用改。
+    final found = _findManifestDir(dir, depth: 0);
+    if (found == null) return '{}';
+    try {
+      _promoteDir(found, dir);
+    } catch (e) {
+      AppLog.instance.w('[MiniApp] 提升 manifest 子目录失败: $e');
+      return '{}';
+    }
+    final lifted = File('${dir.path}/manifest.json');
+    if (lifted.existsSync()) {
+      final body = await lifted.readAsString();
+      return body.trim().isEmpty ? '{}' : body;
+    }
+    return '{}';
+  }
+
+  /// 递归找含 manifest.json 的目录（≤3 层，跳过 `__MACOSX` / `.` 开头目录）。
+  static Directory? _findManifestDir(
+    Directory dir, {
+    required int depth,
+  }) {
+    if (depth > 3) return null;
+    try {
+      if (File('${dir.path}/manifest.json').existsSync()) return dir;
+      if (depth >= 3) return null;
+      for (final e in dir.listSync()) {
+        if (e is! Directory) continue;
+        final name = e.uri.pathSegments.isEmpty ? '' : e.uri.pathSegments.last;
+        if (name == '__MACOSX' || name.startsWith('.')) continue;
+        final hit = _findManifestDir(e, depth: depth + 1);
+        if (hit != null) return hit;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// 把 [from]（manifest 所在子目录）里的所有内容移动到 [to]（包根），
+  /// 再删除空的 [from]。移动而非复制：避免与根目录已有内容冲突。
+  static void _promoteDir(Directory from, Directory to) {
+    for (final e in from.listSync()) {
+      final dest = '${to.path}/${e.uri.pathSegments.last}';
+      if (e is Directory) {
+        // 递归移动目录内容
+        _promoteDir(e, Directory(dest));
+        try {
+          if (e.existsSync()) e.deleteSync(recursive: true);
+        } catch (_) {}
+      } else if (e is File) {
+        File(dest).parent.createSync(recursive: true);
+        e.copySync(dest);
+      }
+    }
   }
 
   /// 判断 [path] 是否落在 [dirPath] 目录内（分隔符归一化后再比）。
@@ -329,7 +395,14 @@ class MiniAppService extends GetxService {
         if (asBytes) {
           final b = await NetworkManager.instance.getData(c);
           // ZIP 魔数 PK\x03\x04：镜像返回的 404/HTML 页也是"非空"，必须校验
-          if (b.length > 4 && b[0] == 0x50 && b[1] == 0x4B) return b;
+          if (b.length > 4 && b[0] == 0x50 && b[1] == 0x4B) {
+            // 上限防护（参考 huoyi market.dart）：超大包/恶意响应会撑爆内存
+            if (b.length > _kMaxPackageBytes) {
+              throw Exception(
+                '包超过 ${(_kMaxPackageBytes / (1024 * 1024)).round()}MB 上限');
+            }
+            return b;
+          }
         } else {
           final s = await NetworkManager.instance.getString(c);
           // manifest / 市场清单都是 JSON，必须是对象/数组开头
@@ -358,24 +431,22 @@ class MiniAppService extends GetxService {
           .last
           .replaceAll('.zip', '');
       var manifestBody = await _unpackZipToDir(bytes, fallbackId);
-      // 必须先校验包结构：小程序包最少要有 manifest.json，
-      // 否则 rawJson 会退化成 '{}'，打开后 _initManifest 拿不到东西 → 白屏。
-      // 典型误装：海阔视界(Hiker)规则包，里面只有一个 rule.json。
-      final probe = manifestBody.trim();
-      if (probe.isEmpty || probe == '{}') {
-        try {
-          final d = await _appDir(fallbackId);
-          if (await d.exists()) await d.delete(recursive: true);
-        } catch (_) {}
-        return (
-          ok: false,
-          error: '这个包里没有 manifest.json，不是小程序包。\n'
-              '（海阔视界规则请到「设置 → 海阔源管理」导入，不要在这里装）',
-        );
-      }
       final realId = _manifestAppId(manifestBody) ?? fallbackId;
       if (realId != fallbackId) {
         manifestBody = await _unpackZipToDir(bytes, realId);
+        try {
+          final stale = await _appDir(fallbackId);
+          if (await stale.exists()) await stale.delete(recursive: true);
+        } catch (_) {}
+      }
+      // 完整性校验（manifest 必须有 + entry 必须在包内且存在）
+      final checkErr = await _validatePackage(manifestBody, realId);
+      if (checkErr != null) {
+        try {
+          final d = await _appDir(realId);
+          if (await d.exists()) await d.delete(recursive: true);
+        } catch (_) {}
+        return (ok: false, error: checkErr);
       }
       final name = _manifestName(manifestBody) ?? fallbackId;
       final app = MiniApp(
@@ -542,6 +613,11 @@ class MiniAppService extends GetxService {
       );
       manifestBody = await _unpackZipToDir(bytes, realId);
     }
+    // 内置包完整性校验（manifest + entry，缺一不可）
+    final checkErr = await _validatePackage(manifestBody, realId);
+    if (checkErr != null) {
+      return (ok: false, error: checkErr);
+    }
     final finalDir = await _appDir(realId);
 
     // ── 数据文件写回 ───────────────────────────────────────
@@ -596,14 +672,32 @@ class MiniAppService extends GetxService {
       var name = e.name;
       late String source;
       var manifestBody = '{}';
+      // zip 包：解包目录以**包内 manifest 的 appId** 为准（与 id 一致，避免错位）
+      var realId = e.appId;
 
       if (e.isZip) {
         final bytes =
             await _downloadWithMirrors(e.url, asBytes: true) as List<int>;
         if (bytes.isEmpty) return (ok: false, error: '下载内容为空');
+        // 市场条目带 md5 时校验（防损坏/篡改；不带则跳过）
+        if (e.md5.isNotEmpty) {
+          final actual = _md5Hex(bytes);
+          if (actual != e.md5) {
+            return (ok: false, error: '包校验失败（md5 不符），可能下载被拦截或文件损坏');
+          }
+        }
         manifestBody = await _unpackZipToDir(bytes, e.appId);
+        realId = _manifestAppId(manifestBody) ?? e.appId;
+        if (realId != e.appId) {
+          manifestBody = await _unpackZipToDir(bytes, realId);
+        }
+        // 完整性校验（manifest + entry）
+        final checkErr = await _validatePackage(manifestBody, realId);
+        if (checkErr != null) {
+          return (ok: false, error: checkErr);
+        }
         name = _manifestName(manifestBody) ?? e.name;
-        source = (await _appDir(e.appId)).path;
+        source = (await _appDir(realId)).path;
       } else {
         manifestBody =
             await _downloadWithMirrors(e.url, asBytes: false) as String;
@@ -613,7 +707,7 @@ class MiniAppService extends GetxService {
       }
 
       final app = MiniApp(
-        id: e.appId, // 用市场 appId 当 id：重复安装 = 升级，不会装出两份
+        id: realId, // 与解包目录一致：重复安装 = 升级，卸载/升级不会错位
         name: name,
         type: 'webapp',
         source: source,
@@ -663,11 +757,13 @@ class MiniAppService extends GetxService {
   String? _manifestAppId(String body) {
     try {
       final m = jsonDecode(body) as Map;
-      final v = (m['appId'] ?? '').toString().trim();
-      return v.isEmpty ? null : v;
-    } catch (_) {
-      return null;
-    }
+      // 兼容三形态（huoyi manifest 同款）：官方 `appId`，市场常见 `id`，老包 `app_id`
+      for (final key in const ['appId', 'id', 'app_id']) {
+        final v = (m[key] ?? '').toString().trim();
+        if (v.isNotEmpty) return v;
+      }
+    } catch (_) {}
+    return null;
   }
 
   String _manifestEntry(String body) {
@@ -678,6 +774,30 @@ class MiniAppService extends GetxService {
     } catch (_) {
       return 'index.html';
     }
+  }
+
+  /// 解包后完整性校验：manifest 必须有效 + entry 必须在包目录内且存在。
+  /// 返回错误文案；通过返回 null。（node:// 入口由后端提供，跳过本地文件校验）
+  Future<String?> _validatePackage(String manifestBody, String appId) async {
+    final probe = manifestBody.trim();
+    if (probe.isEmpty || probe == '{}') {
+      return '这个包里没有 manifest.json，不是小程序包。\n'
+          '（海阔视界规则请到「设置 → 海阔源管理」导入，不要在这里装）';
+    }
+    final entry = _manifestEntry(manifestBody);
+    if (entry.startsWith('node://')) return null;
+    final dir = await _appDir(appId);
+    final base = dir.path.endsWith('/') ? dir.path : '${dir.path}/';
+    final target = Uri.file('$base${entry.replaceAll('\\', '/')}')
+        .normalizePath()
+        .toFilePath();
+    if (!_withinDir(target, base)) {
+      return '这个包的入口页越界（$entry），不是合法的小程序包。';
+    }
+    if (!File(target).existsSync()) {
+      return '这个包缺少入口页（$entry），不是完整的小程序包。';
+    }
+    return null;
   }
 
   /// 导入麦优直播订阅（单独的应用类型，不走 TVBox 配置解析）。

@@ -13,6 +13,7 @@ import 'package:tvbox/services/nodejs_manager.dart';
 import 'package:tvbox/services/webview_page_color.dart';
 import 'package:tvbox/widgets/ad_block_bubble.dart';
 import 'package:tvbox/miniapp/services/ant_bridge.dart';
+import 'package:tvbox/miniapp/services/mini_app_local_server.dart';
 
 /// 判断 [path] 是否落在 [dirPath] 目录内（分隔符归一化后再比）。
 ///
@@ -21,12 +22,7 @@ import 'package:tvbox/miniapp/services/ant_bridge.dart';
 ///   路径，与末尾带 `/` 的 base 对不上 ⇒ 本地小程序在桌面端会**一律被判越界、
 ///   入口页永远加载不出来**（iOS 路径本来就是 `/`，所以真机没暴露）。
 ///   详见 `mini_app_service.dart` 的 `_withinDir` 同款说明。
-bool _withinDir(String path, String dirPath) {
-  final p = path.replaceAll('\\', '/');
-  var d = dirPath.replaceAll('\\', '/');
-  if (!d.endsWith('/')) d = '$d/';
-  return p.startsWith(d);
-}
+bool _withinDir(String path, String dirPath) => isWithinDir(path, dirPath);
 
 /// 小程序 WebView 页：加载远端/本地小程序页面 + 官方 ant SDK v4 桥注入。
 ///
@@ -257,10 +253,27 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
         //   做法同 zip slip：规范化后校验仍在 localRoot 内，越界就拒绝加载。
         final base = local.endsWith('/') ? local : '$local/';
         final target = Uri.file('$base$_entry').normalizePath().toFilePath();
-        if (_withinDir(target, base)) {
-          await _controller.loadFile(target);
-        } else {
+        if (!_withinDir(target, base)) {
           AppLog.instance.log('[MiniAppWeb] 入口页越界，已拒绝加载: $_entry');
+          return;
+        }
+        // 🔴 2026-10-28 改（huoyi renderer 同款思路）：
+        //   本地安装的小程序改用 **loopback HTTP 渲染** —— 服务端把 ant 桥
+        //   插进 `<head>`，页面最早脚本就能拿到 `window.ant`；同时相对资源/
+        //   XHR 走正常 HTTP，没有 `file://` 的 CORS/同源限制。
+        //   以前是 `loadFile` + onPageFinished 注入：第三方裸 HTML 里
+        //   load 前跑的同步脚本拿不到 ant（白屏 / ant is not defined）。
+        //   server 启动失败（极端情况）时回退 loadFile，不打断老包。
+        try {
+          final server = await MiniAppLocalServer.start(
+            appId: _ownerAppId,
+            root: local,
+          );
+          final entryUrl = Uri.parse(server.baseUrl).resolve(_entry).toString();
+          await _controller.loadRequest(Uri.parse(entryUrl));
+        } catch (e) {
+          AppLog.instance.log('[MiniAppWeb] loopback 渲染启动失败，回退 file://: $e');
+          await _controller.loadFile(target);
         }
       }
     } catch (e) {
@@ -287,13 +300,32 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
         return;
       }
       final map = jsonDecode(raw) as Map<String, dynamic>;
-      final appId = (map['appId'] ?? '').toString();
+      // 兼容三形态（huoyi manifest 同款）：官方 `appId`，市场常见 `id`，老包 `app_id`
+      var appId = (map['appId'] ?? '').toString();
+      if (appId.trim().isEmpty) appId = (map['id'] ?? '').toString();
+      if (appId.trim().isEmpty) appId = (map['app_id'] ?? '').toString();
       final entry = (map['entry'] ?? 'index.html').toString();
       final perms = (map['permissions'] as List?)
               ?.map((e) => e.toString())
               .toList() ??
           const <String>[];
-      AntBridge.configure(appId: appId, permissions: perms);
+      // 权限别名归一（huoyi 同款）：老包写 `navigate`，SDK 叫 `navigation`
+      final normalizedPerms = [
+        for (final p in perms)
+          if (p == 'navigate') 'navigation' else p,
+      ];
+      // 网络白名单（可选）：声明了就按白名单校验 ant.request 的 host，
+      // 没声明 = 全放行（保持旧行为，不破坏现有小程序兼容）
+      final allowlist = (map['networkAllowlist'] as List?)
+              ?.map((e) => e.toString().trim())
+              .where((h) => h.isNotEmpty)
+              .toList() ??
+          const <String>[];
+      AntBridge.configure(
+        appId: appId,
+        permissions: normalizedPerms,
+        networkAllowlist: allowlist,
+      );
       _ownerAppId = appId.isEmpty ? 'app' : appId;
       // manifest.node = { entry: 'server/index.js', config: 'server/index.config.js' }
       final node = map['node'];
@@ -302,7 +334,7 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
         final cfg = (node['config'] ?? '').toString().trim();
         if (cfg.isNotEmpty) _nodeConfig = cfg;
       }
-      _nodeAllowed = perms.contains('node');
+      _nodeAllowed = normalizedPerms.contains('node');
       if (entry.isNotEmpty) {
         // 入口页统一交给 _loadEntry 加载（assets / 本地 / 远端同一套）
         _entry = entry;
@@ -325,6 +357,8 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
       unawaited(NodeJSManager.instance.stopMiniAppService(owner));
       _nodeStarted = false;
     }
+    // loopback 静态服务同步释放（本地安装型小程序）
+    unawaited(MiniAppLocalServer.stop(owner));
     super.dispose();
   }
 

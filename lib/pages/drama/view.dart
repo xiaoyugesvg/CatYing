@@ -70,11 +70,11 @@ class _DramaPageState extends State<DramaPage> {
   /// 不清空页面、不挡住已有内容（2026-10-28）。
   String _softHint = '';
 
-  /// 已经「因为缓存列表为空而自动重扫过一次」的源 —— 防止死循环
-  final Set<String> _autoRescanned = {};
-
   /// 加载代次：换源连点时用来丢弃旧请求的结果
   int _loadGen = 0;
+
+  /// 已经「因为缓存列表为空而自动重扫过一次」的源 —— 防止死循环
+  final Set<String> _autoRescanned = {};
 
   /// 这个 tab 是否在前台。
   ///
@@ -244,6 +244,11 @@ class _DramaPageState extends State<DramaPage> {
       return;
     }
     setState(() => _source = source);
+    // 恢复这个源上次选中的分类下标（2026-10-28 修复）：
+    // 之前每次加载都重置成 0，重进页面一定打回第一个分类 ——
+    // 往往就是源改版后已经失效的那个。现在按源持久化，进来恢复。
+    final savedIdx = await DramaSettings.readGroupIndex(source.key);
+    if (!mounted || gen != _loadGen) return;
     await _refreshHistorySources();
     if (!mounted || gen != _loadGen) return;
 
@@ -256,7 +261,7 @@ class _DramaPageState extends State<DramaPage> {
     if (cached != null) {
       setState(() {
         _groups = cached;
-        _groupIdx = 0;
+        _groupIdx = savedIdx.clamp(0, cached.length - 1);
         _loading = false;
       });
       if (!rescan) {
@@ -271,8 +276,8 @@ class _DramaPageState extends State<DramaPage> {
         }
         return;
       }
-      // rescan：先把上次的第一页铺上（不发请求），再继续往下扫描刷新
-      await _applyCachedList(cached.first);
+      // rescan：先把上次选中的分类的第一页铺上（不发请求），再继续往下扫描刷新
+      await _applyCachedList(cached[_groupIdx.clamp(0, cached.length - 1)]);
       if (!mounted || gen != _loadGen) return;
     }
 
@@ -328,7 +333,7 @@ class _DramaPageState extends State<DramaPage> {
     if (!mounted || gen != _loadGen) return;
     setState(() {
       _groups = probe.groups;
-      _groupIdx = 0;
+      _groupIdx = savedIdx.clamp(0, probe.groups.length - 1);
       _scanHint = '';
     });
     await _refreshHistorySources();
@@ -366,9 +371,11 @@ class _DramaPageState extends State<DramaPage> {
     final cached = await _groupsFromCache(source.key);
     if (!mounted || gen != _loadGen) return;
     if (cached != null) {
+      final idx = await DramaSettings.readGroupIndex(source.key);
+      if (!mounted || gen != _loadGen) return;
       setState(() {
         _groups = cached;
-        _groupIdx = 0;
+        _groupIdx = idx.clamp(0, cached.length - 1);
         _loading = false;
         _scanHint = '';
         _error = null;
@@ -455,7 +462,9 @@ class _DramaPageState extends State<DramaPage> {
         return;
       }
       // 第一页失败：有缓存就显示缓存，**不把页面清空**（2026-10-28）
-      final cached = await DramaSettings.cachedList(g.source.key, g.sort.id);
+      final own = await DramaSettings.cachedList(g.source.key, g.sort.id);
+      final cached = own ?? await DramaSettings.anyCachedList(g.source.key);
+      final crossHint = own == null && cached != null;
       if (!mounted) return;
       if (gen != null && gen != _loadGen) return;
       if (cached != null) {
@@ -468,7 +477,9 @@ class _DramaPageState extends State<DramaPage> {
           _loading = false;
           _loadingMore = false;
           _error = null;
-          _softHint = '「${g.sort.name}」加载失败，先显示上次缓存的内容';
+          _softHint = crossHint
+              ? '「${g.sort.name}」加载失败，先显示同源其它分类的缓存'
+              : '「${g.sort.name}」加载失败，先显示上次缓存的内容';
         });
         return;
       }
@@ -702,8 +713,10 @@ class _DramaPageState extends State<DramaPage> {
         controller: _scroll,
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
-          // 分类 chips：当前源命中的几个短剧分类（同影视首页的分类 tab）
-          if (_groups.length > 1)
+          // 分类 chips：当前源命中的短剧分类（同影视首页的分类 tab）。
+          // 命中 1 个也显示（2026-10-28 修复：之前 `length > 1` 才画，
+          // 单分类时整条不显示，用户以为分类丢了）
+          if (_groups.isNotEmpty)
             SliverToBoxAdapter(
               child: SizedBox(
                 height: 46,
@@ -725,6 +738,9 @@ class _DramaPageState extends State<DramaPage> {
                             _videos.clear();
                             _error = null;
                           });
+                          // 记住这个源当前选中的分类（2026-10-28 修复）
+                          DramaSettings.saveGroupIndex(
+                              _groups[i].source.key, i);
                           _loadPage(1);
                         },
                         child: Container(

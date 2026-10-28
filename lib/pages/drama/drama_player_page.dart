@@ -15,6 +15,7 @@ import 'package:tvbox/models/vod_info.dart';
 import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/player_prefs.dart';
 import 'package:tvbox/widgets/app_player.dart';
+import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/widgets/ios_av_player.dart';
 import 'package:tvbox/widgets/ks_player.dart';
 import 'package:tvbox/widgets/mpv_app_player.dart';
@@ -308,6 +309,12 @@ class _DramaPlayerPageState extends State<DramaPlayerPage> {
                   Navigator.of(context).pop();
                 }
                 _c.playUrl.value = found;
+              }
+            },
+            // 后台嗅探放弃（未命中）→ 用户别对着网页干等（2026-10-28）
+            onSniffGaveUp: () {
+              if (mounted) {
+                AppToast.message('未嗅探到直链，可返回换线路或直接观看网页');
               }
             },
           ));

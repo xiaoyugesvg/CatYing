@@ -105,6 +105,19 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   /// "地址获取超时"计时 —— 解析慢时误报错误会打断用户观看）。
   final isResolving = false.obs;
 
+  /// 内嵌网页播放器**正在后台嗅探**（用户 2026-10-28 20:53）。
+  ///
+  /// 网页兜底播放时，网页在后台嗅探直链。这件事以前**完全不可见** ——
+  /// 用户点播放后只看到一块网页/纯黑，不知道 App 在嗅探，更不知道
+  /// 嗅探可能失败、要换线路。这个标志让详情页播放区显示
+  /// 「正在嗅探视频地址…」，链路可见。
+  final isWebSniffing = false.obs;
+
+  /// 后台嗅探**放弃**（未命中）标记：详情页据此把「正在嗅探视频地址…」
+  /// 的转圈浮层换成「未嗅探到直链，可点换线路」的静态提示，几秒后自动消失。
+  final sniffGaveUp = false.obs;
+  Timer? _sniffGaveUpTimer;
+
   /// **已确认是媒体、但地址没有影视后缀**的那一条地址（空串 = 无）。
   ///
   /// 为什么需要它（2026-10-28 复核发现的断点）：
@@ -805,11 +818,30 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     AppLog.instance.log('[Play] 网页后台嗅探命中 → 原生播放器: $url');
     if (h.isNotEmpty) playHeaders.value = h;
     sniffingUrl.value = null;
+    isWebSniffing.value = false;
+    _clearSniffGaveUp();
     // 嗅探命中 = 已确认是媒体：即使地址没后缀也直接交原生播放器
     confirmedMediaUrl.value = url;
     playUrl.value = url;
     playbackSessionId.value = _newUuid();
     isPlaying.value = true;
+  }
+
+  /// 后台嗅探**放弃**（轮询到上限仍未命中）→ 浮层换静态提示。
+  /// 4 秒后自动消失，避免一直占着播放区。
+  void onWebviewSniffGaveUp() {
+    if (sniffGaveUp.value) return;
+    sniffGaveUp.value = true;
+    _sniffGaveUpTimer?.cancel();
+    _sniffGaveUpTimer = Timer(const Duration(seconds: 4), () {
+      // GetxController 没有 mounted，用 isClosed 判断是否已被销毁
+      if (!isClosed && sniffGaveUp.value) sniffGaveUp.value = false;
+    });
+  }
+
+  void _clearSniffGaveUp() {
+    _sniffGaveUpTimer?.cancel();
+    if (sniffGaveUp.value) sniffGaveUp.value = false;
   }
 
   /// 解析结果落播放地址时，按「播放带 Referer」开关补一次 Referer（P2-2）。
@@ -1036,6 +1068,9 @@ class DetailController extends GetxController with WidgetsBindingObserver {
           // 本次地址是否来自 App 的解析接口 —— 决定后面要不要再做一次
           // "响应类型确认"（解析接口爱给无后缀直链，见 `confirmedMediaUrl`）。
           var parsedByApp = false;
+          // 解析前的原始页面地址：MIME 确认无后缀直链时当 Referer 用
+          //（防盗链解析站校验 Referer 才放行，2026-10-28 深挖）。
+          String? appParseReferer;
           if (!_looksLikeDirectMedia(playCandidate) &&
               (sourceWantsParse ||
                   SniffFilter.shouldParse(playCandidate) ||
@@ -1046,6 +1081,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
               final target = (sourceWantsParse || userForced)
                   ? _innerUrlOf(playCandidate)
                   : playCandidate;
+              appParseReferer = target;
               final outcome = await ParseService.instance.parseOutcome(
                 target,
                 only: userForced ? ParseStore.instance.activeBean : null,
@@ -1091,8 +1127,13 @@ class DetailController extends GetxController with WidgetsBindingObserver {
           if (!directConfirmed && (sourceSaysDirect || parsedByApp)) {
             isResolving.value = true;
             try {
+              // ⚠️ 解析接口刚给的地址 → 带上解析前的原始页面当 Referer：
+              // 防盗链解析站（校验 Host/Referer 才放行）不带头会直接 403，
+              // Content-Type 拿不到、字节也读不到 → 无后缀直链被误判成网页
+              // （2026-10-28 深挖）。
               directConfirmed = await WebSniffService.instance
-                  .looksLikeMediaByMime(playCandidate);
+                  .looksLikeMediaByMime(playCandidate,
+                      referer: parsedByApp ? appParseReferer : null);
             } finally {
               if (_spiderResolveToken == token) isResolving.value = false;
             }

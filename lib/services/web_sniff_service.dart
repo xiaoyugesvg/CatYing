@@ -244,7 +244,7 @@ class WebSniffService {
   /// 别被页面里的统计/埋点接口占满（2026-10-28 深挖）。
   Future<String?> _probeByMime(List<String> candidates, {String? referer}) async {
     if (candidates.isEmpty) return null;
-    final batch = _orderProbes(candidates).take(_maxMimeProbes).toList();
+    final batch = orderProbes(candidates).take(_maxMimeProbes).toList();
     final checks = await Future.wait(
       batch.map((u) => looksLikeMediaByMime(u, referer: referer)),
     );
@@ -263,7 +263,11 @@ class WebSniffService {
   ];
 
   /// MIME 探测顺序（稳定排序：同分保持原顺序）。
-  static List<String> _orderProbes(List<String> candidates) {
+  ///
+  /// 公开给 webview_player_page 的 `_mimeFallback` 复用 —— 两处批次名额都
+  /// 很紧（6 / 8 个），页面统计/埋点接口（`/api/track`、`/stat?id=…`）若
+  /// 排在前面会先把名额占满，真流就被挤掉（2026-10-28 深挖）。
+  static List<String> orderProbes(List<String> candidates) {
     if (candidates.length < 2) return candidates;
     int score(String u) {
       final l = u.toLowerCase();

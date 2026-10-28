@@ -51,6 +51,10 @@ class AntBridge {
   /// manifest permissions 权限门禁
   static Set<String> permissions = <String>{};
 
+  /// manifest `networkAllowlist`（可选）：非空时校验 `ant.request` 的 host，
+  /// 空 = 全放行（保持旧行为，不破坏未声明白名单的小程序兼容）
+  static Set<String> networkAllowlist = <String>{};
+
   /// 小程序自带 Node 后端的地址表：`appId → http://127.0.0.1:<port>`
   ///
   /// 由 [MiniAppWebPage] 在启动 `manifest.node` 之后登记，页面关闭时清掉。
@@ -72,9 +76,28 @@ class AntBridge {
   static void configure({
     required String appId,
     List<String> permissions = const [],
+    List<String> networkAllowlist = const [],
   }) {
     AntBridge.appId = appId.isEmpty ? 'app' : appId;
     AntBridge.permissions = permissions.toSet();
+    AntBridge.networkAllowlist = networkAllowlist
+        .map(_normalizeAllowHost)
+        .where((h) => h.isNotEmpty)
+        .toSet();
+  }
+
+  /// 白名单域名规范化：剥掉 scheme / 路径 / 端口（与 huoyi `_normalizeHost` 同语义）
+  static String _normalizeAllowHost(String raw) {
+    var host = raw.trim().toLowerCase();
+    final scheme = host.indexOf('://');
+    if (scheme >= 0) host = host.substring(scheme + 3);
+    for (final stop in ['/', '?', '#']) {
+      final at = host.indexOf(stop);
+      if (at >= 0) host = host.substring(0, at);
+    }
+    final port = host.indexOf(':');
+    if (port >= 0) host = host.substring(0, port);
+    return host;
   }
 
   /// 注入到 WebView 的 window.ant（SDK v4）。页面每次加载完成都注入。
@@ -443,6 +466,16 @@ class AntBridge {
     }
     if (_isForbiddenHost(uri.host)) {
       throw AntError('FORBIDDEN_HOST', '回环/内网地址被禁止');
+    }
+    // 网络白名单（manifest.networkAllowlist，可选）：
+    // 声明了白名单 → 请求 host 必须命中（否则 DENIED_BY_ALLOWLIST）；
+    // 没声明（空）→ 全放行，保持旧行为。
+    if (networkAllowlist.isNotEmpty &&
+        !networkAllowlist.contains(_normalizeAllowHost(uri.host))) {
+      throw AntError(
+        'DENIED_BY_ALLOWLIST',
+        '请求地址不在小程序白名单内（manifest.json 的 networkAllowlist）',
+      );
     }
     final method = (args['method'] ?? 'GET').toString().toUpperCase();
     final responseType = (args['responseType'] ?? 'text').toString();
