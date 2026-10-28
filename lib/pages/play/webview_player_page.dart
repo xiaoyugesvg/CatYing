@@ -89,6 +89,26 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
   /// 正在做 MIME 复核的地址（防重复探测）
   final Set<String> _mimeProbing = <String>{};
 
+  /// **实际载入的地址**（`_load` 里 sanitize / 补协议之后的形态）。
+  ///
+  /// MIME 复核要拿它当 `Referer` —— 不能用 `widget.url`：那是源给的原始串，
+  /// 可能带 `tencent|hash|` 前缀或只有路径，拿它当 Referer 会被站点拒。
+  String _loadedUrl = '';
+
+  /// 网络层兜底是否已发起（每份文档一次，见 [_httpSniffFallback]）
+  bool _httpSniffStarted = false;
+
+  /// 换文档 / 换集时把上一页的嗅探中间状态清干净。
+  ///
+  /// 🔴 不清 `_unverified` 会串集：上一页攒下的无后缀候选还留在列表里，
+  /// 新一集做 MIME 复核时可能命中**上一集**的直链，播出来的内容是错的。
+  void _resetSniffState() {
+    _unverified.clear();
+    _mimeProbing.clear();
+    _sniffTries = 0;
+    _httpSniffStarted = false;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -138,6 +158,7 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
           onPageStarted: (url) {
             // 新文档开始：上一页的嗅探结果作废，重新来过
             _stopSniffing();
+            _resetSniffState();
             _mediaReported = false;
             if (mounted) {
               setState(() {
@@ -237,6 +258,7 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
       });
       return;
     }
+    _loadedUrl = url;
     _controller.loadRequest(uri);
   }
 
@@ -253,13 +275,22 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
     // 没有上层可切（独立全屏页）或 JS 被关掉时不做后台嗅探
     if (widget.onMediaFound == null) return;
     if (!PlayerPrefs.instance.webviewEnableJs.value) return;
+    // 「自动嗅探」总开关（默认关）：影视端（详情 / 短剧 / 媒体库）内嵌网页
+    // 也遵守 —— 关掉后网页照常显示、不再后台自动嗅探切原生；需要时用户点
+    // 「嗅」按钮走独立嗅探页（P1-1 深层语义，2026-10-28）。
+    if (!PlayerPrefs.instance.sniffEnabled.value) return;
     _sniffing = true;
     _sniffTries = 0;
     _sniffTimer?.cancel();
-    _controller.runJavaScript(SniffPlayerPage.hookScript);
+    // 🔴 必须**串行**：`hookScript` 负责建 `window.__sniff`，
+    // `sniffScript` 一上来就调它。原来两个 runJavaScript 并发发出，
+    // sniffScript 有可能先执行 → `__sniff` undefined → catchError 里把
+    // `_sniffing` 置回 false，这一页就再也不嗅了（静默失效）。
     _controller
-        .runJavaScript(SniffPlayerPage.sniffScript)
+        .runJavaScript(SniffPlayerPage.hookScript)
+        .then((_) => _controller.runJavaScript(SniffPlayerPage.sniffScript))
         .then((_) {
+          if (!mounted || _mediaReported) return;
           _sniffTimer = Timer.periodic(
             const Duration(milliseconds: 1500),
             (_) => _pollSniff(),
@@ -277,21 +308,65 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
       if (!mounted || _mediaReported) return;
       final candidates = _candidatesOf(result);
       // 一次拿全部候选，过 SniffFilter（后缀 + 黑/白名单）——
-      // 第一个常是切片广告，跳过它继续找正片。
-      for (final u in candidates) {
+      // 先按"整片优先"排序：`.m3u8` 主列表排在 `.ts` 切片前面，
+      // 否则可能只拿到某一小段（播几秒就结束）。见 `SniffFilter.rankCandidates`。
+      for (final u in SniffFilter.rankCandidates(candidates)) {
         if (SniffFilter.acceptSniffUrl(u)) {
           _reportMedia(u);
           return;
         }
       }
       _sniffTries++;
-      // 第 5 轮（约 7.5 秒）仍无后缀命中 → 对"藏起后缀"的候选做 MIME 复核
-      if (_sniffTries == 5) unawaited(_mimeFallback(candidates));
-      // 12 轮（18 秒）还没结果就停，别一直空转
+      // 每 4 轮（约 6 秒）对"藏起后缀"的候选做一次 MIME 复核。
+      // 原来只在第 5 轮触发**一次** —— 若候选在第 6 轮之后才冒出来，
+      // 就再也不会被复核（典型：播放器先拉广告、十几秒后才拉正片）。
+      if (_sniffTries >= 5 && _sniffTries % 4 == 1) {
+        unawaited(_mimeFallback(candidates));
+      }
+      // ── 网络层兜底（跨域 iframe 的唯一出路）────────────────────
+      //
+      // 🔴 这是**新的主链路**（详情页内嵌网页播放器）之前完全缺失的一环：
+      // webview_flutter 4.x 的 `runJavaScript` 没有 allFrames，注入脚本只能
+      // 作用于主 frame；而解析站的播放器**几乎都是跨域 iframe** ——
+      // 主 frame 里根本没有媒体地址，JS 侧扫到停轮询也不会命中。
+      // 旧的独立嗅探页（`SniffPlayerPage`）一直有这条兜底，迁移到内嵌
+      // 播放器时漏了，表现为"解析站明明能播，内嵌播放器却一直停在网页上"。
+      //
+      // JS 侧扫了约 9 秒仍一无所获，就交给 Dart 侧发 HTTP 去取页面 +
+      // iframe 的 HTML 再扫（Dart 没有同源策略）。
+      if (_sniffTries >= 6) unawaited(_httpSniffFallback());
+      // 12 轮（18 秒）还没结果就停轮询，别一直空转。
+      // ⚠️ `SniffMedia` 通道不受它影响 —— 之后页面自己上报的仍会处理。
       if (_sniffTries >= 12) _stopSniffing();
     }).catchError((_) {
+      // JS 侧直接不可用（页面禁注入 / `__sniff` 没建成）→ 直接走网络层兜底
+      unawaited(_httpSniffFallback());
       _stopSniffing();
     });
+  }
+
+  /// 跨域 iframe 的**网络层兜底嗅探**（思路与 `SniffPlayerPage` 的同名方法一致）。
+  ///
+  /// 每份文档只跑一次：它会真发若干个 HTTP 请求（最多 8 个页面 + 6 次 MIME
+  /// 探测），重复跑只会拖慢切原生播放器的时机。
+  Future<void> _httpSniffFallback() async {
+    if (_httpSniffStarted || _mediaReported || !mounted) return;
+    final page = _loadedUrl.isNotEmpty ? _loadedUrl : widget.url;
+    if (!page.startsWith('http')) return;
+    _httpSniffStarted = true;
+    AppLog.instance.log('[WebviewPlayer] JS 侧未命中 → 转网络层兜底嗅探: $page');
+    try {
+      final hit = await WebSniffService.instance.findMediaUrl(
+        page,
+        referer: page,
+      );
+      if (hit == null || !mounted) return;
+      // 没有影视后缀的命中是 MIME 兜底验证过的，这里把"已验证"告诉过滤器，
+      // 否则会被后缀规则再挡一次。
+      _reportMedia(hit, verified: !SniffFilter.isDirectMedia(hit));
+    } catch (e) {
+      AppLog.instance.log('[WebviewPlayer] 网络层兜底失败: $e');
+    }
   }
 
   /// 把 JS `__sniff.all()` 的返回（iOS/Android 可能是 List 或 JSON 字符串）
@@ -351,7 +426,7 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
     _mimeProbing.add(u);
     try {
       final ok = await WebSniffService.instance
-          .looksLikeMediaByMime(u, referer: widget.url);
+          .looksLikeMediaByMime(u, referer: _loadedUrl);
       if (ok && mounted) _reportMedia(u, verified: true);
     } finally {
       _mimeProbing.remove(u);
@@ -367,7 +442,7 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
     if (batch.isEmpty) return;
     final checks = await Future.wait(
       batch.map((u) =>
-          WebSniffService.instance.looksLikeMediaByMime(u, referer: widget.url)),
+          WebSniffService.instance.looksLikeMediaByMime(u, referer: _loadedUrl)),
     );
     for (var i = 0; i < checks.length; i++) {
       if (checks[i] && mounted) {
@@ -409,6 +484,7 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
     // 换集 / 换清晰度 / 换线路时 URL 变化 → 重新加载
     if (oldWidget.url != widget.url) {
       _stopSniffing();
+      _resetSniffState();
       _mediaReported = false;
       setState(() {
         _loadingProgress = 0;

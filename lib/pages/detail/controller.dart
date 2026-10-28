@@ -104,6 +104,18 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   /// 正在走解析接口取地址（详情页据此显示"解析中"，且**不**启动 15 秒
   /// "地址获取超时"计时 —— 解析慢时误报错误会打断用户观看）。
   final isResolving = false.obs;
+
+  /// **已确认是媒体、但地址没有影视后缀**的那一条地址（空串 = 无）。
+  ///
+  /// 为什么需要它（2026-10-28 复核发现的断点）：
+  /// 解析接口经常直接给出 `http://xx/nm_free.php?url=…` 这种地址 ——
+  /// 响应体就是 `#EXTM3U`，AVPlayer 完全能播，但**地址本身没有 `.m3u8`**。
+  /// 详情页的 [_isWebPageUrl] 靠后缀判定，会把这种地址当网页塞进 WebView，
+  /// 打开的是一个 m3u8 文本页 → 白解析、黑屏。
+  /// 这里记下"已经用 Content-Type / 首字节确认过是媒体"的地址，
+  /// 详情页据此**跳过** WebView，直接交给原生播放器。
+  final confirmedMediaUrl = ''.obs;
+
   final playHeaders = <String, String>{}.obs;
   final playbackSessionId = ''.obs;
   final resumeSeconds = 0.0.obs;
@@ -793,9 +805,24 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     AppLog.instance.log('[Play] 网页后台嗅探命中 → 原生播放器: $url');
     if (h.isNotEmpty) playHeaders.value = h;
     sniffingUrl.value = null;
+    // 嗅探命中 = 已确认是媒体：即使地址没后缀也直接交原生播放器
+    confirmedMediaUrl.value = url;
     playUrl.value = url;
     playbackSessionId.value = _newUuid();
     isPlaying.value = true;
+  }
+
+  /// 解析结果落播放地址时，按「播放带 Referer」开关补一次 Referer（P2-2）。
+  ///
+  /// 原来只有「嗅探命中」（[onWebviewMediaFound]）会补 Referer；解析链路只在
+  /// 解析接口自带 `ext.header` 时才带 —— 用户在设置里打开的「播放带 Referer」
+  /// 对解析结果不生效。这里统一：开关打开时用「解析前的原始页面地址」当
+  /// Referer（防盗链最常校验的正是它），已有 Referer 时不覆盖。
+  void _applySniffReferer(Map<String, String> headers, String pageUrl) {
+    if (!PlayerPrefs.instance.sniffSendReferer.value) return;
+    final page = pageUrl.trim();
+    if (page.isEmpty) return;
+    headers.putIfAbsent('Referer', () => page);
   }
 
   /// 底栏「解析」选中某条线路后：记住选择，并用新线路**重解当前集**。
@@ -1006,6 +1033,9 @@ class DetailController extends GetxController with WidgetsBindingObserver {
               _forceUserParse || !PlayerPrefs.instance.preferScriptParse.value;
           final canAppParse = ParseService.instance.enabled ||
               ParseService.instance.hasParsers;
+          // 本次地址是否来自 App 的解析接口 —— 决定后面要不要再做一次
+          // "响应类型确认"（解析接口爱给无后缀直链，见 `confirmedMediaUrl`）。
+          var parsedByApp = false;
           if (!_looksLikeDirectMedia(playCandidate) &&
               (sourceWantsParse ||
                   SniffFilter.shouldParse(playCandidate) ||
@@ -1025,12 +1055,15 @@ class DetailController extends GetxController with WidgetsBindingObserver {
                     '[Play] 「${outcome.sourceName}」解析 → ${outcome.url}'
                     '（${outcome.direct ? "直链" : "仍为网页，转嗅探"}）');
                 playCandidate = outcome.url;
+                parsedByApp = true;
                 // 解析接口自带的请求头（防盗链）随地址一起带上；
                 // 源自己给的 header 更具体，不覆盖（2026-10-15）。
                 final h = outcome.headers;
                 if (h != null && h.isNotEmpty) {
                   headers = {...h, ...headers};
                 }
+                // 「播放带 Referer」开关打开时，解析结果也补 Referer（P2-2）
+                _applySniffReferer(headers, target);
               } else {
                 AppLog.instance.log('[Play] 解析接口未命中，转直接嗅探');
               }
@@ -1052,7 +1085,10 @@ class DetailController extends GetxController with WidgetsBindingObserver {
           //   · 是媒体 → 直接交给播放器（本次修复的主要收益）；
           //   · 不是 / 探测失败 → 退回原来的嗅探逻辑，**不比改动前差**。
           var directConfirmed = _looksLikeDirectMedia(playCandidate);
-          if (!directConfirmed && sourceSaysDirect) {
+          // 源声明 parse=0，或者地址是**解析接口刚给的** → 都值得确认一次：
+          // 解析站常把 m3u8 塞在 `xxx.php?url=…` 这种无后缀地址后面，
+          // 光看后缀会误判成网页（2026-10-28）。
+          if (!directConfirmed && (sourceSaysDirect || parsedByApp)) {
             isResolving.value = true;
             try {
               directConfirmed = await WebSniffService.instance
@@ -1063,7 +1099,9 @@ class DetailController extends GetxController with WidgetsBindingObserver {
             if (_spiderResolveToken != token) return;
             if (directConfirmed) {
               AppLog.instance.log(
-                  '[Play] 源声明 parse=0 + 响应类型确认是媒体 → 直链播放: $playCandidate');
+                  '[Play] 响应类型确认是媒体 → 直链播放: $playCandidate');
+              // 无后缀直链：让详情页别把它当网页塞 WebView
+              confirmedMediaUrl.value = playCandidate;
             }
           }
 
@@ -1249,6 +1287,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
         _forceUserParse || !PlayerPrefs.instance.preferScriptParse.value;
     final canAppParse =
         ParseService.instance.enabled || ParseService.instance.hasParsers;
+    var parsedByApp = false;
     if (!_looksLikeDirectMedia(candidate) &&
         (SniffFilter.shouldParse(candidate) || userForced) &&
         canAppParse) {
@@ -1266,11 +1305,13 @@ class DetailController extends GetxController with WidgetsBindingObserver {
         if (outcome != null && outcome.url.isNotEmpty) {
           // 直链直接播；解析出的是另一个网页播放页 → 换它继续走自动嗅探
           candidate = outcome.url;
+          parsedByApp = true;
           // 解析接口的请求头（防盗链）随地址带上；已有的（源给的）优先
           final h = outcome.headers;
-          if (h != null && h.isNotEmpty) {
-            playHeaders.value = {...h, ...playHeaders};
-          }
+          final merged = <String, String>{...?h, ...playHeaders};
+          // 「播放带 Referer」开关打开时，解析结果也补 Referer（P2-2）
+          _applySniffReferer(merged, target);
+          playHeaders.value = merged;
         }
       } finally {
         // 只有"仍是本次"才清（期间又切集 ⇒ 标记归新一次管，别提前清掉）
@@ -1281,11 +1322,31 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     // 期间又切了集/换了线路 ⇒ 这次作废（否则会把新集的地址覆盖掉）
     if (_playbackStartToken != token) return;
 
+    // ── 解析接口给的地址：确认它到底是不是媒体 ────────────────────────
+    // 解析站常把 m3u8 塞在 `xxx.php?url=…` 这种**无后缀**地址后面，
+    // 光看后缀会判成网页 → 塞进 WebView 打开一个 m3u8 文本页（黑屏）。
+    // 这里用 Content-Type + 首字节确认一次，是媒体就直接交给原生播放器。
+    if (parsedByApp && !_looksLikeDirectMedia(candidate)) {
+      isResolving.value = true;
+      try {
+        final ok = await WebSniffService.instance
+            .looksLikeMediaByMime(candidate);
+        if (_playbackStartToken != token) return;
+        if (ok) {
+          confirmedMediaUrl.value = candidate;
+          AppLog.instance.log('[Play] 解析结果是媒体（无后缀）→ 直链播放: $candidate');
+        }
+      } finally {
+        if (_playbackStartToken == token) isResolving.value = false;
+      }
+    }
+
     // 仍是网页地址 → 直接内嵌网页播放器加载（**不**跳独立嗅探页）。
     // 内嵌的 WebviewPlayerPage 会在后台嗅探，命中 m3u8 后经
     // onWebviewMediaFound 同页切原生播放器（2026-10-28 用户要求：
     // 「播放不了也把播放器加载出来」「后台嗅探用我的播放器播」）。
-    if (!_looksLikeDirectMedia(candidate)) {
+    if (!_looksLikeDirectMedia(candidate) &&
+        confirmedMediaUrl.value != candidate) {
       AppLog.instance.log('[Play] 网页地址 → 内嵌网页播放器后台嗅探: $candidate');
     }
 

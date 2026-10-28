@@ -288,7 +288,7 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
               subtitle: ApiConfig.instance.localSourcesEnabled.value
                   ? '已启用：本地源会出现在源面板 / 搜索里'
                   : '已关闭：优先使用订阅激活的源',
-              value: '${ApiConfig.instance.localVideoSources.length} 个',
+              value: '${ApiConfig.instance.localPythonSourceCount} 个',
               trailingSwitch: true,
               switchValue: ApiConfig.instance.localSourcesEnabled.value,
               onSwitchChanged: (v) async {
@@ -302,16 +302,26 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
             ),
           ),
         ),
-        _card(
-          SettingsRow(
-            icon: Icons.code_rounded,
-            title: '本地 JS 源',
-            subtitle: 'CatVod / drpy / TVBox 的 .js 脚本',
-            value: '管理',
-            onTap: () async {
-              await Get.to(() => const LocalJsSourcesPage());
-              if (mounted) setState(() {});
-            },
+        Obx(
+          () => _card(
+            SettingsRow(
+              icon: Icons.code_rounded,
+              title: '本地 JS 源',
+              subtitle: ApiConfig.instance.localJsSourcesEnabled.value
+                  ? '已启用：本地 JS 源会出现在源面板 / 搜索里'
+                  : '已关闭：本地 JS 源不参与（本地爬虫开关仍有效）',
+              value: '${ApiConfig.instance.localJsSourceCount} 个',
+              trailingSwitch: true,
+              switchValue: ApiConfig.instance.localJsSourcesEnabled.value,
+              onSwitchChanged: (v) async {
+                await ApiConfig.instance.setLocalJsSourcesEnabled(v);
+                if (mounted) setState(() {});
+              },
+              onTap: () async {
+                await Get.to(() => const LocalJsSourcesPage());
+                if (mounted) setState(() {});
+              },
+            ),
           ),
         ),
         Obx(

@@ -10,6 +10,8 @@ import 'package:tvbox/pages/detail/simple_image_reader_page.dart';
 import 'package:tvbox/pages/detail/simple_text_reader_page.dart';
 import 'package:tvbox/pages/play/sniff_player_page.dart';
 import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/parse_service.dart';
+import 'package:tvbox/services/player_prefs.dart';
 import 'package:tvbox/services/sniff_filter.dart';
 import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/hiker/models/hiker_source.dart';
@@ -565,7 +567,7 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
         return;
 
       case HikerLinkKind.media:
-        await _pushPlayer(url, c.headers);
+        await _resolveAndPlay(url, c.headers);
         return;
 
       case HikerLinkKind.playJson:
@@ -582,21 +584,13 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
           SniffFilter.isDirectMedia,
           orElse: () => pj.urls.first,
         );
-        if (SniffFilter.isDirectMedia(direct)) {
-          await _pushPlayer(direct, pjHeaders);
-        } else {
-          await _pushWeb(direct, headers: pjHeaders);
-        }
+        await _resolveAndPlay(direct, pjHeaders);
         return;
 
       case HikerLinkKind.x5Play:
         // 官方语义：强制用播放器播这个地址 → 剥掉外壳再判一次
         final real = hikerStripScheme(url);
-        if (SniffFilter.isDirectMedia(real)) {
-          await _pushPlayer(real, c.headers);
-        } else {
-          await _pushWeb(real, headers: c.headers);
-        }
+        await _resolveAndPlay(real, c.headers);
         return;
 
       case HikerLinkKind.toast:
@@ -743,6 +737,42 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
         ),
       ),
     );
+  }
+
+  /// 海阔媒体统一分发（2026-10-28，审计 P1-2）。
+  ///
+  /// 之前海阔只有嗅探、不过解析：主流站（优爱腾芒B…）的网页地址直接进
+  /// 原生播放器会黑屏，且永远拿不到直链。这里和影视端对齐：
+  ///   ① 直链 → 原生播放器（`MiniAppPlayerPage`）；
+  ///   ② 否则若 `shouldParse`（主流站 / 源标了 parse）→ 先过解析接口；
+  ///      解析出直链直接播、解析出网页转嗅探页、未命中再嗅探兜底；
+  ///   ③ 既非直链又不应解析 → 嗅探页兜底。
+  Future<void> _resolveAndPlay(String url, Map<String, String> headers) async {
+    if (SniffFilter.isDirectMedia(url)) {
+      return _pushPlayer(url, headers);
+    }
+    if (SniffFilter.shouldParse(url)) {
+      final outcome = await ParseService.instance
+          .parseOutcome(url, headers: headers.isEmpty ? null : headers);
+      if (outcome != null && outcome.url.isNotEmpty) {
+        final h = outcome.headers;
+        var merged = (h != null && h.isNotEmpty)
+            ? <String, String>{...h, ...headers}
+            : headers;
+        // 「播放带 Referer」开关打开时，解析结果也补 Referer（P2-2 一致性）
+        if (PlayerPrefs.instance.shouldSendRefererFor(url, outcome.url)) {
+          merged = <String, String>{...merged}
+            ..putIfAbsent('Referer', () => url.trim());
+        }
+        if (outcome.direct) {
+          return _pushPlayer(outcome.url, merged);
+        }
+        // 解析出网页（type 0 通用解析站返回播放页）→ 转嗅探页继续找直链
+        return _pushWeb(outcome.url, headers: merged);
+      }
+    }
+    // 非直链、且不应解析（或解析未命中）→ 嗅探页兜底
+    return _pushWeb(url, headers: headers);
   }
 
   /// 进内嵌网页：**自动嗅探**网页里的 m3u8/mp4（不依赖全局嗅探开关）。

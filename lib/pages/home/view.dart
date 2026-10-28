@@ -317,14 +317,10 @@ class _HomePageState extends State<HomePage> {
               );
             }),
           ),
-          // 分隔线「|」：把分类与筛选按钮分开
-          Container(
-            width: 1,
-            height: 18,
-            margin: const EdgeInsets.symmetric(horizontal: 10),
-            color: AppTheme.borderMedium,
-          ),
-          // 右侧筛选按钮：点击弹出「分类屏蔽 / 隐藏筛选 / 切换布局」菜单
+          // 分类行右端只保留圆形筛选图标（用户 2026-10-28：
+          // 「那个筛选按钮的位置，并且不要 | 这个」）——
+          // 原来「|」分隔线 + 按钮左右各留 10px，右侧被吃掉约 65px，
+          // 分类可见范围变窄；现在去掉分隔线，按钮也收小一档。
           _buildFilterButton(),
         ],
       ),
@@ -346,13 +342,14 @@ class _HomePageState extends State<HomePage> {
           .where((e) => e.value.isNotEmpty)
           .length;
       return Padding(
-        padding: const EdgeInsets.only(left: 6, right: 2),
+        // 左侧只留 8 与分类分开（原来 6 + 分隔线 21），右侧贴边。
+        padding: const EdgeInsets.only(left: 8),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: hasAny ? _openOptionsMenu : null,
           child: Container(
-            width: 36,
-            height: 36,
+            width: 32,
+            height: 32,
             decoration: BoxDecoration(
               color: picked > 0
                   ? AppTheme.accentColor.withValues(alpha: 0.18)
@@ -367,7 +364,7 @@ class _HomePageState extends State<HomePage> {
             ),
             child: Icon(
               Icons.tune,
-              size: 18,
+              size: 16,
               color: hasAny
                   ? (picked > 0 ? AppTheme.accentColor : AppTheme.textSecondary)
                   : AppTheme.textTertiary.withValues(alpha: 0.4),

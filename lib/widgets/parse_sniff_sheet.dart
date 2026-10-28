@@ -174,7 +174,8 @@ class ParseSniffSheet extends StatelessWidget {
             Obx(() => _switchRow(
                   icon: Icons.travel_explore_rounded,
                   title: '自动嗅探',
-                  subtitle: '网页播放页抓不到地址时，用网页嗅探找媒体链接',
+                  subtitle: '网页地址自动嗅探找直链。详情页内嵌网页默认始终后台嗅探；'
+                      '此开关主要控制小程序 / TG / 海阔 / RSS 的嗅探路由',
                   value: PlayerPrefs.instance.sniffEnabled.value,
                   onChanged: (v) => PlayerPrefs.instance.setSniffEnabled(v),
                 )),

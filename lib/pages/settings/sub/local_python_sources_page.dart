@@ -7,6 +7,7 @@ import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/import_conflict.dart';
 import 'package:tvbox/models/local_python_source.dart';
 import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/app_log.dart';
@@ -185,7 +186,12 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
         AppToast.error('读不出脚本内容');
         return;
       }
-      final r = await LocalPythonSources.instance.importMany(items);
+      final conflict = await _askConflict(items.map((e) => e.name));
+      if (conflict == null) return;
+      final r = await LocalPythonSources.instance.importMany(
+        items,
+        conflict: conflict,
+      );
       await _afterChange();
       _reportBatch(r);
     } catch (e) {
@@ -262,6 +268,21 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
     }
   }
 
+  /// 同名检测 + 让用户选「替换 / 重命名」。
+  ///
+  /// 返回 null = 用户取消（这一批都不导入）。
+  /// 没有同名时直接返回 [ImportConflict.rename]（此时策略不影响结果）。
+  Future<ImportConflict?> _askConflict(Iterable<String> names) async {
+    final dup = await LocalPythonSources.instance.conflictingNames(names);
+    if (dup.isEmpty) return ImportConflict.rename;
+    if (!mounted) return null;
+    return SettingsDialogs.askImportConflict(
+      context,
+      names: dup,
+      kind: 'Python',
+    );
+  }
+
   Future<void> _importFilesMixed() async {
     if (_busy) return;
     setState(() => _busy = true);
@@ -270,41 +291,49 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
         type: FileType.any,
       );
       if (result.isEmpty) return;
-      final pyItems = <({String name, String code})>[];
-      var imported = 0;
-      var failed = 0;
+      // .py 与 zip 里的 .py 先**全部收集成一份清单**，再统一做同名检测 ——
+      // 分开检测会让用户连续弹两次窗。
+      final all = <({String name, String code})>[];
       final errors = <String>[];
       for (final f in result) {
         final lower = f.name.toLowerCase();
         final bytes = await f.readAsBytes();
         if (bytes.isEmpty) continue;
         if (lower.endsWith('.py')) {
-          pyItems.add((
+          all.add((
             name: f.name,
             code: utf8.decode(bytes, allowMalformed: true),
           ));
         } else if (lower.endsWith('.zip')) {
-          final r = await LocalPythonSources.instance.importZip(bytes);
-          imported += r.imported;
-          failed += r.failed;
-          errors.addAll(r.errors);
+          try {
+            all.addAll(LocalPythonSources.instance.scanZipBytes(bytes));
+          } catch (e) {
+            errors.add('${f.name}: zip 解析失败: $e');
+          }
         }
       }
-      if (pyItems.isNotEmpty) {
-        final r = await LocalPythonSources.instance.importMany(pyItems);
-        imported += r.imported;
-        failed += r.failed;
-        errors.addAll(r.errors);
+      if (all.isEmpty) {
+        AppToast.error(errors.isEmpty ? '没有可导入的 .py / .zip' : errors.first);
+        return;
       }
+      final conflict = await _askConflict(all.map((e) => e.name));
+      if (conflict == null) return;
+      final r = await LocalPythonSources.instance.importMany(
+        all,
+        conflict: conflict,
+      );
       await _afterChange();
-      if (imported > 0) {
+      final failed = r.failed + errors.length;
+      if (r.imported > 0) {
         final tail = failed > 0 ? '，失败 $failed 个' : '';
-        AppToast.message('已导入 $imported 个脚本$tail');
-        if (errors.isNotEmpty) {
-          AppLog.instance.w('[LocalPy] 文件导入失败项: ${errors.join(" | ")}');
+        AppToast.message('已导入 ${r.imported} 个脚本$tail');
+        if (r.errors.isNotEmpty || errors.isNotEmpty) {
+          AppLog.instance.w(
+            '[LocalPy] 文件导入失败项: ${[...r.errors, ...errors].join(" | ")}',
+          );
         }
       } else {
-        AppToast.error(errors.isEmpty ? '没有可导入的 .py / .zip' : errors.first);
+        AppToast.error(r.errors.isEmpty ? '没有可导入的 .py / .zip' : r.errors.first);
       }
     } catch (e) {
       AppToast.error('文件导入失败：$e');
@@ -323,7 +352,18 @@ class _LocalPythonSourcesPageState extends State<LocalPythonSourcesPage> {
         AppToast.message('当前系统文件选择器不支持选择文件夹，请改用「选择文件」多选 .py / .zip');
         return;
       }
-      final r = await LocalPythonSources.instance.importDirectory(path);
+      // 先扫描再问「替换 / 重命名」，最后才落盘
+      final items = await LocalPythonSources.instance.scanDirectory(path);
+      if (items.isEmpty) {
+        AppToast.error('目录里没有 .py 文件');
+        return;
+      }
+      final conflict = await _askConflict(items.map((e) => e.name));
+      if (conflict == null) return;
+      final r = await LocalPythonSources.instance.importMany(
+        items,
+        conflict: conflict,
+      );
       await _afterChange();
       _reportBatch(r);
     } catch (e) {

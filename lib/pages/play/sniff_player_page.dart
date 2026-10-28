@@ -11,6 +11,7 @@ import 'package:tvbox/miniapp/pages/mini_app_player_page.dart';
 import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/parse_service.dart';
+import 'package:tvbox/services/parse_store.dart';
 import 'package:tvbox/services/player_prefs.dart';
 import 'package:tvbox/services/play_url_sanitizer.dart';
 import 'package:tvbox/services/sniff_filter.dart';
@@ -312,7 +313,13 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
       if (!es || !es.length) return;
       // 只看最近 200 条：老页面可能攒了几千条，全扫一遍没必要
       var from = es.length > 200 ? es.length - 200 : 0;
-      for (var i = from; i < es.length; i++){
+      // 🔴 从**最近**的请求往回扫（2026-10-28 深挖）：
+      //    perf 桶只有 MAX_PERF=12 个名额，而页面自己的 API/XHR 请求可能
+      //    几十上百条。正序扫（最早 → 最新）会被这些请求先把 12 个名额占满，
+      //    真正的流排在后面**根本进不来**，于是"Resource Timing 明明有、
+      //    原生侧却收不到"。
+      //    播放页的媒体请求通常发生在最后（先拉播放器、再拉播放列表/切片）。
+      for (var i = es.length - 1; i >= from; i--){
         var n = es[i] && es[i].name;
         if (!n) continue;
         push(n, 'perf');
@@ -371,6 +378,16 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
       );
     }
     _currentUrl = widget.url;
+    // 解析线路游标对齐「设置里选中的线路」（ParseStore.activeUrl）：
+    // 原来 _parseIndex 恒从 -1 开始，与详情页 / 解析面板用的线路脱节，
+    // 用户先在面板选了某条线路，进嗅探页点「换解析」却从第一条开始（P2-1）。
+    final beans = ApiConfig.instance.parseBeanList
+        .where((p) => p.url.trim().isNotEmpty && (p.type == 0 || p.type == 1))
+        .toList();
+    final active = ParseStore.instance.activeUrl;
+    _parseIndex = (active.isEmpty || beans.isEmpty)
+        ? -1
+        : beans.indexWhere((p) => p.url == active);
     _initController(widget.url);
     // 详情页需要用本页换地址时（不再叠新页），通过 pendingUrl 通知
     SniffPlayerPage.pendingUrl.addListener(_onPendingUrl);
@@ -504,11 +521,15 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
     // 页面已完成 → 再补一次 hook 注入（幂等：脚本内有 window.__sniffHooked
     // 守卫）。onPageStarted 那次可能早于文档就绪而没被保留，补这一次保证
     // 页面自身脚本在 onPageFinished 之后发起的请求都能劫持到（2026-10-15）。
-    _controller.runJavaScript(hookJs);
-    // 再注入嗅探脚本，脚本内部会立即扫一轮 + 轮询
+    //
+    // 🔴 与 `sniffJs` **串行**：`hookJs` 建 `window.__sniff`，`sniffJs` 一上来
+    // 就用它。原来两个 runJavaScript 并发发出，sniffJs 可能先跑 →
+    // `__sniff` undefined → 直接进 catchError 报"注入失败"（2026-10-28 复核）。
     _controller
-        .runJavaScript(sniffJs)
+        .runJavaScript(hookJs)
+        .then((_) => _controller.runJavaScript(sniffJs))
         .then((_) {
+          if (!mounted) return;
           _sniffTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
             _pollSniff();
           });
@@ -532,7 +553,11 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
           // 第一个可能是广告，必须跳过广告继续挑正片，不能见一个就上。
           final candidates = _candidatesOf(result);
           _lastCandidates = candidates;
-          for (final u in candidates) {
+          // 一次拿全部候选，在原生侧过 SniffFilter（后缀 + 黑/白名单）：
+          // 第一个可能是广告，必须跳过广告继续挑正片，不能见一个就上。
+          // 另外先按"整片优先"排序 —— `.m3u8` 主列表排在 `.ts` 切片前面，
+          // 否则可能只拿到某一小段（见 `SniffFilter.rankCandidates`）。
+          for (final u in SniffFilter.rankCandidates(candidates)) {
             if (SniffFilter.acceptSniffUrl(u)) {
               _onSniffed(u);
               return;
@@ -771,6 +796,9 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
     }
     _parseIndex = (_parseIndex + 1) % list.length;
     final bean = list[_parseIndex];
+    // 把本次选择同步回 ParseStore：详情页主链路与「解析/嗅探」面板都读
+    // activeUrl / activeBean，不回写的话两处会各用各的线路（P2-1）。
+    await ParseStore.instance.setActive(bean.url);
     if (mounted) {
       setState(() {
         _hint = '正在用「${bean.name}」解析…';

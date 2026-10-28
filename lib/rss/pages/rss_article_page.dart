@@ -18,6 +18,9 @@ import 'package:tvbox/rss/models/rss_article.dart';
 import 'package:tvbox/rss/models/rss_source.dart';
 import 'package:tvbox/rss/services/rss_reader.dart';
 import 'package:tvbox/reading/services/tts_service.dart';
+import 'package:tvbox/services/parse_service.dart';
+import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/services/sniff_filter.dart';
 
 class RssArticlePage extends StatefulWidget {
   const RssArticlePage({super.key, required this.source, required this.article});
@@ -123,15 +126,59 @@ class _RssArticlePageState extends State<RssArticlePage> {
 
     final title = '${widget.article.title} ${ep.title}';
     final headers = RssReader.playHeaders(widget.source);
-    final playUrl = direct?.trim() ?? '';
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => playUrl.isNotEmpty
-            ? MiniAppPlayerPage(url: playUrl, title: title, headers: headers)
-            // 拿不到直链（加密/JS 拼接）→ 打开播放页嗅探
-            : SniffPlayerPage(url: ep.url, title: title, headers: headers),
-      ),
-    );
+    final playUrl = (direct?.trim() ?? '').isEmpty ? '' : direct!.trim();
+    if (!mounted) return;
+
+    // 直链 → 原生播放器；网页地址（非直链）→ 主流站先过解析接口，命中直链
+    // 直接播、未命中/不应解析转嗅探页兜底。之前这里把网页地址直接塞
+    // MiniAppPlayerPage 会黑屏，且 RSS 从不接解析（2026-10-28 审计 P1-2）。
+    Future<void> goPlayer(String u, Map<String, String> h) =>
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) =>
+                MiniAppPlayerPage(url: u, title: title, headers: h),
+          ),
+        );
+    void goSniff(String u, Map<String, String> h) =>
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) =>
+                SniffPlayerPage(url: u, title: title, headers: h),
+          ),
+        );
+
+    if (playUrl.isEmpty) {
+      // 拿不到直链（加密/JS 拼接）→ 打开播放页嗅探
+      goSniff(ep.url, headers);
+      return;
+    }
+    if (SniffFilter.isDirectMedia(playUrl)) {
+      await goPlayer(playUrl, headers);
+      return;
+    }
+    if (SniffFilter.shouldParse(playUrl)) {
+      final outcome = await ParseService.instance
+          .parseOutcome(playUrl, headers: headers.isEmpty ? null : headers);
+      if (outcome != null && outcome.url.isNotEmpty) {
+        final oh = outcome.headers;
+        var merged = (oh != null && oh.isNotEmpty)
+            ? <String, String>{...oh, ...headers}
+            : headers;
+        // 「播放带 Referer」开关打开时，解析结果也补 Referer（P2-2 一致性）
+        if (PlayerPrefs.instance.shouldSendRefererFor(playUrl, outcome.url)) {
+          merged = <String, String>{...merged}
+            ..putIfAbsent('Referer', () => playUrl.trim());
+        }
+        if (outcome.direct) {
+          await goPlayer(outcome.url, merged);
+          return;
+        }
+        goSniff(outcome.url, merged); // 解析出网页 → 嗅探页继续找直链
+        return;
+      }
+    }
+    // 非直链且不应解析（或解析未命中）→ 嗅探页兜底
+    goSniff(playUrl, headers);
   }
 
   /// 视频详情页特征：有「线路」+ 集数（电影则看「线路」+ 演职员信息），

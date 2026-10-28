@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/import_conflict.dart';
 import 'package:tvbox/models/local_js_source.dart';
 import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/app_log.dart';
@@ -66,6 +67,21 @@ class _LocalJsSourcesPageState extends State<LocalJsSourcesPage> {
   // 导入
   // ============================================================
 
+  /// 同名检测 + 让用户选「替换 / 重命名」。
+  ///
+  /// 返回 null = 用户取消（这一批都不导入）。
+  /// 没有同名时直接返回 [ImportConflict.rename]（此时策略不影响结果）。
+  Future<ImportConflict?> _askConflict(Iterable<String> names) async {
+    final dup = await LocalJsSources.instance.conflictingNames(names);
+    if (dup.isEmpty) return ImportConflict.rename;
+    if (!mounted) return null;
+    return SettingsDialogs.askImportConflict(
+      context,
+      names: dup,
+      kind: 'JS',
+    );
+  }
+
   Future<void> _import() async {
     if (_busy) return;
     setState(() => _busy = true);
@@ -88,8 +104,13 @@ class _LocalJsSourcesPageState extends State<LocalJsSourcesPage> {
         AppToast.error('读不出脚本内容');
         return;
       }
-      final r = await LocalJsSources.instance.importMany(items);
-      await _afterChange();
+      final conflict = await _askConflict(items.map((e) => e.name));
+      if (conflict == null) return;
+      final r = await LocalJsSources.instance.importMany(
+        items,
+        conflict: conflict,
+      );
+      await _afterChange(reloadActive: conflict == ImportConflict.replace);
       _reportBatch(r);
     } catch (e) {
       AppToast.error('导入失败：$e');
@@ -158,41 +179,49 @@ class _LocalJsSourcesPageState extends State<LocalJsSourcesPage> {
     try {
       final result = await FilePicker.pickFiles(type: FileType.any);
       if (result.isEmpty) return;
-      final jsItems = <({String name, String code})>[];
-      var imported = 0;
-      var failed = 0;
+      // .js 与 zip 里的 .js 先**全部收集成一份清单**，再统一做同名检测 ——
+      // 分开检测会让用户连续弹两次窗。
+      final all = <({String name, String code})>[];
       final errors = <String>[];
       for (final f in result) {
         final lower = f.name.toLowerCase();
         final bytes = await f.readAsBytes();
         if (bytes.isEmpty) continue;
         if (lower.endsWith('.js')) {
-          jsItems.add((
+          all.add((
             name: f.name,
             code: utf8.decode(bytes, allowMalformed: true),
           ));
         } else if (lower.endsWith('.zip')) {
-          final r = await LocalJsSources.instance.importZip(bytes);
-          imported += r.imported;
-          failed += r.failed;
-          errors.addAll(r.errors);
+          try {
+            all.addAll(LocalJsSources.instance.scanZipBytes(bytes));
+          } catch (e) {
+            errors.add('${f.name}: zip 解析失败: $e');
+          }
         }
       }
-      if (jsItems.isNotEmpty) {
-        final r = await LocalJsSources.instance.importMany(jsItems);
-        imported += r.imported;
-        failed += r.failed;
-        errors.addAll(r.errors);
+      if (all.isEmpty) {
+        AppToast.error(errors.isEmpty ? '没有可导入的 .js / .zip' : errors.first);
+        return;
       }
-      await _afterChange();
-      if (imported > 0) {
+      final conflict = await _askConflict(all.map((e) => e.name));
+      if (conflict == null) return;
+      final r = await LocalJsSources.instance.importMany(
+        all,
+        conflict: conflict,
+      );
+      await _afterChange(reloadActive: conflict == ImportConflict.replace);
+      final failed = r.failed + errors.length;
+      if (r.imported > 0) {
         final tail = failed > 0 ? '，失败 $failed 个' : '';
-        AppToast.message('已导入 $imported 个脚本$tail');
-        if (errors.isNotEmpty) {
-          AppLog.instance.w('[LocalJs] 文件导入失败项: ${errors.join(" | ")}');
+        AppToast.message('已导入 ${r.imported} 个脚本$tail');
+        if (r.errors.isNotEmpty || errors.isNotEmpty) {
+          AppLog.instance.w(
+            '[LocalJs] 文件导入失败项: ${[...r.errors, ...errors].join(" | ")}',
+          );
         }
       } else {
-        AppToast.error(errors.isEmpty ? '没有可导入的 .js / .zip' : errors.first);
+        AppToast.error(r.errors.isEmpty ? '没有可导入的 .js / .zip' : r.errors.first);
       }
     } catch (e) {
       AppToast.error('文件导入失败：$e');
@@ -210,8 +239,19 @@ class _LocalJsSourcesPageState extends State<LocalJsSourcesPage> {
         AppToast.message('当前系统文件选择器不支持选择文件夹，请改用「选择文件」多选 .js / .zip');
         return;
       }
-      final r = await LocalJsSources.instance.importDirectory(path);
-      await _afterChange();
+      // 先扫描再问「替换 / 重命名」，最后才落盘
+      final items = await LocalJsSources.instance.scanDirectory(path);
+      if (items.isEmpty) {
+        AppToast.error('目录里没有 .js 文件');
+        return;
+      }
+      final conflict = await _askConflict(items.map((e) => e.name));
+      if (conflict == null) return;
+      final r = await LocalJsSources.instance.importMany(
+        items,
+        conflict: conflict,
+      );
+      await _afterChange(reloadActive: conflict == ImportConflict.replace);
       _reportBatch(r);
     } catch (e) {
       AppToast.error('文件夹导入失败：$e');
@@ -220,8 +260,26 @@ class _LocalJsSourcesPageState extends State<LocalJsSourcesPage> {
     }
   }
 
-  Future<void> _afterChange() async {
+  Future<void> _afterChange({bool reloadActive = false}) async {
     await ApiConfig.instance.reloadLocalVideoSources();
+    // 替换模式下，如果换的正是**当前选中的源**，必须让 Node 重新载入 ——
+    // JS 是单源槽位架构，不 reload 的话跑的还是旧代码（与 `_editScript` 同理）。
+    if (reloadActive) {
+      final bean = ApiConfig.instance.homeSourceBean.value;
+      if (bean != null) {
+        final hit = LocalJsSources.instance.sources
+            .where((s) => s.sourceKey == bean.key)
+            .toList();
+        if (hit.isNotEmpty) {
+          try {
+            await NodeJSManager.instance.loadSource(hit.first.api);
+            AppLog.instance.log('[LocalJs] 替换后已重新载入 ${hit.first.api}');
+          } catch (e) {
+            AppLog.instance.w('[LocalJs] 替换后重新载入失败: $e');
+          }
+        }
+      }
+    }
     if (mounted) setState(() {});
   }
 
@@ -247,6 +305,11 @@ class _LocalJsSourcesPageState extends State<LocalJsSourcesPage> {
     // 否则主页源会被订阅线路覆盖。
     if (!ApiConfig.instance.localSourcesEnabled.value) {
       await ApiConfig.instance.setLocalSourcesEnabled(true);
+    }
+    // ⚠️ 本地 JS 源还有自己的子开关：不一起打开的话，选了也不生效
+    //（`isLocalSourceEnabled` 会判它为"未启用"）。
+    if (!ApiConfig.instance.localJsSourcesEnabled.value) {
+      await ApiConfig.instance.setLocalJsSourcesEnabled(true);
     }
     await ApiConfig.instance.setHomeSource(bean);
     await LocalJsSources.instance.bumpUsage(src.key);

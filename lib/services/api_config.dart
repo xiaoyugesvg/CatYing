@@ -81,8 +81,48 @@ class ApiConfig extends GetxController {
   /// 所以「订阅管理 → 本地爬虫」里依旧能看到、管理已导入的脚本。
   final localSourcesEnabled = false.obs;
 
+  /// 「本地 JS 源」开关（2026-10-28，用户要求：和「本地爬虫」一样能单独开关）。
+  ///
+  /// 语义 = **总开关之下的子开关**：
+  ///   · 本地 Python 源参与 ⇒ `localSourcesEnabled`
+  ///   · 本地 JS 源参与 ⇒ `localSourcesEnabled && localJsSourcesEnabled`
+  ///
+  /// 默认 **true**：这样在加这个开关之前的行为**完全不变**（总开关开着时 JS 源
+  /// 照旧出现在源面板 / 搜索里），只是多了一个能单独关掉 JS 的旋钮。
+  /// 总开关关掉时子开关一律无效 —— 「本地爬虫」仍是本地脚本的总闸。
+  final localJsSourcesEnabled = true.obs;
+
   /// 保存开关的 prefs 键
   static const String _kLocalSourcesEnabled = 'local_sources_enabled_v1';
+
+  /// 「本地 JS 源」开关的 prefs 键
+  static const String _kLocalJsSourcesEnabled = 'local_js_sources_enabled_v1';
+
+  /// 本地源当前是否**参与**（源面板 / 搜索 / 主页源恢复）。
+  ///
+  /// Python 源看总开关；JS 源还要看 JS 子开关。订阅线路**不受**本地开关影响。
+  bool isLocalSourceEnabled(SourceBean s) {
+    if (s.key.startsWith('localjs_')) {
+      return localSourcesEnabled.value && localJsSourcesEnabled.value;
+    }
+    if (s.key.startsWith('localpy_')) {
+      return localSourcesEnabled.value;
+    }
+    return true;
+  }
+
+  /// 本地 **Python** 源数量（`localpy_`）。
+  ///
+  /// 之前设置页「本地爬虫」那行显示的是 [localVideoSources] 的**总**长度，
+  /// 把 JS 源也算进去了（用户截图里 114 个是 PY+JS 合数）—— 拆成两个开关后
+  /// 必须各数各的，否则两行数字会互相矛盾。
+  int get localPythonSourceCount =>
+      localVideoSources.where((s) => s.key.startsWith('localpy_')).length;
+
+  /// 本地 **JS** 源数量（`localjs_`）。
+  int get localJsSourceCount =>
+      localVideoSources.where((s) => s.key.startsWith('localjs_')).length;
+
   final parseBeanList = <ParseBean>[].obs;
   final dohList = <(String, String)>[].obs;
   final isLoaded = false.obs;
@@ -252,12 +292,12 @@ class ApiConfig extends GetxController {
 
   /// 获取指定 key 的源（订阅线路 + 本地 Python 源）
   ///
-  /// 本地源只在「本地爬虫」开关打开时参与（用户 2026-10-18：默认优先订阅激活的源）。
+  /// 本地源只在「本地爬虫」开关打开时参与（用户 2026-10-18：默认优先订阅激活的源）；
+  /// 本地 **JS** 源还要看 JS 子开关（[localJsSourcesEnabled]）。
   SourceBean? getSource(String key) {
     return sourceBeanList.firstWhereOrNull((s) => s.key == key) ??
-        (localSourcesEnabled.value
-            ? localVideoSources.firstWhereOrNull((s) => s.key == key)
-            : null);
+        localVideoSources.firstWhereOrNull(
+            (s) => s.key == key && isLocalSourceEnabled(s));
   }
 
   /// 获取可搜索的源列表（本地 Python 源也参与搜索）
@@ -265,12 +305,12 @@ class ApiConfig extends GetxController {
     final result = sourceBeanList
         .where((s) => s.isSearchable && s.key != 'douban' && s.key != 'baseset')
         .toList();
-    if (localSourcesEnabled.value) {
-      result.addAll(localVideoSources.where((s) => s.isSearchable));
-    }
+    final enabledLocal =
+        localVideoSources.where((s) => s.isSearchable && isLocalSourceEnabled(s));
+    result.addAll(enabledLocal);
     AppLog.instance.log(
       '[ApiConfig] getSearchableSources: 总源数=${sourceBeanList.length}'
-      '+${localSourcesEnabled.value ? localVideoSources.length : 0} 本地源, '
+      '+${enabledLocal.length} 本地源, '
       '可搜索源数=${result.length}',
     );
     return result;
@@ -284,6 +324,10 @@ class ApiConfig extends GetxController {
       final prefs = await SharedPreferences.getInstance();
       // 每次都同步一次开关（默认关）：保证冷启动 / 切订阅时口径一致
       localSourcesEnabled.value = prefs.getBool(_kLocalSourcesEnabled) ?? false;
+      // JS 子开关（默认开）：没写过就跟着「之前的整体行为」走 —— 即总开关开
+      // 着时 JS 源照旧可用，不因为新增这个旋钮而把老用户手里的 JS 源关掉。
+      localJsSourcesEnabled.value =
+          prefs.getBool(_kLocalJsSourcesEnabled) ?? true;
       await LocalPythonSources.instance.load(force: true);
       await LocalJsSources.instance.load(force: true);
       final list = <SourceBean>[
@@ -292,11 +336,11 @@ class ApiConfig extends GetxController {
       ];
       localVideoSources.assignAll(list);
 
-      // 当前主页源是本地源：开关关闭 ⇒ 立刻回到订阅激活的第一条线路
+      // 当前主页源是本地源：对应开关关闭 ⇒ 立刻回到订阅激活的第一条线路
       final cur = homeSourceBean.value;
       if (cur != null &&
           (cur.key.startsWith('localpy_') || cur.key.startsWith('localjs_'))) {
-        if (!localSourcesEnabled.value) {
+        if (!isLocalSourceEnabled(cur)) {
           homeSourceBean.value = sourceBeanList.firstOrNull;
           await prefs.remove(_kLocalHomeApi);
           AppLog.instance.log('[ApiConfig] 本地源开关已关闭，主页源切回订阅线路');
@@ -342,6 +386,21 @@ class ApiConfig extends GetxController {
     } catch (e) {
       AppLog.instance.w('[ApiConfig] 本地源注册失败: $e');
     }
+  }
+
+  /// 「本地 JS 源」开关（2026-10-28，用户要「和 PY 本地一样加个开关」）。
+  ///
+  /// 这是**子开关**：总开关（[setLocalSourcesEnabled]）关着时它一律无效。
+  /// 关掉它 ⇒ 本地 JS 源不再出现在源面板 / 搜索里，主页源若是本地 JS 源
+  /// 也会自动切回订阅线路；打开 ⇒ 立刻可用（Node 引擎本来就常驻，
+  /// 不需要像 Python 那样额外启动）。
+  Future<void> setLocalJsSourcesEnabled(bool value) async {
+    if (localJsSourcesEnabled.value == value) return;
+    localJsSourcesEnabled.value = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kLocalJsSourcesEnabled, value);
+    PrefsMirror.snapshotSoon();
+    await reloadLocalVideoSources();
   }
 
   /// 主页源选择：按**订阅（配置地址）分别记住**。
@@ -1040,12 +1099,11 @@ class ApiConfig extends GetxController {
     final restoredValid =
         restored != null &&
         (newSources.any((s) => s.key == restored.key) ||
-            (localSourcesEnabled.value &&
-                localVideoSources.any((s) => s.key == restored.key)));
+            localVideoSources
+                .any((s) => s.key == restored.key && isLocalSourceEnabled(s)));
     if (!restoredValid) {
-      homeSourceBean.value =
-          newSources.firstOrNull ??
-          (localSourcesEnabled.value ? localVideoSources.firstOrNull : null);
+      homeSourceBean.value = newSources.firstOrNull ??
+          localVideoSources.firstWhereOrNull(isLocalSourceEnabled);
     }
 
     AppLog.instance.log(
@@ -1513,15 +1571,14 @@ class ApiConfig extends GetxController {
     try {
       final prefs = await SharedPreferences.getInstance();
 
-      // ① 本地 Python 源是「全局选择」：只要它还存在于 local_py，就永远优先，
+      // ① 本地 Python / JS 源是「全局选择」：只要它还存在于本地目录，就永远优先，
       //    不因切换订阅 / 激活其他线路而改变。
-      //    ⚠️ 仅在「本地爬虫」开关打开时生效（用户 2026-10-18：优先订阅激活的源）。
+      //    ⚠️ 仅在「本地爬虫」开关打开时生效（用户 2026-10-18：优先订阅激活的源）；
+      //    本地 JS 源还要看 JS 子开关。
       final localKey = prefs.getString(_kLocalHomeApi);
-      if (localSourcesEnabled.value &&
-          localKey != null &&
-          localKey.isNotEmpty) {
+      if (localKey != null && localKey.isNotEmpty) {
         final local = localVideoSources
-            .where((s) => s.key == localKey)
+            .where((s) => s.key == localKey && isLocalSourceEnabled(s))
             .firstOrNull;
         if (local != null) {
           homeSourceBean.value = local;
@@ -1547,15 +1604,13 @@ class ApiConfig extends GetxController {
           homeSourceBean.value = found;
           return;
         }
-        // 本地 Python 源不在订阅线路表里，单独找一次（开关打开时才认）
-        if (localSourcesEnabled.value) {
-          final local = localVideoSources
-              .where((s) => s.key == saved)
-              .firstOrNull;
-          if (local != null) {
-            homeSourceBean.value = local;
-            return;
-          }
+        // 本地 Python / JS 源不在订阅线路表里，单独找一次（对应开关打开时才认）
+        final local = localVideoSources
+            .where((s) => s.key == saved && isLocalSourceEnabled(s))
+            .firstOrNull;
+        if (local != null) {
+          homeSourceBean.value = local;
+          return;
         }
       }
     } catch (e) {

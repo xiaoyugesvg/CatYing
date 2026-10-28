@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:tvbox/models/import_conflict.dart';
 import 'package:tvbox/models/local_python_source.dart';
 import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/python_manager.dart';
@@ -270,10 +271,15 @@ class LocalPythonSources {
   /// 按脚本文本导入（核心逻辑）
   ///
   /// [save] = false 用于批量导入：循环里不反复写清单，最后统一落一次盘。
+  ///
+  /// [conflict] 只在**同名**时起作用：
+  ///   · [ImportConflict.rename]（默认）= 原来的自动改名 `名字 (2)`；
+  ///   · [ImportConflict.replace] = 覆盖同名源，**沿用旧 key**，只换脚本内容。
   Future<({bool ok, String? message, LocalPythonSource? source})> importCode(
     String code, {
     String? displayName,
     bool save = true,
+    ImportConflict conflict = ImportConflict.rename,
   }) async {
     try {
       if (code.trim().isEmpty) {
@@ -307,6 +313,38 @@ class LocalPythonSources {
         base = base.substring(0, base.length - 3);
       }
       if (base.isEmpty) base = '本地源';
+
+      // ── 覆盖同名源 ────────────────────────────────────────────────
+      // 沿用旧 key：文件路径、已选中的 key、分组顺序、使用次数全部不变，
+      // 只把脚本内容换掉 —— 用户视角是"这个源更新了"。
+      if (conflict == ImportConflict.replace) {
+        final i = _sources.indexWhere((s) => s.name == base);
+        if (i >= 0) {
+          final old = _sources[i];
+          final dir = await directory();
+          if (!await dir.exists()) await dir.create(recursive: true);
+          try {
+            await File('${dir.path}/${old.key}.py')
+                .writeAsString(code, flush: true);
+          } catch (e) {
+            return (ok: false, message: '写入 local_py 失败: $e', source: null);
+          }
+          // 重新注册到引擎（同 key 覆盖），否则跑的还是旧代码
+          final rr = await PythonSourcesService.instance.registerSource(
+            'video',
+            old.key,
+            code,
+          );
+          if (!rr.ok) {
+            return (ok: false, message: '注册失败: ${rr.message}', source: null);
+          }
+          if (save) await _save();
+          AppLog.instance.log('[LocalPy] 已替换本地源 ${old.key}（${old.name}）');
+          return (ok: true, message: null, source: old);
+        }
+        // 没找到同名 → 当成新源，走下面的正常流程
+      }
+
       var name = base;
       var n = 2;
       while (_sources.any((s) => s.name == name)) {
@@ -355,10 +393,32 @@ class LocalPythonSources {
     }
   }
 
+  /// 这批条目里与**现有源同名**的显示名（已去掉 `.py`）。
+  ///
+  /// 页面在真正导入前先用它算冲突，好弹「替换 / 重命名」让用户自己选。
+  /// 内部先 `load()`：页面可能还没把清单读进来。
+  Future<List<String>> conflictingNames(Iterable<String> displayNames) async {
+    final bases = <String>{};
+    for (final raw in displayNames) {
+      var b = raw.trim();
+      if (b.toLowerCase().endsWith('.py')) {
+        b = b.substring(0, b.length - 3);
+      }
+      if (b.isNotEmpty) bases.add(b);
+    }
+    if (bases.isEmpty) return const <String>[];
+    await load();
+    return _sources
+        .where((s) => bases.contains(s.name))
+        .map((s) => s.name)
+        .toList();
+  }
+
   /// 批量导入（统一只启动一次引擎、只写一次清单）
   Future<({int imported, int failed, List<String> errors})> importMany(
-    List<({String name, String code})> items,
-  ) async {
+    List<({String name, String code})> items, {
+    ImportConflict conflict = ImportConflict.rename,
+  }) async {
     if (items.isEmpty) {
       return (imported: 0, failed: 0, errors: const <String>[]);
     }
@@ -381,7 +441,12 @@ class LocalPythonSources {
     var failed = 0;
     final errors = <String>[];
     for (final it in items) {
-      final r = await importCode(it.code, displayName: it.name, save: false);
+      final r = await importCode(
+        it.code,
+        displayName: it.name,
+        save: false,
+        conflict: conflict,
+      );
       if (r.ok) {
         imported++;
       } else {
@@ -393,71 +458,88 @@ class LocalPythonSources {
     return (imported: imported, failed: failed, errors: errors);
   }
 
-  /// 批量导入一个目录下的所有 .py（默认递归），每个文件仍是一条独立本地源
-  Future<({int imported, int failed, List<String> errors})> importDirectory(
+  /// 扫描目录里的所有 `.py`（不落盘，供页面先做同名检测）。
+  Future<List<({String name, String code})>> scanDirectory(
     String path, {
     bool recursive = true,
   }) async {
     final items = <({String name, String code})>[];
+    final dir = Directory(path);
+    if (!await dir.exists()) return items;
+    await for (final f in dir.list(
+      recursive: recursive,
+      followLinks: false,
+    )) {
+      if (f is! File) continue;
+      final lower = f.path.toLowerCase();
+      if (!lower.endsWith('.py')) continue;
+      if (lower.contains('__pycache__')) continue;
+      try {
+        final code = await f.readAsString();
+        if (code.trim().isEmpty) continue;
+        items.add((name: f.uri.pathSegments.last, code: code));
+      } catch (_) {
+        // 单个文件读失败不影响其它文件
+      }
+    }
+    return items;
+  }
+
+  /// 批量导入一个目录下的所有 .py（默认递归），每个文件仍是一条独立本地源
+  Future<({int imported, int failed, List<String> errors})> importDirectory(
+    String path, {
+    bool recursive = true,
+    ImportConflict conflict = ImportConflict.rename,
+  }) async {
+    final List<({String name, String code})> items;
     try {
-      final dir = Directory(path);
-      if (!await dir.exists()) {
-        return (imported: 0, failed: 0, errors: const <String>['目录不存在']);
-      }
-      await for (final f in dir.list(
-        recursive: recursive,
-        followLinks: false,
-      )) {
-        if (f is! File) continue;
-        final lower = f.path.toLowerCase();
-        if (!lower.endsWith('.py')) continue;
-        if (lower.contains('__pycache__')) continue;
-        try {
-          final code = await f.readAsString();
-          if (code.trim().isEmpty) continue;
-          items.add((name: f.uri.pathSegments.last, code: code));
-        } catch (_) {
-          // 单个文件读失败不影响其它文件
-        }
-      }
+      items = await scanDirectory(path, recursive: recursive);
     } catch (e) {
       return (imported: 0, failed: 0, errors: ['扫描目录失败: $e']);
     }
     if (items.isEmpty) {
       return (imported: 0, failed: 0, errors: const <String>['目录里没有 .py 文件']);
     }
-    return importMany(items);
+    return importMany(items, conflict: conflict);
+  }
+
+  /// 解析 zip 里的所有 `.py`（不落盘，供页面先做同名检测）。解析失败会抛异常。
+  List<({String name, String code})> scanZipBytes(List<int> bytes) {
+    final items = <({String name, String code})>[];
+    final archive = ZipDecoder().decodeBytes(bytes);
+    for (final f in archive) {
+      if (!f.isFile) continue;
+      final name = f.name.replaceAll('\\', '/');
+      final lower = name.toLowerCase();
+      if (!lower.endsWith('.py')) continue;
+      if (lower.contains('__macosx/') || lower.contains('__pycache__/')) {
+        continue;
+      }
+      final data = f.content;
+      if (data is! List<int> || data.isEmpty) continue;
+      items.add((
+        name: name.split('/').last,
+        code: utf8.decode(data, allowMalformed: true),
+      ));
+    }
+    return items;
   }
 
   /// 批量导入 zip 里的所有 .py（自动跳过 __MACOSX / __pycache__）
   Future<({int imported, int failed, List<String> errors})> importZip(
-    List<int> bytes,
-  ) async {
-    final items = <({String name, String code})>[];
+    List<int> bytes, {
+    ImportConflict conflict = ImportConflict.rename,
+  }) async {
+    final List<({String name, String code})> items;
     try {
-      final archive = ZipDecoder().decodeBytes(bytes);
-      for (final f in archive) {
-        if (!f.isFile) continue;
-        final name = f.name.replaceAll('\\', '/');
-        final lower = name.toLowerCase();
-        if (!lower.endsWith('.py')) continue;
-        if (lower.contains('__macosx/') || lower.contains('__pycache__/')) {
-          continue;
-        }
-        final data = f.content;
-        if (data is! List<int> || data.isEmpty) continue;
-        items.add((
-          name: name.split('/').last,
-          code: utf8.decode(data, allowMalformed: true),
-        ));
-      }
+      items = scanZipBytes(bytes);
     } catch (e) {
       return (imported: 0, failed: 0, errors: ['zip 解析失败: $e']);
     }
     if (items.isEmpty) {
       return (imported: 0, failed: 0, errors: const <String>['zip 里没有 .py 文件']);
     }
-    return importMany(items);
+    return importMany(items, conflict: conflict);
   }
 
   /// 改名（只改清单，不动文件/key）

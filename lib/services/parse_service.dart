@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import 'package:tvbox/common/constants.dart';
 import 'package:tvbox/models/app_config.dart';
+import 'package:tvbox/reading/source/global_proxy.dart';
 import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/parse_store.dart';
@@ -61,11 +62,27 @@ class ParseService {
   static const Duration _preferWindow = Duration(milliseconds: 1200);
 
   Dio? _dio;
-  Dio get _client => _dio ??= Dio(BaseOptions(
-        connectTimeout: _timeout,
-        receiveTimeout: _timeout,
-        headers: {'User-Agent': AppConstants.defaultUserAgent},
-      ));
+  Dio get _client => _dio ??= _createDio();
+
+  /// 🔴 必须套全局代理（2026-10-28 深挖）。
+  ///
+  /// 全项目 60 多处 Dio 都调了 `applyGlobalProxy`，**唯独这里漏了** ——
+  /// 后果是：用户一开代理，解析接口的请求走直连，解析站基本都连不上，
+  /// 表现为「解析线路全部失败，关了代理就好」。嗅探侧
+  /// （`WebSniffService`）一直是套着的，所以只有解析会挂，很难联想到一起。
+  static Dio _createDio() {
+    final dio = Dio(BaseOptions(
+      connectTimeout: _timeout,
+      receiveTimeout: _timeout,
+      headers: {'User-Agent': AppConstants.defaultUserAgent},
+    ));
+    try {
+      applyGlobalProxy(dio);
+    } catch (e) {
+      AppLog.instance.log('[Parse] 代理配置失败: $e');
+    }
+    return dio;
+  }
 
   /// 是否允许解析：存在可用接口（url 非空，type 0 或 1）**且**用户没有在
   /// 「播放设置 → 嗅探设置」里关掉解析总开关。
@@ -257,7 +274,28 @@ class ParseService {
         return null;
       }
 
-      final extracted = _extractUrl(body);
+      // ── 响应体**本身就是 m3u8 播放列表** ──────────────────────────
+      //
+      // 很多解析站（典型就是内置「牛马」那种 `xxx/nm_free.php?url=…`）
+      // 不返回 JSON，而是**直接把 m3u8 文本吐出来** —— 这时"播放地址"
+      // 就是请求地址本身，AVPlayer 播它没问题。
+      //
+      // 原来这里一律走 `_extractUrl`，而纯文本分支只认**带媒体后缀的绝对
+      // 地址**：正文里若是相对路径（`/hls/xxx/1.ts`、`seg-1.ts`）就一个都
+      // 提不出来 → 整条线路被判"未提取到地址"→ 解析等于没做。
+      // 这是「解析明明配了却永远失败」的常见原因（2026-10-28 深挖）。
+      if (_looksLikeM3u8Body(body)) {
+        AppLog.instance.log(
+            '[Parse] 接口「${bean.name}」直接返回 m3u8 文本 → 用请求地址播放');
+        return ParseOutcome(
+          endpoint,
+          direct: true,
+          sourceName: bean.name,
+          headers: beanHeaders,
+        );
+      }
+
+      final extracted = _extractUrl(body, base: endpoint);
       if (extracted == null || extracted.isEmpty) {
         AppLog.instance.log('[Parse] 接口「${bean.name}」未提取到地址');
         return null;
@@ -355,20 +393,56 @@ class ParseService {
   ///   ② **JSONP 响应**（`callback({...})`）：抠出花括号里的 JSON 同①。
   ///   ③ **HTML / 纯文本**：只接受带影视后缀（m3u8/mp4/flv…）的直链；
   ///      纯文本里的任意网页 URL 不再采信（w3.org 这类误判即由此杜绝）。
-  String? _extractUrl(String body) {
-    final trimmed = body.trim();
+  /// 响应体是不是一段 **HLS 播放列表**（`#EXTM3U` / `#EXTINF` 开头）。
+  ///
+  /// 用来识别"解析站直接吐 m3u8 文本"的形态 —— 这种情况下播放地址就是
+  /// 请求地址本身，不需要再从正文里抠 URL。
+  static bool _looksLikeM3u8Body(String body) {
+    final head = body.trimLeft();
+    if (head.isEmpty) return false;
+    return head.startsWith('#EXTM3U') || head.startsWith('#EXTINF');
+  }
+
+  String? _extractUrl(String body, {String? base}) {
+    var trimmed = body.trim();
+    // 少数接口会带 UTF-8 BOM（`\uFEFF`）—— Dart 的 trim() 不认为它是空白，
+    // 留着会让下面的 `_looksLikeJsonBody` 判不出 JSON（2026-10-28 深挖）。
+    if (trimmed.isNotEmpty && trimmed.codeUnitAt(0) == 0xFEFF) {
+      trimmed = trimmed.substring(1).trimLeft();
+    }
     if (trimmed.isEmpty) return null;
 
-    // ① JSON
-    final decoded = _tryDecodeJson(trimmed);
-    if (decoded != null) {
-      final named = _findInJson(decoded, namedOnly: true);
-      if (named != null) return named;
-      return _findInJson(decoded, namedOnly: false);
+    // ① JSON / JSONP —— **只在响应确实像 JSON 时**才走这条路。
+    //
+    // 原来无条件先 `_tryDecodeJson`（内部取"第一个 `{` 到最后一个 `}`"），
+    // 于是**网页**里那段内联 JS 对象也会被当成接口响应解析：
+    // `{"url":"/static/logo.png"}` 之类一旦被认成具名字段，就会把图标/页面
+    // 当成播放结果（2026-10-28 深挖）。
+    if (_looksLikeJsonBody(trimmed)) {
+      final decoded = _tryDecodeJson(trimmed);
+      if (decoded != null) {
+        final named = _findInJson(decoded, namedOnly: true, base: base);
+        if (named != null) return named;
+        final loose = _findInJson(decoded, namedOnly: false, base: base);
+        if (loose != null) return loose;
+      }
     }
 
     // ③ 非 JSON：严格只认影视直链（HTML 里扫 m3u8/mp4 也走这条）
-    return _firstMediaUrl(trimmed);
+    return _bestMediaUrl(trimmed);
+  }
+
+  /// 响应体是否**看起来**是 JSON / JSONP（而不是夹着 JS 对象的网页）。
+  ///
+  /// 判据很窄：以 `{` / `[` 开头，或以 `标识符(` 开头（JSONP）。
+  /// 网页永远以 `<!DOCTYPE` / `<html` / `<` 开头，一眼就能排掉。
+  static bool _looksLikeJsonBody(String text) {
+    if (text.isEmpty) return false;
+    final c = text.codeUnitAt(0);
+    if (c == 0x7B /* { */ || c == 0x5B /* [ */) return true;
+    // JSONP：`callback({...})` / `jQuery123_456({...})`
+    final head = text.length > 64 ? text.substring(0, 64) : text;
+    return RegExp(r'^[A-Za-z_$][\w$.]*\s*\(\s*[\{\[]').hasMatch(head);
   }
 
   /// 直接 `jsonDecode`，失败再按 JSONP `xxx({...})` 抠花括号内容试一次。
@@ -394,35 +468,41 @@ class ParseService {
   /// [namedOnly] = false：具名字段落空后的**兜底全量扫描**，此时只接受
   /// 影视直链，避免把说明文字/日志里的任意网址（w3.org 命名空间之类）
   /// 误当播放地址。
+  ///
+  /// [base] 是解析接口地址，用来把**相对路径**补成绝对地址 —— 有些接口
+  /// 返回 `{"url":"/hls/xxx/index.m3u8"}`（2026-10-28 深挖）。
   String? _findInJson(dynamic node,
-      {required bool namedOnly, int depth = 0}) {
+      {required bool namedOnly, String? base, int depth = 0}) {
     if (depth > 6 || node == null) return null;
 
     if (node is String) {
       final v = node.trim();
-      if (!v.startsWith('http://') && !v.startsWith('https://')) {
-        // 少数接口把地址包在一段文字里，宽松模式允许从中抠媒体直链
-        return namedOnly ? null : _firstMediaUrl(v);
+      final abs = _absoluteUrl(v, base);
+      if (abs != null) {
+        if (namedOnly) return abs;
+        return _isDirectMedia(abs) ? abs : _bestMediaUrl(abs);
       }
-      if (namedOnly) return v;
-      return _isDirectMedia(v) ? v : _firstMediaUrl(v);
+      // 少数接口把地址包在一段文字里，宽松模式允许从中抠媒体直链
+      return namedOnly ? null : _bestMediaUrl(v);
     }
 
     if (node is Map) {
       if (namedOnly) {
         for (final key in const ['url', 'data', 'playUrl', 'video', 'play_url']) {
-          final r = _findInJson(node[key], namedOnly: true, depth: depth + 1);
+          final r = _findInJson(node[key],
+              namedOnly: true, base: base, depth: depth + 1);
           if (r != null) return r;
         }
         // 具名字段里也可能嵌着对象/数组，继续向下找具名字段
         for (final v in node.values) {
-          final r = _findInJson(v, namedOnly: true, depth: depth + 1);
+          final r =
+              _findInJson(v, namedOnly: true, base: base, depth: depth + 1);
           if (r != null) return r;
         }
         return null;
       }
       for (final v in node.values) {
-        final r = _findInJson(v, namedOnly: false, depth: depth + 1);
+        final r = _findInJson(v, namedOnly: false, base: base, depth: depth + 1);
         if (r != null) return r;
       }
       return null;
@@ -430,7 +510,8 @@ class ParseService {
 
     if (node is List) {
       for (final v in node) {
-        final r = _findInJson(v, namedOnly: namedOnly, depth: depth + 1);
+        final r = _findInJson(v,
+            namedOnly: namedOnly, base: base, depth: depth + 1);
         if (r != null) return r;
       }
       return null;
@@ -438,7 +519,32 @@ class ParseService {
     return null;
   }
 
-  /// 从任意文本里取**第一个影视直链**（必须带媒体后缀）。
+  /// 把接口返回的地址规整成**绝对地址**；不该采信的返回 null。
+  ///
+  /// 采信范围：
+  ///   · `http(s)://…` —— 原样；
+  ///   · `//cdn/x.m3u8` —— 补 `https:`；
+  ///   · 相对路径 —— **必须带媒体后缀**才补成绝对地址。
+  ///
+  /// 最后一条很关键：解析站返回的 JSON 里常有 `"logo":"/static/a.png"`、
+  /// `"url":"/about"` 这类相对路径，无脑补全会把图标/页面当成播放结果
+  /// （2026-10-28 深挖）。
+  static String? _absoluteUrl(String raw, String? base) {
+    if (raw.isEmpty) return null;
+    if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
+    if (raw.startsWith('//')) return 'https:$raw';
+    final b = base ?? '';
+    if (b.isEmpty) return null;
+    if (!_isDirectMedia(raw)) return null;
+    try {
+      final resolved = Uri.parse(b).resolveUri(Uri.parse(raw)).toString();
+      return resolved.startsWith('http') ? resolved : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 从任意文本里取**最可能是整片**的影视直链（必须带媒体后缀）。
   ///
   /// 与旧的 `_firstHttpUrl`（见 git 历史）不同：这里绝不接受
   /// `http://www.w3.org/1999/xhtml` 这类没有媒体后缀的任意网址，
@@ -462,7 +568,27 @@ class ParseService {
     return _mediaReCache!;
   }
 
-  String? _firstMediaUrl(String text) => _mediaUrlRe.firstMatch(text)?.group(0);
+  /// 文本里**最可播**的那条媒体直链（没有则 null）。
+  ///
+  /// 2026-10-28 深挖：原来是 `firstMatch` —— 取正文里**第一个**命中的地址。
+  /// 解析站返回的 HTML/内联 JS 常常先列出几十条 `.ts` 切片（播放器分片表），
+  /// `.m3u8` 主列表在更后面；取第一个命中就等于把"某一小段"当成了整片，
+  /// 用户看到的是「解析成功但播几秒就结束」。现在收集全部命中再按
+  /// [SniffFilter.rankCandidates] 排序取最优（m3u8 主列表 > m3u8 > mpd >
+  /// mp4 类 > 未知 > ts/m4s 切片）。
+  ///
+  /// 同时先做 `\/` → `/` 反转义：地址常藏在 `<script>` 的 JSON 字符串里，
+  /// 写作 `"https:\/\/cdn\/x\/index.m3u8"`，反转义前一个都扫不出来。
+  static String? _bestMediaUrl(String text) {
+    final src = text.contains('\\/') ? text.replaceAll('\\/', '/') : text;
+    final hits = <String>[];
+    for (final m in _mediaUrlRe.allMatches(src)) {
+      final u = m.group(0);
+      if (u != null && u.isNotEmpty && !hits.contains(u)) hits.add(u);
+    }
+    if (hits.isEmpty) return null;
+    return SniffFilter.rankCandidates(hits).first;
+  }
 
   /// 仅供单测：直接喂解析接口响应体，验证 [_extractUrl] 的提取/误判行为
   /// （w3.org xmlns 回归、JSON 具名字段、JSONP、HTML 媒体直链扫描）。
@@ -492,8 +618,10 @@ class ParseService {
 
   /// 直链探针：只请求 `Range: bytes=0-0`，拿到状态码立刻断开。
   ///
-  /// 只有拿到**明确的 4xx/5xx** 才判不可用；网络异常/超时按可用处理 ——
-  /// 探测抖动不该让一条本来能播的链接被丢掉。
+  /// 只有拿到**明确的**坏链状态码（404 / 410 / 5xx）才判不可用；
+  /// 401 / 403 / 416 与网络异常/超时一律**按可用处理** ——
+  /// 探测本身信息量有限（没有播放页 Referer、有的 CDN 不支持 Range），
+  /// 因为一次探测就把一条本来能播的链接丢掉，代价远大于收益。
   Future<bool> _probeDirect(String url, Map<String, String>? headers) async {
     ResponseBody? body;
     try {
@@ -513,6 +641,14 @@ class ParseService {
       );
       body = resp.data;
       final code = resp.statusCode ?? 0;
+      // 401 / 403 / 416 **不算坏链**（2026-10-28 深挖）：
+      //   · 403 —— 解析出的直链大多带防盗链，本探测**拿不到播放页 Referer**，
+      //     被 403 是常态，不代表链接失效。判死等于把能播的结果丢掉，
+      //     于是又回到"解析明明成功却播不了"；
+      //   · 416 —— 部分 CDN 不支持 `Range: bytes=0-0`，直接回
+      //     `416 Range Not Satisfiable`，链接本身完全正常。
+      // 只把 404 / 410 / 5xx 这类**明确**的坏链当失败。
+      if (code == 401 || code == 403 || code == 416) return true;
       if (code >= 400) return false;
       return true;
     } catch (e) {

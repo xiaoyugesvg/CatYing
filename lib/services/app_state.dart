@@ -275,10 +275,12 @@ class AppState extends GetxController {
     // 按**脚本**判：订阅里有没有 .py 源，或用户单独导入过本地 Python 源。
     // ⚠️ 本地源只在「本地爬虫」开关打开时才算数（用户 2026-10-18：
     //    默认优先订阅激活的源，不为本地源白启 Python）。
+    // ⚠️ 只数**本地 Python 源**：本地 JS 源走 Node 引擎，不该把 Python 引擎
+    //    拉起来（只有 JS 本地源时白启 Python 是纯浪费）。
     final localEnabled = ApiConfig.instance.localSourcesEnabled.value;
     final hasPySource =
         ApiConfig.instance.sourceBeanList.any((s) => s.isPythonScriptSource) ||
-        (localEnabled && ApiConfig.instance.localVideoSources.isNotEmpty);
+        (localEnabled && ApiConfig.instance.localPythonSourceCount > 0);
     if (!hasPySource) {
       AppLog.instance.log('[AppState] 没有 .py 源（含本地），跳过 Python 引擎启动（按脚本判）');
       return;
@@ -289,7 +291,7 @@ class AppState extends GetxController {
         // 订阅/远端 .py：Documents/python-project 下全量注册
         await PythonSourcesService.instance.syncToEngine();
         // 本地 Python 源：Documents/local_py 下单独注册（与订阅解耦）
-        if (localEnabled && ApiConfig.instance.localVideoSources.isNotEmpty) {
+        if (localEnabled && ApiConfig.instance.localPythonSourceCount > 0) {
           await LocalPythonSources.instance.registerAll();
         }
       }

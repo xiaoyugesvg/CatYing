@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/models/import_conflict.dart';
 import 'package:tvbox/services/prefs_mirror.dart';
 import 'package:tvbox/widgets/common_widgets.dart';
 
@@ -136,6 +137,148 @@ class SettingsDialogs {
           ],
         ),
       )),
+    );
+  }
+
+  /// 导入本地源时**同名冲突**的选择：替换 / 重命名 / 取消。
+  ///
+  /// 用户 2026-10-28：
+  ///   「不管是本地py还是本地的js同名导入的时候都要给我选择是替换还是重命名」
+  ///
+  /// 以前是同名就静默加 `(2)`，用户既不知道撞了名、也没法选择覆盖。
+  /// 返回 null = 用户取消（整批都不导入）。
+  static Future<ImportConflict?> askImportConflict(
+    BuildContext context, {
+    required List<String> names,
+    required String kind,
+  }) {
+    final preview = names.take(6).toList();
+    final rest = names.length - preview.length;
+    return showModalBottomSheet<ImportConflict>(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => kbSheet(SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.textTertiary.withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Text(
+                '有 ${names.length} 个同名$kind源',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontHeadline,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '${preview.join('、')}${rest > 0 ? ' 等 $rest 个' : ''}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: 12,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 14),
+              _conflictTile(
+                ctx: ctx,
+                icon: Icons.swap_horiz_rounded,
+                title: '替换',
+                subtitle: '覆盖原有脚本，位置和选中状态保持不变',
+                value: ImportConflict.replace,
+              ),
+              const SizedBox(height: 8),
+              _conflictTile(
+                ctx: ctx,
+                icon: Icons.content_copy_rounded,
+                title: '重命名',
+                subtitle: '另存为新的一份，名字自动加 (2)',
+                value: ImportConflict.rename,
+              ),
+              const SizedBox(height: 12),
+              Center(
+                child: TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: Text(
+                    '取消',
+                    style: TextStyle(color: AppTheme.textTertiary),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      )),
+    );
+  }
+
+  static Widget _conflictTile({
+    required BuildContext ctx,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required ImportConflict value,
+  }) {
+    return Material(
+      color: AppTheme.backgroundTertiary,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => Navigator.pop(ctx, value),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          child: Row(
+            children: [
+              Icon(icon, size: 20, color: AppTheme.accentColor),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: AppTheme.fontBody,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: AppTheme.textTertiary,
+                        fontSize: 12,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

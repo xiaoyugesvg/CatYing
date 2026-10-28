@@ -29,7 +29,25 @@ class ParseStore {
 
   static const String _kList = 'parse_line_list'; // StringList（每项一条 JSON）
   static const String _kActive = 'parse_active_url'; // 选中的线路 url
+  static const String _kSeeded = 'parse_builtin_seeded'; // 内置线路是否已检查过
   static const String _backupName = 'parse_list.bak';
+
+  /// 内置兜底线路。
+  ///
+  /// 为什么要内置（2026-10-28 用户指定）：`ApiConfig.parseBeanList` 是
+  /// 「订阅里有什么就是什么」，用户订阅不带 `parses`、自己也没手动加过时
+  /// 整张表是空的 ⇒ `ParseService.hasParsers` 为 false ⇒ 详情页/播放器里
+  /// 那一整段解析代码**根本不执行**，用户看到的就是「解析按钮点了没反应」。
+  ///
+  /// `type: 0` = 嗅探/通用解析站：它返回的可能是直链，也可能是一个带播放器
+  /// 的网页（交给嗅探链路兜底），两种都由 `ParseService` 自己判定。
+  static const List<ParseBean> kBuiltinParsers = [
+    ParseBean(
+      name: '内置解析',
+      url: 'https://jx.muiu.site/?url=',
+      type: 0,
+    ),
+  ];
 
   final List<ParseBean> _list = [];
   String _activeUrl = '';
@@ -70,6 +88,23 @@ class ParseStore {
         ..clear()
         ..addAll(_decode(raw));
       _activeUrl = (prefs.getString(_kActive) ?? '').trim();
+
+      // ── 内置兜底线路（只塞一次）────────────────────────────────
+      //
+      // 触发条件：本地一条线路都没有 **且** 这个标记还没写过。
+      // 标记写成后永不再塞 —— 用户**明确删掉**内置线路之后，不该每次启动
+      // 又给他冒出来一条（2026-10-28）。
+      final seeded = prefs.getBool(_kSeeded) ?? false;
+      if (!seeded) {
+        await prefs.setBool(_kSeeded, true);
+        if (_list.isEmpty) {
+          _list.addAll(kBuiltinParsers);
+          await _save();
+          AppLog.instance.log(
+              '[ParseStore] 本地没有解析线路 → 已内置 ${kBuiltinParsers.length} 条兜底');
+        }
+      }
+
       // 选中的线路已经不在列表里（被删了 / 备份较旧）→ 回到"自动"
       if (_activeUrl.isNotEmpty && !_list.any((b) => b.url == _activeUrl)) {
         _activeUrl = '';

@@ -750,12 +750,17 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   }
 
   Future<void> _selectSource(SourceBean source) async {
-    // 选本地源 ⇒ 顺手打开「本地爬虫」开关（与本地源管理页同一语义），
+    // 选本地源 ⇒ 顺手打开对应开关（与本地源管理页同一语义），
     // 否则主页源会被订阅线路覆盖。
-    if ((source.key.startsWith('localpy_') ||
-            source.key.startsWith('localjs_')) &&
-        !ApiConfig.instance.localSourcesEnabled.value) {
+    // ⚠️ 本地 JS 源还有自己的子开关：不一起打开的话，选了也仍然不生效
+    //（`isLocalSourceEnabled` 会判它为"未启用"）。
+    final isPy = source.key.startsWith('localpy_');
+    final isJs = source.key.startsWith('localjs_');
+    if ((isPy || isJs) && !ApiConfig.instance.localSourcesEnabled.value) {
       await ApiConfig.instance.setLocalSourcesEnabled(true);
+    }
+    if (isJs && !ApiConfig.instance.localJsSourcesEnabled.value) {
+      await ApiConfig.instance.setLocalJsSourcesEnabled(true);
     }
     await ApiConfig.instance.setHomeSource(source);
     if (!mounted) return;

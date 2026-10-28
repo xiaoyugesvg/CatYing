@@ -23,8 +23,8 @@ import 'package:tvbox/services/sniff_filter.dart';
 import 'package:tvbox/services/source_service.dart';
 import 'package:tvbox/services/spider_service.dart';
 import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/playback_surface.dart';
 import 'package:tvbox/pages/play/sniff_player_page.dart';
-import 'package:tvbox/pages/play/webview_player_page.dart';
 import 'package:tvbox/miniapp/pages/mini_app_player_page.dart';
 
 /// 官方 ant JSAPI SDK v4 桥（Dart 侧实现）。
@@ -964,7 +964,9 @@ class AntBridge {
     if (!SniffFilter.isDirectMedia(candidate)) {
       final mustParse =
           parse == '1' || jx == '1' || SniffFilter.shouldParse(candidate);
-      if (mustParse && ParseService.instance.enabled) {
+      if (mustParse &&
+          (ParseService.instance.enabled ||
+              ParseService.instance.hasParsers)) {
         final outcome = await ParseService.instance.parseOutcome(candidate);
         if (outcome != null && outcome.url.isNotEmpty) {
           AppLog.instance.log(
@@ -975,6 +977,11 @@ class AntBridge {
           final h = outcome.headers;
           if (h != null && h.isNotEmpty) {
             headers = {...h, ...headers};
+          }
+          // 「播放带 Referer」开关打开时，解析结果也补 Referer（P2-2 一致性）
+          if (PlayerPrefs.instance.shouldSendRefererFor(url, candidate)) {
+            headers = <String, String>{...headers}
+              ..putIfAbsent('Referer', () => url.trim());
           }
         } else {
           AppLog.instance.log('[AntBridge] player.open 解析未命中，转直接嗅探');
@@ -995,7 +1002,7 @@ class AntBridge {
         // 播放器打开——直接丢给原生播放器会黑屏（2026-10-15）。
         AppLog.instance.log(
             '[AntBridge] player.open 嗅探已关闭，网页地址转内嵌网页播放器: $candidate');
-        Get.to(() => WebviewPlayerPage(url: candidate, title: title));
+        Get.to(() => PlaybackSurface.webFallback(url: candidate, title: title));
         return {'route': 'webview', 'url': candidate, 'sniff': false};
       }
     }

@@ -6,7 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:tvbox/music/pages/player_page.dart';
 import 'package:tvbox/music/widgets/music_components.dart';
-import 'package:tvbox/music/widgets/mini_player.dart';
 import 'package:tvbox/music/services/player_manager.dart';
 import 'package:tvbox/music/theme/music_theme.dart';
 import 'package:tvbox/services/app_log.dart';
@@ -41,13 +40,7 @@ class MusicFloatingPlayButton extends StatefulWidget {
 class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
   static const double _size = 54;
 
-  /// 球与迷你播放条之间的视觉间隙
-  ///
-  /// 8 是"看得出是两层、又不显得空"的值（和迷你条自己的
-  /// `gapAboveNavBar = 6` 同一量级）。
-  static const double _bottomGap = 8;
-
-  /// 拖动后的位置；null = 用默认位置（右下、迷你播放器上方）
+  /// 拖动后的位置；null = 用默认位置（右侧中间，见 [_defaultPos]）
   Offset? _pos;
 
   /// 是否展开出「上一首 / 播放暂停 / 下一首 / 关闭」四个键
@@ -58,13 +51,37 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
   bool _dismissed = false;
   String? _lastSongKey;
 
-  /// **贴边时是否把球"半藏"进屏幕边缘**。
+  /// 半藏时露在屏幕内的比例（0.4 = 藏进去 60%，"隐藏大半"）。
   ///
-  /// 原来默认 true（露出约 62%，追求"贴边"效果），但真机上用户看到的是
-  /// **一个圆形封面被垂直切掉一半**（用户 2026-10-28 截图 IMG_9541/9544），
-  /// 观感像渲染 bug。现改为 false：球始终完整显示，吸附到边时保留 16px
-  /// 边距 —— 不再有"半个圆"。
-  bool _tucked = false;
+  /// 原来按 `pos.dx + tuck` 算，而 `pos.dx` 已被 clamp 在屏内（距边 4~16），
+  /// 实际只藏进去 `tuck - 16 ≈ 4.5px` —— 视觉上等于没藏（用户反馈"不贴边"）。
+  /// 现在 `_pos` 的合法范围**本身就包含半藏区间**（见 [_minPosX]/[_maxPosX]），
+  /// 拖到边上时球自然被推出去一大半，藏多少是确定的。
+  static const double _visibleRatio = 0.4;
+
+  /// 松手时"吸附成半藏"的容差（球距**全露贴边位**多少 px 内就吸附）。
+  ///
+  /// 取 8：全露贴边是距边 4，所以只有球拖到距边 12px 以内才吸附半藏。
+  /// 球默认就停在距边 16 —— 不能被吸附，否则"默认位置"和"拖回默认位置"
+  /// 会长得不一样。
+  static const double _snapThreshold = 8;
+
+  /// 半藏时球左上角允许的**最小 x**（左贴边：球 60% 在屏幕左侧外）。
+  double _minPosX(EdgeInsets pad) => pad.left - _size * (1 - _visibleRatio);
+
+  /// 半藏时球左上角允许的**最大 x**（右贴边：球 60% 在屏幕右侧外）。
+  double _maxPosX(Size screen, EdgeInsets pad) =>
+      screen.width - _size * _visibleRatio - pad.right;
+
+  /// 球的**默认位置**（未拖动过时）。
+  ///
+  /// 🔴 必须只有这一份定义：`build` 用它画球、`onPanUpdate` 用它当拖动起点。
+  /// 之前 `onPanUpdate` 的兜底写的是"屏幕底部迷你条上方"（`height - 156`），
+  /// 而 `build` 画在**屏幕垂直中间**（`height/2 - 27`）—— 两者差几百 px，
+  /// 于是**第一次**拖动时球从中间瞬移到屏幕底部（用户反馈"第一次想移动
+  /// 总是跑很远，第二次才能按住"），第二次 `_pos` 有值了才正常。
+  Offset _defaultPos(Size screen) =>
+      Offset(screen.width - _size - 16, screen.height / 2 - _size / 2);
 
   void _openPlayer() {
     final nav = VideoPlayerPip.navigatorKey.currentState;
@@ -190,23 +207,23 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
         // 默认位置：屏幕右侧中间（右侧 16px 边距，垂直居中）。
         // 之前默认在底部迷你条上方，现在改到右侧中间，
         // 避免挡歌词/控制区，也更醒目。
-        final defaultY = screen.height / 2 - _size / 2;
-        final pos = _pos ?? Offset(screen.width - _size - 16, defaultY);
+        final pos = _pos ?? _defaultPos(screen);
         // 用 `pos` 判断贴哪一侧（不能用 x —— 半藏后 x 可能为负）
         final toLeft = pos.dx + _size / 2 < screen.width / 2;
-        // 半藏仅作为可选样式（`_tucked`）；默认 false = 球始终完整显示。
-        // 用户 2026-10-28 反馈"圆形被垂直裁掉一半"后默认关闭。
-        final tucked = _tucked && !_open;
-        final tuck = _size * 0.38;
+        // `_pos` 的合法范围**包含半藏区间**：拖到边上时球会被推出去一大半，
+        // 而不是像原来那样"屏内坐标 + 固定偏移"（那样最多只能藏 4.5px）。
+        final minPosX = _minPosX(pad);
+        final maxPosX = _maxPosX(screen, pad);
+        // 半藏判定：坐标已经落到半藏区间（贴着边）且不是展开态。
+        // 用它替代原来的 `_tucked` 布尔量 —— 位置与状态只有一份来源，
+        // 按下/拖动时不会再出现"状态变了但坐标没跟上"的跳变。
+        final tucked = !_open &&
+            (pos.dx <= minPosX + 0.5 || pos.dx >= maxPosX - 0.5);
         // 展开时：长条**贴边**（吸附到最近边，4px 边距）——
         // 用户要求"操作后化成长条贴边"，不论球之前在中间还是边上。
         final x = _open
             ? (toLeft ? pad.left + 4 : maxX)
-            : tucked
-                ? (toLeft
-                    ? pad.left - tuck
-                    : screen.width - _size - pad.right + tuck)
-                : pos.dx.clamp(pad.left + 4, maxX);
+            : pos.dx.clamp(minPosX, maxPosX);
         final y = pos.dy.clamp(80.0, maxY);
 
         // 展开时的控制条：上一首 / 播放暂停 / 下一首（共 3 键）
@@ -263,7 +280,7 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
                     // 展开态：控制条 + 右上角关闭按钮；不显示主球
                     ? _buildExpandedPanel(controls)
                     // 收起态：只显示主球
-                    : _ballCircle(player),
+                    : _ballCircle(player, tucked: tucked),
               ),
             ),
           ],
@@ -358,24 +375,24 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
   }
 
   /// 主球（圆形本体）：**点击展开/收起**，**长按进播放页**，可拖动
-  Widget _ballCircle(MusicPlayerManager player) {
+  Widget _ballCircle(MusicPlayerManager player, {required bool tucked}) {
     return GestureDetector(
-      // 拖动一开始就"拔出来"（全露，封面转起来）
-      onPanStart: (_) {
-        if (_tucked) setState(() => _tucked = false);
-      },
+      // ⚠️ 这里**故意没有 onPanStart**：原来按下时会把球"从边缘拔出来"
+      // （`_tucked=false` + 坐标改成贴边全露），球在手指底下瞬移一段，
+      // 用户感受就是"按不住/跑很远"。现在拖动范围本身就包含半藏区间，
+      // 拖到边上球自然被推出去，不需要任何状态切换，全程连续跟手。
       onPanUpdate: (d) {
         final screen = MediaQuery.of(context).size;
         final pad = MediaQuery.of(context).padding;
-        final maxX = (screen.width - _size - pad.right - 4).clamp(pad.left + 4, screen.width);
         final maxY =
             (screen.height - _size - pad.bottom - 8).clamp(90.0, screen.height);
-        final minX = pad.left + 4;
-        // 注：上界 `maxX` 上方已声明（这里不重复声明）；
-        // 松手吸附时会用"安全区版本"重新算上界，所以最终落点一定贴边。
-        final cur = _pos ??
-            Offset(screen.width - _size - 16,
-            screen.height - pad.bottom - (MusicMiniPlayerLayout.topFromBottom + _bottomGap));
+        // 横向允许拖到半藏区间（球可以 60% 在屏幕外），这样"拖到边上"
+        // 和"半藏"是同一件事，不存在两套坐标。
+        final minX = _minPosX(pad);
+        final maxX = _maxPosX(screen, pad);
+        // 拖动起点与 build 用**同一个** `_defaultPos`（原来这里兜底写的是
+        // 屏幕底部，导致第一次拖动球直接瞬移到屏幕下方，见 `_defaultPos` 注释）。
+        final cur = _pos ?? _defaultPos(screen);
         setState(() {
           _pos = Offset(
             (cur.dx + d.delta.dx).clamp(minX, maxX),
@@ -383,18 +400,25 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
           );
         });
       },
-      // 松手：**停在当前位置**（拖动自由、随意停留），
-      // 靠边（球中心离左右缘约 40px 内）则半藏贴边。
+      // 松手：**停在当前位置**（拖动自由、随意停留）；
+      // 若已靠到边上（距边 [_snapThreshold] 内），吸附成标准的半藏位。
       onPanEnd: (_) {
         final screen = MediaQuery.of(context).size;
         final pad = MediaQuery.of(context).padding;
         final cur = _pos;
         if (cur == null) return;
         final toLeft = cur.dx + _size / 2 < screen.width / 2;
+        // 全露时的贴边坐标（距边 4）
+        final fullX = toLeft
+            ? pad.left + 4
+            : screen.width - _size - pad.right - 4;
         final nearEdge = toLeft
-            ? cur.dx < pad.left + _size + 40
-            : cur.dx > screen.width - _size - pad.right - 40;
-        setState(() => _tucked = nearEdge);
+            ? cur.dx <= fullX + _snapThreshold
+            : cur.dx >= fullX - _snapThreshold;
+        if (!nearEdge) return;
+        setState(() {
+          _pos = Offset(toLeft ? _minPosX(pad) : _maxPosX(screen, pad), cur.dy);
+        });
       },
       // 点击 = 展开/收起控制键（用户要求：点一下要能播放/暂停/上下首）
       onTap: () => setState(() => _open = !_open),
@@ -433,10 +457,11 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
                     height: _size,
                     fit: BoxFit.cover,
                     // 文件被删/格式不支持 → 回落到封面/图标，不留白洞
-                    errorBuilder: (_, __, ___) => _ballCover(player),
+                    errorBuilder: (_, __, ___) =>
+                        _ballCover(player, tucked: tucked),
                   )
                 // ② 默认 = **正在播放的封面**，播放时像唱片一样旋转
-                : _ballCover(player),
+                : _ballCover(player, tucked: tucked),
           ),
         ),
       ),
@@ -454,14 +479,14 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
   ///   · **暂停时进度不再前进 → 自动停在原角度** ✓
   ///   · 切歌后进度归零 → 从 0 开始转 ✓
   /// 20 秒一圈（唱片观感）。封面取不到 → 回落状态图标（不留白洞）。
-  Widget _ballCover(MusicPlayerManager player) {
+  Widget _ballCover(MusicPlayerManager player, {bool tucked = false}) {
     final cover = (player.currentSong?.coverUrl ?? '').trim();
     if (cover.isEmpty) return _ballIcon(player);
-    // C 方案：半藏（贴边且收起）时**不转**；全露（拖动/展开）时才转
-    final spinning = !(_tucked && !_open);
-    final angle = spinning
-        ? player.position.value.inMilliseconds / 20000 * 2 * math.pi
-        : 0.0;
+    // C 方案：半藏（贴边且收起）时**不转**；全露时才转。
+    // `tucked` 由 `_ball` 按坐标算好传进来（已含 `!_open` 判断）。
+    final angle = tucked
+        ? 0.0
+        : player.position.value.inMilliseconds / 20000 * 2 * math.pi;
     return Transform.rotate(
       angle: angle,
       child: CoverImage(url: cover, size: _size, cornerRadius: 0),

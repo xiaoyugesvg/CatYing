@@ -104,6 +104,54 @@ class SniffFilter {
     return true;
   }
 
+  /// 候选地址**排序**：越靠前越可能是"能播完整片"的那个地址。
+  ///
+  /// 为什么需要（2026-10-28 深挖）：
+  ///   · 默认后缀清单里含 `.ts` / `.m4s`，而 HLS 页面会请求**几十个切片**，
+  ///     它们全都算"媒体直链"。原生侧若按原顺序取第一个命中，很可能拿到
+  ///     只是某一小段 —— 用户看到播几秒就结束；
+  ///   · 能播完整片的是**主播放列表**（`.m3u8`），命名常带
+  ///     `index` / `master` / `playlist`，值得再提一档；
+  ///   · 广告 m3u8 常排在正片前面（先拉贴片），但那条由 [looksLikeAdUrl]
+  ///     负责挡，这里只管"整片 vs 切片"。
+  ///
+  /// 排序**稳定**：同分保持原顺序，不改变"先到先得"的既有语义。
+  static List<String> rankCandidates(Iterable<String> urls) {
+    final list = urls.toList();
+    if (list.length < 2) return list;
+    final indexed = <(int, int, String)>[
+      for (var i = 0; i < list.length; i++) (candidateRank(list[i]), i, list[i]),
+    ];
+    indexed.sort((a, b) {
+      final byRank = a.$1.compareTo(b.$1);
+      return byRank != 0 ? byRank : a.$2.compareTo(b.$2);
+    });
+    return [for (final e in indexed) e.$3];
+  }
+
+  /// 单条候选的"整片可能性"打分，**越小越优先**（见 [rankCandidates]）。
+  ///
+  /// 公开出来是因为嗅探/解析两侧都需要"边扫边比、别急着交第一个命中"：
+  /// `rankCandidates` 只能对一批一起排，而 `WebSniffService` 是逐页扫的，
+  /// 需要一个单条打分来决定"要不要继续往下扫"。
+  static int candidateRank(String url) {
+    final ext = mediaExt(url);
+    final lower = url.toLowerCase();
+    if (ext == '.m3u8') {
+      final looksMaster = lower.contains('master') ||
+          lower.contains('index') ||
+          lower.contains('playlist');
+      return looksMaster ? 0 : 1;
+    }
+    if (ext == '.mpd') return 2;
+    if (ext == '.mp4' || ext == '.flv' || ext == '.mkv' || ext == '.mov') {
+      return 3;
+    }
+    // 切片：单独播只有几秒，排最后
+    if (ext == '.ts' || ext == '.m4s') return 5;
+    return 4;
+  }
+
   /// 已知广告 / 追踪域名（**后缀**匹配：`x.doubleclick.net` 也算命中）。
   static const List<String> kBuiltinAdHosts = [
     'doubleclick.net',

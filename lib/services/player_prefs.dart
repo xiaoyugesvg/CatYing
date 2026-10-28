@@ -539,6 +539,20 @@ class PlayerPrefs {
     await prefs.setBool('sniff_send_referer', v);
   }
 
+  /// 解析 / 嗅探结果落播放地址时，是否该补一条 `Referer: <页面地址>`（P2-2 一致性）。
+  ///
+  /// 统一判定，供各链路（详情 / 海阔 / RSS / 小程序 / TG 桥）共用，避免只有
+  /// 详情页和嗅探页生效、其它链路漏接：
+  ///   · 开关打开（默认关，维持不带 Referer 的既有行为）；
+  ///   · [pageUrl] 是 http(s)（本地 `id` / 自定义 scheme 不当 Referer）；
+  ///   · 且与媒体地址不同（同一地址不必补）。
+  bool shouldSendRefererFor(String pageUrl, String mediaUrl) {
+    if (!sniffSendReferer.value) return false;
+    final page = pageUrl.trim();
+    if (page.isEmpty || !page.startsWith('http')) return false;
+    return page != mediaUrl.trim();
+  }
+
   /// 影视直链后缀清单（空 = 用出厂清单）
   Future<void> setMediaExtensions(List<String> v) =>
       _setRuleList(mediaExtensions, 'media_extensions', v);

@@ -20,8 +20,7 @@ import 'package:tvbox/services/tmdb_service.dart';
 import 'package:tvbox/services/detail_page_controller.dart';
 import 'package:tvbox/services/player_fullscreen_controller.dart';
 import 'package:tvbox/services/player_prefs.dart';
-import 'package:tvbox/services/play_route.dart';
-import 'package:tvbox/services/sniff_filter.dart';
+import 'package:tvbox/widgets/playback_surface.dart';
 import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:tvbox/widgets/app_player.dart';
 import 'package:tvbox/widgets/ios_av_player.dart';
@@ -32,7 +31,6 @@ import 'package:tvbox/widgets/video_player_pip.dart';
 import 'package:tvbox/widgets/parse_sniff_sheet.dart';
 import 'package:tvbox/widgets/window_fullscreen.dart';
 import 'package:tvbox/pages/drama/drama_player_page.dart';
-import 'package:tvbox/pages/play/webview_player_page.dart';
 import 'package:tvbox/pages/search/controller.dart' show TvSearchController;
 import 'package:tvbox/pages/detail/controller.dart';
 import 'package:tvbox/pages/detail/episode_list.dart';
@@ -1101,9 +1099,14 @@ class _DetailPageState extends State<DetailPage> {
     }
     // 网页播放器页（非直链媒体 URL）→ 用 WebView 兜底播放
     // （对应 catmovie WebviewView：第三方解析页 / parse=1 网页端 / player 页）
-    if (_isWebPageUrl(url)) {
+    //
+    // ⚠️ 例外：`confirmedMediaUrl` = 已用 Content-Type/首字节确认过是媒体的
+    // **无后缀地址**（解析站常见的 `xxx.php?url=…` 形态）。这种地址 AVPlayer
+    // 能直接播，塞进 WebView 只会打开一个 m3u8 文本页（2026-10-28 复核修复）。
+    if (PlaybackSurface.needsWebFallback(url,
+        confirmedMediaUrl: _controller.confirmedMediaUrl.value)) {
       // 内嵌模式: 4:3 固定高度(内部处理), 避免 Column 内高度塌陷致有声无画面
-      return WebviewPlayerPage(
+      return PlaybackSurface.webFallback(
         url: url,
         title: _controller.vodInfo.value?.name,
         embedded: true,
@@ -1122,7 +1125,7 @@ class _DetailPageState extends State<DetailPage> {
     final engine = PlayerPrefs.instance.vodEngine.value;
     if (engine == PlayerEngine.webview) {
       // 同上: 内嵌模式
-      return WebviewPlayerPage(
+      return PlaybackSurface.webFallback(
         url: url,
         title: _controller.vodInfo.value?.name,
         embedded: true,
@@ -1303,30 +1306,6 @@ class _DetailPageState extends State<DetailPage> {
         ),
       ),
     );
-  }
-
-  /// 判断播放 URL 是否为"网页播放器页"（需 WebView 兜底）而非直链媒体。
-  ///
-  /// 规则：
-  /// - 非 http/https（如 rtmp/rtsp）→ 不是网页，走原生播放器
-  /// - 是媒体直链 → 走原生播放器。判定统一走 [SniffFilter.isDirectMedia]，
-  ///   **跟随用户在「嗅探设置 → 影视直链后缀」里的自定义清单**（2026-10-15：
-  ///   这里原来还有第 4 份写死的后缀表，用户改后缀时它不跟着变，会把直链
-  ///   误判成网页丢给 WebView，或把网页当直链丢给播放器）
-  /// - 其余 http(s) URL → 视为网页播放页（解析页 / player 页 / 网页端地址）
-  bool _isWebPageUrl(String url) {
-    final lower = url.trim().toLowerCase();
-    if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
-      return false;
-    }
-    if (SniffFilter.isDirectMedia(url)) return false;
-    // 音频直链也交给原生播放器（与 parse_service 的音频白名单同源）
-    for (final ext in kAudioExtensions) {
-      if (lower.contains(ext)) {
-        return false;
-      }
-    }
-    return true;
   }
 
   // MARK: - 视频信息区

@@ -42,7 +42,19 @@ class WebSniffService {
   static const int _maxPages = 8;
 
   /// iframe 递归层数（0 = 只看首页，1 = 首页 + 其 iframe）
-  static const int _maxDepth = 2;
+  ///
+  /// 解析站常见链路是「播放页 → 播放器 iframe → 真正的播放器 iframe」，
+  /// 两层就够；给到 3 是为了留一点余量（2026-10-28 深挖）。
+  static const int _maxDepth = 3;
+
+  /// 最多用 **WebView 渲染兜底**几次。
+  ///
+  /// 每次渲染都要真开一个隐形 WKWebView 并等页面 JS 跑完（最长 20 秒）。
+  /// 原来每个取不到内容的页面都会走一次 —— 一个 8 页面的站点全是 SPA 时，
+  /// 最坏要 8 × 20 秒 = 两分半，用户看到的就是「嗅探卡死不动」。
+  /// 现在只给最可能需要渲染的页面（入口页 + 它的直接 iframe）留 2 次名额，
+  /// 其余纯 HTTP 拿不到就跳过（2026-10-28 深挖）。
+  static const int _maxWebviewRenders = 2;
 
   /// 没有影视后缀的候选，最多探测多少个（并发；防止对复杂站点发几十个请求）
   static const int _maxMimeProbes = 6;
@@ -85,42 +97,90 @@ class WebSniffService {
     return dio;
   }
 
-  /// 从 [pageUrl] 出发找**第一个可播放的媒体直链**；找不到返回 null。
+  /// 从 [pageUrl] 出发找**最可播的那个媒体直链**；找不到返回 null。
   ///
   /// [referer] 一般传页面地址自身（部分站点校验 Referer 才给页面）。
+  ///
+  /// 2026-10-28 深挖的三处行为修正（都在这个方法里）：
+  ///   · **不再"第一个命中就交出去"**：原来按 HTML 里出现的先后取第一个
+  ///     带后缀的地址，而 HLS 页面往往先出现几十条 `.ts` 切片、`.m3u8`
+  ///     在更后面 —— 结果播几秒就结束。现在按
+  ///     [SniffFilter.candidateRank] 边扫边比，只有拿到 m3u8（rank ≤ 1）
+  ///     才提前收工，其余命中继续往后扫，最后取最优。
+  ///   · **iframe 的 src 本身就是媒体直链时不再当网页抓**：`<iframe src="…/index.m3u8">`
+  ///     原来会去 GET 这个 m3u8，再从正文里扫出某个 `.ts` 切片当结果。
+  ///   · **iframe 的 Referer 用父页面**：不少播放器 iframe 会校验 Referer，
+  ///     一直用顶层地址会被 403。
   Future<String?> findMediaUrl(String pageUrl, {String? referer}) async {
     final start = pageUrl.trim();
     if (!_isHttp(start)) return null;
 
     final visited = <String>{};
-    var frontier = <String>[start];
+    // 队列元素 = (本页地址, 它的父页面地址) —— 父页面地址只用于 Referer
+    var frontier = <(String, String?)>[(start, referer)];
     var depth = 0;
     var fetched = 0;
+    var renders = 0;
     // 没有影视后缀的候选（`/play?id=…`、`/stream/abc` 这类）。
     // 等所有页面扫完仍无后缀命中时，再用服务端 Content-Type 兜底验证。
     final probeCandidates = <String>[];
 
-    while (frontier.isNotEmpty && depth <= _maxDepth && fetched < _maxPages) {
-      final next = <String>[];
-      for (final url in frontier) {
-        if (fetched >= _maxPages) break;
-        if (!visited.add(url)) continue;
-        fetched++;
+    // 目前找到的最佳直链。rank 越小越可能播完整片（0 = m3u8 主列表）。
+    String? best;
+    var bestRank = 1 << 20;
 
-        var html = await _get(url, referer: referer);
+    /// 收一条候选；返回 true 表示"已经足够好，可以停止扫描"。
+    bool offer(String u) {
+      if (!SniffFilter.acceptSniffUrl(u)) return false;
+      final r = SniffFilter.candidateRank(u);
+      if (r < bestRank) {
+        best = u;
+        bestRank = r;
+      }
+      // m3u8（主列表或普通列表）就是最终答案，没必要再扫后面的页面
+      return bestRank <= 1;
+    }
+
+    while (frontier.isNotEmpty && depth <= _maxDepth && fetched < _maxPages) {
+      final next = <(String, String?)>[];
+      var stop = false;
+      for (final (url, parent) in frontier) {
+        if (fetched >= _maxPages || stop) break;
+        if (!visited.add(url)) continue;
+
+        // ① 这个地址本身就是一个媒体直链（入口就是 m3u8，或 iframe 的
+        //    src 直接指向 m3u8）—— 绝不能当网页去 GET：m3u8 正文里全是
+        //    `.ts` 切片，扫出来只会拿到其中一小段。
+        if (SniffFilter.isDirectMedia(url)) {
+          fetched++;
+          if (offer(url)) {
+            stop = true;
+            break;
+          }
+          continue;
+        }
+
+        fetched++;
+        final pageReferer = parent ?? referer;
+        var html = await _get(url, referer: pageReferer);
         // ── 兜底：SPA / CF 挑战页交给 WKWebView 渲染后再扫 ──────────
         //
         // 纯 HTTP 拿到的是空壳（JS 还没跑）或「Just a moment」挑战页，
         // 这种页面里一个媒体链接都没有。用通用 WebView 通道打开，
         // 等 JS 渲染完（尽力等挑战自动过）再取 DOM。
-        if (html == null ||
-            html.isEmpty ||
-            WebViewFetchService.looksLikeChallenge(html)) {
+        //
+        // ⚠️ 名额有限（见 [_maxWebviewRenders]）：渲染很贵，不能每个页面都来一次。
+        if ((html == null ||
+                html.isEmpty ||
+                WebViewFetchService.looksLikeChallenge(html)) &&
+            renders < _maxWebviewRenders) {
+          renders++;
           final page = await WebViewFetchService.instance.fetchHtml(
             url,
-            headers: (referer == null || referer.isEmpty)
+            headers: (pageReferer == null || pageReferer.isEmpty)
                 ? null
-                : {'Referer': referer},
+                : {'Referer': pageReferer},
+            timeoutMs: 15000,
           );
           if (page != null && page.html.isNotEmpty) {
             html = page.html;
@@ -130,25 +190,44 @@ class WebSniffService {
         }
         if (html == null || html.isEmpty) continue;
 
-        // ① 页面本身（含内联 JS）里就有媒体直链？
+        // ② 页面本身（含内联 JS）里就有媒体直链？
         for (final u in _findMediaUrls(html)) {
-          if (SniffFilter.acceptSniffUrl(u)) {
-            AppLog.instance.log('[WebSniff] 命中（第 $fetched 个页面）: $u');
-            return u;
+          if (offer(u)) {
+            stop = true;
+            break;
           }
         }
-        // ② 没有后缀、但形似媒体的地址先记下来（MIME 兜底用）
+        if (stop) break;
+        // ③ 没有后缀、但形似媒体的地址先记下来（MIME 兜底用）
         for (final u in _findProbeCandidates(html, base: url)) {
           if (!probeCandidates.contains(u)) probeCandidates.add(u);
         }
-        // ③ 抠 iframe / frame 的 src —— 跨域也在 HTML 里，照样读得到
-        next.addAll(_findFrameUrls(html, base: url));
+        // ④ 抠 iframe / frame 的 src —— 跨域也在 HTML 里，照样读得到
+        for (final f in _findFrameUrls(html, base: url)) {
+          // 直接指向媒体的 iframe：当场收下，不要塞进队列当网页去抓
+          //（塞进去的话，最外层 depth 用尽时还会漏掉它）
+          if (SniffFilter.isDirectMedia(f)) {
+            if (offer(f)) {
+              stop = true;
+              break;
+            }
+          } else {
+            next.add((f, url));
+          }
+        }
+        if (stop) break;
       }
       frontier = next;
       depth++;
+      if (stop) break;
     }
 
-    // ④ MIME 兜底：扩展名被藏起来的直链，用**响应头**而不是后缀判断
+    if (best != null) {
+      AppLog.instance.log('[WebSniff] 命中（rank=$bestRank）: $best');
+      return best;
+    }
+
+    // ⑤ MIME 兜底：扩展名被藏起来的直链，用**响应头**而不是后缀判断
     //（思路对齐 res-sniffer 的默认嗅探插件：按 Content-Type 识别媒体）
     final hit = await _probeByMime(probeCandidates, referer: referer);
     if (hit != null) {
@@ -158,10 +237,14 @@ class WebSniffService {
     return null;
   }
 
-  /// 并发探测前 [max] 个候选，按**原顺序**取第一个 Content-Type 是媒体的。
+  /// 并发探测前 [max] 个候选，取第一个 Content-Type 是媒体的。
+  ///
+  /// 探测顺序不是页面里的先后顺序：路径里带播放语义的（`/hls/index`、
+  /// `/live/xxx`、`/play/123`）先探，其余保持原顺序 —— 名额只有 6 个，
+  /// 别被页面里的统计/埋点接口占满（2026-10-28 深挖）。
   Future<String?> _probeByMime(List<String> candidates, {String? referer}) async {
     if (candidates.isEmpty) return null;
-    final batch = candidates.take(_maxMimeProbes).toList();
+    final batch = _orderProbes(candidates).take(_maxMimeProbes).toList();
     final checks = await Future.wait(
       batch.map((u) => looksLikeMediaByMime(u, referer: referer)),
     );
@@ -171,6 +254,35 @@ class WebSniffService {
       if (SniffFilter.acceptSniffUrl(u, mediaVerified: true)) return u;
     }
     return null;
+  }
+
+  /// 路径里的"播放语义"关键词 —— 命中越多越优先探测。
+  static const List<String> _probeHintWords = [
+    'm3u8', 'playlist', 'master', 'index', 'hls', 'live',
+    'stream', 'play', 'video', 'media', 'vod',
+  ];
+
+  /// MIME 探测顺序（稳定排序：同分保持原顺序）。
+  static List<String> _orderProbes(List<String> candidates) {
+    if (candidates.length < 2) return candidates;
+    int score(String u) {
+      final l = u.toLowerCase();
+      var s = 0;
+      for (final w in _probeHintWords) {
+        if (l.contains(w)) s++;
+      }
+      return s;
+    }
+
+    final indexed = <(int, int, String)>[
+      for (var i = 0; i < candidates.length; i++)
+        (score(candidates[i]), i, candidates[i]),
+    ];
+    indexed.sort((a, b) {
+      final byScore = b.$1.compareTo(a.$1); // 分高在前
+      return byScore != 0 ? byScore : a.$2.compareTo(b.$2);
+    });
+    return [for (final e in indexed) e.$3];
   }
 
   /// 用 `Content-Type`（+ 开头字节）判断这个地址是不是媒体。
@@ -342,19 +454,32 @@ class WebSniffService {
   /// 扫出文本里所有带**当前生效后缀清单**的媒体直链。
   ///
   /// 后缀串取自 [SniffFilter.mediaExtAlternation]（全项目唯一来源）。
+  ///
+  /// ⚠️ 必须先做一次 `\/` → `/` 的**反转义**：播放页里最关键的地址几乎都
+  /// 藏在 `<script>` 的 JSON 字符串里，写作 `"https:\/\/cdn\/x\/index.m3u8"`。
+  /// 正则的字符类排除了反斜杠（防止匹配到断行/转义），于是这类地址
+  /// **一个都扫不出来** —— 这是"嗅探明明打开了却什么都抓不到"的常见原因
+  /// （2026-10-28 深挖）。反转义只在副本上做，不改原文。
   static List<String> _findMediaUrls(String text) {
+    final src = _unescapeSlashes(text);
     final re = RegExp(
       "https?://[^\\s\"'<>\\\\]+?\\.(?:${SniffFilter.mediaExtAlternation})"
       "(?:[?#][^\\s\"'<>\\\\]*)?",
       caseSensitive: false,
     );
     final out = <String>[];
-    for (final m in re.allMatches(text)) {
+    for (final m in re.allMatches(src)) {
       final u = m.group(0);
       if (u != null && u.isNotEmpty) out.add(u);
     }
     return out;
   }
+
+  /// 把 JS/JSON 字符串里的 `\/` 还原成 `/`（只在副本上做，不改原文）。
+  ///
+  /// 见 [_findMediaUrls] 的说明：不做这一步，藏在 `<script>` 里的地址全扫不到。
+  static String _unescapeSlashes(String text) =>
+      text.contains('\\/') ? text.replaceAll('\\/', '/') : text;
 
   static final RegExp _frameRe = RegExp(
     r'''<(?:iframe|frame)\b[^>]*?\b(?:src|data-src)\s*=\s*["']([^"']+)["']''',
@@ -402,10 +527,11 @@ class WebSniffService {
       out.add(abs);
     }
 
-    for (final m in _probeAttrRe.allMatches(html)) {
+    final src = _unescapeSlashes(html);
+    for (final m in _probeAttrRe.allMatches(src)) {
       take(m.group(1) ?? '');
     }
-    for (final m in _probeJsonRe.allMatches(html)) {
+    for (final m in _probeJsonRe.allMatches(src)) {
       take(m.group(1) ?? '');
     }
     return out;
@@ -413,7 +539,7 @@ class WebSniffService {
 
   static List<String> _findFrameUrls(String html, {required String base}) {
     final out = <String>[];
-    for (final m in _frameRe.allMatches(html)) {
+    for (final m in _frameRe.allMatches(_unescapeSlashes(html))) {
       final abs = _absolute((m.group(1) ?? '').trim(), base);
       if (abs != null) out.add(abs);
     }

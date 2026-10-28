@@ -15,6 +15,7 @@ import 'package:tvbox/widgets/ks_player.dart';
 import 'package:tvbox/widgets/mpv_app_player.dart';
 import 'package:tvbox/widgets/parse_sniff_sheet.dart';
 import 'package:tvbox/widgets/video_player.dart';
+import 'package:tvbox/widgets/playback_surface.dart';
 
 /// 媒体库播放器页（独立模块 `lib/pages/media_library/`）
 ///
@@ -183,6 +184,19 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
                     ),
                   )
                 : CircularProgressIndicator(color: AppTheme.accentColor),
+          );
+        }
+        // 网页播放页（非直链媒体）→ 内嵌 WebView 兜底：避免原生播放器黑屏，
+        // 后台嗅探到直链后由 onMediaFound 写回 playUrl，本页同页切原生
+        // （复用下面 playUrl 变化的既有重建逻辑）。2026-10-28 修复（审计 P0-1）。
+        if (PlaybackSurface.needsWebFallback(url)) {
+          return PlaybackSurface.webFallback(
+            url: url,
+            title: title,
+            embedded: true,
+            onMediaFound: (found) {
+              if (found.isNotEmpty) widget.controller.playUrl.value = found;
+            },
           );
         }
         return VideoPlayerWidget(
