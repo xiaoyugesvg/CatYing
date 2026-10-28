@@ -785,6 +785,11 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     if (!PlayerPrefs.instance.parseEnabled.value) {
       await PlayerPrefs.instance.setParseEnabled(true);
     }
+    // 选过线路 = 以后都优先用自己的线路（持久化，重启后仍然生效）；
+    // 想改回"尊重脚本内置解析"在面板里把开关打开即可（2026-10-28）。
+    if (PlayerPrefs.instance.preferScriptParse.value) {
+      await PlayerPrefs.instance.setPreferScriptParse(false);
+    }
     _forceUserParse = true;
     AppLog.instance.log('[Parse] 切换解析线路 → ${url.isEmpty ? '自动' : url}');
     retryCurrentEpisode();
@@ -966,10 +971,12 @@ class DetailController extends GetxController with WidgetsBindingObserver {
           // 2026-10-27：**源已经声明"这是要解析/嗅探的网页"时，跳过 App 自己
           // 的解析接口** —— 源给的就是解析站的地址，再套一层 App 的解析只会
           // 把地址解歪，或者白跑一次请求。
-          // 2026-10-28：但用户在「解析 / 嗅探」面板里**主动选过线路**时例外 ——
-          // 聚合源自带的解析站常常"IP 使用次数超限"，这时必须改用用户的
-          // 解析管理。解析目标取解析站地址里 `url=` 的内层原始页面，避免套娃。
-          final userForced = _forceUserParse;
+          // 2026-10-28：但用户在「解析 / 嗅探」面板里**主动选过线路**、或全局
+          // 关掉了「脚本内置解析优先」时例外 —— 聚合源自带的解析站常常
+          // "IP 使用次数超限"，这时必须改用用户的解析管理。
+          // 解析目标取解析站地址里 `url=` 的内层原始页面，避免套娃。
+          final userForced =
+              _forceUserParse || !PlayerPrefs.instance.preferScriptParse.value;
           if (!_looksLikeDirectMedia(playCandidate) &&
               (!sourceWantsParse || userForced) &&
               (SniffFilter.shouldParse(playCandidate) || userForced) &&
@@ -1207,8 +1214,10 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     // 2026-10-15：是否解析统一由 SniffFilter 判定（内置主流站点 +
     // 用户追加域名 - 屏蔽域名），且解析总开关开启。不在解析范围内的
     // 网页不请求解析接口，直接交给下面的自动嗅探。
-    // 2026-10-28：用户在面板里主动选过线路时，强制走用户的解析管理。
-    final userForced = _forceUserParse;
+    // 2026-10-28：用户在面板里主动选过线路、或全局关掉了「脚本内置解析优先」
+    // 时，强制走用户的解析管理。
+    final userForced =
+        _forceUserParse || !PlayerPrefs.instance.preferScriptParse.value;
     if (!_looksLikeDirectMedia(candidate) &&
         (SniffFilter.shouldParse(candidate) || userForced) &&
         ParseService.instance.enabled) {

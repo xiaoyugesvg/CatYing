@@ -63,6 +63,10 @@ class _ParseSniffSheetState extends State<ParseSniffSheet> {
   late bool _sniff = PlayerPrefs.instance.sniffEnabled.value;
   late bool _parse = PlayerPrefs.instance.parseEnabled.value;
 
+  /// 脚本内置解析优先（2026-10-28）：脚本声明 `parse:1` 时用它自己的解析，
+  /// 还是用下面这份线路列表。
+  late bool _preferScript = PlayerPrefs.instance.preferScriptParse.value;
+
   List<ParseBean> get _lines => ParseStore.instance.list;
   String get _active => ParseStore.instance.activeUrl;
 
@@ -74,6 +78,11 @@ class _ParseSniffSheetState extends State<ParseSniffSheet> {
   Future<void> _toggleParse(bool v) async {
     setState(() => _parse = v);
     await PlayerPrefs.instance.setParseEnabled(v);
+  }
+
+  Future<void> _togglePreferScript(bool v) async {
+    setState(() => _preferScript = v);
+    await PlayerPrefs.instance.setPreferScriptParse(v);
   }
 
   void _sniffNow() {
@@ -165,6 +174,23 @@ class _ParseSniffSheetState extends State<ParseSniffSheet> {
                     value: _parse,
                     onChanged: _toggleParse,
                   ),
+                  Divider(
+                    height: 0.5,
+                    indent: 46,
+                    endIndent: 12,
+                    color: AppTheme.textTertiary.withValues(alpha: 0.18),
+                  ),
+                  // 2026-10-28：脚本自带解析时的优先级（用户问「如果脚本有
+                  // 内置的咋弄？」）。开 = 尊重脚本；关 = 一律用下面的线路。
+                  _switchRow(
+                    icon: Icons.extension_rounded,
+                    title: '优先用脚本内置解析',
+                    subtitle: _preferScript
+                        ? '脚本声明要解析时，直接用它自己的解析站'
+                        : '一律用你的解析线路（会剥掉脚本解析地址的外壳重解）',
+                    value: _preferScript,
+                    onChanged: _togglePreferScript,
+                  ),
                 ],
               ),
             ),
@@ -197,11 +223,20 @@ class _ParseSniffSheetState extends State<ParseSniffSheet> {
                   ),
                 ),
                 const Spacer(),
-                Text(
-                  _parse ? '选中后重新解析当前集' : '解析开关已关闭',
-                  style: TextStyle(
-                    color: AppTheme.textTertiary,
-                    fontSize: 11,
+                Flexible(
+                  child: Text(
+                    !_parse
+                        ? '解析开关已关闭'
+                        : (_preferScript
+                            ? '选线路会自动改为优先用你的线路'
+                            : '选中后重新解析当前集'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      color: AppTheme.textTertiary,
+                      fontSize: 11,
+                    ),
                   ),
                 ),
               ],

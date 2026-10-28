@@ -90,6 +90,17 @@ class PlayerPrefs {
   /// 开启后命中规则的网页先请求解析接口。
   final parseEnabled = false.obs;
 
+  /// **脚本内置解析优先**（2026-10-28）。
+  ///
+  /// 用户问：「解析是直接用脚本内置还是解析线路？如果脚本有内置的咋弄？」
+  /// Spider / 聚合源常自带解析（`parse:1` / `jx:1`，或直接返回自家解析站地址）。
+  ///   · `true`（默认）= 尊重脚本作者：脚本声明要解析时，App **不插手**，
+  ///     直接用脚本给的地址；
+  ///   · `false` = 一律用用户自己的解析线路（并把脚本解析地址里的
+  ///     `url=` 内层原始页面取出来重解）。
+  /// 用户在「解析 / 嗅探」面板里**主动选过线路**后会自动置 false 并持久化。
+  final preferScriptParse = true.obs;
+
   /// **嗅探播放是否带 Referer**（用户 2026-10-15 拍板加的开关）。
   ///
   /// 开启后，嗅探/解析到的直链在播放时会带上 `Referer: <当前网页地址>` ——
@@ -241,6 +252,8 @@ class PlayerPrefs {
     // 嗅探/解析总开关：默认关闭（用户 2026-10-15 要求）
     sniffEnabled.value = prefs.getBool('sniff_enabled') ?? false;
     parseEnabled.value = prefs.getBool('parse_enabled') ?? false;
+    // 脚本内置解析优先：默认 true（尊重脚本作者）
+    preferScriptParse.value = prefs.getBool('prefer_script_parse') ?? true;
     // 嗅探播放带 Referer：默认关闭（维持既有"不带 Referer"行为）
     sniffSendReferer.value = prefs.getBool('sniff_send_referer') ?? false;
     final step = prefs.getInt('play_time_step') ?? 0;
@@ -510,6 +523,13 @@ class PlayerPrefs {
     parseEnabled.value = v;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('parse_enabled', v);
+  }
+
+  /// 脚本内置解析优先（true = 尊重脚本；false = 一律用用户解析线路）
+  Future<void> setPreferScriptParse(bool v) async {
+    preferScriptParse.value = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('prefer_script_parse', v);
   }
 
   /// 嗅探播放是否带 Referer（默认关）
