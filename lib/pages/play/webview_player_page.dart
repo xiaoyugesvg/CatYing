@@ -1,7 +1,14 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/ad_block_service.dart';
 import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/services/play_url_sanitizer.dart';
+import 'package:tvbox/services/sniff_filter.dart';
+import 'package:tvbox/services/web_sniff_service.dart';
+import 'package:tvbox/pages/play/sniff_player_page.dart';
 import 'package:flutter/services.dart';
 import 'package:tvbox/common/system_ui.dart';
 import 'package:tvbox/widgets/ad_block_bubble.dart';
@@ -36,6 +43,13 @@ class WebviewPlayerPage extends StatefulWidget {
   /// 内嵌模式右上角的「解析」入口。
   final VoidCallback? onSwitchParse;
 
+  /// 后台嗅探到可播放直链时回调（**同页**切原生播放器，不弹新页面）。
+  ///
+  /// 详情页内嵌模式传它：网页先照常加载（播放器一定出来），后台嗅探到
+  /// m3u8/mp4 后由详情页把 playUrl 换成直链 —— 全程同一个页面，不再
+  /// 「详情页 → 嗅探页 → 播放器页」三层跳转（用户 2026-10-28 要求）。
+  final void Function(String url)? onMediaFound;
+
   const WebviewPlayerPage({
     super.key,
     required this.url,
@@ -44,6 +58,7 @@ class WebviewPlayerPage extends StatefulWidget {
     this.forceLandscape = true,
     this.onSniff,
     this.onSwitchParse,
+    this.onMediaFound,
   });
 
   @override
@@ -57,6 +72,22 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
   /// 主文档加载失败（见 onWebResourceError）：给明确提示 + 重试，而不是纯黑
   bool _failed = false;
   String _failDesc = '';
+
+  // ── 后台嗅探（2026-10-28）──
+  //
+  // 详情页内嵌网页播放器时，网页照常显示（播放器一定出来），同时后台
+  // 注入与嗅探页同一套 hook 脚本，抓到 m3u8/mp4 就回调 onMediaFound，
+  // 由详情页**同页**切原生播放器 —— 不再跳独立嗅探页。
+  bool _sniffing = false;
+  Timer? _sniffTimer;
+  int _sniffTries = 0;
+  bool _mediaReported = false;
+
+  /// XHR/fetch 上报的无后缀候选（第 5 轮统一做 MIME 复核）
+  final List<String> _unverified = <String>[];
+
+  /// 正在做 MIME 复核的地址（防重复探测）
+  final Set<String> _mimeProbing = <String>{};
 
   @override
   void initState() {
@@ -82,6 +113,11 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
   void _initController(String url) {
     final enableJs = PlayerPrefs.instance.webviewEnableJs.value;
     _controller = WebViewController()
+      // 后台嗅探上报通道（与嗅探页共用同一套 hook 脚本）
+      ..addJavaScriptChannel(
+        'SniffMedia',
+        onMessageReceived: (msg) => _onChannelMessage(msg.message),
+      )
       ..setJavaScriptMode(
         enableJs ? JavaScriptMode.unrestricted : JavaScriptMode.disabled,
       )
@@ -100,6 +136,9 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
             }
           },
           onPageStarted: (url) {
+            // 新文档开始：上一页的嗅探结果作废，重新来过
+            _stopSniffing();
+            _mediaReported = false;
             if (mounted) {
               setState(() {
                 _loadingProgress = 0;
@@ -113,6 +152,8 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
           onPageFinished: (url) {
             // 补注：这时 DOM 已经在了，隐藏才真正生效
             AdBlockService.instance.injectInto(_controller, url);
+            // 页面就绪 → 后台嗅探（命中后由详情页同页切原生播放器）
+            _startSniffing();
           },
           onWebResourceError: (error) {
             // 只有**主文档**失败才提示（子资源失败很常见，不打扰用户）
@@ -156,7 +197,11 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
   /// `intent://…`、`txvip://…`。直接 `loadRequest` 会得到 101，
   /// 与其让用户对着一串错误码发呆，不如先判一下。
   void _load(String raw) {
-    var url = raw.trim();
+    // 先剥掉 `类型|哈希|真实URL` 包裹（TVBox 社区源常见，如
+    // `tencent|54e3…|https://v.qq.com/…`）：否则 webview_flutter 的
+    // loadRequest 会抛 `Missing scheme in uri`，被全局 ErrorWidget
+    // 捕成「界面渲染出错」整页报错（用户 2026-10-28 截图）。
+    var url = sanitizePlayUrl(raw);
     if (url.isEmpty) {
       setState(() {
         _failed = true;
@@ -195,11 +240,176 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
     _controller.loadRequest(uri);
   }
 
+  // ============================================================
+  // 后台嗅探（2026-10-28）
+  //
+  // 详情页内嵌网页播放器时：网页照常显示（播放器一定出来），同时后台
+  // 跑与嗅探页**同一套** hook / 轮询脚本。抓到 m3u8/mp4 就回调
+  // [WebviewPlayerPage.onMediaFound]，由详情页同页切原生播放器。
+  // ============================================================
+
+  void _startSniffing() {
+    if (_sniffing || _mediaReported || !mounted) return;
+    // 没有上层可切（独立全屏页）或 JS 被关掉时不做后台嗅探
+    if (widget.onMediaFound == null) return;
+    if (!PlayerPrefs.instance.webviewEnableJs.value) return;
+    _sniffing = true;
+    _sniffTries = 0;
+    _sniffTimer?.cancel();
+    _controller.runJavaScript(SniffPlayerPage.hookScript);
+    _controller
+        .runJavaScript(SniffPlayerPage.sniffScript)
+        .then((_) {
+          _sniffTimer = Timer.periodic(
+            const Duration(milliseconds: 1500),
+            (_) => _pollSniff(),
+          );
+        })
+        .catchError((_) {
+          _sniffing = false;
+        });
+  }
+
+  void _pollSniff() {
+    _controller
+        .runJavaScriptReturningResult('window.__sniff.all()')
+        .then((result) {
+      if (!mounted || _mediaReported) return;
+      final candidates = _candidatesOf(result);
+      // 一次拿全部候选，过 SniffFilter（后缀 + 黑/白名单）——
+      // 第一个常是切片广告，跳过它继续找正片。
+      for (final u in candidates) {
+        if (SniffFilter.acceptSniffUrl(u)) {
+          _reportMedia(u);
+          return;
+        }
+      }
+      _sniffTries++;
+      // 第 5 轮（约 7.5 秒）仍无后缀命中 → 对"藏起后缀"的候选做 MIME 复核
+      if (_sniffTries == 5) unawaited(_mimeFallback(candidates));
+      // 12 轮（18 秒）还没结果就停，别一直空转
+      if (_sniffTries >= 12) _stopSniffing();
+    }).catchError((_) {
+      _stopSniffing();
+    });
+  }
+
+  /// 把 JS `__sniff.all()` 的返回（iOS/Android 可能是 List 或 JSON 字符串）
+  /// 解析成候选列表（不做规则过滤）。
+  List<String> _candidatesOf(dynamic result) {
+    final candidates = <String>[];
+    if (result is List) {
+      candidates.addAll(result.map((e) => '$e'));
+      return candidates;
+    }
+    final raw = '$result'.trim();
+    if (raw.isEmpty || raw == 'null' || raw == '[]') return candidates;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List) {
+        candidates.addAll(decoded.map((e) => '$e'));
+      } else if (decoded is String) {
+        candidates.add(decoded);
+      }
+    } catch (_) {
+      if (raw.startsWith('http')) candidates.add(raw.replaceAll('"', ''));
+    }
+    return candidates;
+  }
+
+  /// hook 通过 `SniffMedia` 通道实时上报的候选。
+  void _onChannelMessage(String raw) {
+    if (raw.isEmpty || _mediaReported || widget.onMediaFound == null) return;
+    if (raw.startsWith('t:')) {
+      // 可信来源（video/audio/source 的 src）：可能没有后缀，MIME 复核
+      final u = raw.substring(2);
+      if (SniffFilter.acceptSniffUrl(u)) {
+        _reportMedia(u);
+        return;
+      }
+      if (!SniffFilter.isDirectMedia(u)) unawaited(_verifyMime(u));
+      return;
+    }
+    if (raw.startsWith('u:')) {
+      // XHR/fetch 的无后缀候选：攒着，第 5 轮统一批量复核
+      final u = raw.substring(2);
+      if (SniffFilter.isDirectMedia(u)) {
+        _reportMedia(u);
+        return;
+      }
+      if (!_unverified.contains(u) && _unverified.length < 24) {
+        _unverified.add(u);
+      }
+      return;
+    }
+    // 带影视后缀的候选：直接过规则
+    _reportMedia(raw);
+  }
+
+  Future<void> _verifyMime(String u) async {
+    if (_mediaReported || _mimeProbing.contains(u)) return;
+    _mimeProbing.add(u);
+    try {
+      final ok = await WebSniffService.instance
+          .looksLikeMediaByMime(u, referer: widget.url);
+      if (ok && mounted) _reportMedia(u, verified: true);
+    } finally {
+      _mimeProbing.remove(u);
+    }
+  }
+
+  Future<void> _mimeFallback(List<String> candidates) async {
+    if (_mediaReported || !mounted) return;
+    final batch = <String>{
+      ...candidates.where((u) => !SniffFilter.isDirectMedia(u)),
+      ..._unverified.where((u) => !SniffFilter.isDirectMedia(u)),
+    }.take(8).toList();
+    if (batch.isEmpty) return;
+    final checks = await Future.wait(
+      batch.map((u) =>
+          WebSniffService.instance.looksLikeMediaByMime(u, referer: widget.url)),
+    );
+    for (var i = 0; i < checks.length; i++) {
+      if (checks[i] && mounted) {
+        _reportMedia(batch[i], verified: true);
+        return;
+      }
+    }
+  }
+
+  /// 命中直链 → 先停网页媒体（防双声），再回调详情页切原生播放器。
+  void _reportMedia(String url, {bool verified = false}) {
+    if (_mediaReported || !mounted) return;
+    if (!SniffFilter.acceptSniffUrl(url, mediaVerified: verified)) return;
+    _mediaReported = true;
+    _stopSniffing();
+    _pauseWebMedia();
+    AppLog.instance.log(
+        '[WebviewPlayer] 后台嗅探命中${verified ? '（MIME 复核）' : ''}: $url');
+    widget.onMediaFound?.call(url);
+  }
+
+  void _pauseWebMedia() {
+    try {
+      _controller.runJavaScript(
+        'try{document.querySelectorAll("video,audio").forEach(function(m){try{m.pause();m.muted=true;}catch(e){}});}catch(e){}',
+      );
+    } catch (_) {}
+  }
+
+  void _stopSniffing() {
+    _sniffing = false;
+    _sniffTimer?.cancel();
+    _sniffTimer = null;
+  }
+
   @override
   void didUpdateWidget(covariant WebviewPlayerPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     // 换集 / 换清晰度 / 换线路时 URL 变化 → 重新加载
     if (oldWidget.url != widget.url) {
+      _stopSniffing();
+      _mediaReported = false;
       setState(() {
         _loadingProgress = 0;
         _failed = false; // 换集/换线路：复位失败态
@@ -210,6 +420,7 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
 
   @override
   void dispose() {
+    _stopSniffing();
     // 停掉页面媒体，避免 WebView 被销毁后声音残留
     try {
       _controller.runJavaScript(

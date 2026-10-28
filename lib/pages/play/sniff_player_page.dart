@@ -12,6 +12,7 @@ import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/parse_service.dart';
 import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/services/play_url_sanitizer.dart';
 import 'package:tvbox/services/sniff_filter.dart';
 import 'package:tvbox/services/web_sniff_service.dart';
 
@@ -60,6 +61,16 @@ class SniffPlayerPage extends StatefulWidget {
   /// `_autoSniff` 的 await 早就返回了 ⇒ 没人清 `sniffingUrl`，详情页会永久停在
   /// "正在嗅探视频地址…"占位上。用这个 tick 把"关闭"这个事实广播给上游。
   static final ValueNotifier<int> closedTick = ValueNotifier<int>(0);
+
+  /// 后台嗅探脚本（供详情页内嵌网页播放器复用）。
+  ///
+  /// 与嗅探页共用**同一套**模板，避免两边行为漂移（2026-10-28）。
+  static String get hookScript => _SniffPlayerPageState._hookTemplate
+      .replaceAll('@EXT@', SniffFilter.mediaExtAlternation);
+
+  /// 轮询嗅探脚本（供详情页内嵌网页播放器复用）。公开原因同 [hookScript]。
+  static String get sniffScript => _SniffPlayerPageState._sniffTemplate
+      .replaceAll('@EXT@', SniffFilter.mediaExtAlternation);
 
   @override
   State<SniffPlayerPage> createState() => _SniffPlayerPageState();
@@ -332,12 +343,16 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
 })();
 ''';
 
-  /// 注入用的 hook 脚本（后缀按当前清单填入）
-  static String get _hookJs =>
+  /// 注入用的 hook 脚本（后缀按当前清单填入）。
+  ///
+  /// 公开给 [WebviewPlayerPage] 复用 —— 详情页内嵌网页播放器现在也做
+  /// **后台嗅探**（同页切原生播放器，不再跳独立嗅探页），两边必须用同一套
+  /// 脚本，否则一处升级另一处漏抓（2026-10-28）。
+  static String get hookJs =>
       _hookTemplate.replaceAll('@EXT@', SniffFilter.mediaExtAlternation);
 
-  /// 注入用的轮询嗅探脚本（后缀按当前清单填入）
-  static String get _sniffJs =>
+  /// 注入用的轮询嗅探脚本（后缀按当前清单填入）。公开原因同 [hookJs]。
+  static String get sniffJs =>
       _sniffTemplate.replaceAll('@EXT@', SniffFilter.mediaExtAlternation);
 
   @override
@@ -377,10 +392,7 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
       _sniffedUrl = null;
       _hint = '正在嗅探页面里的视频地址…';
     });
-    _controller.loadRequest(
-      Uri.parse(next),
-      headers: widget.headers ?? const <String, String>{},
-    );
+    _safeLoad(next, widget.headers);
   }
 
   void _initController(String url) {
@@ -429,7 +441,7 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
           onPageStarted: (url) {
             _stopSniffing();
             // 抢在页面自身脚本执行前注入劫持脚本（漏掉的由页面完成后的轮询嗅探兜底）
-            _controller.runJavaScript(_hookJs);
+            _controller.runJavaScript(hookJs);
             if (mounted) {
               setState(() {
                 _loadingProgress = 0;
@@ -454,13 +466,27 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
             );
           },
         ),
-      )
-      ..loadRequest(
-        Uri.parse(url),
-        // 上游给的 header 也用于**加载网页本身**：部分播放页要求特定
-        // Referer/UA 才返回内容（2026-10-15）
-        headers: widget.headers ?? const <String, String>{},
       );
+    // 上游给的 header 也用于**加载网页本身**：部分播放页要求特定
+    // Referer/UA 才返回内容（2026-10-15）
+    _safeLoad(url, widget.headers);
+  }
+
+  /// 载入网页前的最后一道防线：先剥掉 `类型|哈希|真实URL` 包裹，再确认是
+  /// http(s)。否则 webview_flutter 的 `loadRequest` 会抛
+  /// `ArgumentError('Missing scheme in uri')`，被全局 ErrorWidget 捕成
+  /// 「界面渲染出错」整页报错（用户 2026-10-28 截图）。
+  void _safeLoad(String raw, Map<String, String>? headers) {
+    final url = sanitizePlayUrl(raw);
+    if (!isHttpPlayUrl(url)) {
+      _hint = '这条线路没有返回可打开的网页地址';
+      if (mounted) setState(() {});
+      return;
+    }
+    _controller.loadRequest(
+      Uri.parse(url),
+      headers: headers ?? const <String, String>{},
+    );
   }
 
   // ── 嗅探 ──
@@ -478,10 +504,10 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
     // 页面已完成 → 再补一次 hook 注入（幂等：脚本内有 window.__sniffHooked
     // 守卫）。onPageStarted 那次可能早于文档就绪而没被保留，补这一次保证
     // 页面自身脚本在 onPageFinished 之后发起的请求都能劫持到（2026-10-15）。
-    _controller.runJavaScript(_hookJs);
+    _controller.runJavaScript(hookJs);
     // 再注入嗅探脚本，脚本内部会立即扫一轮 + 轮询
     _controller
-        .runJavaScript(_sniffJs)
+        .runJavaScript(sniffJs)
         .then((_) {
           _sniffTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
             _pollSniff();
@@ -730,8 +756,8 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
   // ── 换解析接口 ──
 
   Future<void> _switchParser() async {
-    // 解析总开关关闭：parseOutcome(only:) 不经过 enabled 判定，这里手动拦一道
-    if (!PlayerPrefs.instance.parseEnabled.value) return;
+    // 不再要求「解析总开关」：只要配了解析接口就能换线路（2026-10-28）。
+    // parseOutcome(only:) 本身不经过 enabled 判定，这里只确认有接口可用。
     final list = ApiConfig.instance.parseBeanList
         .where((p) => p.url.trim().isNotEmpty && (p.type == 0 || p.type == 1))
         .toList();
@@ -779,11 +805,7 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
         setState(() {
           _hint = '「${bean.name}」返回网页，正在加载并嗅探';
         });
-        _controller.loadRequest(
-          Uri.parse(outcome.url),
-          // 解析接口自带的 header 也用于加载这个网页
-          headers: outcome.headers ?? const <String, String>{},
-        );
+        _safeLoad(outcome.url, outcome.headers);
       }
     } else {
       setState(() {
@@ -929,8 +951,8 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
                     _startSniffing();
                   },
                 ),
-                // 解析总开关关闭时不显示「换解析接口」（2026-10-15）
-                if (PlayerPrefs.instance.parseEnabled.value)
+                // 只要配了解析接口就显示「换解析接口」（2026-10-28：不再被开关卡住）
+                if (ParseService.instance.hasParsers)
                   IconButton(
                     icon: const Icon(Icons.swap_horiz, color: Colors.white70),
                     tooltip: '换解析接口',

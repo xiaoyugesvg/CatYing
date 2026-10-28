@@ -794,6 +794,13 @@ class _HomePageState extends State<HomePage> {
     final selected = _controller.selectedFilters[f.key];
     final hasValidSelection =
         selected != null && f.values.any((v) => v.v == selected);
+    // 组名兜底：不少 TVBox 源的 filters 只给 key 不给 name（`name` 为空串），
+    // 原来直接渲染 f.name ⇒ 左侧固定 60pt 的组名列整块空白（用户 2026-10-28
+    // 截图 IMG_9547）。name 为空时退回 key，再不行给「分类」占位；
+    // 文字色也从 textTertiary 提到 textSecondary（浅色卡片上更看得清）。
+    final label = f.name.trim().isNotEmpty
+        ? f.name.trim()
+        : (f.key.trim().isNotEmpty ? f.key.trim() : '分类');
     return Row(
       // 顶部对齐：组名可能换行成两行，芯片列保持顶部对齐才整齐
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -803,7 +810,7 @@ class _HomePageState extends State<HomePage> {
           child: Padding(
             padding: const EdgeInsets.only(top: 6, right: 4),
             child: Text(
-              f.name,
+              label,
               // 组名文字在固定宽度列内居中
               textAlign: TextAlign.center,
               // 允许换行，长组名（国家/地区）不再被截断
@@ -811,7 +818,7 @@ class _HomePageState extends State<HomePage> {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: AppTheme.textTertiary,
+                color: AppTheme.textSecondary,
                 // 组名字号加大（11 → 13）：用户反馈 4 个字太小、卡片显宽
                 fontSize: AppTheme.fontSubhead,
                 fontWeight: FontWeight.w600,

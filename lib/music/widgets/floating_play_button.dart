@@ -58,10 +58,13 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
   bool _dismissed = false;
   String? _lastSongKey;
 
-  /// **C 方案**：贴边且收起时把球"半藏"进屏幕边缘（露出约 62%），
-  /// 此时**封面不旋转**（静止的半圆在边上更安静）；
-  /// 拖动中 / 展开时球全部露出 → 封面旋转 ✓
-  bool _tucked = true;
+  /// **贴边时是否把球"半藏"进屏幕边缘**。
+  ///
+  /// 原来默认 true（露出约 62%，追求"贴边"效果），但真机上用户看到的是
+  /// **一个圆形封面被垂直切掉一半**（用户 2026-10-28 截图 IMG_9541/9544），
+  /// 观感像渲染 bug。现改为 false：球始终完整显示，吸附到边时保留 16px
+  /// 边距 —— 不再有"半个圆"。
+  bool _tucked = false;
 
   void _openPlayer() {
     final nav = VideoPlayerPip.navigatorKey.currentState;
@@ -191,7 +194,8 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
         final pos = _pos ?? Offset(screen.width - _size - 16, defaultY);
         // 用 `pos` 判断贴哪一侧（不能用 x —— 半藏后 x 可能为负）
         final toLeft = pos.dx + _size / 2 < screen.width / 2;
-        // C 方案：**贴边且收起** → 半藏（露出约 62%）；拖动中/展开 → 全露
+        // 半藏仅作为可选样式（`_tucked`）；默认 false = 球始终完整显示。
+        // 用户 2026-10-28 反馈"圆形被垂直裁掉一半"后默认关闭。
         final tucked = _tucked && !_open;
         final tuck = _size * 0.38;
         // 展开时：长条**贴边**（吸附到最近边，4px 边距）——

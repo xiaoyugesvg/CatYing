@@ -72,6 +72,13 @@ class ParseService {
   bool get enabled =>
       PlayerPrefs.instance.parseEnabled.value && _parsers().isNotEmpty;
 
+  /// 是否**配置了**可用解析接口（不看用户的解析总开关）。
+  ///
+  /// 详情页用它实现「打开网页链接就自动解一次」：用户不必先去设置里把
+  /// 「解析总开关」打开（2026-10-28 用户明确反感被开关卡住）。
+  /// 没有配置任何接口时返回 false —— 不会无意义地发请求。
+  bool get hasParsers => _parsers().isNotEmpty;
+
   List<ParseBean> _parsers() {
     final list = ApiConfig.instance.parseBeanList;
     return list

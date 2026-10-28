@@ -22,6 +22,7 @@ import 'package:tvbox/services/player_prefs.dart';
 import 'package:tvbox/services/ad_filter_service.dart';
 import 'package:tvbox/services/parse_service.dart';
 import 'package:tvbox/services/parse_store.dart';
+import 'package:tvbox/services/play_url_sanitizer.dart';
 import 'package:tvbox/services/web_sniff_service.dart';
 import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/webhome/webhtv_site_health_page.dart';
@@ -749,20 +750,25 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     return url;
   }
 
-  /// 底栏「嗅探」：用 WebView 打开当前网页，手动抓里面的媒体地址。
+  /// 底栏「嗅探」：**手动**入口，打开独立嗅探页（可换解析 / 重新嗅探）。
+  ///
+  /// ⚠️ 自动流程（源返回网页播放页时）**不再**走这里，也不再 push 任何
+  /// 新页面：网页直接内嵌在详情页播放区里加载，后台嗅探命中后同页切原生
+  /// 播放器（见 [onWebviewMediaFound]）。这里只服务用户显式点「嗅」的场景。
   void openSniff() {
-    final url = _rawPlayUrl.isNotEmpty ? _rawPlayUrl : (playUrl.value ?? '');
+    final url = sanitizePlayUrl(
+        _rawPlayUrl.isNotEmpty ? _rawPlayUrl : (playUrl.value ?? ''));
     if (!url.startsWith('http')) {
       AppToast.message('当前地址不是网页，无法嗅探');
       return;
     }
-    // 底层正在放的若是**网页**（内嵌 WebView），走统一入口让播放区让位 ——
-    // 否则详情页那个 WebView 会和嗅探页各加载一份同一网页（双份解码/双份
-    // 声音）。底层是直链播放器时不打断，直接打开嗅探页（2026-10-15 深挖）。
+    // 手动嗅探页关闭后收尾「嗅探中」标记（自动流程已不再 push 本页）
+    _hookSniffPageClosed();
+    // 底层正挂着网页播放器时，先让播放区让位：否则本页与嗅探页各跑一份
+    // 同一个网页（双份解码/声音）。底层是原生直链时不打断（继续播）。
     final current = playUrl.value ?? '';
     if (current.isNotEmpty && !_looksLikeDirectMedia(current)) {
-      _autoSniff(url);
-      return;
+      sniffingUrl.value = url;
     }
     Get.to(() => SniffPlayerPage(
           url: url,
@@ -770,6 +776,26 @@ class DetailController extends GetxController with WidgetsBindingObserver {
           headers:
               playHeaders.isEmpty ? null : Map<String, String>.from(playHeaders),
         ));
+  }
+
+  /// 内嵌网页播放器**后台嗅探**到直链 → 同页切原生播放器（2026-10-28）。
+  ///
+  /// 用户要求：「后台嗅探出来用我的播放器播放，不要重新给个页面」。
+  /// 这里只改 `playUrl`，详情页播放区会从 [WebviewPlayerPage] 换成
+  /// `AppPlayer`，全程停在详情页，不 push 任何新页面。
+  void onWebviewMediaFound(String url) {
+    if (url.isEmpty) return;
+    final h = <String, String>{...playHeaders};
+    if (PlayerPrefs.instance.sniffSendReferer.value) {
+      final page = playUrl.value ?? '';
+      if (page.isNotEmpty && page != url) h.putIfAbsent('Referer', () => page);
+    }
+    AppLog.instance.log('[Play] 网页后台嗅探命中 → 原生播放器: $url');
+    if (h.isNotEmpty) playHeaders.value = h;
+    sniffingUrl.value = null;
+    playUrl.value = url;
+    playbackSessionId.value = _newUuid();
+    isPlaying.value = true;
   }
 
   /// 底栏「解析」选中某条线路后：记住选择，并用新线路**重解当前集**。
@@ -909,6 +935,9 @@ class DetailController extends GetxController with WidgetsBindingObserver {
         final sourceSaysDirect = !sourceWantsParse && parseFlag == 0;
 
         if (resolvedUrl != null && resolvedUrl.isNotEmpty) {
+          // 先剥掉 `类型|哈希|真实URL` 包裹（如 `tencent|54e3…|https://…`），
+          // 再补全相对路径 —— 顺序反了会把整串拼到站点域名后面（2026-10-28）。
+          resolvedUrl = sanitizePlayUrl(resolvedUrl);
           // 相对播放地址 → 用源 api 的 host 补成绝对（方案 B，见 [_absolutizePlayUrl]）
           resolvedUrl = _absolutizePlayUrl(resolvedUrl);
           // 记下 Spider 给的地址（底栏「嗅探」按钮要用）—— 记**补全后**的形态，
@@ -968,23 +997,25 @@ class DetailController extends GetxController with WidgetsBindingObserver {
           var playCandidate = resolvedUrl;
           // 2026-10-15：是否解析改由 SniffFilter 统一判定（内置主流站点 +
           // 用户在「播放设置 → 嗅探设置」里追加的域名，减去屏蔽域名）。
-          // 2026-10-27：**源已经声明"这是要解析/嗅探的网页"时，跳过 App 自己
-          // 的解析接口** —— 源给的就是解析站的地址，再套一层 App 的解析只会
-          // 把地址解歪，或者白跑一次请求。
-          // 2026-10-28：但用户在「解析 / 嗅探」面板里**主动选过线路**、或全局
-          // 关掉了「脚本内置解析优先」时例外 —— 聚合源自带的解析站常常
-          // "IP 使用次数超限"，这时必须改用用户的解析管理。
-          // 解析目标取解析站地址里 `url=` 的内层原始页面，避免套娃。
+          // 2026-10-28：不再要求用户先打开「解析总开关」——只要配了解析接口，
+          // 遇到网页播放页就**自动用解析接口解一次**（用户说的「内置牛马解析」
+          // 那种：解析链接 + 官方播放页 → 直接返回 m3u8）。
+          // 源声明 parse=1 时解的是它 `?url=` 里的**原始官方页**，避免套娃；
+          // 解析失败会原样落回网页（内嵌网页播放器兜底），不比改动前差。
           final userForced =
               _forceUserParse || !PlayerPrefs.instance.preferScriptParse.value;
+          final canAppParse = ParseService.instance.enabled ||
+              ParseService.instance.hasParsers;
           if (!_looksLikeDirectMedia(playCandidate) &&
-              (!sourceWantsParse || userForced) &&
-              (SniffFilter.shouldParse(playCandidate) || userForced) &&
-              ParseService.instance.enabled) {
+              (sourceWantsParse ||
+                  SniffFilter.shouldParse(playCandidate) ||
+                  userForced) &&
+              canAppParse) {
             isResolving.value = true;
             try {
-              final target =
-                  userForced ? _innerUrlOf(playCandidate) : playCandidate;
+              final target = (sourceWantsParse || userForced)
+                  ? _innerUrlOf(playCandidate)
+                  : playCandidate;
               final outcome = await ParseService.instance.parseOutcome(
                 target,
                 only: userForced ? ParseStore.instance.activeBean : null,
@@ -1036,21 +1067,16 @@ class DetailController extends GetxController with WidgetsBindingObserver {
             }
           }
 
-          // 解析完（或跳过解析）后**仍是网页地址**：嗅探开关开着就交给嗅探页
-          // 抓页面里的 m3u8/mp4。详情页**不**同时挂内嵌 WebView，避免和嗅探页
-          // 双重加载同一网页（双份解码 + 双份声音）——用户 2026-10-15。
-          if (!directConfirmed && PlayerPrefs.instance.sniffEnabled.value) {
-            _autoSniff(playCandidate);
-            return;
-          }
-          // 源明说要解析/嗅探，但嗅探总开关关着 ⇒ 这个地址给播放器只会黑屏
-          // 等 15 秒。直接给出能操作的提示，别让用户对着黑屏猜（2026-10-27）。
-          if (!directConfirmed && sourceWantsParse) {
-            AppLog.instance.w(
-                '[Play] 源声明 parse=1（需解析/嗅探）但嗅探开关关闭: $playCandidate');
-            setPlaybackError('这个源返回的是网页播放页，需要开启嗅探才能播放'
-                '（播放设置 → 嗅探设置 → 打开嗅探）');
-            return;
+          // ── 网页地址：直接交给内嵌网页播放器（2026-10-28 用户要求）──────
+          //   · 不再要求先开「嗅探总开关」——别拿开关卡人；
+          //   · 播放不了也要把播放器加载出来（内嵌 WebView 先显示网页）；
+          //   · 嗅探在**后台**做，命中 m3u8 后同页切原生播放器，不跳独立页。
+          // 所以这里既不发错误提示、也不 push 嗅探页，直接落到下面的
+          // `playUrl = playCandidate`（详情页据此挂内嵌 WebviewPlayerPage，
+          // 由它后台嗅探并经 onWebviewMediaFound 切回原生播放器）。
+          if (!directConfirmed) {
+            AppLog.instance.log(
+                '[Play] 网页播放页 → 内嵌网页播放器（后台嗅探）: $playCandidate');
           }
           // ── 地址形态兜底（用户 2026-10-15）────────────────────────────
           // 既不是绝对 URL、又补不出 base ⇒ 交给播放器只会白卡 15 秒再弹
@@ -1203,6 +1229,9 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     // 走这里的都是普通视频链路（CMS 源 / 直链），形态复位成"视频"
     contentMode.value = PlayContentMode.video;
     var candidate = _selectedPlayableURL(fallback: fallback);
+    // 先剥掉 `类型|哈希|真实URL` 包裹（TVBox 社区源常见）：必须在补全**之前**，
+    // 否则会被当成相对路径拼到站点域名后面，彻底解不出真实地址（2026-10-28）。
+    candidate = sanitizePlayUrl(candidate);
     // 相对播放地址 → 用源 api 的 host 补成绝对（方案 B，见 [_absolutizePlayUrl]）
     candidate = _absolutizePlayUrl(candidate);
 
@@ -1212,15 +1241,17 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     }
 
     // 2026-10-15：是否解析统一由 SniffFilter 判定（内置主流站点 +
-    // 用户追加域名 - 屏蔽域名），且解析总开关开启。不在解析范围内的
-    // 网页不请求解析接口，直接交给下面的自动嗅探。
-    // 2026-10-28：用户在面板里主动选过线路、或全局关掉了「脚本内置解析优先」
-    // 时，强制走用户的解析管理。
+    // 用户追加域名 - 屏蔽域名）。
+    // 2026-10-28：不再要求先打开「解析总开关」——只要配了解析接口，遇到
+    // 网页播放页就自动用解析接口解一次（「内置牛马解析」那种直接出 m3u8）。
+    // 用户在面板里主动选过线路、或关掉「脚本内置解析优先」时强制走用户线路。
     final userForced =
         _forceUserParse || !PlayerPrefs.instance.preferScriptParse.value;
+    final canAppParse =
+        ParseService.instance.enabled || ParseService.instance.hasParsers;
     if (!_looksLikeDirectMedia(candidate) &&
         (SniffFilter.shouldParse(candidate) || userForced) &&
-        ParseService.instance.enabled) {
+        canAppParse) {
       // 解析期间挂"解析中"标记：详情页据此显示文案，且不启动 15 秒
       // "地址获取超时"计时（解析慢时误报错误会打断观看）。
       isResolving.value = true;
@@ -1250,14 +1281,12 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     // 期间又切了集/换了线路 ⇒ 这次作废（否则会把新集的地址覆盖掉）
     if (_playbackStartToken != token) return;
 
-    // 仍是网页地址且嗅探开关开着 → 交给嗅探页抓媒体直链。
-    // ⚠️ 详情页播放区**不再**同时挂内嵌 WebView：否则会和嗅探页各加载一份
-    // 同一个网页（双份解码 + 双份声音，返回后底层还在跑）——用户 2026-10-15
-    // 「嗅探容易影响播放」的主因。
-    if (!_looksLikeDirectMedia(candidate) &&
-        PlayerPrefs.instance.sniffEnabled.value) {
-      _autoSniff(candidate);
-      return;
+    // 仍是网页地址 → 直接内嵌网页播放器加载（**不**跳独立嗅探页）。
+    // 内嵌的 WebviewPlayerPage 会在后台嗅探，命中 m3u8 后经
+    // onWebviewMediaFound 同页切原生播放器（2026-10-28 用户要求：
+    // 「播放不了也把播放器加载出来」「后台嗅探用我的播放器播」）。
+    if (!_looksLikeDirectMedia(candidate)) {
+      AppLog.instance.log('[Play] 网页地址 → 内嵌网页播放器后台嗅探: $candidate');
     }
 
     // ── 地址形态兜底（用户 2026-10-15）────────────────────────────────
@@ -1273,41 +1302,6 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     playUrl.value = candidate;
     playbackSessionId.value = _newUuid();
     isPlaying.value = true;
-  }
-
-  /// 把网页地址交给嗅探页（详情页播放区让位，避免双重加载）。
-  ///
-  /// 去重（用户 2026-10-15）：已有嗅探页在栈中时**不 push 新页**，改为把新
-  /// 地址交给已打开那页重载 —— 否则「自动下一集」每集都会叠一层嗅探页，
-  /// 返回要连按多次才能回详情页。
-  Future<void> _autoSniff(String url) async {
-    _hookSniffPageClosed();
-    if (sniffingUrl.value != null) {
-      AppLog.instance.log('[Play] 已有嗅探页在栈中 → 复用重载: $url');
-      SniffPlayerPage.pendingUrl.value = url;
-      sniffingUrl.value = url;
-      return;
-    }
-    sniffingUrl.value = url;
-    AppLog.instance.log('[Play] 网页地址 → 自动嗅探: $url');
-    await Get.to(() => SniffPlayerPage(
-          url: url,
-          title: vodInfo.value?.name,
-          // 把上游（Spider 源 / 解析接口）的请求头带给嗅探页：嗅探到直链后
-          // 播放时要用，否则有防盗链的 CDN 会 403（2026-10-15）。
-          headers:
-              playHeaders.isEmpty ? null : Map<String, String>.from(playHeaders),
-        ));
-    // 期间详情页可能已被关闭（用户一路返回并退出），此时不可再写 Rx
-    if (isClosed) return;
-    // 从嗅探页返回详情页：结束嗅探态，改用网页本身兜底（原行为：能直接看网页）
-    if (sniffingUrl.value != url) return; // 期间已切到别的地址，交给那一次收尾
-    sniffingUrl.value = null;
-    if ((playUrl.value ?? '').isEmpty) {
-      playUrl.value = url;
-      playbackSessionId.value = _newUuid();
-      isPlaying.value = true;
-    }
   }
 
   void resetQualityState() {

@@ -1110,6 +1110,8 @@ class _DetailPageState extends State<DetailPage> {
         // 网页兜底播放没有底栏 → 右上角补「嗅探 / 解析」两个入口（2026-10-28）
         onSniff: _openSniffSheet,
         onSwitchParse: _openParseSheet,
+        // 后台嗅探命中 → 同页切原生播放器（不再跳独立嗅探页）
+        onMediaFound: _controller.onWebviewMediaFound,
       );
     }
     final headers = _controller.playHeaders.isNotEmpty
@@ -1127,6 +1129,8 @@ class _DetailPageState extends State<DetailPage> {
         // 网页兜底播放没有底栏 → 右上角补「嗅探 / 解析」两个入口（2026-10-28）
         onSniff: _openSniffSheet,
         onSwitchParse: _openParseSheet,
+        // 后台嗅探命中 → 同页切原生播放器（不再跳独立嗅探页）
+        onMediaFound: _controller.onWebviewMediaFound,
       );
     }
 
