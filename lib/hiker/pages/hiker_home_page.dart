@@ -898,10 +898,12 @@ class _HikerHomePageState extends State<HikerHomePage> {
       onTap: () => showHikerSourceConfigDialog(context, s),
       child: Container(
         margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.fromLTRB(11, 9, 11, 9),
         decoration: BoxDecoration(
-          color: AppTheme.backgroundTertiary,
-          borderRadius: BorderRadius.circular(10),
+          // 与详情页卡片同一套：卡片底 + 0.6 细边 + 圆角 12
+          color: AppTheme.backgroundCard,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.borderLight, width: 0.6),
         ),
         child: Row(
           children: [
@@ -910,7 +912,7 @@ class _HikerHomePageState extends State<HikerHomePage> {
               size: 15,
               color: Colors.orange.shade400,
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 7),
             Expanded(
               child: Text(
                 '这个源需要填「源配置」（${s.configKeys.map((k) => 'config.$k').join('、')}）',
@@ -918,16 +920,12 @@ class _HikerHomePageState extends State<HikerHomePage> {
                 style: TextStyle(
                   color: AppTheme.textSecondary,
                   fontSize: AppTheme.fontCaption,
+                  height: 1.45,
                 ),
               ),
             ),
-            Text(
-              '去设置',
-              style: TextStyle(
-                color: AppTheme.accentOnSurface,
-                fontSize: AppTheme.fontCaption,
-              ),
-            ),
+            const SizedBox(width: 6),
+            HikerPill('去设置', icon: Icons.chevron_right_rounded, accent: true),
           ],
         ),
       ),

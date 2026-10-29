@@ -222,14 +222,13 @@ class _HikerSearchPageState extends State<HikerSearchPage> {
         children: [
           Row(
             children: [
-              Text(
-                '搜索历史',
-                style: TextStyle(
-                  color: AppTheme.textTertiary,
-                  fontSize: AppTheme.fontCaption,
+              // 与详情页 / 主页同一套区块标题（主题色竖条 + 加粗）
+              const Expanded(
+                child: HikerSectionTitle(
+                  '搜索历史',
+                  padding: EdgeInsets.zero,
                 ),
               ),
-              const Spacer(),
               GestureDetector(
                 onTap: () async {
                   await HikerPrefs.instance.clearHistory();
@@ -245,7 +244,7 @@ class _HikerSearchPageState extends State<HikerSearchPage> {
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -260,23 +259,7 @@ class _HikerSearchPageState extends State<HikerSearchPage> {
                       await HikerPrefs.instance.removeHistory(k);
                       if (mounted) setState(() {});
                     },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppTheme.backgroundTertiary,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        k,
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: AppTheme.fontFootnote,
-                        ),
-                      ),
-                    ),
+                    child: HikerPill(k, maxWidth: 180),
                   ),
                 )
                 .toList(),

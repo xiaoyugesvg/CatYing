@@ -19,6 +19,7 @@ import 'package:tvbox/hiker/services/hiker_prefs.dart';
 import 'package:tvbox/hiker/services/hiker_route.dart';
 import 'package:tvbox/hiker/services/hiker_store.dart';
 import 'package:tvbox/hiker/widgets/hiker_blocks.dart' show hikerPlainText, hikerRichSpans;
+import 'package:tvbox/hiker/widgets/hiker_widgets.dart';
 import 'package:tvbox/hiker/pages/hiker_search_page.dart';
 
 /// 海阔条目详情 + 打开。
@@ -136,6 +137,9 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
   String? _error;
   String? _resolvedNote;
   List<_Candidate> _candidates = const [];
+
+  /// 简介是否已展开（长简介默认收 4 行，避免把「解析结果」顶出屏幕）
+  bool _descOpen = false;
 
   /// 规则用 `addListener('onClose', …)` 登记的回调：**离开本页时回放**
   ///（海阔里由原生在页面关闭时执行，多为"清 MyVar / 清缓存"）
@@ -962,37 +966,58 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
             children: [
               Expanded(
                 child: SizedBox(
-                  height: 42,
-                  child: FilledButton.icon(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppTheme.accentColor,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                  height: 44,
+                  child: DecoratedBox(
+                    // 主按钮给一层淡淡的主题色投影 —— 详情页只有一个"主动作"，
+                    // 让它自己浮起来（原来和「取地址」是同一平面的两块方块）
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(13),
+                      boxShadow: _busy
+                          ? null
+                          : [
+                              BoxShadow(
+                                color: AppTheme.accentColor.withValues(
+                                  alpha: 0.28,
+                                ),
+                                blurRadius: 12,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                    ),
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.accentColor,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(13),
+                        ),
+                      ),
+                      onPressed: _busy ? null : _playPrimary,
+                      icon: _busy
+                          ? const SizedBox(
+                              width: 15,
+                              height: 15,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.play_arrow_rounded, size: 20),
+                      label: Text(
+                        _busy ? '解析中…' : '播放',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
                     ),
-                    onPressed: _busy ? null : _playPrimary,
-                    icon: _busy
-                        ? const SizedBox(
-                            width: 15,
-                            height: 15,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Icon(Icons.play_arrow_rounded, size: 20),
-                    label: Text(_busy ? '解析中…' : '播放'),
                   ),
                 ),
               ),
               const SizedBox(width: 10),
               SizedBox(
-                height: 42,
+                height: 44,
                 child: OutlinedButton(
                   style: OutlinedButton.styleFrom(
                     side: BorderSide(color: AppTheme.borderMedium),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(13),
                     ),
                   ),
                   onPressed: _busy ? null : _resolve,
@@ -1052,38 +1077,66 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
 
           // 用户 2026-10-18：「把简介放在解析结果前面」——
           // 先看简介再决定点哪条解析地址，顺序更自然。
+          // 2026-10-29：包成卡片 + 超长可折叠（长简介以前会把「解析结果」整块顶出屏幕）
           if (it.desc.isNotEmpty) ...[
             const SizedBox(height: 18),
-            Text(
-              '简介',
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: AppTheme.fontSubhead,
-                fontWeight: FontWeight.bold,
+            const HikerSectionTitle('简介'),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(13, 11, 13, 11),
+              decoration: BoxDecoration(
+                color: AppTheme.backgroundCard,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppTheme.borderLight, width: 0.6),
               ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              it.desc,
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: AppTheme.fontSubhead,
-                height: 1.6,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    it.desc,
+                    maxLines: _descOpen ? null : 4,
+                    overflow: _descOpen ? null : TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: AppTheme.fontSubhead,
+                      height: 1.65,
+                    ),
+                  ),
+                  if (it.desc.length > 80) ...[
+                    const SizedBox(height: 6),
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => setState(() => _descOpen = !_descOpen),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _descOpen ? '收起' : '展开全部',
+                            style: TextStyle(
+                              color: AppTheme.accentOnSurface,
+                              fontSize: AppTheme.fontCaption,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          Icon(
+                            _descOpen
+                                ? Icons.keyboard_arrow_up_rounded
+                                : Icons.keyboard_arrow_down_rounded,
+                            size: 15,
+                            color: AppTheme.accentOnSurface,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
           ],
 
           if (_candidates.isNotEmpty) ...[
             const SizedBox(height: 18),
-            Text(
-              '解析结果（${_candidates.length}）',
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: AppTheme.fontSubhead,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 8),
+            HikerSectionTitle('解析结果', count: _candidates.length),
             _candidateArea(),
           ],
 
@@ -1113,37 +1166,17 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
     await _play(pick);
   }
 
+  /// 头部信息区（用户 2026-10-29：「详情页界面能不优化美化呢」）
+  ///
+  /// 原来是「左封面 + 右四行 `键：值`」——四行灰字全是同一个字号，扫读时分不出
+  /// 哪条重要。现在改成：封面（带投影）+ 标题 + 一排胶囊（来源 / 类型 / 地址
+  /// 类型）+ 一行地址说明。「备注」不再重复出现在这里（下面「简介」卡片已经有了）。
   Widget _head(HikerItem it) {
+    final link = describeHikerLink(it.url);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            width: 96,
-            height: 134,
-            color: AppTheme.backgroundTertiary,
-            child: it.pic.isEmpty
-                ? Center(
-                    child: Icon(
-                      Icons.movie_outlined,
-                      size: 26,
-                      color: AppTheme.textTertiary,
-                    ),
-                  )
-                : CachedNetworkImage(
-                    imageUrl: it.pic,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Center(
-                      child: Icon(
-                        Icons.broken_image_outlined,
-                        size: 22,
-                        color: AppTheme.textTertiary,
-                      ),
-                    ),
-                  ),
-          ),
-        ),
+        _cover(it),
         const SizedBox(width: 14),
         Expanded(
           child: Column(
@@ -1155,19 +1188,42 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: AppTheme.textPrimary,
-                  fontSize: AppTheme.fontHeadline,
-                  fontWeight: FontWeight.bold,
+                  fontSize: AppTheme.fontTitle3,
+                  fontWeight: FontWeight.w700,
+                  height: 1.3,
                 ),
               ),
-              const SizedBox(height: 8),
-              _infoRow('来源', widget.source.title),
-              if (it.desc.isNotEmpty) _infoRow('备注', it.desc),
-              if (it.colType.isNotEmpty) _infoRow('类型', it.colType),
-              // 不再裸露 `hiker://lazy#14uwff4` 这种中间态地址 —— 翻成
-              // 「延迟规则 · 点一次才算得出真地址」这样看得懂的话
-              _infoRow(
-                '地址',
-                it.url.isEmpty ? '(空)' : describeHikerLinkText(it.url),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  HikerPill(
+                    widget.source.title,
+                    icon: Icons.source_rounded,
+                    maxWidth: 150,
+                  ),
+                  if (it.colType.isNotEmpty)
+                    HikerPill(
+                      it.colType,
+                      icon: Icons.sell_outlined,
+                      maxWidth: 120,
+                    ),
+                  // 地址类型（视频直链 / 延迟规则 / 网页…）—— 原来藏在
+                  // `地址：xxx` 那一行里，现在提成一眼可见的标签
+                  if (it.url.isNotEmpty) HikerPill(link.kind, accent: true),
+                ],
+              ),
+              const SizedBox(height: 9),
+              Text(
+                it.url.isEmpty ? '这一步没有地址' : link.detail,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontCaption,
+                  height: 1.45,
+                ),
               ),
             ],
           ),
@@ -1176,32 +1232,48 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
     );
   }
 
-  Widget _infoRow(String k, String v) => Padding(
-    padding: const EdgeInsets.only(bottom: 4),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '$k：',
-          style: TextStyle(
-            color: AppTheme.textTertiary,
-            fontSize: AppTheme.fontCaption,
+  /// 详情页封面：圆角 + 投影，空图给占位图标
+  Widget _cover(HikerItem it) {
+    return Container(
+      width: 100,
+      height: 140,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.18),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
           ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          color: AppTheme.backgroundTertiary,
+          child: it.pic.isEmpty
+              ? Center(
+                  child: Icon(
+                    Icons.movie_outlined,
+                    size: 26,
+                    color: AppTheme.textTertiary,
+                  ),
+                )
+              : CachedNetworkImage(
+                  imageUrl: it.pic,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Center(
+                    child: Icon(
+                      Icons.broken_image_outlined,
+                      size: 22,
+                      color: AppTheme.textTertiary,
+                    ),
+                  ),
+                ),
         ),
-        Expanded(
-          child: Text(
-            v,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: AppTheme.fontCaption,
-            ),
-          ),
-        ),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 
   /// 候选区：**一行三个卡片**（用户 2026-10-16：卡片上是名称、点击直接播/开）。
   ///
@@ -1333,29 +1405,11 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
         const SizedBox(height: 10),
         _sectionTitle('标签'),
         Padding(
-          padding: const EdgeInsets.only(top: 6),
+          padding: const EdgeInsets.only(top: 4),
           child: Wrap(
             spacing: 6,
             runSpacing: 6,
-            children: [
-              for (final tag in tags)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: AppTheme.backgroundCard,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: AppTheme.borderLight),
-                  ),
-                  child: Text(
-                    tag,
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: AppTheme.fontFootnote,
-                    ),
-                  ),
-                ),
-            ],
+            children: [for (final tag in tags) HikerPill(tag)],
           ),
         ),
       ],
@@ -1374,17 +1428,9 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
     return Column(mainAxisSize: MainAxisSize.min, children: rows);
   }
 
-  /// 区块标题（左对齐加粗，贴合详情页现有字体体系）
-  Widget _sectionTitle(String text) {
-    return Text(
-      text,
-      style: TextStyle(
-        color: AppTheme.textPrimary,
-        fontSize: AppTheme.fontSubhead,
-        fontWeight: FontWeight.bold,
-      ),
-    );
-  }
+  /// 区块标题（统一成「主题色竖条 + 加粗标题」，与主页 / 搜索页同一套观感）
+  Widget _sectionTitle(String text) =>
+      HikerSectionTitle(text, padding: const EdgeInsets.only(bottom: 4));
 
   /// 候选 3 列卡片行（复用平铺逻辑；[enabled] 为 false 时不可点）
   List<Widget> _cardsRows(List<_Candidate> items, {bool enabled = true}) {
@@ -1490,13 +1536,16 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
       onTap: enabled ? () => _play(c) : null,
       onLongPress: enabled ? () => _copy(c.url) : null,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        padding: const EdgeInsets.fromLTRB(8, 10, 8, 9),
         decoration: BoxDecoration(
           color: enabled
               ? AppTheme.backgroundCard
               : AppTheme.backgroundTertiary,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTheme.borderLight),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: enabled ? AppTheme.borderLight : Colors.transparent,
+            width: 0.6,
+          ),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1512,26 +1561,44 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
                     : AppTheme.textTertiary,
                 fontSize: AppTheme.fontFootnote,
                 fontWeight: FontWeight.w600,
+                height: 1.3,
               ),
             ),
-            const SizedBox(height: 6),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(icon, size: 13, color: AppTheme.accentOnSurface),
-                const SizedBox(width: 3),
-                Flexible(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: AppTheme.accentOnSurface,
-                      fontSize: AppTheme.fontCaption,
+            const SizedBox(height: 7),
+            // 动作标签做成小胶囊：一眼能看出这张卡是「播放 / 看图 / 阅读 / 打开」
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: enabled ? AppTheme.accentSurface : Colors.transparent,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    icon,
+                    size: 12,
+                    color: enabled
+                        ? AppTheme.accentOnSurface
+                        : AppTheme.textTertiary,
+                  ),
+                  const SizedBox(width: 3),
+                  Flexible(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: enabled
+                            ? AppTheme.accentOnSurface
+                            : AppTheme.textTertiary,
+                        fontSize: AppTheme.fontCaption,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
             // 真正的内容：图片几张 / 正文多少字 / 视频直链 / 网页地址
             // （用户 2026-10-16：「取地址要给我图片、正文、视频直链」）

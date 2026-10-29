@@ -183,6 +183,154 @@ class HikerStateView extends StatelessWidget {
   }
 }
 
+/// 海阔区块标题：左侧主题色竖条 + 加粗标题 + 可选计数徽标 / 右侧说明。
+///
+/// 用户 2026-10-29：「海阔的整体UI界面和详情页界面能不优化美化呢」——
+/// 详情页原来所有小标题都是一模一样的裸文本（「简介」「解析结果」「标签」
+/// 「本片剧照」…），层级全靠字号，扫读时抓不到结构。这里统一成一条竖条，
+/// 主页 / 详情页 / 搜索页共用同一套观感。
+class HikerSectionTitle extends StatelessWidget {
+  const HikerSectionTitle(
+    this.text, {
+    super.key,
+    this.count,
+    this.trailing,
+    this.padding = const EdgeInsets.only(bottom: 8),
+  });
+
+  final String text;
+
+  /// 标题右侧的小徽标数字（如「解析结果」有几条）
+  final int? count;
+
+  /// 更次要的右侧文案（如当前分类名）
+  final String? trailing;
+
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: padding,
+      child: Row(
+        children: [
+          Container(
+            width: 3,
+            height: 13,
+            decoration: BoxDecoration(
+              color: AppTheme.accentOnSurface,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 7),
+          Flexible(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: AppTheme.fontSubhead,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ),
+          if (count != null) ...[
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: AppTheme.accentSurface,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                '$count',
+                style: TextStyle(
+                  color: AppTheme.accentOnSurface,
+                  fontSize: AppTheme.fontCaption,
+                  fontWeight: FontWeight.w600,
+                  height: 1.3,
+                ),
+              ),
+            ),
+          ],
+          if (trailing != null) ...[
+            const Spacer(),
+            Text(
+              trailing!,
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: AppTheme.fontCaption,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// 小胶囊标签（来源 / 类型 / 标签词共用）
+class HikerPill extends StatelessWidget {
+  const HikerPill(
+    this.text, {
+    super.key,
+    this.icon,
+    this.accent = false,
+    this.maxWidth,
+  });
+
+  final String text;
+  final IconData? icon;
+
+  /// 强调样式：淡主题色底 + 主题色文字（用于「当前线路」这类关键信息）
+  final bool accent;
+
+  final double? maxWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = accent ? AppTheme.accentOnSurface : AppTheme.textSecondary;
+    return Container(
+      constraints: maxWidth == null
+          ? null
+          : BoxConstraints(maxWidth: maxWidth!),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: accent ? AppTheme.accentSurface : AppTheme.backgroundTertiary,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: accent ? Colors.transparent : AppTheme.borderLight,
+          width: 0.6,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 11, color: fg),
+            const SizedBox(width: 3),
+          ],
+          Flexible(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: fg,
+                fontSize: AppTheme.fontCaption,
+                fontWeight: accent ? FontWeight.w600 : FontWeight.normal,
+                height: 1.3,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// 海阔模块的方形 Logo（主页顶栏 / 引导页复用）
 ///
 /// 图标用「海阔视界」App 启动图（assets/icons/hiker.png），与底栏 / 分类
