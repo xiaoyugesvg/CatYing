@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:archive/archive.dart';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -424,10 +425,30 @@ class _HikerManagePageState extends State<HikerManagePage> {
     try {
       final result = await FilePicker.pickFiles(
         type: FileType.custom,
-        allowedExtensions: const ['json', 'txt'],
+        // 用户 2026-10-29：「红果短剧.hk小程序.zip 怎么导入」——
+        // 海阔小程序最普遍的分享形态就是 zip（里面一个 rule.json），
+        // 原来只收 json/txt，用户只能自己解压再粘，白卡一道。
+        allowedExtensions: const ['json', 'txt', 'zip'],
       );
       if (result.isEmpty) return;
-      final path = result.first.path;
+      final f = result.first;
+      final name = f.name.toLowerCase();
+      Uint8List? bytes;
+      if (name.endsWith('.zip')) {
+        try {
+          bytes = await f.readAsBytes();
+        } catch (_) {
+          final p = f.path;
+          if (p != null) bytes = await File(p).readAsBytes();
+        }
+        if (bytes == null || bytes.isEmpty) {
+          AppToast.error('读不出这个 zip');
+          return;
+        }
+        await _doImportZip(bytes, from: '安装包');
+        return;
+      }
+      final path = f.path;
       if (path == null) {
         AppToast.message('读不出这个文件（没有本地路径）');
         return;
@@ -435,6 +456,84 @@ class _HikerManagePageState extends State<HikerManagePage> {
       await _doImport(await File(path).readAsString(), from: '文件');
     } catch (e) {
       AppToast.error('选择文件失败：$e');
+    }
+  }
+
+  /// 从 **zip 安装包**导入海阔小程序。
+  ///
+  /// 一个包通常是：`rule.json`（规则本体）+ 若干 `hiker://files/…` 要用的数据文件。
+  /// 所以这里做两件事：
+  ///   ① 把包里所有 `*.json` 当规则解析（`rule.json` 优先，其余按序）——
+  ///      一条/多条/顶层数组都吃（复用 [HikerStore.importFromText]）；
+  ///   ② 包里还有非 json 的**数据文件**时，顺手整包铺进文件区（走
+  ///      [HikerFiles.importZip]，路径越界的条目会被拒），这样依赖
+  ///      `hiker://files/xxx` 的源才跑得起来。
+  Future<void> _doImportZip(Uint8List bytes, {String from = ''}) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final Archive archive;
+      try {
+        archive = ZipDecoder().decodeBytes(bytes, verify: false);
+      } catch (e) {
+        AppToast.error('不是有效的 zip：${e.toString().split('\n').first}');
+        return;
+      }
+
+      final jsonFiles = <ArchiveFile>[];
+      var hasDataFile = false;
+      for (final f in archive.files) {
+        if (!f.isFile) continue;
+        final n = f.name.replaceAll('\\', '/').toLowerCase();
+        if (n.contains('__macosx/')) continue;
+        if (n.endsWith('.json')) {
+          jsonFiles.add(f);
+        } else {
+          hasDataFile = true;
+        }
+      }
+      if (jsonFiles.isEmpty) {
+        AppToast.error('这个 zip 里没有 .json 规则（只有数据文件？）');
+        return;
+      }
+      // rule.json 排最前：它是小程序本体，其它 json 可能是配置/字典
+      jsonFiles.sort((a, b) {
+        int rank(ArchiveFile f) =>
+            f.name.toLowerCase().endsWith('rule.json') ? 0 : 1;
+        return rank(a).compareTo(rank(b));
+      });
+
+      var added = 0;
+      var updated = 0;
+      var total = _store.sources.length;
+      for (final f in jsonFiles) {
+        final data = f.content;
+        if (data is! List<int> || data.isEmpty) continue;
+        final (a, u, t) = await _store.importFromText(
+          utf8.decode(data, allowMalformed: true),
+        );
+        added += a;
+        updated += u;
+        total = t;
+      }
+
+      var fileNote = '';
+      if (hasDataFile) {
+        final (written, skipped) = await HikerFiles.importZip(bytes);
+        fileNote = '；数据文件 $written 个已铺进文件区';
+        if (skipped > 0) fileNote += '（跳过 $skipped 个目录/越界项）';
+      }
+
+      if (added == 0 && updated == 0) {
+        AppToast.error('zip 里的 JSON 没解析出源（确认是海阔导出的规则）');
+      } else {
+        AppToast.message(
+            '${from.isEmpty ? '' : '[$from] '}导入完成：新增 $added、更新 $updated，共 $total 个$fileNote');
+      }
+    } catch (e) {
+      AppToast.error('导入失败：${e.toString().split('\n').first}');
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -634,7 +733,7 @@ class _HikerManagePageState extends State<HikerManagePage> {
               Expanded(
                 child: _actionButton(
                   icon: Icons.folder_open_rounded,
-                  label: '文件',
+                  label: '文件/包',
                   onTap: _busy ? null : _importFromFile,
                 ),
               ),
