@@ -174,6 +174,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 _categoryTile(
                   icon: Icons.rocket_launch_outlined,
                   iconAsset: 'assets/icons/hiker.png',
+                  iconTinted: true,
                   title: '海阔设置',
                   onTap: () => Get.to(() => const HikerSettingsPage()),
                 ),
@@ -215,8 +216,13 @@ class _SettingsPageState extends State<SettingsPage> {
     required IconData icon,
     required String title,
     required VoidCallback onTap,
-    /// 有彩色品牌图标时优先用它（海阔视界启动图），与首页 / 底栏保持一致。
+    /// 有品牌图标时优先用它（海阔），与首页 / 底栏保持一致。
     String? iconAsset,
+    /// 该资源是否按强调色着色。
+    ///
+    /// 海阔图标是**透明底白色蒙版**（2026-10-29 去掉了原来的黄底方块）——
+    /// 不着色的话在浅色主题里就是一张白图，看不见。
+    bool iconTinted = false,
   }) {
     return GlassPress(
       onTap: onTap,
@@ -248,7 +254,13 @@ class _SettingsPageState extends State<SettingsPage> {
                 child: iconAsset != null
                     ? Padding(
                         padding: const EdgeInsets.all(6),
-                        child: Image.asset(iconAsset, fit: BoxFit.contain),
+                        child: Image.asset(
+                          iconAsset,
+                          fit: BoxFit.contain,
+                          color: iconTinted ? AppTheme.accentColor : null,
+                          colorBlendMode:
+                              iconTinted ? BlendMode.srcIn : null,
+                        ),
                       )
                     : Icon(icon, size: 18, color: AppTheme.accentColor),
               ),

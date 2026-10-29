@@ -98,8 +98,9 @@ enum NavFeature {
         //   房间 = 紫/粉对话气泡（保留原色，不透明白描边）
         NavFeature.rex => 'assets/icons/rex.png',
         NavFeature.room => 'assets/icons/room.png',
-        // 用户指定：海阔分类图标用「海阔视界」App 的启动图标
-        // （彩色图，原样显示、不按前景色着色，与首页徽标同策略）。
+        // 海阔：用「海阔视界」的标志（气泡）。2026-10-29 起是**透明底单色**
+        // 版本 —— 原来那张是整块黄底 App 图标，塞进 36×36 图标框里就是
+        // 一块黄色方块（用户：「没去掉图片里面的背景颜色吗？还是一个黄色背景」）。
         NavFeature.hiker => 'assets/icons/hiker.png',
         _ => null,
       };
@@ -107,11 +108,11 @@ enum NavFeature {
   /// 图标资源是否用前景色着色（[iconAsset] 对应的图）。
   ///
   /// · 首页图标是**彩色徽标**（七彩花瓣）：着色会把颜色全抹掉 ⇒ 原样显示；
-  /// · 海阔图标是**彩色启动图**：同上，原样显示；
+  /// · 海阔图标 2026-10-29 起改成**透明底白色蒙版**（黄底方块已去掉）：
+  ///   白色在浅色主题上会看不见，所以必须着色，跟着主题/强调色走；
   /// · 其余几张（含房间的两个圆）都是**白色蒙版**：白色圆 alpha 全、
   ///   内部圆点 alpha 半，着色后颜色跟着主题走，圆点仍看得出层次。
-  bool get iconAssetTinted =>
-      iconAsset != null && this != NavFeature.home && this != NavFeature.hiker;
+  bool get iconAssetTinted => iconAsset != null && this != NavFeature.home;
 
   /// 选中图标
   IconData get activeIcon => switch (this) {
