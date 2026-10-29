@@ -130,7 +130,10 @@ if (trustMedia && isPlayableShape(candidate) && !_isWebPage(candidate)) {
 - 真正的网页地址若**带**这些后缀（`…/vodplay/223052-1-1.html`）→ 仍判 `page` → 立刻 `setPlaybackError(kMovieWebUrlRejected)` → 自动顺延候选/换线路。✅
 - 真正的网页地址若**不带**后缀（`…/vodplay/123-1-1/`、`…/?m=vod-play-id-123`）→ 被当媒体丢给播放器 → **白等一次播放器超时**（实测量级 15s）才触发 `setPlaybackError` 顺延。功能不丢（`setPlaybackError:602` 的顺延链仍在），但用户会多等十几秒，且最终文案变成播放器超时，而不是"这是网页不是直链"。
 
-**建议**（低成本）：播放器报错时，如果当前 URL `!looksLikeDirectMedia(url)`，在错误文案后追加一句"该地址可能仍是网页而非视频直链，建议换线路"。这样既不收紧 `trustMedia`（不误杀 token 直链），又把信息补回来。
+**建议（低成本）**：播放器报错时，如果当前 URL `!looksLikeDirectMedia(url)`，在错误文案后追加一句"该地址可能仍是网页而非视频直链，建议换线路"。这样既不收紧 `trustMedia`（不误杀 token 直链），又把信息补回来。
+
+> **已实现（2026-10-29 21:02，用户同意）**：`detail/controller.dart` 新增 `_spiderTrustedMedia` 标记（Spider 分支按 `resolution.isMedia` 置位，普通 CMS 链路在 `_startPlayback` 复位）+ `_withPageHint()`：报错时若当前地址是 http(s) 且 `!looksLikeDirectMedia()`，在文案后补一行「（这个地址可能仍是网页而不是直链，建议换线路）」。三处刻意不加：非 http(s) 协议、已是 `.m3u8/.mp4`、以及本来就走"网页地址被拒"那条文案。
+> 附带处理：`classifyPlaybackError()` 先剥掉这句提示再分类 —— 否则提示里的「地址」二字会把所有播放失败都归成「地址无效」。
 
 ---
 
@@ -222,12 +225,12 @@ grep -rn "SettingsHelp" lib/ | grep -v settings_shared.dart
 | 6 | 2 条 warning | 删 `detail/view.dart` 里没人用的 `engine` 局部变量；删 `mini_app_service.dart` 未使用的 `models/app_config.dart` import |
 | 7 | 仓库卫生 | `analyze_check.txt` 取消跟踪 + 写进 `.gitignore`；`docs/` 两个被删空的复核文档已 `git checkout` 恢复 |
 | 8 | 过时注释 | `api_config.dart:388 / 1582` 里「本地 JS 源子开关」改为「本地爬虫总开关」，并注明 JS 源已随 `c23852d` 移除 |
+| 9 | §3.4 `trustMedia` 失败反馈（21:02 追加） | `detail/controller.dart` 加 `_spiderTrustedMedia` 标记 + `_withPageHint()`：无直链特征的地址播放失败时补一句「可能仍是网页」；`classifyPlaybackError` 会先剥掉这句再分类 |
 
 **验证**：`flutter analyze lib test` → 0 error / 0 warning（1,560 info）；`flutter test` → **634 / 634 全部通过**。
 
 **未处理（有意保留）**：
 
-- §3.4 的 `trustMedia` 失败反馈（要改播放器错误文案，属行为改动，等确认）；
 - §3.7 `local_js` 内部三处缺陷（文件已删，随功能一起消失）；
 - `_crop_cord.png` / `_crop_me_top.png` 仍在根目录且被跟踪（疑似设计参考图，未替你删）。
 

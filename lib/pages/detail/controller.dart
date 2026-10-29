@@ -610,9 +610,39 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     // P1-2：同 flag 内候选顺延后仍未恢复 → 自动换下一条 flag（最多 6 次）
     if (_advanceToNextFlag()) return;
     // 走到这里 = 所有线路都试过了，把原因写给用户（isPlaying 置否、看门狗停）
-    errorMessage.value = message;
+    errorMessage.value = _withPageHint(message);
     isPlaying.value = false;
     _stopStallWatchdog(); // P2-1
+  }
+
+  /// 本次取址是否「按 Spider / JS 源的解析结果直接当直链」（`trustMedia`）。
+  ///
+  /// 只用于**失败文案**：这类地址常常没有 `.m3u8/.mp4` 后缀（token / 跳转端点），
+  /// 取址时按用户 2026-10-29 的决定直接交给播放器；但如果它其实是个网页，
+  /// 播放器只会报「播放失败 / 超时」，用户看不出原因。这里记一笔，
+  /// 让报错时能补一句提示。
+  bool _spiderTrustedMedia = false;
+
+  /// 「按直链信任、但可能仍是网页」的失败提示（用户 2026-10-29 同意加）。
+  ///
+  /// 单独抽成常量：[classifyPlaybackError] 要先把它剥掉再分类，否则这句里的
+  /// 「地址」会让所有播放失败都被归成「地址无效」。
+  static const String _kTrustedMediaPageHint =
+      '（这个地址可能仍是网页而不是直链，建议换线路）';
+
+  /// 给「按直链信任、但可能仍是网页」的失败补一句提示。
+  ///
+  /// 只在**当前地址确实不像直链**时才加，避免误导真正的死链 / 403：
+  ///   · 不是 http(s)（`x5://` / `magnet:` 之类）→ 不加（本来就不是网页）；
+  ///   · 已经是 `.m3u8/.mp4…` → 不加（播放器认得出，失败就是源的问题）；
+  ///   · 本来就是「网页地址被拒」那条文案 → 不加（重复）。
+  String _withPageHint(String message) {
+    if (!_spiderTrustedMedia) return message;
+    if (message == kMovieWebUrlRejected) return message;
+    final u = (playUrl.value ?? '').trim().toLowerCase();
+    if (!u.startsWith('http')) return message;
+    if (looksLikeDirectMedia(u)) return message;
+    return '$message\n$_kTrustedMediaPageHint';
   }
 
   /// 本集内已被判定失败的地址（按 URL 去重，防止在多个同址候选间打转）
@@ -687,7 +717,9 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   ///
   /// 命中优先级：地址解析 → 超时 → 403/404/防盗链 → 地址无效 → 解码/播放器。
   String? classifyPlaybackError(String msg) {
-    final m = msg.toLowerCase();
+    // 先剥掉「可能仍是网页」那句提示：里面的「地址」会把所有失败都归成
+    // 「地址无效」（见 [_kTrustedMediaPageHint]）。
+    final m = msg.replaceAll(_kTrustedMediaPageHint, '').toLowerCase();
     if (m.contains('解析') || m.contains('parse')) {
       return '播放地址解析失败，可换线路或换源';
     }
@@ -986,6 +1018,8 @@ class DetailController extends GetxController with WidgetsBindingObserver {
           );
           if (_spiderResolveToken != token) return;
           final playCandidate = resolution.url;
+          // 记下这次是「按 Spider 直链信任」还是普通直链，供失败文案用
+          _spiderTrustedMedia = resolution.isMedia;
           headers = Map<String, String>.from(resolution.headers);
           playHeaders.value = headers;
           if (resolution.isPage) {
@@ -1180,6 +1214,9 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     _playbackStartToken = token;
     // 走这里的都是普通视频链路（CMS 源 / 直链），形态复位成"视频"
     contentMode.value = PlayContentMode.video;
+    // 普通链路不走 `trustMedia`：地址形态由 PlayPipeline 正常判定，
+    // 失败时也就不需要「可能仍是网页」那句提示（见 [_withPageHint]）。
+    _spiderTrustedMedia = false;
     var candidate = _selectedPlayableURL(fallback: fallback);
     // 先剥掉 `类型|哈希|真实URL` 包裹（TVBox 社区源常见）：必须在补全**之前**，
     // 否则会被当成相对路径拼到站点域名后面，彻底解不出真实地址（2026-10-28）。
