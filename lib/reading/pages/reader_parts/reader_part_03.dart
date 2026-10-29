@@ -1476,6 +1476,43 @@ mixin _ReaderPart03 on _BookSourceReaderPageState {
   bool get _seamlessPaging => _rs.pageMode.paginates;
 
 @override
+  /// 朗读推进 → **把正在念的那一段翻进视野**（用户 2026-10-29：「为啥朗读的时候
+  /// 不跟随翻页呢」）。
+  ///
+  /// 为什么不靠跟读高亮那个 widget 自己滚：
+  ///   分页模式下每页是独立渲染的，「正在念的那一段」在**别的页**时，它的 widget
+  ///   根本没被构建 —— `Scrollable.ensureVisible` 无处可滚，表现就是"朗读在走、
+  ///   页面不动"。所以这里直接按段落下标算出页号，把 PageView 翻过去。
+  ///
+  /// 只在**分页模式**生效：滚动模式由 `_wrapWithHighlight` 的 ensureVisible 负责
+  /// （那边能拿到段内 context，滚动更平滑，不会整章重排）。
+  void _followTtsSegment() {
+    if (!_ttsAutoLocate) return;
+    if (!_rs.pageMode.paginates) return;
+    if (!_tts.isSpeaking.value && !_tts.isPaused.value) return;
+    if (_pages.isEmpty) return;
+    final pi = _ttsParagraph;
+    if (pi == null) return;
+    // 段落 → 全书块下标（与 `_pageBody` 里 `e.blockIndex - _blockOffset` 互逆）
+    final want = _blockOffset + pi;
+    // 无缝拼接后 `_pages` 里可能混着下一章的页 ⇒ 只在当前章的页范围里找
+    final (start, end) = _chapterPageRange(_index);
+    final target = BookPaginator.pageOfBlockInRange(
+      _pages,
+      want,
+      from: start,
+      to: end,
+    );
+    if (target == null || target == _pageIndex) return;
+    if (_pageCtrl.hasClients) {
+      _pageCtrl.jumpToPage(target);
+    } else {
+      // 仿真 / 覆盖模式没有挂载 PageView
+      _setPageIndex(target);
+    }
+  }
+
+@override
   /// 某章在 `_pages` 里的页范围 `[start, end)`（无缝拼接后一章可能有多段）。
   /// 找不到时返回整段（退化成旧行为）。
   (int, int) _chapterPageRange(int chapter) {

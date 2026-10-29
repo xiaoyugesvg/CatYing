@@ -137,6 +137,47 @@ class TtsService extends GetxService {
   File? _netTmpFile;
   bool _netSynthesizing = false;
 
+  /// 本章是否已从网络源**降级**成系统朗读。
+  ///
+  /// 用户 2026-10-29：「AI听书为啥读一段下一段又是系统朗读？」
+  /// 根因有两个，这是第二个：
+  ///   · ①（主因）`_onSegmentDone` 无条件走系统朗读 —— 见那里的注释；
+  ///   · ② 合成**偶发**失败时，只给失败的那一段回落系统朗读，下一段又去试网络源，
+  ///     于是整章变成「AI 音 / 系统音」交替。
+  /// 所以：**一段失败就整章统一走系统**（同一章里绝不混两种声音），
+  /// 下一章 `speak()` 时重置，重新给网络源机会。
+  bool _netDegraded = false;
+
+  /// 本次朗读**实际**是否走网络合成（有源 + 没降级）
+  ///
+  /// 所有「分支走网络还是走原生」的判断都必须用它，不要再用 `_netSource != null` ——
+  /// 那会让降级后的暂停 / 倍速 / 跳段仍然去操作已经停用的播放器。
+  bool get _useNet => _netSource != null && !_netDegraded;
+
+  /// 当前实际在用的引擎名（朗读面板 / 引擎页展示用）
+  String get activeEngineLabel {
+    if (!_useNet) return '系统朗读';
+    final s = _netSource!;
+    return s.name.trim().isEmpty ? _labelOf(s) : s.name.trim();
+  }
+
+  /// 重新对齐「当前用哪个源」——**每个段落开始时都要调**。
+  ///
+  /// 这样用户在朗读过程中去「朗读引擎」页换了源，下一段就生效，
+  /// 而不是必须停掉重念才认（原来的行为，用户觉得"设置没反应"）。
+  void _syncNetSource() {
+    final active = TtsSourceStore.instance.active;
+    final next = (active != null && _networkTypes.contains(active.type))
+        ? active
+        : null;
+    final nextId = next?.id ?? '';
+    if (nextId != (_netSource?.id ?? '')) {
+      // 换了源 → 之前的降级结论作废，重新给它一次机会
+      _netDegraded = false;
+    }
+    _netSource = next;
+  }
+
   /// 念完最后一段时回调（用于"自动连播下一章"）
   VoidCallback? onFinished;
 
@@ -250,10 +291,9 @@ class TtsService extends GetxService {
       {int startAt = 0, List<String?>? segmentVoices}) async {
     // 刷新当前朗读源：朗读引擎页里选中的网络源生效，否则原生
     await TtsSourceStore.instance.init();
-    final active = TtsSourceStore.instance.active;
-    _netSource = (active != null && _networkTypes.contains(active.type))
-        ? active
-        : null;
+    _syncNetSource();
+    // 新的一次朗读（换章 / 重念）→ 清掉上一章的降级结论，重新试网络源
+    _netDegraded = false;
     var segs = splitSegments(text);
     // EasyVoice「AI 推荐配音」：一次 AI 分析给一段才有意义，
     // 把小段合并成 ~1500 字大段再发（服务端内部会再按角色切）
@@ -277,7 +317,7 @@ class TtsService extends GetxService {
     isPaused.value = false;
     await TtsNowPlaying.instance.activate();
     _updateNowPlaying(playing: true);
-    if (_netSource != null) {
+    if (_useNet) {
       await _speakNetworkCurrent();
     } else {
       await _speakCurrent();
@@ -304,7 +344,7 @@ class TtsService extends GetxService {
 
   Future<void> pause() async {
     if (!isSpeaking.value) return;
-    if (_netSource != null && !_netSynthesizing) {
+    if (_useNet && !_netSynthesizing) {
       try {
         await _netPlayer?.pause();
       } catch (_) {}
@@ -326,7 +366,7 @@ class TtsService extends GetxService {
     isSpeaking.value = true;
     isPaused.value = false;
     _updateNowPlaying(playing: true);
-    if (_netSource != null) {
+    if (_useNet) {
       // 合成中暂停的：直接等当前段合成完开播即可
       if (!_netSynthesizing) {
         try {
@@ -347,7 +387,9 @@ class TtsService extends GetxService {
 
   Future<void> stop() async {
     _stopRequested = true;
-    if (_netSource != null) {
+    // ⚠️ 这里判 `_netPlayer`（而不是 `_useNet`）：降级后 `_useNet` 已经是 false，
+    //   但播放器可能还留着上一段的声音、临时文件也还没删 —— 都得收干净。
+    if (_netSource != null || _netPlayer != null) {
       _netSynthesizing = false;
       try {
         await _netPlayer?.stop();
@@ -371,7 +413,7 @@ class TtsService extends GetxService {
     isSpeaking.value = true;
     isPaused.value = false;
     _updateNowPlaying(playing: true);
-    if (_netSource != null) {
+    if (_useNet) {
       _netSynthesizing = false;
       try {
         await _netPlayer?.stop();
@@ -385,7 +427,7 @@ class TtsService extends GetxService {
 
   Future<void> setRate(double v) async {
     rate.value = v.clamp(0.1, 1.0);
-    if (_netSource != null) {
+    if (_useNet) {
       // 正在播的段用播放器实时变速（已合成段的请求参数不再回传）
       if (isSpeaking.value && !_netSynthesizing) {
         try {
@@ -401,7 +443,7 @@ class TtsService extends GetxService {
   Future<void> setPitch(double v) async {
     pitch.value = v.clamp(0.5, 2.0);
     // 网络源：音调只影响之后新合成的段；正在播的段不重念
-    if (_netSource != null) return;
+    if (_useNet) return;
     if (isSpeaking.value) await _speakCurrent();
   }
 
@@ -455,7 +497,7 @@ class TtsService extends GetxService {
       return;
     }
     final src = _netSource;
-    if (src == null) {
+    if (src == null || _netDegraded) {
       await _speakCurrent();
       return;
     }
@@ -497,9 +539,14 @@ class TtsService extends GetxService {
       _netSynthesizing = false;
       if (_stopRequested) return;
       if (src.fallbackToSystem) {
-        // 合成失败 → 按源开关切回系统朗读继续读，提示一次
-        lastError.value =
-            '${_labelOf(src)}失败，已切回系统朗读：$e';
+        // 合成失败 → 按源开关切回系统朗读继续读。
+        //
+        // ⚠️ 用户 2026-10-29：「读一段下一段又是系统朗读」的另一半原因就在这里：
+        //   原来只让**失败的那一段**走系统，下一段又去试网络源 → 整章 AI 音 /
+        //   系统音交替。现在失败一次就**整章**统一走系统（`_netDegraded`），
+        //   声音保持一致；下一章 `speak()` 会重置再试。
+        _netDegraded = true;
+        lastError.value = '${_labelOf(src)}失败，本章已切回系统朗读：$e';
         isSpeaking.value = true;
         isPaused.value = false;
         await _speakCurrent();
@@ -1272,7 +1319,22 @@ class TtsService extends GetxService {
     }
     currentIndex.value = next;
     _updateNowPlaying();
-    _speakCurrent();
+    // 🔴🔴 这里原来**无条件**调 `_speakCurrent()`（= 系统朗读）🔴🔴
+    //
+    // 用户 2026-10-29：「AI听书为啥读一段下一段又是系统朗读？」
+    // 就是这行造成的：`speak()` 的第一段走 `_speakNetworkCurrent()`（AI 音色），
+    // 播完之后进到这里 → 直接切系统朗读念第二段 → 再进这里 → 系统朗读第三段…
+    // 于是"只有第一段是 AI"，听起来就是「读一段、下一段变系统朗读」。
+    //
+    // 正确做法：**每个段落开始时重新对齐一次当前源**（用户在朗读过程中换了引擎
+    // 也能从下一段生效），再按 `_useNet` 决定走哪条分支。
+    _syncNetSource();
+    if (_useNet) {
+      // 网络合成是异步的，不能 await（这里在原生/播放器回调里）
+      unawaited(_speakNetworkCurrent());
+    } else {
+      _speakCurrent();
+    }
   }
 
   /// 把文本切成适合朗读的片段。

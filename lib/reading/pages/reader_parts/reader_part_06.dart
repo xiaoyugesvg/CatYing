@@ -481,8 +481,11 @@ mixin _ReaderPart06 on _BookSourceReaderPageState {
                     ),
                   ),
                   const SizedBox(height: 2),
+                  // 用户 2026-10-29：「感觉搞得好混乱」——这行原来**写死**成
+                  // 「系统朗读 · 跟随系统」，即使用户已经把引擎换成小米 MiMo，
+                  // 面板里还写着系统朗读。现在显示真实在用的那个。
                   Text(
-                    '系统朗读 · 跟随系统',
+                    _ttsEngineSubtitle(),
                     style: TextStyle(
                       fontSize: AppTheme.fontFootnote,
                       color: _fgMuted,
@@ -775,6 +778,19 @@ mixin _ReaderPart06 on _BookSourceReaderPageState {
   }
 
 @override
+  /// 朗读面板里「朗读引擎」那一行的副标题 —— 显示**真实**在用的引擎。
+  ///
+  /// 读 `TtsService.activeEngineLabel`（它按"有没有网络源 + 有没有降级"算），
+  /// 不直接读 store：降级到系统朗读时这里也该跟着说实话。
+  String _ttsEngineSubtitle() {
+    final tts = _tts;
+    final name = tts.activeEngineLabel;
+    if (name == '系统朗读') return '系统朗读 · 离线 · 自动兜底';
+    final src = TtsSourceStore.instance.active;
+    final kind = src?.typeLabel ?? '网络朗读源';
+    return '$name · $kind';
+  }
+
   /// A4：双音色音色名输入行
   Widget _ttsVoiceField(
     String label,

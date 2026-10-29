@@ -1702,39 +1702,51 @@ mixin _ReaderPart02 on _BookSourceReaderPageState {
   }
 
 @override
+@override
   /// 把一段正文包上跟读高亮（用 Obx 订阅 TtsService 的进度变化）
+  ///
+  /// ⚠️ 2026-10-29：**高亮和「自动定位」必须解耦**。
+  ///   原来第一行是 `if (_ttsHighlight == 0) return child;` —— 用户把「跟读高亮」
+  ///   设成「关」之后，连"朗读跟着翻页"一起失效了（他以为只是不要底色）。
+  ///   现在：底色关掉就只不画底色，`_ttsAutoLocate` 打开时照样定位。
+  ///   ⚠️ 定位**不能**顺手加 padding（会改动分页度量，页底会溢出）——
+  ///   只包一层 Builder，视觉上一像素都不变。
   Widget _wrapWithHighlight(int pi, Widget child) {
-    if (_ttsHighlight == 0) return child;
+    if (_ttsHighlight == 0 && !_ttsAutoLocate) return child;
     return Obx(() {
+      // 不是"正在念的那一段"：原样返回，什么都不做
+      if (pi != _ttsParagraph) return child;
       final d = _ttsHighlightDecoration(pi);
-      if (d == null) return child;
-      return Container(
-        decoration: d,
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-        // ✅ **自动定位阅读位置**（本轮接上 ✓ —— 对应 TTS 面板里的那个开关 ✓）：
-        //   · 这个 `Obx` **本身就在"朗读进度变化"时重建** ✓✓，而 `d != null`（判据在
-        //     `_ttsHighlightDecoration:1212` ✓）恰好表示 **`pi` 就是"正在念的那一段"** ✓
-        //     ⇒ 所以**不需要**另加监听/定时器 ✓，只在"成为当前段"时滚一次即可 ✓。
-        //   · ⚠️ 用 `Builder` 取一个**段内**的 `BuildContext` ✓ —— `Obx` 的 builder **不带** context ✗，
-        //     而 `Scrollable.ensureVisible` 需要一个**已挂载**的 context ✓✓。
-        //   · ⚠️ 放进 `addPostFrameCallback` ✓：重建当帧**尚未布局** ✗，滚动目标要等一帧才准确 ✓。
-        //   · ⚠️ `alignment: 0.35` ✓：让当前段停在视口**偏上**处 ✓（下方还留得住下一段 ✓ 更好读 ✓）。
-        child: Builder(
-          builder: (ctx) {
-            if (_ttsAutoLocate) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (!mounted || !ctx.mounted) return;
-                Scrollable.ensureVisible(
-                  ctx,
-                  alignment: 0.35,
-                  duration: const Duration(milliseconds: 260),
-                  curve: Curves.easeOut,
-                );
-              });
-            }
-            return child;
-          },
-        ),
+      // 没开高亮：不套装饰也不套 padding，只借 Builder 拿一个段内 context
+      final Widget out = d == null
+          ? child
+          : Container(
+              decoration: d,
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: child,
+            );
+      if (!_ttsAutoLocate) return out;
+      // ✅ **自动定位阅读位置**（滚动模式）：
+      //   · 这个 `Obx` 在"朗读进度变化"时重建，走到这里说明 pi 就是"正在念的那一段"
+      //   · ⚠️ 用 `Builder` 取一个**段内**的 `BuildContext` —— `Obx` 的 builder 不带 context
+      //   · ⚠️ 放进 `addPostFrameCallback`：重建当帧**尚未布局**，滚动目标要等一帧才准确
+      //   · ⚠️ `alignment: 0.35`：让当前段停在视口**偏上**处，下方还留得住下一段
+      //   · 分页模式**不靠这里**：本段在别的页时这个 widget 根本没被构建，
+      //     那种情况由 `_followTtsSegment` 直接把 PageView 翻到那一页。
+      return Builder(
+        builder: (ctx) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted || !ctx.mounted) return;
+            if (_rs.pageMode.paginates) return;
+            Scrollable.ensureVisible(
+              ctx,
+              alignment: 0.35,
+              duration: const Duration(milliseconds: 260),
+              curve: Curves.easeOut,
+            );
+          });
+          return out;
+        },
       );
     });
   }

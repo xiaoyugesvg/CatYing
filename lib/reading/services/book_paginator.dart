@@ -515,4 +515,27 @@ class BookPaginator {
     }
     return ans;
   }
+
+  /// 在 `[from, to)` 页范围里找**真的含有**该块的页；找不到返回 null。
+  ///
+  /// 与 [pageIndexOf] 的区别（别混用）：
+  ///   · [pageIndexOf] 用 `firstBlockIndex` 二分，**只保证"不早于"**该块，
+  ///     块被切到下一页时会指到前一页；
+  ///   · 这个按 `PageEntry.blockIndex` 精确匹配，用于「朗读跟读翻页」这种
+  ///     必须落到**正在念的那一段所在页**的场景（用户 2026-10-29）。
+  ///   · `to` 传 null = 到末尾；范围限制是为了跳过无缝拼接进来的**下一章**的页。
+  static int? pageOfBlockInRange(
+    List<BookPage> pages,
+    int blockIndex, {
+    int from = 0,
+    int? to,
+  }) {
+    final end = (to ?? pages.length).clamp(0, pages.length);
+    for (var i = from.clamp(0, pages.length); i < end; i++) {
+      for (final e in pages[i].entries) {
+        if (e.blockIndex == blockIndex) return i;
+      }
+    }
+    return null;
+  }
 }

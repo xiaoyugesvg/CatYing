@@ -46,6 +46,7 @@ import 'package:tvbox/reading/pages/reader_title_styles_page.dart';
 import 'package:tvbox/reading/services/srs_style_importer.dart';
 import 'package:tvbox/reading/services/title_html_parser.dart';
 import 'package:tvbox/reading/services/tts_service.dart';
+import 'package:tvbox/reading/services/tts_source_store.dart';
 import 'package:tvbox/reading/services/ai_service.dart';
 import 'package:tvbox/reading/services/reading_time_service.dart';
 import 'package:tvbox/reading/services/bsr_independent_layout.dart';
@@ -547,8 +548,13 @@ DateTime? _appendFetchAt;
   /// 点底栏「朗读」时是否**直接进沉浸式播放页** ✓（`TtsFullPlayerPage` ✓ 本页已有用法 ✓）
   bool _ttsDirectPlayer = false;
 
-/// 朗读时是否**自动把正在读的段落滚进视口** ✓（跟读高亮本来就有 ✓）
-  bool _ttsAutoLocate = false;
+/// 朗读时是否**自动把正在读的段落滚进视口**（跟读高亮本来就有 ✓）
+///
+/// 用户 2026-10-29：「为啥朗读的时候不跟随翻页呢」——
+/// 默认原来是 **false**，等于这个功能默认是关的，用户根本不知道要去开。
+/// 现在默认开：朗读不跟着翻页才是"坏了"的行为。
+/// 存过偏好的用户仍以自己存的那个值为准（见 `_restorePrefs`）。
+  bool _ttsAutoLocate = true;
 
 // ── 屏幕休眠 ────────────────────────────────────────────────
   /// 当前是否已请求"禁止息屏"（避免重复调用 + 退出时要知道该不该关）
@@ -907,6 +913,9 @@ Timer? _ttsTimerHandle;
   int?  get _ttsParagraph;
   BoxDecoration? _ttsHighlightDecoration(int pi);
   Widget _wrapWithHighlight(int pi, Widget child);
+  /// 朗读推进时，把「正在念的那一段」翻进视野
+  /// （分页模式翻页；滚动模式由 `_wrapWithHighlight` 自己滚 —— 见那里的注释）
+  void _followTtsSegment();
   TextStyle _bodyStyle(Color fg, {bool bold = false, bool noUnderline = false});
   double  get _bubbleMaxWidth;
   double  get _bubbleTextWidth;

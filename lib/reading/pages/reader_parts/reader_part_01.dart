@@ -71,6 +71,9 @@ mixin _ReaderPart01 on _BookSourceReaderPageState {
   /// 否则书签 / 划线会落到上一段。
   int get _blockOffset => _showChapterTitle ? 1 : 0;
 
+  /// 朗读进度监听（分页模式下据此翻页；`dispose` 必须撤掉）
+  Worker? _ttsFollowWorker;
+
 @override
   /// 番茄钟浮层 bottom 偏移：根据底部功能栏高度 + TTS 迷你条状态动态计算。
   /// 底部功能栏（悬浮卡片）高度 ≈ margin(10) + padding(16) + 进度行(48)
@@ -420,6 +423,12 @@ mixin _ReaderPart01 on _BookSourceReaderPageState {
     _restorePrefs();
     _syncDockBrightness();
     _loadChapter(_index);
+    // 朗读跟随（用户 2026-10-29：「为啥朗读的时候不跟随翻页呢」）
+    //
+    // 只在**分页模式**下有用：跟读高亮那个 `Obx` 只包得住"本页"的段落，
+    // 正在念的段落在别的页时它压根没被构建 ⇒ 必须在这里监听进度、主动翻页。
+    // 滚动模式不用这个（`_wrapWithHighlight` 里 `ensureVisible` 更平滑）。
+    _ttsFollowWorker = ever<int>(_tts.currentIndex, (_) => _followTtsSegment());
     // C7 护眼休息提醒：墙钟计时（后台恢复后自动补齐），30s 检查一次
     _eyeBreakStart = DateTime.now();
     _eyeTimer = Timer.periodic(const Duration(seconds: 30), (_) {
@@ -581,6 +590,9 @@ mixin _ReaderPart01 on _BookSourceReaderPageState {
     //   与 `book_reader_page.dart` 的 dispose 同款写法 ✓
     _tts.onFinished = null;
     _tts.stop();
+    // 朗读跟随的监听必须一起撤掉（否则 service 是单例，会一直持有已销毁的 State）
+    _ttsFollowWorker?.dispose();
+    _ttsFollowWorker = null;
     // 自动阅读定时器 / 滚动控制器（退出必须停，否则会继续翻页）
     _autoReadTimer?.cancel();
     _autoReadTimer = null;

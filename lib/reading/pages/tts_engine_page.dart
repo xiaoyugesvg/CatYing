@@ -91,12 +91,12 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                 ),
                 for (final t in [
                   'edge',
-                  'network',
-                  'azure',
                   'mimo',
-                  'openai',
                   'easyvoice',
+                  'openai',
+                  'azure',
                   'http',
+                  'network',
                 ])
                   ListTile(
                     title: Text(
@@ -106,6 +106,14 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                           color: isDark
                               ? Colors.white
                               : JellyTheme.textPrimaryLight),
+                    ),
+                    // 用户 2026-10-29：「感觉搞得好混乱」——七个类型光看名字
+                    // 分不清谁免费、谁要 Key、谁最灵活。每行补一句区别。
+                    subtitle: Text(
+                      _typeHint(t),
+                      style: TextStyle(
+                          fontSize: AppTheme.fontFootnote,
+                          color: JellyTheme.textSecondary),
                     ),
                     onTap: () => Navigator.pop(ctx, t),
                   ),
@@ -146,107 +154,31 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 40),
             children: [
-              // ── 系统朗读（兜底引擎）────────────────────────
-              Container(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-                decoration: BoxDecoration(
-                  color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.record_voice_over_rounded,
-                            size: 20, color: label),
-                        const SizedBox(width: 8),
-                        Text('系统朗读',
-                            style: TextStyle(
-                                fontSize: AppTheme.fontHeadline,
-                                fontWeight: FontWeight.w700,
-                                color: label)),
-                        const Spacer(),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? Colors.white.withValues(alpha: 0.10)
-                                : Colors.black.withValues(alpha: 0.06),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text('兜底引擎',
-                              style: TextStyle(
-                                  fontSize: AppTheme.fontFootnote,
-                                  color: JellyTheme.textSecondary)),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '离线、零流量、不需要任何配置。其它朗读源不可用时一律回落到它。',
-                      style: TextStyle(
-                          fontSize: AppTheme.fontSubhead,
-                          height: 1.6,
-                          color: JellyTheme.textSecondary),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Text('当前引擎',
-                            style: TextStyle(fontSize: AppTheme.fontBody, color: label)),
-                        const Spacer(),
-                        TextButton(
-                          onPressed: () async {
-                            await TtsSourceStore.instance.setActive('');
-                            if (!mounted) return;
-                            ScaffoldMessenger.of(context)
-                                .showSnackBar(const SnackBar(
-                              content: Text('已切回系统朗读'),
-                              duration: Duration(seconds: 2),
-                            ));
-                          },
-                          child: const Text('切换'),
-                        ),
-                      ],
-                    ),
-                    Text(
-                      TtsSourceStore.instance.activeId.isEmpty
-                          ? '系统朗读（使用中）'
-                          : '未使用'
-                              '${TtsSourceStore.instance.active?.name.isNotEmpty == true ? '（当前走「${TtsSourceStore.instance.active!.name}」）' : ''}',
-                      style: TextStyle(
-                          fontSize: AppTheme.fontSubhead,
-                          color: TtsSourceStore.instance.activeId.isEmpty
-                              ? label
-                              : JellyTheme.textSecondary),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      // 2026-10-29：原来这段「未检测到已安装的朗读引擎」
-                      // 是**无条件**显示的 —— 系统引擎明明可用也照说不误，
-                      // 用户会以为自己手机坏了。改成真去问一次原生。
-                      _sysAvailable == false
-                          ? '未检测到已安装的朗读引擎。若系统设置·文字转语音里能试听，'
-                              '通常是引擎被禁用或系统限制了应用查询已安装引擎。'
-                          : '使用系统自带语音合成，无需联网。'
-                              '想换更好的音色请在下面添加朗读源。',
-                      style: TextStyle(
-                          fontSize: AppTheme.fontFootnote,
-                          height: 1.6,
-                          color: JellyTheme.textSecondary),
-                    ),
-                  ],
-                ),
-              ),
+              // ── 顶部：现在到底用哪个引擎 ─────────────────────
+              //
+              // 用户 2026-10-29：「AI朗读还有其余听书引擎感觉搞得好混乱呢」。
+              // 原来这页最上面是一大张「系统朗读」卡（带「兜底引擎」徽标 +
+              // 「当前引擎 / 切换」+ 两段说明），朗读源又在下面单独一套单选，
+              // 用户要自己在脑子里拼"现在到底谁在念"。这里先给一句结论。
+              _currentEngineCard(isDark, label),
               const SizedBox(height: 18),
-              Text('朗读源',
+              Text('引擎',
                   style: TextStyle(
                       fontSize: AppTheme.fontBody,
                       fontWeight: FontWeight.w600,
                       color: JellyTheme.textSecondary)),
               const SizedBox(height: 8),
+              _sysEngineTile(isDark, label),
+              if (sources.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text('朗读源',
+                    style: TextStyle(
+                        fontSize: AppTheme.fontBody,
+                        fontWeight: FontWeight.w600,
+                        color: JellyTheme.textSecondary)),
+                const SizedBox(height: 8),
+              ],
+
               if (sources.isEmpty)
                 Container(
                   padding: const EdgeInsets.all(16),
@@ -257,8 +189,7 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                   ),
                   child: Text(
                     '还没有添加朗读源。朗读源用来接入系统之外的语音合成服务，'
-                    '音色通常比系统引擎好得多（EasyVoice 免费无需 API Key，'
-                    '其余需要你自己的 Key）。',
+                    '音色通常比系统引擎好得多（Edge 内置 / 小米 MiMo 都免费、免 Key）。',
                     style: TextStyle(
                         fontSize: AppTheme.fontSubhead,
                         height: 1.7,
@@ -266,89 +197,7 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                   ),
                 )
               else
-                for (final s in sources)
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    decoration: BoxDecoration(
-                      color: isDark
-                          ? JellyTheme.cardDark
-                          : JellyTheme.cardLight,
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: ListTile(
-                      title: Row(
-                        children: [
-                          Flexible(
-                            child: Text(s.name,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                    fontSize: AppTheme.fontHeadline,
-                                    color: label)),
-                          ),
-                          if (s.id == TtsSourceStore.instance.activeId) ...[
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: isDark
-                                    ? Colors.white.withValues(alpha: 0.12)
-                                    : JellyTheme.primary
-                                        .withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Text('使用中',
-                                  style: TextStyle(
-                                      fontSize: AppTheme.fontFootnote,
-                                      color: isDark
-                                          ? Colors.white
-                                          : JellyTheme.primary)),
-                            ),
-                          ],
-                        ],
-                      ),
-                      subtitle: Text(s.typeLabel,
-                          style: TextStyle(
-                              fontSize: AppTheme.fontFootnote,
-                              color: JellyTheme.textSecondary)),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: Icon(
-                              s.id == TtsSourceStore.instance.activeId
-                                  ? Icons.check_circle_rounded
-                                  : Icons.radio_button_unchecked,
-                              size: 22,
-                              color: s.id == TtsSourceStore.instance.activeId
-                                  ? JellyTheme.primary
-                                  : JellyTheme.textSecondary,
-                            ),
-                            tooltip: s.id == TtsSourceStore.instance.activeId
-                                ? '当前使用中'
-                                : '设为当前使用',
-                            onPressed: () =>
-                                TtsSourceStore.instance.setActive(s.id),
-                          ),
-                          IconButton(
-                            icon: Icon(Icons.delete_outline,
-                                size: 20, color: JellyTheme.textSecondary),
-                            onPressed: () =>
-                                TtsSourceStore.instance.remove(s.id),
-                          ),
-                        ],
-                      ),
-                      onTap: () async {
-                        await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => TtsSourceEditPage(source: s),
-                          ),
-                        );
-                        if (mounted) setState(() {});
-                      },
-                    ),
-                  ),
+                for (final s in sources) _sourceTile(s, isDark, label),
               const SizedBox(height: 8),
               // ── 添加朗读源 ────────────────────────────────
               InkWell(
@@ -372,7 +221,7 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                               fontWeight: FontWeight.w600,
                               color: label)),
                       const Spacer(),
-                      Text('Edge 内置 / 网络导入 / Azure / EasyVoice',
+                      Text('Edge 免费 / MiMo / Azure / 自定义',
                           style: TextStyle(
                               fontSize: AppTheme.fontFootnote,
                               color: JellyTheme.textSecondary)),
@@ -410,9 +259,285 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                   ),
                 ),
               ),
+              const SizedBox(height: 16),
+              // 用户 2026-10-29：「AI朗读还有其余听书引擎感觉搞得好混乱呢」——
+              // 把"什么时候生效 / 失败会怎样"写在这里，省得用户去猜。
+              Text(
+                '切换后从下一段开始生效，不用重新点播放。\n'
+                '网络源合成失败时会整章回落系统朗读（不会一段 AI 一段系统），'
+                '下一章再自动重试。',
+                style: TextStyle(
+                    fontSize: AppTheme.fontFootnote,
+                    height: 1.7,
+                    color: JellyTheme.textSecondary),
+              ),
             ],
           );
         },
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // 视觉零件（用户 2026-10-29：「感觉搞得好混乱」→ 先给结论，再给列表）
+  // ══════════════════════════════════════════════════════════
+
+  /// 朗读源类型的一句话区别（弹层副标题用）
+  static String _typeHint(String type) {
+    switch (type) {
+      case 'edge':
+        return '免配置、免 Key，走 App 内置 Node，音色比系统朗读好';
+      case 'mimo':
+        return '小米 MiMo，限时免费，需要填 Key';
+      case 'easyvoice':
+        return '自建 EasyVoice 服务（免费 Edge 音色），需要填服务地址';
+      case 'openai':
+        return '任意 OpenAI 兼容的 /audio/speech 接口，需要地址 + Key';
+      case 'azure':
+        return '微软 Azure 语音，需要区域 + Key，音色最全';
+      case 'http':
+        return '自定义 URL 模板，最灵活；知道接口长什么样再选它';
+      default:
+        return '从链接或 JSON 导入别人配好的引擎（新手最省事）';
+    }
+  }
+
+  /// 顶部总览：**现在到底谁在念**
+  ///
+  /// 原来这页要用户自己从两张卡里拼答案（「系统朗读 → 当前引擎：未使用
+  /// （当前走「小米 MiMo」）」+ 下面某一行挂着「使用中」徽标）。
+  Widget _currentEngineCard(bool isDark, Color label) {
+    final store = TtsSourceStore.instance;
+    final active = store.active;
+    final onSystem = active == null;
+    final name = onSystem ? '系统朗读' : active.name;
+    final kind = onSystem ? '离线 · 零流量 · 无需配置' : active.typeLabel;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: JellyTheme.primary.withValues(alpha: isDark ? 0.5 : 0.28),
+          width: 0.8,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: JellyTheme.primary.withValues(alpha: isDark ? 0.22 : 0.12),
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: Icon(
+              onSystem
+                  ? Icons.record_voice_over_rounded
+                  : Icons.graphic_eq_rounded,
+              size: 20,
+              color: isDark ? Colors.white : JellyTheme.primary,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('当前引擎',
+                    style: TextStyle(
+                        fontSize: AppTheme.fontCaption,
+                        color: JellyTheme.textSecondary)),
+                const SizedBox(height: 2),
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: AppTheme.fontHeadline,
+                      fontWeight: FontWeight.w700,
+                      color: label),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  kind,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: AppTheme.fontFootnote,
+                      color: JellyTheme.textSecondary),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.12)
+                  : JellyTheme.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text('使用中',
+                style: TextStyle(
+                    fontSize: AppTheme.fontCaption,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : JellyTheme.primary)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 系统朗读行 —— 与朗读源同一套单选样式（原来它是张独立大卡 + 「切换」按钮）
+  Widget _sysEngineTile(bool isDark, Color label) {
+    final on = TtsSourceStore.instance.activeId.isEmpty;
+    return _tile(
+      isDark: isDark,
+      selected: on,
+      title: '系统朗读',
+      subtitle: _sysAvailable == false
+          ? '未检测到系统语音引擎（若「设置 · 朗读内容」里能试听，通常是系统限制了查询）'
+          : '手机自带语音合成 · 离线 · 其它源不可用时自动兜底',
+      icon: Icons.smartphone_rounded,
+      onSelect: () async {
+        await TtsSourceStore.instance.setActive('');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('已切回系统朗读'),
+          duration: Duration(seconds: 2),
+        ));
+      },
+    );
+  }
+
+  /// 一个朗读源行（点圆点设为使用中；点整行进编辑；右侧删除要确认）
+  Widget _sourceTile(TtsSource s, bool isDark, Color label) {
+    final on = s.id == TtsSourceStore.instance.activeId;
+    return _tile(
+      isDark: isDark,
+      selected: on,
+      title: s.name,
+      subtitle: s.typeLabel,
+      icon: Icons.graphic_eq_rounded,
+      onSelect: () => TtsSourceStore.instance.setActive(s.id),
+      onTap: () async {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => TtsSourceEditPage(source: s)),
+        );
+        if (mounted) setState(() {});
+      },
+      onDelete: () async {
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('删除朗读源'),
+            content: Text('删除「${s.name}」？它保存的 API Key 也会一起清掉。'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('取消'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('删除', style: TextStyle(color: Colors.redAccent)),
+              ),
+            ],
+          ),
+        );
+        if (ok != true) return;
+        await TtsSourceStore.instance.remove(s.id);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('已删除「${s.name}」'),
+          duration: const Duration(seconds: 2),
+        ));
+      },
+    );
+  }
+
+  /// 单选行骨架（系统朗读 / 朗读源共用，样式一致才不会显得"两套体系"）
+  Widget _tile({
+    required bool isDark,
+    required bool selected,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required VoidCallback onSelect,
+    VoidCallback? onTap,
+    VoidCallback? onDelete,
+  }) {
+    final label = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+        borderRadius: BorderRadius.circular(14),
+        border: selected
+            ? Border.all(
+                color: JellyTheme.primary.withValues(alpha: isDark ? 0.6 : 0.4),
+                width: 0.8,
+              )
+            : null,
+      ),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
+          child: Row(
+            children: [
+              Icon(icon,
+                  size: 19,
+                  color: selected ? label : JellyTheme.textSecondary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: AppTheme.fontHeadline, color: label),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: AppTheme.fontFootnote,
+                          height: 1.4,
+                          color: JellyTheme.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: Icon(
+                  selected
+                      ? Icons.check_circle_rounded
+                      : Icons.radio_button_unchecked,
+                  size: 22,
+                  color:
+                      selected ? JellyTheme.primary : JellyTheme.textSecondary,
+                ),
+                tooltip: selected ? '当前使用中' : '设为当前使用',
+                onPressed: onSelect,
+              ),
+              if (onDelete != null)
+                IconButton(
+                  icon: Icon(Icons.delete_outline,
+                      size: 20, color: JellyTheme.textSecondary),
+                  tooltip: '删除',
+                  onPressed: onDelete,
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
