@@ -570,11 +570,33 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
     return true;
   }
 
-  /// 把 `file://` / 绝对路径 解析成本地文件真实路径；不是本地路径返回 null。
+  /// 把 `file://` / 绝对路径 / **本地源相对标识** 解析成本地文件真实路径；
+  /// 不是本地路径返回 null。
+  ///
+  /// 🔴 2026-10-29：这里原来只认 `file://` 和绝对路径，注释里写着
+  /// 「本地源（Documents/local_js/ljs_*.js）在 SpiderService 里以相对标识
+  ///  ljs_xxx.js 出现」，**但实现根本没处理那种形态** —— 于是本地 JS 源
+  /// 一律被当成远程 URL 去下载，必然失败。现在补上：
+  /// 形如 `ljs_ab12cd34ef56.js` 的标识直接映射到 `<Documents>/local_js/`。
   Future<String?> _resolveLocalJsPath(String raw) async {
     final s = raw.trim();
     if (s.isEmpty) return null;
-    // file:// 或绝对路径（调试 / 手动指定用）
+
+    // ① 本地源相对标识：ljs_<12位>.js
+    if (RegExp(r'^ljs_[A-Za-z0-9]+\.js$').hasMatch(s)) {
+      try {
+        final docs = await getApplicationDocumentsDirectory();
+        final p = '${docs.path}/local_js/$s';
+        if (await File(p).exists()) return p;
+        AppLog.instance.w('[IOSNodeJS] 本地 JS 源文件不存在: $p');
+        return null;
+      } catch (e) {
+        AppLog.instance.w('[IOSNodeJS] 解析本地 JS 源路径失败: $e');
+        return null;
+      }
+    }
+
+    // ② file:// 或绝对路径（调试 / 手动指定用）
     String? candidate;
     if (s.startsWith('file://')) {
       try {

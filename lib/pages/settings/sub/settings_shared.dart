@@ -551,7 +551,10 @@ class _SettingsSubPageState extends State<SettingsSubPage> {
   /// `snapshotSoon()` 内部会先 `flushNow()`（让 plist 立即落盘）再写镜像文件。
   @override
   void dispose() {
-    PrefsMirror.snapshotSoon();
+    // 用 snapshotNow 而不是 snapshotSoon：页面正在销毁，要的是"走之前把改动
+    // 存下来"，不需要再挂一个 400ms 的去抖定时器（那会让 flutter_test 报
+    // 「A Timer is still pending」，生产环境也是无意义的延迟写）。
+    PrefsMirror.snapshotNow();
     super.dispose();
   }
 

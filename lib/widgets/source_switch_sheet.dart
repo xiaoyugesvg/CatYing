@@ -3,11 +3,12 @@ import 'package:flutter/services.dart';
 import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:get/get.dart';
 import 'package:tvbox/common/theme.dart';
-import 'package:tvbox/models/local_python_source.dart';
 import 'package:tvbox/models/source_bean.dart';
 import 'package:tvbox/models/subscription.dart';
 import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/local_js_sources.dart';
 import 'package:tvbox/services/local_python_sources.dart';
+import 'package:tvbox/services/xbpq/xbpq_service.dart';
 import 'package:tvbox/services/source_kind.dart';
 import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/widgets/card_action_sheet.dart';
@@ -42,6 +43,22 @@ class SourceSwitchSheet extends StatefulWidget {
   State<SourceSwitchSheet> createState() => _SourceSwitchSheetState();
 }
 
+/// 源面板的分类。
+///
+/// 2026-10-29 由「本地 PY / 订阅」两档扩成四档：订阅线路 + 三族本地源
+/// （本地爬虫 / 本地JS / XBPQ）。三族本地源**只在导入过**时才出现。
+enum _SrcGroup {
+  subscription('订阅'),
+  localPy('本地爬虫'),
+  localJs('本地JS'),
+  xbpq('XBPQ');
+
+  const _SrcGroup(this.label);
+
+  /// 胶囊上的名字（订阅那个会换成订阅名，见 build 里的 subName）
+  final String label;
+}
+
 class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   final TextEditingController _searchController = TextEditingController();
 
@@ -55,10 +72,14 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   /// 是否正在看「失效线路」分类（顶部「失效 N」切换）
   bool _showInvalid = false;
 
-  /// 0 = 本地 Python / 1 = 订阅线路
-  int _tab = 1;
+  /// 当前分类。
+  ///
+  /// 2026-10-29 之前只有「本地 PY / 订阅」两档（`int _tab`）。用户要求
+  /// 「本地JS」「XBPQ」各自成一个分类，且**只在导入过**的时候才出现 ——
+  /// 于是改成枚举 + 动态分类列表（见 [_groups]）。
+  _SrcGroup _group = _SrcGroup.subscription;
 
-  /// 首次构建时按当前主页源决定默认 tab（本地源 → 本地 tab）
+  /// 首次构建时按当前主页源决定默认分类
   bool _tabInited = false;
 
   /// 长按一条线路 → 移入「失效」（用户 2026-10-15：
@@ -134,44 +155,115 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
     );
   }
 
-  /// 本地源 bean → 本地脚本（key 带 `localpy_` 前缀）
-  LocalPythonSource? _localOf(SourceBean bean) =>
-      LocalPythonSources.instance.sources
-          .firstWhereOrNull((s) => s.sourceKey == bean.key);
-
-  /// 长按本地源 → **卡片式**菜单。
+  /// 本地源 bean → 对应的本地条目（PY / JS / XBPQ 三族）。
   ///
-  /// 用户 2026-10-20：「本地 py 源这个上面也加个长按弹窗分享、编辑、删除等」。
+  /// 2026-10-29：这里原来只认 PY，JS 与 XBPQ 的源在源面板里长按会**毫无反应**
+  /// （`_localOf` 返回 null 就 return 了）。现在三族都认。
   Future<void> _localSourceMenu(SourceBean bean) async {
-    final py = _localOf(bean);
-    if (py == null) return;
+    if (bean.isLocalPySource) {
+      final s = LocalPythonSources.instance.sources
+          .firstWhereOrNull((e) => e.sourceKey == bean.key);
+      if (s == null) return;
+      return _showLocalActions(
+        bean: bean,
+        subtitle: '本地爬虫 · ${s.key}.py',
+        onRename: (name) async {
+          final r = await LocalPythonSources.instance.rename(s.key, name);
+          return (r.ok, r.message);
+        },
+        onShare: () => LocalPythonSources.instance.readCode(s.key),
+        onDelete: () async {
+          await LocalPythonSources.instance.remove(s.key);
+          return true;
+        },
+      );
+    }
+    if (bean.isLocalJsSource) {
+      final s = LocalJsSources.instance.sources
+          .firstWhereOrNull((e) => e.sourceKey == bean.key);
+      if (s == null) return;
+      return _showLocalActions(
+        bean: bean,
+        subtitle: '本地JS · ${s.key}.js',
+        onRename: (name) async {
+          final r = await LocalJsSources.instance.rename(s.key, name);
+          return (r.ok, r.message);
+        },
+        onShare: () => LocalJsSources.instance.readCode(s.key),
+        onDelete: () async {
+          await LocalJsSources.instance.remove(s.key);
+          return true;
+        },
+      );
+    }
+    if (bean.isXbpqSource) {
+      return _showLocalActions(
+        bean: bean,
+        subtitle: 'XBPQ · ${bean.key}',
+        onRename: (name) async {
+          final r = await XbpqService.instance.rename(bean.key, name);
+          return (r.ok, r.message);
+        },
+        // XBPQ 的"脚本"就是规则文本，分享出去即一份可直接导入的规则
+        onShare: () async => XbpqService.instance.entryOf(bean.key)?.ruleText,
+        onDelete: () async {
+          await XbpqService.instance.remove(bean.key);
+          return true;
+        },
+      );
+    }
+  }
+
+  /// 三族本地源共用的长按菜单（编辑 / 分享 / 删除）。
+  ///
+  /// 抽出来是因为 PY / JS / XBPQ 的菜单文案与交互必须**完全一致**
+  /// （用户 2026-10-29：「长按、布局等等全部和本地爬虫一样」），
+  /// 只有背后的存储实现不同。
+  Future<void> _showLocalActions({
+    required SourceBean bean,
+    required String subtitle,
+    required Future<(bool, String?)> Function(String name) onRename,
+    required Future<String?> Function() onShare,
+    required Future<bool> Function() onDelete,
+  }) async {
     await showCardActions(
       context,
       title: bean.name,
-      subtitle: '本地 Python · ${py.key}.py',
+      subtitle: subtitle,
       actions: [
         CardAction(
           icon: Icons.drive_file_rename_outline,
           label: '编辑',
-          onTap: () => _renameLocal(py),
+          onTap: () => _renameLocal(bean, onRename),
         ),
         CardAction(
           icon: Icons.ios_share_rounded,
           label: '分享',
-          onTap: () => _shareLocal(py),
+          onTap: () async {
+            final code = await onShare();
+            if (code == null || code.isEmpty) {
+              AppToast.error('找不到脚本内容');
+              return;
+            }
+            await Clipboard.setData(ClipboardData(text: code));
+            AppToast.message('内容已复制到剪贴板');
+          },
         ),
         CardAction(
           icon: Icons.delete_outline_rounded,
           label: '删除',
           danger: true,
-          onTap: () => _deleteLocal(py),
+          onTap: () => _deleteLocal(bean, onDelete),
         ),
       ],
     );
   }
 
-  Future<void> _renameLocal(LocalPythonSource local) async {
-    final ctrl = TextEditingController(text: local.name);
+  Future<void> _renameLocal(
+    SourceBean bean,
+    Future<(bool, String?)> Function(String name) doRename,
+  ) async {
+    final ctrl = TextEditingController(text: bean.name);
     final name = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -202,26 +294,19 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
       ),
     );
     if (name == null || name.isEmpty) return;
-    final r = await LocalPythonSources.instance.rename(local.key, name);
-    if (!r.ok) {
-      AppToast.error(r.message ?? '改名失败');
+    final (ok, message) = await doRename(name);
+    if (!ok) {
+      AppToast.error(message ?? '改名失败');
       return;
     }
     await ApiConfig.instance.reloadLocalVideoSources();
     if (mounted) setState(() {});
   }
 
-  Future<void> _shareLocal(LocalPythonSource local) async {
-    final code = await LocalPythonSources.instance.readCode(local.key);
-    if (code == null || code.isEmpty) {
-      AppToast.error('找不到脚本文件');
-      return;
-    }
-    await Clipboard.setData(ClipboardData(text: code));
-    AppToast.message('脚本内容已复制到剪贴板');
-  }
-
-  Future<void> _deleteLocal(LocalPythonSource local) async {
+  Future<void> _deleteLocal(
+    SourceBean bean,
+    Future<bool> Function() doDelete,
+  ) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -234,7 +319,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
           ),
         ),
         content: Text(
-          '「${local.name}」的脚本文件会被删除并从引擎卸载，不可恢复。',
+          '「${bean.name}」会被删除，不可恢复。',
           style: TextStyle(
             color: AppTheme.textSecondary,
             fontSize: AppTheme.fontSubhead,
@@ -254,7 +339,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
       ),
     );
     if (ok != true) return;
-    await LocalPythonSources.instance.remove(local.key);
+    await doDelete();
     // 删的是当前主页源时，reload 会自动切回订阅线路或下一条本地源
     await ApiConfig.instance.reloadLocalVideoSources();
     if (!mounted) return;
@@ -265,22 +350,36 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   /// 按住把手拖到另一条线路上 → 重排并落盘
   Future<void> _moveSource(String fromKey, String toKey) async {
     if (fromKey == toKey) return;
-    final isLocal =
-        fromKey.startsWith('localpy_') && toKey.startsWith('localpy_');
-    if (isLocal) {
-      // 本地源顺序存在 service 里（订阅线路表不管本地源）
-      final visible = _filteredSourcesFrom(
-        List<SourceBean>.of(ApiConfig.instance.localVideoSources),
-      ).map((s) => s.key).toList();
+
+    // ── 本地源族内重排（PY / JS 各自一份顺序；XBPQ 没有顺序概念）──
+    final gFrom = _groupOfKey(fromKey);
+    final gTo = _groupOfKey(toKey);
+    if (gFrom == gTo && gFrom != _SrcGroup.subscription) {
+      // 只在本分类内排，且只排当前可见的这批
+      final visible = _listOf(gFrom).map((s) => s.key).toList();
       final from = visible.indexOf(fromKey);
       final to = visible.indexOf(toKey);
       if (from < 0 || to < 0) return;
       final moved = visible.removeAt(from);
       visible.insert(to.clamp(0, visible.length), moved);
-      await LocalPythonSources.instance.reorderWithin(visible);
-      await ApiConfig.instance.reloadLocalVideoSources();
+      switch (gFrom) {
+        case _SrcGroup.localPy:
+          await LocalPythonSources.instance.reorderWithin(visible);
+          await ApiConfig.instance.reloadLocalVideoSources();
+          break;
+        case _SrcGroup.localJs:
+          await LocalJsSources.instance.reorderWithin(visible);
+          await ApiConfig.instance.reloadLocalVideoSources();
+          break;
+        case _SrcGroup.xbpq:
+        case _SrcGroup.subscription:
+          // XBPQ 规则按导入顺序，不提供拖动排序；订阅走下面的分支
+          break;
+      }
       return;
     }
+    if (gFrom != _SrcGroup.subscription) return; // 跨分类拖动无意义
+
     // 订阅线路：只重排当前可见的这批（搜索过滤时不影响隐藏的源）
     // 直接对 RxList 本身取快照（它是 List 的子类），不碰受保护的 `.value`。
     final visible = _filteredSourcesFrom(
@@ -389,20 +488,10 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   void _locateSelected() {
     final key = _selectedKey;
     if (key == null) return;
-    final py = _filteredSourcesFrom(_localPySources);
-    final subs = _filteredSourcesFrom(
-      // ignore: invalid_use_of_protected_member
-      ApiConfig.instance.sourceBeanList.value,
-    );
-    // 选中源在哪个 tab：本地 PY → 0，其余（订阅线路）→ 1
-    int targetTab = 1;
-    List<SourceBean> list = subs;
-    if (py.any((s) => s.key == key)) {
-      targetTab = 0;
-      list = py;
-    }
-    if (_tab != targetTab) {
-      setState(() => _tab = targetTab);
+    final target = _groupOfKey(key);
+    final list = _listOf(target);
+    if (_group != target) {
+      setState(() => _group = target);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _scrollToKey(list, key);
       });
@@ -452,7 +541,72 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   List<SourceBean> get _localPySources {
     // ignore: invalid_use_of_protected_member
     final all = ApiConfig.instance.localVideoSources.value;
-    return all.where((s) => s.key.startsWith('localpy_')).toList();
+    return all.where((s) => s.isLocalPySource).toList();
+  }
+
+  /// 本地 **JS** 源（key 前缀 `localjs_`）
+  List<SourceBean> get _localJsSources {
+    // ignore: invalid_use_of_protected_member
+    final all = ApiConfig.instance.localVideoSources.value;
+    return all.where((s) => s.isLocalJsSource).toList();
+  }
+
+  /// **XBPQ** 规则源（key 前缀 `localxbpq_`）
+  List<SourceBean> get _xbpqSources {
+    // ignore: invalid_use_of_protected_member
+    final all = ApiConfig.instance.localVideoSources.value;
+    return all.where((s) => s.isXbpqSource).toList();
+  }
+
+  /// 某个分类下的源（已按搜索词过滤）
+  List<SourceBean> _listOf(_SrcGroup g) {
+    switch (g) {
+      case _SrcGroup.subscription:
+        // ignore: invalid_use_of_protected_member
+        return _filteredSourcesFrom(ApiConfig.instance.sourceBeanList.value);
+      case _SrcGroup.localPy:
+        return _filteredSourcesFrom(_localPySources);
+      case _SrcGroup.localJs:
+        return _filteredSourcesFrom(_localJsSources);
+      case _SrcGroup.xbpq:
+        return _filteredSourcesFrom(_xbpqSources);
+    }
+  }
+
+  /// 该分类的**总条数**（不受搜索影响 —— 决定分类胶囊是否出现）
+  int _countOf(_SrcGroup g) {
+    switch (g) {
+      case _SrcGroup.subscription:
+        // ignore: invalid_use_of_protected_member
+        return ApiConfig.instance.sourceBeanList.value.length;
+      case _SrcGroup.localPy:
+        return _localPySources.length;
+      case _SrcGroup.localJs:
+        return _localJsSources.length;
+      case _SrcGroup.xbpq:
+        return _xbpqSources.length;
+    }
+  }
+
+  /// 要显示的分类胶囊。
+  ///
+  /// 订阅永远在；三族本地源**只有导入过才出现**（用户 2026-10-29：
+  /// 「只有导入这两种脚本才会在源切换里面有这两个的分类」）。
+  List<_SrcGroup> get _groups {
+    return [
+      _SrcGroup.subscription,
+      if (_countOf(_SrcGroup.localPy) > 0) _SrcGroup.localPy,
+      if (_countOf(_SrcGroup.localJs) > 0) _SrcGroup.localJs,
+      if (_countOf(_SrcGroup.xbpq) > 0) _SrcGroup.xbpq,
+    ];
+  }
+
+  /// 选中源属于哪个分类
+  _SrcGroup _groupOfKey(String key) {
+    if (key.startsWith('localpy_')) return _SrcGroup.localPy;
+    if (key.startsWith(SourceBean.localJsKeyPrefix)) return _SrcGroup.localJs;
+    if (key.startsWith(SourceBean.xbpqKeyPrefix)) return _SrcGroup.xbpq;
+    return _SrcGroup.subscription;
   }
 
   /// tab 胶囊（与漫源仓库 / RSS 分类同一套样式）
@@ -605,11 +759,17 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   }
 
   Future<void> _selectSource(SourceBean source) async {
-    // 选本地源 ⇒ 顺手打开「本地爬虫」开关（与本地源管理页同一语义），
+    // 选本地源 ⇒ 顺手打开**对应那一族**的开关（与本地源管理页同一语义），
     // 否则主页源会被订阅线路覆盖。
-    final isPy = source.key.startsWith('localpy_');
-    if (isPy && !ApiConfig.instance.localSourcesEnabled.value) {
+    // 2026-10-29：三族各有独立开关，不能一律去开「本地爬虫」。
+    if (source.isLocalPySource && !ApiConfig.instance.localSourcesEnabled.value) {
       await ApiConfig.instance.setLocalSourcesEnabled(true);
+    } else if (source.isLocalJsSource &&
+        !ApiConfig.instance.localJsEnabled.value) {
+      await ApiConfig.instance.setLocalJsEnabled(true);
+    } else if (source.isXbpqSource &&
+        !ApiConfig.instance.localXbpqEnabled.value) {
+      await ApiConfig.instance.setLocalXbpqEnabled(true);
     }
     await ApiConfig.instance.setHomeSource(source);
     if (!mounted) return;
@@ -619,14 +779,11 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   @override
   Widget build(BuildContext context) {
     final h = MediaQuery.of(context).size.height;
-    // 首次打开：当前主页源是本地源 → 直接落在对应 tab
-    // （localpy_ → 0，订阅 → 1）
+    // 首次打开：当前主页源是本地源 → 直接落在对应分类
     if (!_tabInited) {
       _tabInited = true;
       final key = _selectedKey;
-      if (key != null && key.startsWith('localpy_')) {
-        _tab = 0;
-      }
+      if (key != null) _group = _groupOfKey(key);
     }
     // 面板高度 = 1/3 屏 × 1.2（用户要求"变成现在的 1.2 倍"）：
     // 1/3 屏时标题+搜索框占掉大半，源网格只剩一点点高（看起来"底部遮住一部分"），
@@ -760,35 +917,31 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                   onChanged: (v) => setState(() => _keyword = v.trim()),
                 ),
               ),
-              // tab：PY本地 / 订阅 —— 与漫源仓库同一套胶囊样式。
-              // 本地源即使「本地爬虫」开关关着也显示：用户点它即会打开开关。
+              // 分类胶囊：订阅线路 + 三族本地源 —— 与漫源仓库同一套胶囊样式。
+              // 本地源即使对应开关关着也显示（点它即会打开开关）；
+              // 但**没导入过的那一族整条不出现**（用户 2026-10-29）。
               Obx(() {
-                // ignore: invalid_use_of_protected_member
-                final localCount = ApiConfig.instance.localVideoSources.length;
-                if (localCount == 0) return const SizedBox.shrink();
-                final pyCount = _localPySources.length;
+                final groups = _groups;
                 final subName =
                     SubscriptionService.instance.active?.name ?? '订阅线路';
                 return Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _tabPill(
-                          'PY本地 $pyCount',
-                          _tab == 0,
-                          () => setState(() => _tab = 0),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: _tabPill(
-                          subName,
-                          _tab == 1,
-                          () => setState(() => _tab = 1),
-                        ),
-                      ),
-                    ],
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        for (var i = 0; i < groups.length; i++) ...[
+                          if (i > 0) const SizedBox(width: 8),
+                          _tabPill(
+                            groups[i] == _SrcGroup.subscription
+                                ? subName
+                                : '${groups[i].label} ${_countOf(groups[i])}',
+                            _group == groups[i],
+                            () => setState(() => _group = groups[i]),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 );
               }),
@@ -797,23 +950,18 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                 child: Obx(() {
                   // 「失效」分类：列出已移出的线路（可逐条 / 全部移回）
                   if (_showInvalid) return _buildInvalidList();
-                  // ignore: invalid_use_of_protected_member
-                  final all = ApiConfig.instance.sourceBeanList.value;
                   final selectedKey = _selectedKey;
-                  final subs = _filteredSourcesFrom(all);
-                  // 本地 Python 源单独占一个 tab，不跟订阅线路混排。
-                  // 管理页里的脚本即使「本地爬虫」开关关着也要能在这里看到并选择
-                  //（选中时会自动打开开关，见 _selectSource）。
-                  final py = _filteredSourcesFrom(_localPySources);
-                  // 本地源被删光时 tab 条整条隐藏，此时列表必须回落成订阅线路
-                  final tab = _tab == 0 && py.isEmpty ? 1 : _tab;
-                  final isLocal = tab == 0;
-                  final list = tab == 0 ? py : subs;
+                  final groups = _groups;
+                  // 当前分类被删空（或开关变化导致该族消失）→ 回落到订阅线路
+                  final group =
+                      groups.contains(_group) ? _group : _SrcGroup.subscription;
+                  final isLocal = group != _SrcGroup.subscription;
+                  final list = _listOf(group);
                   if (list.isEmpty) {
                     return Center(
                       child: Text(
                         _keyword.isEmpty
-                            ? (isLocal ? '这里还没有本地源' : '这里还没有源')
+                            ? (isLocal ? '这里还没有${group.label}源' : '这里还没有源')
                             : '未找到匹配的源',
                         style: TextStyle(color: AppTheme.textTertiary),
                       ),

@@ -349,6 +349,13 @@ class PrefsMirror {
   static void stopAutoSnapshot() {
     _timer?.cancel();
     _timer = null;
+    // 🔴 2026-10-29：这里原来只停周期定时器，**没停 400ms 去抖那个**
+    // (`_soon`)。设置子页在 `dispose()` 里会调 `snapshotSoon()`，测试结束
+    // 后这个 400ms Timer 还挂着 ⇒ flutter_test 报
+    // 「A Timer is still pending」把用例判失败（settings_layout_regression_test）。
+    // 生产环境不受影响（进程退出即回收），但测试必须干净。
+    _soon?.cancel();
+    _soon = null;
   }
 
   static Timer? _soon;
@@ -375,5 +382,15 @@ class PrefsMirror {
     // ③ 再去抖补一次：合并设置页里连点开关 / 连续拖动产生的密集调用。
     _soon?.cancel();
     _soon = Timer(delay, () => unawaited(snapshot()));
+  }
+
+  /// 立刻落盘 + 写镜像，**不留定时器**。
+  ///
+  /// 给 `dispose()` 这类"页面正在消失"的场景用：那边要的是"走之前把改动
+  /// 存下来"，而不是"400ms 后再存一次"。留个定时器在树已销毁之后还会跑，
+  /// 既没意义，也会让 flutter_test 报「A Timer is still pending」。
+  static void snapshotNow() {
+    unawaited(flushNow());
+    unawaited(snapshot());
   }
 }

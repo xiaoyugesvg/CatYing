@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/local_js_sources.dart';
 import 'package:tvbox/services/local_python_sources.dart';
 import 'package:tvbox/services/moontv_converter.dart';
 import 'package:tvbox/services/prefs_mirror.dart';
@@ -83,22 +84,41 @@ class ApiConfig extends GetxController {
   /// 保存开关的 prefs 键
   static const String _kLocalSourcesEnabled = 'local_sources_enabled_v1';
 
-  /// key 是否属于「本地源」两族之一（Python / XBPQ）。
+  /// 「本地 JS 源」总开关（用户 2026-10-29：三族本地源各自一个开关）。
+  ///
+  /// 默认 false，语义与 [localSourcesEnabled] 完全一致，只是管的是
+  /// `localjs_` 那一族。三族分开是必要的 —— 用户可能只想跑 PY 源，
+  /// 不想让一堆 JS 源把源面板和搜索撑爆。
+  final localJsEnabled = false.obs;
+  static const String _kLocalJsEnabled = 'local_js_enabled_v1';
+
+  /// 「XBPQ 规则源」总开关。
+  ///
+  /// 2026-10-29 之前它跟着 [localSourcesEnabled] 走（没有独立开关），
+  /// 用户要求「XBPQ 的开关要和本地爬虫一样」→ 拆出来独立控制。
+  final localXbpqEnabled = false.obs;
+  static const String _kLocalXbpqEnabled = 'local_xbpq_enabled_v1';
+
+  /// key 是否属于「本地源」三族之一（Python / JS / XBPQ）。
   ///
   /// 收敛成一个判断，是为了以后再加一族引擎时不会漏掉主页源回退那几处。
   static bool _isLocalSourceKey(String key) =>
       key.startsWith('localpy_') ||
+      key.startsWith(SourceBean.localJsKeyPrefix) ||
       key.startsWith(SourceBean.xbpqKeyPrefix);
 
   /// 本地源当前是否**参与**（源面板 / 搜索 / 主页源恢复）。
   ///
-  /// Python / XBPQ 源都看总开关。订阅线路**不受**本地开关影响。
+  /// 三族各看各的开关。订阅线路**不受**本地开关影响。
   bool isLocalSourceEnabled(SourceBean s) {
     if (s.key.startsWith('localpy_')) {
       return localSourcesEnabled.value;
     }
+    if (s.key.startsWith(SourceBean.localJsKeyPrefix)) {
+      return localJsEnabled.value;
+    }
     if (s.key.startsWith(SourceBean.xbpqKeyPrefix)) {
-      return localSourcesEnabled.value;
+      return localXbpqEnabled.value;
     }
     return true;
   }
@@ -111,10 +131,14 @@ class ApiConfig extends GetxController {
   int get localPythonSourceCount =>
       localVideoSources.where((s) => s.key.startsWith('localpy_')).length;
 
+  /// 本地 **JS** 源数量（`localjs_`）。
+  int get localJsSourceCount => localVideoSources
+      .where((s) => s.key.startsWith(SourceBean.localJsKeyPrefix))
+      .length;
+
   /// 本地 **XBPQ** 规则源数量（`localxbpq_`）。
   ///
-  /// 与 PY / JS 一样各数各的：XBPQ 没有独立子开关，跟着「本地爬虫」总开关走，
-  /// 但数量必须分开显示，否则用户看不出自己导了几条规则。
+  /// 与 PY / JS 一样各数各的，否则用户看不出自己导了几条规则。
   int get localXbpqSourceCount => localVideoSources
       .where((s) => s.key.startsWith(SourceBean.xbpqKeyPrefix))
       .length;
@@ -335,13 +359,20 @@ class ApiConfig extends GetxController {
     // ── ① 开关口径：每次都同步一次（默认关），保证冷启动 / 切订阅时一致 ──
     if (prefs != null) {
       localSourcesEnabled.value = prefs.getBool(_kLocalSourcesEnabled) ?? false;
+      localJsEnabled.value = prefs.getBool(_kLocalJsEnabled) ?? false;
+      localXbpqEnabled.value = prefs.getBool(_kLocalXbpqEnabled) ?? false;
     }
 
-    // ── ② 两套本地源各自独立加载：Python 那套抛错不能把 JS 那套一起带走 ──
+    // ── ② 三套本地源各自独立加载：任何一套抛错不能把其它两套一起带走 ──
     try {
       await LocalPythonSources.instance.load(force: true);
     } catch (e) {
       AppLog.instance.w('[ApiConfig] 读取本地 Python 源失败: $e');
+    }
+    try {
+      await LocalJsSources.instance.load(force: true);
+    } catch (e) {
+      AppLog.instance.w('[ApiConfig] 读取本地 JS 源失败: $e');
     }
     try {
       await XbpqService.instance.ensureLoaded(force: true);
@@ -356,6 +387,13 @@ class ApiConfig extends GetxController {
         list.add(e.toSourceBean());
       } catch (_) {
         /* 单条坏数据不影响其它源 */
+      }
+    }
+    for (final e in LocalJsSources.instance.sources) {
+      try {
+        list.add(e.toSourceBean());
+      } catch (_) {
+        /* 同上 */
       }
     }
     for (final bean in XbpqService.instance.sourceBeans) {
@@ -423,6 +461,29 @@ class ApiConfig extends GetxController {
     } catch (e) {
       AppLog.instance.w('[ApiConfig] 本地源注册失败: $e');
     }
+  }
+
+  /// 「本地 JS 源」总开关（2026-10-29）。
+  ///
+  /// JS 源是按需载入的，没有"注册"这一步 —— 开开关只需刷清单，
+  /// 用户切到某个 JS 源时 `NodeJSManager.loadSource` 会自己把文件载进 Node。
+  Future<void> setLocalJsEnabled(bool value) async {
+    if (localJsEnabled.value == value) return;
+    localJsEnabled.value = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kLocalJsEnabled, value);
+    PrefsMirror.snapshotSoon();
+    await reloadLocalVideoSources();
+  }
+
+  /// 「XBPQ 规则源」总开关（2026-10-29）。
+  Future<void> setLocalXbpqEnabled(bool value) async {
+    if (localXbpqEnabled.value == value) return;
+    localXbpqEnabled.value = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kLocalXbpqEnabled, value);
+    PrefsMirror.snapshotSoon();
+    await reloadLocalVideoSources();
   }
 
   /// 主页源选择：按**订阅（配置地址）分别记住**。

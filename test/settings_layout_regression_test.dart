@@ -157,6 +157,13 @@ void main() {
     expect(find.text('本地爬虫'), findsOneWidget);
     // 这两行之后的行也必须还在（原来被 ErrorWidget 吃掉了）
     expect(find.text('引擎管理'), findsOneWidget);
+    // 2026-10-29：订阅管理页新增了「本地JS」一行，列表变长，
+    // 「重置配置」已滚出首屏 —— ListView 是懒构建的，不滚过去就根本不存在。
+    await tester.scrollUntilVisible(
+      find.text('重置配置'),
+      240,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('重置配置'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());

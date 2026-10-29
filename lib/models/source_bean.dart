@@ -88,16 +88,35 @@ class SourceBean {
   /// 引擎。放在模型里是为了让「判定」不依赖 service（避免循环 import）。
   static const String xbpqKeyPrefix = 'localxbpq_';
 
+  /// 本地 **JS** 源的 key 前缀（用户导入的 .js 脚本，交给内置 Node 跑）。
+  ///
+  /// 三族本地源的前缀必须互不重叠，否则源面板分组、开关、计数会互相串：
+  ///   · `localpy_`     → CPython
+  ///   · `localjs_`     → Node
+  ///   · `localxbpq_`   → 内置 Dart 规则引擎
+  static const String localJsKeyPrefix = 'localjs_';
+
   /// 是否为 XBPQ 规则源（用户导入的爬虫规则 JSON）。
   bool get isXbpqSource => key.startsWith(xbpqKeyPrefix);
+
+  /// 是否为本地 JS 源（用户导入的 .js 脚本）。
+  bool get isLocalJsSource => key.startsWith(localJsKeyPrefix);
+
+  /// 是否为本地 Python 源。
+  bool get isLocalPySource => key.startsWith('localpy_');
+
+  /// 是否属于「本地源」三族之一。
+  bool get isLocalFamilySource =>
+      isLocalPySource || isLocalJsSource || isXbpqSource;
 
   /// 源类型分类（供源切换 UI 分组展示）。
   ///
   /// 只依据本模型已有字段（[type] / [api] / [jar]）判定，判定不出的一律归
   /// [SourceKind.unknown]；项目里没有依据的概念（如"猫源""TVBox"）不会臆造。
   SourceKind get sourceKind {
-    // key 前缀优先：XBPQ 源的 type 只是占位值，不能按 type 归类。
+    // key 前缀优先：本地源 / XBPQ 源的 type 只是占位值，不能按 type 归类。
     if (isXbpqSource) return SourceKind.xbpq;
+    if (isLocalJsSource) return SourceKind.js;
     // type==4 → T4 远程接口（字段注释「4 Remote」；source_service 对 type==4
     // 走 filter/extend 分支请求）。
     if (type == 4) return SourceKind.t4;

@@ -14,6 +14,7 @@ import 'package:tvbox/widgets/source_kind_badge.dart';
 import 'package:tvbox/pages/settings/controller.dart';
 import 'package:tvbox/pages/settings/sub/cf_sites_page.dart';
 import 'package:tvbox/pages/settings/sub/engine_settings_page.dart';
+import 'package:tvbox/pages/settings/sub/local_js_sources_page.dart';
 import 'package:tvbox/pages/settings/sub/local_python_sources_page.dart';
 import 'package:tvbox/pages/settings/sub/local_xbpq_sources_page.dart';
 import 'package:tvbox/pages/settings/sub/settings_shared.dart';
@@ -349,17 +350,46 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
             ),
           ),
         ),
+        // 本地 JS 源（用户 2026-10-29）：与本地爬虫**同构**的第三族 ——
+        // 订阅 JS / 猫源 / TVBox 的 .js 脚本，交给内置 Node 执行。
+        // 独立开关、独立计数、独立管理页，互不影响。
+        Obx(
+          () => _card(
+            SettingsRow(
+              icon: Icons.code_rounded,
+              title: '本地JS',
+              subtitle: ApiConfig.instance.localJsEnabled.value
+                  ? '已启用：JS 源会出现在源面板 / 搜索里'
+                  : '已关闭：JS 源不参与源面板 / 搜索',
+              value: '${ApiConfig.instance.localJsSourceCount} 个',
+              trailingSwitch: true,
+              switchValue: ApiConfig.instance.localJsEnabled.value,
+              onSwitchChanged: (v) async {
+                await ApiConfig.instance.setLocalJsEnabled(v);
+                if (mounted) setState(() {});
+              },
+              onTap: () async {
+                await Get.to(() => const LocalJsSourcesPage());
+                if (mounted) setState(() {});
+              },
+            ),
+          ),
+        ),
         Obx(
           () => _card(
             SettingsRow(
               icon: Icons.rule_rounded,
               title: 'XBPQ',
-              // 没有独立子开关：跟着上面的「本地爬虫」总开关走，
-              // 所以这里只做状态说明，不再放第二个 Switch。
-              subtitle: ApiConfig.instance.localSourcesEnabled.value
+              subtitle: ApiConfig.instance.localXbpqEnabled.value
                   ? '已启用：规则源会出现在源面板 / 搜索里'
-                  : '已关闭：随「本地爬虫」开关一起生效',
+                  : '已关闭：规则源不参与源面板 / 搜索',
               value: '${ApiConfig.instance.localXbpqSourceCount} 个',
+              trailingSwitch: true,
+              switchValue: ApiConfig.instance.localXbpqEnabled.value,
+              onSwitchChanged: (v) async {
+                await ApiConfig.instance.setLocalXbpqEnabled(v);
+                if (mounted) setState(() {});
+              },
               onTap: () async {
                 await Get.to(() => const LocalXbpqSourcesPage());
                 if (mounted) setState(() {});
