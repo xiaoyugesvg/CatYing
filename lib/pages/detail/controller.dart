@@ -510,6 +510,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
 
   void selectFlag(String flag) {
     if (selectedFlag.value == flag) return;
+    _resetAutoSwitch(); // 用户主动切线路 → 自动计数清零、看门狗停
 
     // 先记住当前进度：切线路/换源的语义是「换条线路接着看这一集」，
     // 不是从头开始。与 selectQuality 用同一套进度快照（currentPlaybackSeconds）。
@@ -562,6 +563,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     // 同一集且已在播才忽略；换集永远要触发
     final sameEp = selectedEpisodeIndex.value == index && isPlaying.value;
     if (sameEp) return;
+    _resetAutoSwitch(); // 用户主动换集 → 自动计数清零、看门狗停
 
     isPlaying.value = false;
     playUrl.value = null;
@@ -590,6 +592,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   void applyPlaybackState(VodPlaybackState state) {
     final info = vodInfo.value;
     if (info == null || info.playFlags.isEmpty) return;
+    _resetAutoSwitch(); // 恢复播放（换集/换线路）→ 自动计数清零、看门狗停
 
     final fallbackFlag =
         info.playFlag.isEmpty ? info.playFlags[0] : info.playFlag;
@@ -639,6 +642,10 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   void updatePlaybackProgress(double seconds) {
     if (!seconds.isFinite) return;
     _realtimeProgressSeconds = seconds > 0 ? seconds : 0;
+    // P2-1：播放中首次拿到进度 → 启动卡顿看门狗（停滞 20s 自动恢复）
+    if (isPlaying.value && (playUrl.value ?? '').isNotEmpty) {
+      _ensureStallWatchdog();
+    }
   }
 
   double currentPlaybackSeconds() {
@@ -670,8 +677,12 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       false,
     );
     if ((playUrl.value ?? '').isNotEmpty && _advanceToNextCandidate()) return;
+    // P1-2：同 flag 内候选顺延后仍未恢复 → 自动换下一条 flag（最多 6 次）
+    if (_advanceToNextFlag()) return;
+    // 走到这里 = 所有线路都试过了，把原因写给用户（isPlaying 置否、看门狗停）
     errorMessage.value = message;
     isPlaying.value = false;
+    _stopStallWatchdog(); // P2-1
   }
 
   /// 本集内已被判定失败的地址（按 URL 去重，防止在多个同址候选间打转）
@@ -695,6 +706,160 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     return true;
   }
 
+  /// ─────────────────────────── P1-2 / P1-3 / P2-1 ───────────────────────────
+
+  /// 自动换线路（flag/源线）重试上限：同一集最多自动切 6 条线路再放弃。
+  int _autoFlagSwitches = 0;
+  static const int _maxAutoFlagSwitches = 6;
+  final Set<String> _triedFlags = <String>{};
+
+  /// P1-2：同 flag 内候选已全部失败 → 自动切到下一条**未试过**的 flag，
+  /// 最多切 [_maxAutoFlagSwitches] 次。返回 true 表示已切走（恢复播放）。
+  bool _advanceToNextFlag() {
+    final info = vodInfo.value;
+    if (info == null) return false;
+    if (_autoFlagSwitches >= _maxAutoFlagSwitches) return false;
+    final flags = info.playFlags;
+    if (flags.length <= 1) return false;
+    final curIdx = flags.indexOf(selectedFlag.value);
+    for (var step = 1; step < flags.length; step++) {
+      final nextFlag = flags[(curIdx + step) % flags.length];
+      if (nextFlag == selectedFlag.value) continue;
+      if (_triedFlags.contains(nextFlag)) continue;
+      final episodes = info.playUrlMap[nextFlag] ?? [];
+      if (episodes.isEmpty) continue;
+      _triedFlags.add(nextFlag);
+      _autoFlagSwitches++;
+      AppLog.instance.log(
+          '[Play] 自动换线路(第$_autoFlagSwitches/$_maxAutoFlagSwitches) → $nextFlag');
+      selectedFlag.value = nextFlag;
+      info.playFlag = nextFlag;
+      _rememberFlag(nextFlag);
+      _failedPlayUrls.clear(); // 新线路重新给机会
+      final targetIndex =
+          selectedEpisodeIndex.value.clamp(0, episodes.length - 1);
+      selectedEpisodeIndex.value = targetIndex;
+      info.playIndex = targetIndex;
+      final episodeURL = episodes[targetIndex].url;
+      updateQualityOptions(episodeURL, resetSelection: true);
+      if (isSpiderSource) {
+        _resolveSpiderPlayUrl(flag: nextFlag, id: episodeURL);
+      } else {
+        playHeaders.clear();
+        unawaited(_startPlayback(episodeURL));
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /// P1-3：把播放错误文案归到 5 类，返回可操作建议（未命中返回 null）。
+  ///
+  /// 命中优先级：解析 → 超时 → 403/404/防盗链 → 地址无效 → 解码/播放器。
+  String? classifyPlaybackError(String msg) {
+    final m = msg.toLowerCase();
+    if (m.contains('解析') || m.contains('parse')) {
+      return '解析线路可能失效，可换解析接口，或直接用网页播放';
+    }
+    if (m.contains('超时') ||
+        m.contains('timeout') ||
+        m.contains('timed out')) {
+      return '网络超时，可换线路或检查网络后重试';
+    }
+    if (m.contains('403') ||
+        m.contains('404') ||
+        m.contains('防盗链') ||
+        m.contains('forbidden') ||
+        m.contains('not found') ||
+        m.contains('拦截') ||
+        m.contains('禁止')) {
+      return '源地址失效或被拦截，请换一条线路';
+    }
+    if (m.contains('不是完整链接') ||
+        m.contains('地址') ||
+        m.contains('url') ||
+        m.contains('无效') ||
+        m.contains('http')) {
+      return '该源返回的地址无效，请切换其他线路';
+    }
+    if (m.contains('解码') ||
+        m.contains('播放') ||
+        m.contains('player') ||
+        m.contains('codec') ||
+        m.contains('黑屏')) {
+      return '播放器无法解码，可换线路或用网页播放';
+    }
+    return null;
+  }
+
+  /// 复位自动换线路计数 / 已试集合 / 卡顿看门狗。
+  /// 用户**主动**切线路、换集、重试、恢复播放时调用 —— 用户已接管，
+  /// 自动计数清零、看门狗停掉（避免误判）。
+  void _resetAutoSwitch() {
+    _autoFlagSwitches = 0;
+    _triedFlags.clear();
+    _stopStallWatchdog();
+  }
+
+  /// P2-1：卡顿看门狗。播放中若 20s 内进度无任何推进（疑似卡顿/死链），
+  /// 自动触发一次换线路恢复（走 [setPlaybackError] 的顺延/换 flag 逻辑），
+  /// 避免用户干等一块"播着但不动"的黑屏。
+  static const Duration _stallWindow = Duration(seconds: 20);
+  double _stallBaselinePos = 0;
+  Timer? _stallWatchdog;
+
+  void _ensureStallWatchdog() {
+    if (_stallWatchdog != null) return;
+    _stallBaselinePos = currentPlaybackSeconds();
+    _stallWatchdog = Timer.periodic(_stallWindow, (_) => _checkStall());
+  }
+
+  void _stopStallWatchdog() {
+    _stallWatchdog?.cancel();
+    _stallWatchdog = null;
+    _stallBaselinePos = 0; // 归零基线：下次播放重新校准，避免旧基线误判卡顿
+  }
+
+  void _checkStall() {
+    if (!isPlaying.value || (playUrl.value ?? '').isEmpty) {
+      _stopStallWatchdog();
+      return;
+    }
+    final pos = currentPlaybackSeconds();
+    // 进度有推进 → 健康，刷新基准
+    if (pos - _stallBaselinePos > 0.5) {
+      _stallBaselinePos = pos;
+      return;
+    }
+    // 之前已播到某位置（>1s）却 20s 无推进 → 判定卡顿死链
+    if (_stallBaselinePos > 1) {
+      AppLog.instance
+          .w('[Play] 检测到播放卡顿（20s 无进度推进），尝试自动恢复');
+      _stopStallWatchdog();
+      setPlaybackError('播放卡顿（长时间无进度推进），已尝试自动换线路');
+    }
+  }
+
+  /// P1-1：手选解析线路（userForced）时，先用选中的单线解析；
+  /// 若该线失败（outcome == null），自动回退到「全接口并发」再试一次，
+  /// 避免"只试一条就放弃、要用户手动换线"。
+  Future<ParseOutcome?> _tryParse(String target,
+      {required bool userForced}) async {
+    if (!userForced) {
+      return ParseService.instance.parseOutcome(target);
+    }
+    final active = ParseStore.instance.activeBean;
+    if (active == null) {
+      return ParseService.instance.parseOutcome(target); // 无手选线 → 全试
+    }
+    final first =
+        await ParseService.instance.parseOutcome(target, only: active);
+    if (first != null) return first;
+    AppLog.instance
+        .log('[Play] 手选解析线「${active.name}」失败，自动回退全试');
+    return ParseService.instance.parseOutcome(target); // 回退全试
+  }
+
   /// 播放/解析失败后用户点「重试」：重新解析当前集的播放地址。
   ///
   /// 与「重新加载详情」不同 —— 详情通常已经加载成功（vodInfo 非空），
@@ -706,6 +871,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       return;
     }
     errorMessage.value = null;
+    _resetAutoSwitch(); // 用户手动重试 → 自动计数清零、看门狗停
     playUrl.value = null;
     isPlaying.value = false;
     // 复位"解析中"标记：避免上一次解析异常退出后标志悬挂，
@@ -1082,10 +1248,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
                   ? _innerUrlOf(playCandidate)
                   : playCandidate;
               appParseReferer = target;
-              final outcome = await ParseService.instance.parseOutcome(
-                target,
-                only: userForced ? ParseStore.instance.activeBean : null,
-              );
+              final outcome = await _tryParse(target, userForced: userForced);
               if (outcome != null && outcome.url.isNotEmpty) {
                 AppLog.instance.log(
                     '[Play] 「${outcome.sourceName}」解析 → ${outcome.url}'
@@ -1337,10 +1500,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       isResolving.value = true;
       try {
         final target = userForced ? _innerUrlOf(candidate) : candidate;
-        final outcome = await ParseService.instance.parseOutcome(
-          target,
-          only: userForced ? ParseStore.instance.activeBean : null,
-        );
+        final outcome = await _tryParse(target, userForced: userForced);
         // 期间又切了集 / 换了线路 ⇒ 这次结果作废（别把新集顶回去）
         if (_playbackStartToken != token) return;
         if (outcome != null && outcome.url.isNotEmpty) {

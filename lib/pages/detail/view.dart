@@ -970,6 +970,8 @@ class _DetailPageState extends State<DetailPage> {
       if (errMsg != null && errMsg.isNotEmpty) {
         _playerErrorTimer?.cancel();
         _playerErrorTimer = null;
+        // P1-3：错误分类提示，给用户一个可操作建议
+        final errHint = _controller.classifyPlaybackError(errMsg);
         return AspectRatio(
           aspectRatio: 4 / 3,
           child: Container(
@@ -990,6 +992,20 @@ class _DetailPageState extends State<DetailPage> {
                     height: 1.5,
                   ),
                 ),
+                // P1-3：分类建议，给用户一个可操作方向
+                if (errHint != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      errHint,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: 18),
                 Wrap(
                   spacing: 12,
