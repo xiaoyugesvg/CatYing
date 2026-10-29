@@ -28,7 +28,7 @@ import 'package:tvbox/widgets/ks_player.dart';
 import 'package:tvbox/widgets/mpv_app_player.dart';
 import 'package:tvbox/widgets/video_player.dart';
 import 'package:tvbox/widgets/video_player_pip.dart';
-import 'package:tvbox/widgets/parse_sniff_sheet.dart';
+import 'package:tvbox/widgets/playback_surface.dart';
 import 'package:tvbox/widgets/window_fullscreen.dart';
 import 'package:tvbox/pages/drama/drama_player_page.dart';
 import 'package:tvbox/pages/search/controller.dart' show TvSearchController;
@@ -934,30 +934,6 @@ class _DetailPageState extends State<DetailPage> {
         _playerErrorTimer = null;
         return const SizedBox.shrink();
       }
-      // 自动嗅探中：播放区让位（**不**挂内嵌 WebView），避免与嗅探页各加载
-      // 一份同一个网页 —— 双份解码 + 双份声音、返回后底层还在跑。
-      // 用户 2026-10-15「嗅探容易影响播放」的主因。
-      if (_controller.sniffingUrl.value != null) {
-        _playerErrorTimer?.cancel();
-        _playerErrorTimer = null;
-        return AspectRatio(
-          aspectRatio: 4 / 3,
-          child: Container(
-            color: Colors.black,
-            child: const Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircularProgressIndicator(color: Colors.white),
-                  SizedBox(height: 12),
-                  Text('正在嗅探视频地址…',
-                      style: TextStyle(color: Colors.white70, fontSize: 13)),
-                ],
-              ),
-            ),
-          ),
-        );
-      }
       // 🔴 错误态必须**排在 url 分支之前**（用户 2026-10-28 20:53 截图）。
       //
       // 原来顺序是「有 url → 播放器 / 否则 → 错误态」，于是：
@@ -1017,23 +993,11 @@ class _DetailPageState extends State<DetailPage> {
                       Icons.refresh_rounded,
                       () => _controller.retryCurrentEpisode(),
                     ),
-                    _errorActionButton(
-                      '嗅',
-                      Icons.travel_explore_rounded,
-                      () => _openSniffSheet(),
-                    ),
-                    _errorActionButton(
-                      '解',
-                      Icons.workspace_premium_rounded,
-                      () => _openParseSheet(),
-                    ),
-                    // 用户 2026-10-28 20:53：「解析不成功，我自己切换线路」。
-                    // 「解」进的是解析面板，还要再找一次线路；这里直接给一个
-                    // 「换线路」按钮，一步打开线路列表。
+                    // 换线路：直接切到下一条可用播放线路（不再打开解析面板）。
                     _errorActionButton(
                       '换线路',
                       Icons.swap_horiz_rounded,
-                      () => _openParseSheet(),
+                      () => _controller.switchToNextFlag(),
                     ),
                   ],
                 ),
@@ -1091,19 +1055,9 @@ class _DetailPageState extends State<DetailPage> {
                     alignment: WrapAlignment.center,
                     children: [
                       _errorActionButton(
-                        '嗅',
-                        Icons.travel_explore_rounded,
-                        () => _openSniffSheet(),
-                      ),
-                      _errorActionButton(
-                        '解',
-                        Icons.workspace_premium_rounded,
-                        () => _openParseSheet(),
-                      ),
-                      _errorActionButton(
                         '换线路',
                         Icons.swap_horiz_rounded,
-                        () => _openParseSheet(),
+                        () => _controller.switchToNextFlag(),
                       ),
                     ],
                   ),
@@ -1116,14 +1070,9 @@ class _DetailPageState extends State<DetailPage> {
     });
   }
 
-  /// 等待播放地址期间的阶段文案（用户 2026-10-28 20:53 反馈"看不出在干嘛"）。
-  ///
-  /// 三种等待要分清楚，否则用户只会觉得"转圈卡住"：
-  ///   · isResolving → 正在走解析接口取地址
-  ///   · sniffingUrl  → 正在嗅探网页里的媒体地址（由上面单独分支渲染）
-  ///   · 其余          → 正在准备/加载
+  /// 等待播放地址期间的阶段文案。
   String _loadingStageText() {
-    if (_controller.isResolving.value) return '正在解析视频地址…';
+    if (_controller.isResolving.value) return '正在获取播放地址…';
     return '正在准备播放…';
   }
 
@@ -1154,98 +1103,6 @@ class _DetailPageState extends State<DetailPage> {
     await Future<void>.delayed(const Duration(milliseconds: 250));
   }
 
-  /// 网页兜底播放时，在网页上方叠一层「正在嗅探视频地址…」提示。
-  ///
-  /// 用户 2026-10-28 20:53 的核心不满：点播放后"转圈 → 停在网页 → 黑屏"，
-  /// **完全看不出 App 在做什么**。网页兜底的正确链路是：
-  ///   解析 → 网页加载 → **后台嗅探直链** → 交给原生播放器播放。
-  /// 中间这一步是隐形的，用户只看到网页，于是以为"进网页了，不会播"。
-  ///
-  /// 这里把嗅探状态显式画出来（半透明浮层，不阻断网页交互），
-  /// 并顺手把「换线路」摆在旁边 —— 嗅探失败时用户能立刻换线路。
-  /// 嗅探**放弃**时（[DetailController.sniffGaveUp]）转成静态提示：
-  /// 「未嗅探到直链」+ 换线路按钮，几秒后自动消失（2026-10-28）。
-  Widget _withSniffOverlay(Widget child) {
-    return Obx(() {
-      final sniffing = _controller.isWebSniffing.value;
-      final gaveUp = _controller.sniffGaveUp.value;
-      if (!sniffing && !gaveUp) return child;
-      return Stack(
-        children: [
-          child,
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.transparent,
-                    Colors.black.withValues(alpha: 0.75),
-                  ],
-                ),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  if (sniffing) ...[
-                    const SizedBox(
-                      width: 13,
-                      height: 13,
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                        strokeWidth: 2,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    const Flexible(
-                      child: Text(
-                        '正在嗅探视频地址…',
-                        style: TextStyle(color: Colors.white, fontSize: 12.5),
-                      ),
-                    ),
-                  ] else ...[
-                    const Icon(
-                      Icons.info_outline_rounded,
-                      size: 15,
-                      color: Colors.white70,
-                    ),
-                    const SizedBox(width: 8),
-                    const Flexible(
-                      child: Text(
-                        '未嗅探到直链，可换线路或直接观看网页',
-                        style: TextStyle(color: Colors.white, fontSize: 12.5),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(width: 10),
-                  // 嗅探不出结果时，用户不必等失败才能换线路。
-                  GestureDetector(
-                    onTap: _openParseSheet,
-                    child: const Text(
-                      '换线路',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                        decoration: TextDecoration.underline,
-                        decorationColor: Colors.white70,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      );
-    });
-  }
-
   Widget _buildPlayerWidget({required bool isFull, required bool isPip}) {
     final url = _controller.playUrl.value!;
     // 内核切换过渡帧：只渲染空壳，**不要**在这里调 _ensurePlayer ——
@@ -1261,29 +1118,14 @@ class _DetailPageState extends State<DetailPage> {
         ),
       );
     }
-    // 网页播放器页（非直链媒体 URL）→ 用 WebView 兜底播放
-    // （对应 catmovie WebviewView：第三方解析页 / parse=1 网页端 / player 页）
-    //
-    // ⚠️ 例外：`confirmedMediaUrl` = 已用 Content-Type/首字节确认过是媒体的
-    // **无后缀地址**（解析站常见的 `xxx.php?url=…` 形态）。这种地址 AVPlayer
-    // 能直接播，塞进 WebView 只会打开一个 m3u8 文本页（2026-10-28 复核修复）。
-    if (PlaybackSurface.needsWebFallback(url,
-        confirmedMediaUrl: _controller.confirmedMediaUrl.value)) {
+    // 网页播放器页（非直链媒体 URL）→ 用 App 自己的内嵌网页播放器
+    if (PlaybackSurface.needsWebFallback(url)) {
       // 内嵌模式: 4:3 固定高度(内部处理), 避免 Column 内高度塌陷致有声无画面
-      return _withSniffOverlay(PlaybackSurface.webFallback(
+      return PlaybackSurface.webFallback(
         url: url,
         title: _controller.vodInfo.value?.name,
         embedded: true,
-        // 网页兜底播放没有底栏 → 右上角补「嗅探 / 解析」两个入口（2026-10-28）
-        onSniff: _openSniffSheet,
-        onSwitchParse: _openParseSheet,
-        // 后台嗅探命中 → 同页切原生播放器（不再跳独立嗅探页）
-        onMediaFound: _controller.onWebviewMediaFound,
-        // 后台嗅探进行中 → 播放区显示「正在嗅探视频地址…」（用户 2026-10-28）
-        onSniffState: (active) => _controller.isWebSniffing.value = active,
-        // 后台嗅探放弃（未命中）→ 浮层转「未嗅探到直链」静态提示
-        onSniffGaveUp: _controller.onWebviewSniffGaveUp,
-      ));
+      );
     }
     final headers = _controller.playHeaders.isNotEmpty
         ? Map<String, String>.from(_controller.playHeaders)
@@ -1293,20 +1135,11 @@ class _DetailPageState extends State<DetailPage> {
     final engine = PlayerPrefs.instance.vodEngine.value;
     if (engine == PlayerEngine.webview) {
       // 同上: 内嵌模式
-      return _withSniffOverlay(PlaybackSurface.webFallback(
+      return PlaybackSurface.webFallback(
         url: url,
         title: _controller.vodInfo.value?.name,
         embedded: true,
-        // 网页兜底播放没有底栏 → 右上角补「嗅探 / 解析」两个入口（2026-10-28）
-        onSniff: _openSniffSheet,
-        onSwitchParse: _openParseSheet,
-        // 后台嗅探命中 → 同页切原生播放器（不再跳独立嗅探页）
-        onMediaFound: _controller.onWebviewMediaFound,
-        // 后台嗅探进行中 → 播放区显示「正在嗅探视频地址…」（用户 2026-10-28）
-        onSniffState: (active) => _controller.isWebSniffing.value = active,
-        // 后台嗅探放弃（未命中）→ 浮层转「未嗅探到直链」静态提示
-        onSniffGaveUp: _controller.onWebviewSniffGaveUp,
-      ));
+      );
     }
 
     // 把续播位置透传给 _ensurePlayer, 让 libmpv 通过 Media.start 参数

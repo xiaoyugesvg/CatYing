@@ -19,15 +19,11 @@ import 'package:tvbox/services/network_manager.dart';
 import 'package:tvbox/services/play_route.dart';
 import 'package:tvbox/services/play_context_store.dart';
 import 'package:tvbox/services/play_pipeline.dart';
-import 'package:tvbox/services/sniff_filter.dart';
 import 'package:tvbox/services/player_prefs.dart';
 import 'package:tvbox/services/ad_filter_service.dart';
-import 'package:tvbox/services/parse_service.dart';
-import 'package:tvbox/services/parse_store.dart';
 import 'package:tvbox/services/play_url_sanitizer.dart';
 import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/webhome/webhtv_site_health_page.dart';
-import 'package:tvbox/pages/play/sniff_player_page.dart';
 import 'package:tvbox/pages/detail/simple_image_reader_page.dart';
 import 'package:tvbox/pages/detail/simple_text_reader_page.dart';
 
@@ -93,42 +89,9 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   final isPlaying = false.obs;
   final playUrl = Rx<String?>(null);
 
-  /// **正在自动嗅探的网页地址**（非空 = 已弹起嗅探页）。
-  ///
-  /// 为什么需要它（用户 2026-10-15「嗅探容易影响播放」）：
-  ///   · 详情页播放区**不再**同时挂内嵌 WebView —— 否则和嗅探页各加载一份
-  ///     同一网页，双份解码/双份声音，返回后底层还在跑（这是最主要的影响）；
-  ///   · 也用它做**去重**：已有嗅探页在栈中就不再 push 新页，避免"自动下一集"
-  ///     每集都叠一层嗅探页、返回要连按多次。
-  final sniffingUrl = Rx<String?>(null);
-
-  /// 正在走解析接口取地址（详情页据此显示"解析中"，且**不**启动 15 秒
-  /// "地址获取超时"计时 —— 解析慢时误报错误会打断用户观看）。
+  /// 正在取播放地址（详情页据此显示"取址中"，且**不**启动 15 秒
+  /// "地址获取超时"计时）。
   final isResolving = false.obs;
-
-  /// 内嵌网页播放器**正在后台嗅探**（用户 2026-10-28 20:53）。
-  ///
-  /// 网页兜底播放时，网页在后台嗅探直链。这件事以前**完全不可见** ——
-  /// 用户点播放后只看到一块网页/纯黑，不知道 App 在嗅探，更不知道
-  /// 嗅探可能失败、要换线路。这个标志让详情页播放区显示
-  /// 「正在嗅探视频地址…」，链路可见。
-  final isWebSniffing = false.obs;
-
-  /// 后台嗅探**放弃**（未命中）标记：详情页据此把「正在嗅探视频地址…」
-  /// 的转圈浮层换成「未嗅探到直链，可点换线路」的静态提示，几秒后自动消失。
-  final sniffGaveUp = false.obs;
-  Timer? _sniffGaveUpTimer;
-
-  /// **已确认是媒体、但地址没有影视后缀**的那一条地址（空串 = 无）。
-  ///
-  /// 为什么需要它（2026-10-28 复核发现的断点）：
-  /// 解析接口经常直接给出 `http://xx/nm_free.php?url=…` 这种地址 ——
-  /// 响应体就是 `#EXTM3U`，AVPlayer 完全能播，但**地址本身没有 `.m3u8`**。
-  /// 详情页的 [_isWebPageUrl] 靠后缀判定，会把这种地址当网页塞进 WebView，
-  /// 打开的是一个 m3u8 文本页 → 白解析、黑屏。
-  /// 这里记下"已经用 Content-Type / 首字节确认过是媒体"的地址，
-  /// 详情页据此**跳过** WebView，直接交给原生播放器。
-  final confirmedMediaUrl = ''.obs;
 
   final playHeaders = <String, String>{}.obs;
   final playbackSessionId = ''.obs;
@@ -337,41 +300,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   @override
   void onClose() {
     WidgetsBinding.instance.removeObserver(this);
-    // 详情页销毁：清掉嗅探会话残留，避免下次打开详情页被误判为"正在嗅探"
-    sniffingUrl.value = null;
-    SniffPlayerPage.pendingUrl.value = null;
-    if (_sniffCloseHooked) {
-      SniffPlayerPage.closedTick.removeListener(_onSniffPageClosed);
-    }
     super.onClose();
-  }
-
-  /// 是否已挂上"嗅探页关闭"监听（只挂一次）
-  bool _sniffCloseHooked = false;
-
-  void _hookSniffPageClosed() {
-    if (_sniffCloseHooked) return;
-    _sniffCloseHooked = true;
-    SniffPlayerPage.closedTick.addListener(_onSniffPageClosed);
-  }
-
-  /// 嗅探页**关闭**了（无论是不是本页 push 的）⇒ 结束"嗅探中"态。
-  ///
-  /// ⚠️ 为什么不能只靠 `_autoSniff` 里那次 `await Get.to(...)`：
-  ///   嗅探页被**复用重载**时（`pendingUrl`），await 对应的那次早已返回，
-  ///   没人再清 `sniffingUrl` ⇒ 详情页播放区会**永久**停在
-  ///   "正在嗅探视频地址…"的黑底占位上（不报错、不超时，只能退出重进）。
-  void _onSniffPageClosed() {
-    if (isClosed) return;
-    final u = sniffingUrl.value;
-    if (u == null) return; // 已经收尾过（首次 push 那条路径也会清）
-    sniffingUrl.value = null;
-    // 从嗅探页返回：改用网页本身兜底（原行为：能直接看网页）
-    if ((playUrl.value ?? '').isEmpty) {
-      playUrl.value = u;
-      playbackSessionId.value = _newUuid();
-      isPlaying.value = true;
-    }
   }
 
   @override
@@ -872,10 +801,6 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       errorMessage.value = '当前剧集地址为空，请切换其他线路';
       return;
     }
-    // 用户点「重试」= 要重新解析：先让这个地址的解析缓存失效。
-    // 解析出的 m3u8 常带时效签名，若还命中 10 分钟内的旧缓存，会陷入
-    // "点重试 → 同一个坏地址 → 再失败" 的死循环（2026-10-15 深挖发现）。
-    ParseService.instance.invalidate(episode.url);
 
     if (episode.url.startsWith('/')) {
       _resolveSpiderPlayUrl(flag: flag, id: episode.url);
@@ -884,114 +809,10 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     }
   }
 
-  // ============================================================
-  // 底栏「嗅探 / 解析」按钮
-  // ============================================================
-
-  /// 当前集从 Spider 拿到的**原始**播放地址（未经解析 / 嗅探）。
-  /// 「嗅探」按钮用它 —— 已经解析成直链后再嗅探没有意义。
-  String _rawPlayUrl = '';
-  String get rawPlayUrl => _rawPlayUrl;
-
-  /// 用户是否**主动**在「解析 / 嗅探」面板里选过解析线路（2026-10-28）。
-  ///
-  /// 为什么需要：Spider / 聚合源常自带一个解析地址（`parse:1`，如
-  /// `…/jiexi.php?url=<爱奇艺页面>`），旧逻辑会**跳过 App 自己的解析**
-  /// 直接打开它 —— 那个解析站一旦「IP 使用次数超限」，用户就彻底没法播。
-  /// 用户在面板里选了线路，就表示「用我的解析线路」，这里据此强制走
-  /// [ParseService]（并把解析站地址里 `url=` 的内层原始地址取出来重新解）。
-  bool _forceUserParse = false;
-
-  /// 底栏「嗅探」：**手动**入口，打开独立嗅探页（可换解析 / 重新嗅探）。
-  ///
-  /// ⚠️ 自动流程（源返回网页播放页时）**不再**走这里，也不再 push 任何
-  /// 新页面：网页直接内嵌在详情页播放区里加载，后台嗅探命中后同页切原生
-  /// 播放器（见 [onWebviewMediaFound]）。这里只服务用户显式点「嗅」的场景。
-  void openSniff() {
-    final url = sanitizePlayUrl(
-        _rawPlayUrl.isNotEmpty ? _rawPlayUrl : (playUrl.value ?? ''));
-    if (!url.startsWith('http')) {
-      AppToast.message('当前地址不是网页，无法嗅探');
-      return;
-    }
-    // 手动嗅探页关闭后收尾「嗅探中」标记（自动流程已不再 push 本页）
-    _hookSniffPageClosed();
-    // 底层正挂着网页播放器时，先让播放区让位：否则本页与嗅探页各跑一份
-    // 同一个网页（双份解码/声音）。底层是原生直链时不打断（继续播）。
-    final current = playUrl.value ?? '';
-    if (current.isNotEmpty && !_looksLikeDirectMedia(current)) {
-      sniffingUrl.value = url;
-    }
-    Get.to(() => SniffPlayerPage(
-          url: url,
-          title: vodInfo.value?.name,
-          headers:
-              playHeaders.isEmpty ? null : Map<String, String>.from(playHeaders),
-        ));
-  }
-
-  /// 内嵌网页播放器**后台嗅探**到直链 → 同页切原生播放器（2026-10-28）。
-  ///
-  /// 用户要求：「后台嗅探出来用我的播放器播放，不要重新给个页面」。
-  /// 这里只改 `playUrl`，详情页播放区会从 [WebviewPlayerPage] 换成
-  /// `AppPlayer`，全程停在详情页，不 push 任何新页面。
-  void onWebviewMediaFound(String url) {
-    if (url.isEmpty) return;
-    final h = <String, String>{...playHeaders};
-    if (PlayerPrefs.instance.sniffSendReferer.value) {
-      final page = playUrl.value ?? '';
-      if (page.isNotEmpty && page != url) h.putIfAbsent('Referer', () => page);
-    }
-    AppLog.instance.log('[Play] 网页后台嗅探命中 → 原生播放器: $url');
-    if (h.isNotEmpty) playHeaders.value = h;
-    sniffingUrl.value = null;
-    isWebSniffing.value = false;
-    _clearSniffGaveUp();
-    // 嗅探命中 = 已确认是媒体：即使地址没后缀也直接交原生播放器
-    confirmedMediaUrl.value = url;
-    playUrl.value = url;
-    playbackSessionId.value = _newUuid();
-    isPlaying.value = true;
-  }
-
-  /// 后台嗅探**放弃**（轮询到上限仍未命中）→ 浮层换静态提示。
-  /// 4 秒后自动消失，避免一直占着播放区。
-  void onWebviewSniffGaveUp() {
-    if (sniffGaveUp.value) return;
-    sniffGaveUp.value = true;
-    _sniffGaveUpTimer?.cancel();
-    _sniffGaveUpTimer = Timer(const Duration(seconds: 4), () {
-      // GetxController 没有 mounted，用 isClosed 判断是否已被销毁
-      if (!isClosed && sniffGaveUp.value) sniffGaveUp.value = false;
-    });
-  }
-
-  void _clearSniffGaveUp() {
-    _sniffGaveUpTimer?.cancel();
-    if (sniffGaveUp.value) sniffGaveUp.value = false;
-  }
-
-  /// 底栏「解析」选中某条线路后：记住选择，并用新线路**重解当前集**。
-  /// 传空串 = 自动（按列表顺序依次尝试）。
-  ///
-  /// 2026-10-28：同时置 `_forceUserParse` —— 用户既然主动选了线路，
-  /// 即使是「源自带解析地址」的聚合源，也要改用**用户的解析管理**重解。
-  Future<void> selectParseLine(String url) async {
-    await ParseStore.instance.setActive(url);
-    ApiConfig.instance.parseBeanList.value = ParseStore.instance.list;
-    // 用户主动选线路 = 明确要用解析：解析总开关若关着，顺手打开，
-    // 否则 ParseService.enabled 为 false，选了也不生效（2026-10-28）。
-    if (!PlayerPrefs.instance.parseEnabled.value) {
-      await PlayerPrefs.instance.setParseEnabled(true);
-    }
-    // 选过线路 = 以后都优先用自己的线路（持久化，重启后仍然生效）；
-    // 想改回"尊重脚本内置解析"在面板里把开关打开即可（2026-10-28）。
-    if (PlayerPrefs.instance.preferScriptParse.value) {
-      await PlayerPrefs.instance.setPreferScriptParse(false);
-    }
-    _forceUserParse = true;
-    AppLog.instance.log('[Parse] 切换解析线路 → ${url.isEmpty ? '自动' : url}');
-    retryCurrentEpisode();
+  /// 「换线路」：切到下一条未试过的播放线路并重解当前集。
+  void switchToNextFlag() {
+    if (_advanceToNextFlag()) return;
+    AppToast.message('没有其它可用的播放线路');
   }
 
   bool playNext() {
@@ -1021,9 +842,6 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     //   novel:// → 正文；pics:// / mange:// → 图片；其余 → 视频。
     // （内容形态决定详情页要不要占那块 4:3 播放区）
     contentMode.value = PlayContentMode.video;
-    // 上一集确认过的「无后缀直链」不能残留到这一集，否则新网页地址会被
-    // 当成媒体直接丢进播放器（黑屏且不报错）。
-    confirmedMediaUrl.value = '';
 
     unawaited(_resolveSpiderPlayUrlInner(token: token, flag: flag, id: id));
   }
@@ -1105,32 +923,13 @@ class DetailController extends GetxController with WidgetsBindingObserver {
 
         if (_spiderResolveToken != token) return;
 
-        // ── 源声明的播放形态（CatVod 约定）──────────────────────────
-        //   `parse == 0` → `url` 就是**可直接播放的直链**
-        //   `parse == 1` → `url` 是**需要解析/嗅探的网页**
-        //   （`jx` 是同一语义的旧字段，两个都认；缺失按"未声明"处理）
-        //
-        // 🔴 原来这两个字段**完全没读**，只按"地址有没有影视后缀"猜。
-        // 两头都会错：
-        //   · `parse:0` + 无后缀直链 —— 典型是解析接口直接吐 m3u8 文本
-        //     （`nm_free.php?url=…`）。被判成网页 → 塞进 WebView 嗅探 →
-        //     打开的是 m3u8 文本页，**必然失败**；
-        //   · `parse:1` + 网页恰好落在主流站点域名下 → App 又用自己的
-        //     解析接口解一遍，可能把源已经给好的地址解歪。
-        final parseFlag = _intFlag(result['parse']);
-        final jxFlag = _intFlag(result['jx']);
-        final sourceWantsParse = parseFlag == 1 || jxFlag == 1;
-        final sourceSaysDirect = !sourceWantsParse && parseFlag == 0;
-
         if (resolvedUrl != null && resolvedUrl.isNotEmpty) {
           // 先剥掉 `类型|哈希|真实URL` 包裹（如 `tencent|54e3…|https://…`），
           // 再补全相对路径 —— 顺序反了会把整串拼到站点域名后面（2026-10-28）。
           resolvedUrl = sanitizePlayUrl(resolvedUrl);
-          // 相对播放地址 → 用源 api 的 host 补成绝对（方案 B，见 [_absolutizePlayUrl]）
+          // 相对播放地址 → 用源 api 的 host 补成绝对
           resolvedUrl = _absolutizePlayUrl(resolvedUrl);
-          // 记下 Spider 给的地址（底栏「嗅探」按钮要用）—— 记**补全后**的形态，
-          // 否则嗅探页/播放器拿到相对路径同样加载不了
-          _rawPlayUrl = resolvedUrl;
+
           // **按内容分流①：正文协议**（小说源，`novel://{title,content}`）
           // —— 这类源给出的"播放地址"其实是整章正文，交给播放器只会黑屏，
           // 所以直接进简易书籍阅读器。
@@ -1176,31 +975,19 @@ class DetailController extends GetxController with WidgetsBindingObserver {
             );
             return;
           }
-          // ── 统一播放管线（直链 → 解析 → MIME 确认 → 网页嗅探）──────────
-          // 详情页 / 海阔模块 / 小程序三端共用同一套判据（play_pipeline.dart），
-          // 不再各写一份，避免"这里能播、那边黑屏"。
-          final resolution = await PlayPipeline.instance.resolve(
+          // ── 统一播放判定（直链 → 原生播放器；网页 → 内嵌网页播放器）──
+          final resolution = PlayPipeline.instance.resolve(
             resolvedUrl,
             headers: headers,
-            forceParse: _forceUserParse,
-            sourceWantsParse: sourceWantsParse,
-            sourceSaysDirect: sourceSaysDirect,
             apiBase: spiderInfo.api,
-            refererPage: resolvedUrl,
           );
           if (_spiderResolveToken != token) return;
           final playCandidate = resolution.url;
           headers = Map<String, String>.from(resolution.headers);
           playHeaders.value = headers;
-          if (resolution.mediaConfirmed) {
-            // 无后缀直链：让详情页别把它当网页塞 WebView
-            confirmedMediaUrl.value = playCandidate;
-          }
           if (resolution.isPage) {
-            // 网页地址 → 详情页挂内嵌 WebviewPlayerPage，后台嗅探命中后
-            // 经 onWebviewMediaFound 同页切原生播放器（不 push 独立嗅探页）。
-            AppLog.instance.log(
-                '[Play] 网页播放页 → 内嵌网页播放器（后台嗅探）: $playCandidate');
+            // 网页地址 → 详情页挂内嵌 WebviewPlayerPage（App 自己的播放器）
+            AppLog.instance.log('[Play] 网页播放页 → 内嵌网页播放器: $playCandidate');
           }
           // ── 地址形态兜底（用户 2026-10-15）────────────────────────────
           // 既不是绝对 URL、又补不出 base ⇒ 交给播放器只会白卡 15 秒再弹
@@ -1297,29 +1084,9 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     return fallback;
   }
 
-  /// 是否已是已知直链媒体（后缀命中）——是则无需再过解析接口。
-  ///
-  /// 2026-10-15：统一委托 [SniffFilter.isDirectMedia]，它按**用户可自定义**的
-  /// 「影视直链后缀」清单判定（空则用出厂 13 种）。原来这里只认 6 种，
-  /// `.webm/.mov/.m4s/.mpd/.avi` 等能直接播的地址会被误判成"网页"→ 送去解析
-  /// 或被弹去嗅探页，等于白白打断一次播放。
-  bool _looksLikeDirectMedia(String url) => SniffFilter.isDirectMedia(url);
+  /// 是否已是已知直链媒体（后缀命中）。
+  bool _looksLikeDirectMedia(String url) => looksLikeDirectMedia(url);
 
-  /// 读 `playerContent` 里的 `parse` / `jx` 标志（CatVod 约定）→ int。
-  ///
-  /// 各家源给的类型五花八门：`1` / `"1"` / `true` / 缺失。
-  /// **缺失返回 -1**（不是 0）—— 0 在 CatVod 里是"这是直链"的**明确声明**，
-  /// 而"没给这个字段"完全是另一回事，混为一谈会让老源全被当成 parse=0。
-  int _intFlag(Object? v) {
-    if (v == null) return -1;
-    if (v is bool) return v ? 1 : 0;
-    if (v is num) return v.toInt();
-    final s = v.toString().trim().toLowerCase();
-    if (s.isEmpty) return -1;
-    if (s == 'true') return 1;
-    if (s == 'false') return 0;
-    return int.tryParse(s) ?? -1;
-  }
 
   /// 能直接交给播放器/阅读器的**地址形态白名单前缀**。
   ///
@@ -1410,12 +1177,11 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     _playbackStartToken = token;
     // 走这里的都是普通视频链路（CMS 源 / 直链），形态复位成"视频"
     contentMode.value = PlayContentMode.video;
-    confirmedMediaUrl.value = '';
     var candidate = _selectedPlayableURL(fallback: fallback);
     // 先剥掉 `类型|哈希|真实URL` 包裹（TVBox 社区源常见）：必须在补全**之前**，
     // 否则会被当成相对路径拼到站点域名后面，彻底解不出真实地址（2026-10-28）。
     candidate = sanitizePlayUrl(candidate);
-    // 相对播放地址 → 用源 api 的 host 补成绝对（方案 B，见 [_absolutizePlayUrl]）
+    // 相对播放地址 → 用源 api 的 host 补成绝对
     candidate = _absolutizePlayUrl(candidate);
 
     if (AdFilterService.instance.isBlocked(candidate) &&
@@ -1423,17 +1189,14 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       candidate = fallback;
     }
 
-    // ── 统一播放管线（与详情页 Spider 链路同一个 play_pipeline.dart）────
-    // 刚在设置里选过线路 / 关掉「脚本内置解析优先」时强制走用户线路。
+    // ── 统一播放判定：直链 → 原生播放器；网页 → 内嵌网页播放器 ──────
     isResolving.value = true;
     late PlayResolution resolution;
     try {
-      resolution = await PlayPipeline.instance.resolve(
+      resolution = PlayPipeline.instance.resolve(
         candidate,
         headers: playHeaders,
-        forceParse: _forceUserParse,
         apiBase: SpiderService.instance.getCurrentSpiderInfo().api,
-        refererPage: candidate,
       );
     } finally {
       // 只有"仍是本次"才清（期间又切集 ⇒ 标记归新一次管，别提前清掉）
@@ -1445,16 +1208,9 @@ class DetailController extends GetxController with WidgetsBindingObserver {
 
     candidate = resolution.url;
     playHeaders.value = Map<String, String>.from(resolution.headers);
-    if (resolution.mediaConfirmed) {
-      confirmedMediaUrl.value = candidate;
-      AppLog.instance.log('[Play] 解析结果是媒体（无后缀）→ 直链播放: $candidate');
-    }
     if (resolution.isPage) {
-      // 仍是网页地址 → 直接内嵌网页播放器加载（**不**跳独立嗅探页）。
-      // 内嵌的 WebviewPlayerPage 会在后台嗅探，命中 m3u8 后经
-      // onWebviewMediaFound 同页切原生播放器（2026-10-28 用户要求：
-      // 「播放不了也把播放器加载出来」「后台嗅探用我的播放器播」）。
-      AppLog.instance.log('[Play] 网页地址 → 内嵌网页播放器后台嗅探: $candidate');
+      // 网页地址 → 内嵌网页播放器加载（App 自己的播放器）
+      AppLog.instance.log('[Play] 网页地址 → 内嵌网页播放器: $candidate');
     }
 
     // ── 地址形态兜底（用户 2026-10-15）────────────────────────────────

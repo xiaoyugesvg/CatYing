@@ -8,7 +8,7 @@ import 'package:tvbox/services/player_prefs.dart';
 import 'package:tvbox/services/play_url_sanitizer.dart';
 import 'package:tvbox/services/sniff_filter.dart';
 import 'package:tvbox/services/web_sniff_service.dart';
-import 'package:tvbox/pages/play/sniff_player_page.dart';
+import 'package:tvbox/services/sniff_scripts.dart';
 import 'package:flutter/services.dart';
 import 'package:tvbox/common/system_ui.dart';
 import 'package:tvbox/common/theme.dart';
@@ -323,8 +323,8 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
     // sniffScript 有可能先执行 → `__sniff` undefined → catchError 里把
     // `_sniffing` 置回 false，这一页就再也不嗅了（静默失效）。
     _controller
-        .runJavaScript(SniffPlayerPage.hookScript)
-        .then((_) => _controller.runJavaScript(SniffPlayerPage.sniffScript))
+        .runJavaScript(SniffScripts.hookScript)
+        .then((_) => _controller.runJavaScript(SniffScripts.sniffScript))
         .then((_) {
           if (!mounted || _mediaReported) return;
           _sniffTimer = Timer.periodic(

@@ -76,12 +76,13 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
   /// 球的**默认位置**（未拖动过时）。
   ///
   /// 🔴 必须只有这一份定义：`build` 用它画球、`onPanUpdate` 用它当拖动起点。
-  /// 之前 `onPanUpdate` 的兜底写的是"屏幕底部迷你条上方"（`height - 156`），
-  /// 而 `build` 画在**屏幕垂直中间**（`height/2 - 27`）—— 两者差几百 px，
-  /// 于是**第一次**拖动时球从中间瞬移到屏幕底部（用户反馈"第一次想移动
-  /// 总是跑很远，第二次才能按住"），第二次 `_pos` 有值了才正常。
-  Offset _defaultPos(Size screen) =>
-      Offset(screen.width - _size - 16, screen.height / 2 - _size / 2);
+  /// （拖动逻辑的注释见 `_ballCircle`。）
+  ///
+  /// 🔴 默认即「贴边半藏」：球停在最右侧半藏区间（露出 [_visibleRatio] = 40%），
+  /// 符合用户"每次打开软件就贴边"的要求。原来写的是"距边 16px、整圆全露"，
+  /// 用户反馈"每次都是整圆、不贴边"，所以改成贴边位。
+  Offset _defaultPos(Size screen, EdgeInsets pad) =>
+      Offset(_maxPosX(screen, pad), screen.height / 2 - _size / 2);
 
   void _openPlayer() {
     final nav = VideoPlayerPip.navigatorKey.currentState;
@@ -204,10 +205,10 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
         // 迷你条只在本页有正在播放的歌时出现 —— 而本组件同样是
         // "没有正在播放的歌就整体隐藏"（见上面 `song == null`），
         // 所以**两者同生同灭**，不需要再判断一次。
-        // 默认位置：屏幕右侧中间（右侧 16px 边距，垂直居中）。
-        // 之前默认在底部迷你条上方，现在改到右侧中间，
-        // 避免挡歌词/控制区，也更醒目。
-        final pos = _pos ?? _defaultPos(screen);
+        // 默认位置：屏幕右侧**贴边半藏**（露出 40%），垂直居中。
+        // 由 [_defaultPos] 给出（= [_maxPosX]），符合用户"每次打开就贴边"的要求；
+        // 拖动逻辑见下方。
+        final pos = _pos ?? _defaultPos(screen, pad);
         // 用 `pos` 判断贴哪一侧（不能用 x —— 半藏后 x 可能为负）
         final toLeft = pos.dx + _size / 2 < screen.width / 2;
         // `_pos` 的合法范围**包含半藏区间**：拖到边上时球会被推出去一大半，
@@ -392,7 +393,7 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
         final maxX = _maxPosX(screen, pad);
         // 拖动起点与 build 用**同一个** `_defaultPos`（原来这里兜底写的是
         // 屏幕底部，导致第一次拖动球直接瞬移到屏幕下方，见 `_defaultPos` 注释）。
-        final cur = _pos ?? _defaultPos(screen);
+        final cur = _pos ?? _defaultPos(screen, pad);
         setState(() {
           _pos = Offset(
             (cur.dx + d.delta.dx).clamp(minX, maxX),
