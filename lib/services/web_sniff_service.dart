@@ -32,6 +32,43 @@ import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/sniff_filter.dart';
 import 'package:tvbox/services/webview_fetch_service.dart';
 
+/// 一次嗅探会话的候选池。
+///
+/// 把"收候选 / 去重 / 打分 / 记住最优"从 [WebSniffService.findMediaUrl] 的
+/// 局部变量里抽出来：
+///   · 同一地址在多个页面/iframe 里重复出现时不会重复计入；
+///   · `rank` 越小越可能是**整片**（0 = m3u8 主列表），便于调用方按顺序试播；
+///   · 目标只有一个：拿到 `rank <= 1` 就收工，不再扫后面的页面。
+class SniffSession {
+  /// 已收下的候选（按出现顺序，已去重）。
+  final List<String> candidates = [];
+
+  /// 目前最优候选；无命中为 null。
+  String? best;
+
+  /// 最优候选的 rank（越小越好）。
+  int bestRank = 1 << 20;
+
+  /// 收一条候选；返回 true 表示"已经足够好，可以停止扫描"。
+  bool offer(String raw) {
+    final u = raw.trim();
+    if (u.isEmpty) return false;
+    if (!SniffFilter.acceptSniffUrl(u)) return false;
+    if (!candidates.contains(u)) candidates.add(u);
+    final r = SniffFilter.candidateRank(u);
+    if (r < bestRank) {
+      best = u;
+      bestRank = r;
+    }
+    return bestRank <= 1;
+  }
+
+  /// 候选按"整片可能性"排序（调用方可依次尝试）。
+  List<String> get ranked => SniffFilter.rankCandidates(candidates);
+
+  bool get isEmpty => candidates.isEmpty;
+}
+
 class WebSniffService {
   WebSniffService._();
   static final WebSniffService instance = WebSniffService._();
@@ -125,21 +162,12 @@ class WebSniffService {
     // 等所有页面扫完仍无后缀命中时，再用服务端 Content-Type 兜底验证。
     final probeCandidates = <String>[];
 
-    // 目前找到的最佳直链。rank 越小越可能播完整片（0 = m3u8 主列表）。
-    String? best;
-    var bestRank = 1 << 20;
+    // 目前找到的最佳直链交给 [SniffSession]：去重 + rank 越小越可能是整片
+    //（0 = m3u8 主列表）。rank ≤ 1 时提前收工。
+    final session = SniffSession();
 
     /// 收一条候选；返回 true 表示"已经足够好，可以停止扫描"。
-    bool offer(String u) {
-      if (!SniffFilter.acceptSniffUrl(u)) return false;
-      final r = SniffFilter.candidateRank(u);
-      if (r < bestRank) {
-        best = u;
-        bestRank = r;
-      }
-      // m3u8（主列表或普通列表）就是最终答案，没必要再扫后面的页面
-      return bestRank <= 1;
-    }
+    bool offer(String u) => session.offer(u);
 
     while (frontier.isNotEmpty && depth <= _maxDepth && fetched < _maxPages) {
       final next = <(String, String?)>[];
@@ -222,9 +250,10 @@ class WebSniffService {
       if (stop) break;
     }
 
-    if (best != null) {
-      AppLog.instance.log('[WebSniff] 命中（rank=$bestRank）: $best');
-      return best;
+    if (session.best != null) {
+      AppLog.instance
+          .log('[WebSniff] 命中（rank=${session.bestRank}）: ${session.best}');
+      return session.best;
     }
 
     // ⑤ MIME 兜底：扩展名被藏起来的直链，用**响应头**而不是后缀判断

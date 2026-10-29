@@ -17,7 +17,7 @@ import 'package:tvbox/models/vod_info.dart';
 import 'package:tvbox/reading/source/global_proxy.dart';
 import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/app_log.dart';
-import 'package:tvbox/services/parse_service.dart';
+import 'package:tvbox/services/play_pipeline.dart';
 import 'package:tvbox/services/player_prefs.dart';
 import 'package:tvbox/services/sniff_filter.dart';
 import 'package:tvbox/services/source_service.dart';
@@ -988,65 +988,49 @@ class AntBridge {
             .map((k, v) => MapEntry(k.toString(), v.toString()))
         : const <String, String>{};
 
-    // 与影视端**同一套分流**（规则集中在 services/sniff_filter.dart +
-    // play_route.dart 的后缀清单，且用户自定义的后缀清单在这里也生效）：
-    //   ① 主流正版站（优爱腾芒B…），或线路显式标了 parse/jx → 先过解析接口；
-    //   ② 其余站点 → 直接嗅探。
-    // 解析出直链直接播；解析出网页 / 未命中 / 没配接口 → 交给嗅探页兜底。
-    var candidate = url;
-    if (!SniffFilter.isDirectMedia(candidate)) {
-      final mustParse =
-          parse == '1' || jx == '1' || SniffFilter.shouldParse(candidate);
-      if (mustParse &&
-          (ParseService.instance.enabled ||
-              ParseService.instance.hasParsers)) {
-        final outcome = await ParseService.instance.parseOutcome(candidate);
-        if (outcome != null && outcome.url.isNotEmpty) {
-          AppLog.instance.log(
-              '[AntBridge] player.open 解析「${outcome.sourceName}」→ ${outcome.url}'
-              '（${outcome.direct ? "直链" : "仍为网页，转嗅探"}）');
-          candidate = outcome.url;
-          // 解析接口自带的请求头（防盗链）随地址带上；小程序传入的优先
-          final h = outcome.headers;
-          if (h != null && h.isNotEmpty) {
-            headers = {...h, ...headers};
-          }
-          // 「播放带 Referer」开关打开时，解析结果也补 Referer（P2-2 一致性）
-          if (PlayerPrefs.instance.shouldSendRefererFor(url, candidate)) {
-            headers = <String, String>{...headers}
-              ..putIfAbsent('Referer', () => url.trim());
-          }
-        } else {
-          AppLog.instance.log('[AntBridge] player.open 解析未命中，转直接嗅探');
-        }
-      }
-      if (!SniffFilter.isDirectMedia(candidate) &&
-          PlayerPrefs.instance.sniffEnabled.value) {
-        AppLog.instance.log('[AntBridge] player.open 转嗅探: $candidate');
+    // 与影视端 / 海阔**共用同一条** [PlayPipeline]（2026-10-29 重构）：
+    //   ① 直链 → 原生播放器；
+    //   ② 主流站 / 线路标了 parse|jx → 解析接口，解出直链直接播，
+    //      解出网页继续走下一步；
+    //   ③ 仍是网页 → 嗅探开关打开进嗅探页，否则内嵌网页播放器。
+    final resolution = await PlayPipeline.instance.resolve(
+      url,
+      headers: headers,
+      sourceWantsParse:
+          parse == '1' || jx == '1' || SniffFilter.shouldParse(url),
+      refererPage: url,
+    );
+    if (resolution.isPage) {
+      if (PlayerPrefs.instance.sniffEnabled.value) {
+        AppLog.instance.log('[AntBridge] player.open 转嗅探: ${resolution.url}');
         // 把小程序传入的请求头带给嗅探页（嗅探到直链后播放要用）
         Get.to(() => SniffPlayerPage(
-            url: candidate,
+            url: resolution.url,
             title: title,
-            headers: headers.isEmpty ? null : headers));
-        return {'route': 'sniff', 'url': candidate, 'sniff': true};
+            headers: resolution.headers.isEmpty ? null : resolution.headers));
+        return {'route': 'sniff', 'url': resolution.url, 'sniff': true};
       }
-      if (!SniffFilter.isDirectMedia(candidate)) {
-        // 嗅探总开关关闭（默认）：网页地址不再进嗅探页，改用内嵌网页
-        // 播放器打开——直接丢给原生播放器会黑屏（2026-10-15）。
-        AppLog.instance.log(
-            '[AntBridge] player.open 嗅探已关闭，网页地址转内嵌网页播放器: $candidate');
-        Get.to(() => PlaybackSurface.webFallback(url: candidate, title: title));
-        return {'route': 'webview', 'url': candidate, 'sniff': false};
-      }
+      // 嗅探总开关关闭（默认）：网页地址不再进嗅探页，改用内嵌网页
+      // 播放器打开——直接丢给原生播放器会黑屏（2026-10-15）。
+      AppLog.instance.log(
+          '[AntBridge] player.open 嗅探已关闭，网页地址转内嵌网页播放器: ${resolution.url}');
+      Get.to(() => PlaybackSurface.webFallback(
+          url: resolution.url, title: title));
+      return {'route': 'webview', 'url': resolution.url, 'sniff': false};
+    }
+    if (!resolution.isMedia) {
+      // novel:// / pics:// —— 阅读器形态，不该从 player.open 进来
+      throw AntError('INVALID_PARAMS', 'player.open: 该地址不是视频播放地址');
     }
 
-    AppLog.instance.log('[AntBridge] player.open: $title $candidate');
-    Get.to(() => MiniAppPlayerPage(url: candidate, title: title, headers: headers));
+    AppLog.instance.log('[AntBridge] player.open: $title ${resolution.url}');
+    Get.to(() => MiniAppPlayerPage(
+        url: resolution.url, title: title, headers: resolution.headers));
     return {
       'route': 'player',
-      'url': candidate,
+      'url': resolution.url,
       'sniff': false,
-      'headerKeys': headers.keys.toList(),
+      'headerKeys': resolution.headers.keys.toList(),
     };
   }
 }

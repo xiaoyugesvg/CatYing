@@ -10,8 +10,7 @@ import 'package:tvbox/pages/detail/simple_image_reader_page.dart';
 import 'package:tvbox/pages/detail/simple_text_reader_page.dart';
 import 'package:tvbox/pages/play/sniff_player_page.dart';
 import 'package:tvbox/services/app_log.dart';
-import 'package:tvbox/services/parse_service.dart';
-import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/services/play_pipeline.dart';
 import 'package:tvbox/services/sniff_filter.dart';
 import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/hiker/models/hiker_source.dart';
@@ -751,40 +750,31 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
     );
   }
 
-  /// 海阔媒体统一分发（2026-10-28，审计 P1-2）。
+  /// 海阔媒体统一分发（2026-10-29 重构：与影视端共用 [PlayPipeline]）。
   ///
-  /// 之前海阔只有嗅探、不过解析：主流站（优爱腾芒B…）的网页地址直接进
-  /// 原生播放器会黑屏，且永远拿不到直链。这里和影视端对齐：
-  ///   ① 直链 → 原生播放器（`MiniAppPlayerPage`）；
-  ///   ② 否则若 `shouldParse`（主流站 / 源标了 parse）→ 先过解析接口；
-  ///      解析出直链直接播、解析出网页转嗅探页、未命中再嗅探兜底；
-  ///   ③ 既非直链又不应解析 → 嗅探页兜底。
+  /// 之前海阔自己写了一份"直链 → 解析 → 嗅探"，判据和详情页漂移：
+  /// 主流站网页地址直接进原生播放器会黑屏，且永远拿不到直链。
+  /// 现在链路只有一条：
+  ///   ① 直链 / 解析得到直链 → 原生播放器；
+  ///   ② 仍是网页 → 嗅探页兜底（自动嗅探 m3u8）。
   Future<void> _resolveAndPlay(String url, Map<String, String> headers) async {
-    if (SniffFilter.isDirectMedia(url)) {
-      return _pushPlayer(url, headers);
+    final resolution = await PlayPipeline.instance.resolve(
+      url,
+      headers: headers,
+      sourceWantsParse: SniffFilter.shouldParse(url),
+      apiBase: null,
+      refererPage: url,
+    );
+    switch (resolution.kind) {
+      case PlayKind.media:
+        return _pushPlayer(resolution.url, resolution.headers);
+      case PlayKind.page:
+        return _pushWeb(resolution.url, headers: resolution.headers);
+      case PlayKind.novel:
+      case PlayKind.pictures:
+        // 这两类在 `hikerLinkKind` 分流时就已经进阅读器，这里只兜底不播。
+        return;
     }
-    if (SniffFilter.shouldParse(url)) {
-      final outcome = await ParseService.instance
-          .parseOutcome(url, headers: headers.isEmpty ? null : headers);
-      if (outcome != null && outcome.url.isNotEmpty) {
-        final h = outcome.headers;
-        var merged = (h != null && h.isNotEmpty)
-            ? <String, String>{...h, ...headers}
-            : headers;
-        // 「播放带 Referer」开关打开时，解析结果也补 Referer（P2-2 一致性）
-        if (PlayerPrefs.instance.shouldSendRefererFor(url, outcome.url)) {
-          merged = <String, String>{...merged}
-            ..putIfAbsent('Referer', () => url.trim());
-        }
-        if (outcome.direct) {
-          return _pushPlayer(outcome.url, merged);
-        }
-        // 解析出网页（type 0 通用解析站返回播放页）→ 转嗅探页继续找直链
-        return _pushWeb(outcome.url, headers: merged);
-      }
-    }
-    // 非直链、且不应解析（或解析未命中）→ 嗅探页兜底
-    return _pushWeb(url, headers: headers);
   }
 
   /// 进内嵌网页：**自动嗅探**网页里的 m3u8/mp4（不依赖全局嗅探开关）。

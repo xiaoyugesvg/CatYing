@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:tvbox/pages/cf_verify_page.dart';
 import 'package:tvbox/widgets/video_player_pip.dart';
 import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/play_context_store.dart';
 import 'package:tvbox/services/cf_session.dart';
 import 'package:tvbox/services/dio_factory.dart';
 import 'package:tvbox/services/drpy_service.dart';
@@ -1419,6 +1420,15 @@ class SpiderService {
     String? jar,
   }) {
     _currentSpider = (key: key, type: type, api: api ?? '', ext: ext ?? '');
+    // 落一份到持久化仓库：进程被杀 / 会话失效 / 从历史直接进详情时，
+    // 详情页可以按源 key 把这个上下文原样恢复（见 play_context_store.dart）。
+    PlayContextStore.instance.rememberSpider(
+      key: key,
+      type: type,
+      api: api ?? '',
+      ext: ext ?? '',
+      jar: jar ?? '',
+    );
     AppLog.instance.log(
       '[SpiderService] setCurrentSpider: key=$key, type=$type, api=$api, ext=$ext',
     );
