@@ -5,6 +5,7 @@ import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/reading/services/settings_service.dart';
 import 'package:tvbox/services/nav_feature_service.dart';
 import 'package:tvbox/pages/settings/sub/nav_appearance_page.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 
 /// 设置 → 主页页面
@@ -635,18 +636,11 @@ class HomePagesSettingsPage extends StatelessWidget {
                 ],
               ),
             ),
-            // 开关
-            Transform.scale(
-              scale: 0.85,
-              child: Switch(
-                value: isEnabled,
-                // 必需页面：开关禁用（参考图里也是灰的）
-                onChanged: f.required
-                    ? null
-                    : (v) => svc.setEnabled(f, v),
-                activeThumbColor: AppTheme.accentColor,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
+            // 开关（统一组件，见 AppSwitch）
+            AppSwitch(
+              value: isEnabled,
+              // 必需页面：开关禁用（参考图里也是灰的）
+              onChanged: f.required ? null : (v) => svc.setEnabled(f, v),
             ),
             const SizedBox(width: 6),
           ],

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:tvbox/reading/services/ai_service.dart';
 import 'package:tvbox/pages/settings/sub/log_diagnosis_page.dart';
 
@@ -1037,9 +1038,8 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                   ],
                 ),
               ),
-              Switch.adaptive(
+              AppSwitch(
                 value: _readerSeparate,
-                activeTrackColor: AppTheme.accentOnSurface,
                 onChanged: (v) => setState(() => _readerSeparate = v),
               ),
             ],

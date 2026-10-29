@@ -550,7 +550,7 @@ class _TgSourcePageState extends State<TgSourcePage> {
                     ],
                   ),
                 ),
-                Switch(
+                AppSwitch(
                   value: _tg.proxyOn,
                   onChanged: _probeBusy ? null : _togglePool,
                 ),
@@ -661,7 +661,7 @@ class _TgSourcePageState extends State<TgSourcePage> {
                         ],
                       ),
                     ),
-                    Switch(
+                    AppSwitch(
                       value: f.blockEmoji,
                       onChanged: (v) => f.setBlockEmoji(v),
                     ),

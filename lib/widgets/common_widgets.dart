@@ -468,14 +468,10 @@ class SettingsRow extends StatelessWidget {
             ),
           if (trailingSwitch) ...[
             const SizedBox(width: AppTheme.spacingSM),
-            Transform.scale(
-              scale: 0.85, // 开关略收，避免撑高行
-              child: Switch(
-                value: switchValue,
-                onChanged: switchEnabled ? onSwitchChanged : null,
-                activeThumbColor: AppTheme.accentColor,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
+            // 统一开关（见 AppSwitch 文档）
+            AppSwitch(
+              value: switchValue,
+              onChanged: switchEnabled ? onSwitchChanged : null,
             ),
           ] else if (onTap != null) ...[
             const SizedBox(width: 4),
@@ -887,6 +883,50 @@ class CardGridAvatar extends StatelessWidget {
           fontWeight: FontWeight.bold,
           color: accent,
         ),
+      ),
+    );
+  }
+}
+
+/// 全局统一开关。
+///
+/// 用户 2026-10-29：「设置页面、订阅管理里面这些卡片，开关按钮的样式要一样」。
+///
+/// 在此之前同一个页面族里并存了 6 种写法 —— 缩放 0.85 / 0.9 / 不缩放、
+/// `Switch` 与 `Switch.adaptive` 混用、有的设 `activeThumbColor` 有的不设，
+/// 视觉上确实参差不齐。现在全部收敛到这一个组件：
+///   · 统一 `Transform.scale(0.85)`（避免撑高行，与 [AppCard] 的
+///     `trailingSwitch` 完全一致）；
+///   · 统一 `activeThumbColor = AppTheme.accentColor`；
+///   · 统一 `materialTapTargetSize.shrinkWrap`（去掉多余的点击留白）。
+///
+/// 新代码一律用它，不要再直接写 `Switch` / `Switch.adaptive`。
+class AppSwitch extends StatelessWidget {
+  const AppSwitch({
+    super.key,
+    required this.value,
+    this.onChanged,
+    this.scale = 0.85,
+  });
+
+  final bool value;
+
+  /// null = 禁用（显示为灰）
+  final ValueChanged<bool>? onChanged;
+
+  /// 缩放。默认 0.85；个别「大开关」场景可传 1.0，但**不要**再传 0.9 之类的
+  /// 第三种值 —— 那就是这次要消掉的参差。
+  final double scale;
+
+  @override
+  Widget build(BuildContext context) {
+    return Transform.scale(
+      scale: scale,
+      child: Switch(
+        value: value,
+        onChanged: onChanged,
+        activeThumbColor: AppTheme.accentColor,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
     );
   }

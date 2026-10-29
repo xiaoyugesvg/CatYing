@@ -395,14 +395,9 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
               ],
             ),
           ),
-          Transform.scale(
-            scale: 0.9,
-            child: Switch(
-              value: value,
-              onChanged: onChanged,
-              activeThumbColor: AppTheme.accentColor,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
+          AppSwitch(
+            value: value,
+            onChanged: onChanged,
           ),
         ],
       ),

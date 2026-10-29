@@ -153,14 +153,9 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
                 ],
               ),
             ),
-            Transform.scale(
-              scale: 0.85,
-              child: Switch(
-                value: _remote.enabled,
-                activeThumbColor: AppTheme.accentColor,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                onChanged: (v) => _setRemote(enabled: v),
-              ),
+            AppSwitch(
+              value: _remote.enabled,
+              onChanged: (v) => _setRemote(enabled: v),
             ),
           ],
         ),
@@ -270,7 +265,7 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
             ],
           ),
         ),
-        Switch.adaptive(value: value, onChanged: onChanged),
+        AppSwitch(value: value, onChanged: onChanged),
       ],
     );
   }
