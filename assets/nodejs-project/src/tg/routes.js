@@ -113,9 +113,32 @@ async function proxyStream(req, res, targetUrl) {
     } catch (_) {
         return;
     }
+    // 🔴 上游中途断流时必须 **destroy** 而不是 end()（用户 2026-10-29
+    //   「加载出来了画面，但是就是超时播放不了」）：
+    //   响应头里已经写了 Content-Length，上游少给字节却"正常结束" ⇒
+    //   播放器等的是剩下的字节，既不报错也不继续收 ⇒ 一直缓冲到它自己的
+    //   超时（App 侧 15s 的「加载超时」）。断连接它才会立刻重试。
+    const bail = () => {
+        try { r.data.destroy(); } catch (_) {}
+        try { res.destroy(); } catch (_) {}
+    };
+    r.data.on('error', bail);
+    r.data.on('aborted', bail);
+    // 上游「正常结束但字节不够」也要按断流处理。
+    // 监听器注册在 pipe 之前 ⇒ 先于 pipe 的 onend 执行，能抢先把连接断掉。
+    let piped = 0;
+    const want = parseInt(cl || '0', 10) || 0;
+    r.data.on('data', (c) => { piped += c.length; });
+    r.data.on('end', () => {
+        if (want > 0 && piped < want) {
+            console.warn(`[TG] 上游提前结束：${piped}/${want} 字节`);
+            bail();
+        }
+    });
     r.data.pipe(res);
-    r.data.on('error', () => { try { res.end(); } catch (_) {} });
-    req.on('close', () => { try { r.data.destroy(); } catch (_) {} });
+    req.on('close', () => {
+        try { r.data.destroy(); } catch (_) {}
+    });
 }
 
 function readJson(req) {

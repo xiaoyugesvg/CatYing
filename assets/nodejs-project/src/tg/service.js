@@ -26,6 +26,7 @@ import { StringSession } from 'telegram/sessions/index.js';
 import { ConnectionTCPFull } from 'telegram/network/index.js';
 import QRCode from 'qrcode';
 import { titleFromGuillemets } from './public.js';
+import { parseRange, requestSizeFor } from './range.js';
 
 // ── 全局状态 ────────────────────────────────────────────────
 // 内置应用凭据（Telegram Desktop 公开的一组）：Dart 侧没推配置时也能直接扫码，
@@ -599,25 +600,20 @@ export async function streamTo(req, res, peer, id, fileName) {
     const mime = doc.mimeType || 'video/mp4';
     const name = fileName || docFileName(doc) || `tg-${id}.mp4`;
 
-    // 解析 Range
-    let start = 0;
-    let end = size > 0 ? size - 1 : 0;
-    let partial = false;
-    const rng = req.headers.range;
-    if (rng) {
-        const m = /bytes=(\d*)-(\d*)/.exec(String(rng));
-        if (m) {
-            partial = true;
-            if (m[1] !== '') start = parseInt(m[1], 10);
-            if (m[2] !== '') end = parseInt(m[2], 10);
-            else if (size > 0) end = size - 1;
-        }
+    // 解析 Range（后缀区间 / 总长未知 / 不可满足 ⇒ 见 range.js 的注释）
+    const spec = parseRange(req.headers.range, size);
+    if (spec.unsatisfiable) {
+        // 416 必须带 `Content-Range: bytes */size`，播放器才知道真实长度、
+        // 才能改发一个合法区间。原来这里是「夹成 1 个字节」⇒ 错位数据。
+        res.writeHead(416, {
+            'Content-Range': `bytes */${size}`,
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'no-store',
+        });
+        res.end();
+        return;
     }
-    if (size > 0) {
-        if (end >= size) end = size - 1;
-        if (start > end) start = end;
-    }
-    const len = size > 0 ? (end - start + 1) : 0;
+    const { start, end, len, partial } = spec;
 
     const headers = {
         'Content-Type': mime,
@@ -641,6 +637,8 @@ export async function streamTo(req, res, peer, id, fileName) {
     //   先抓一块，失败就返回 502 + 错误 JSON，播放器立刻能报错。
     let it;
     let first = null;
+    // 本次单块字节数：小请求（探流 2 字节）只取 4KB，别为了 2 字节拖 256KB
+    const chunkBytes = requestSizeFor(len);
     try {
         // ⚠️ 这里必须重新 ensureConnected：getDoc 命中 msgCache 时**不会建连**，
         //   直接 `st.client.iterDownload` 会在 client 为 null 时抛 TypeError
@@ -657,8 +655,11 @@ export async function streamTo(req, res, peer, id, fileName) {
             // ⚠️ 这两个必须是 big-integer：gramjs 内部对它们调 .add/.divide，
             //   传 number 就是 "o.add is not a function"（用户 2026-10-26）
             offset: bigInt(start),
-            requestSize: 256 * 1024,
-            chunkSize: 256 * 1024,
+            // 播放器探流只发 `bytes=0-1`（要 2 字节），原来固定 256KB ⇒
+            // 为了回 2 字节先从 Telegram 拖 256KB，慢网下这一下就超时。
+            // 按实际区间收窄（下限 4KB），起播/拖进度都明显更快。
+            requestSize: chunkBytes,
+            chunkSize: chunkBytes,
             fileSize: size > 0 ? bigInt(size) : undefined,
             // 长视频中途 fileReference 会过期：带上 [inputChat, msgId]，
             // gramjs 能自己重新拉一次消息换取新引用（和 downloadMedia 内部一致）
@@ -687,7 +688,13 @@ export async function streamTo(req, res, peer, id, fileName) {
         return;
     }
     if (!first) {
-        res.writeHead(200, headers);
+        // 一个字节都没取到：若已声明 Content-Length，**必须**断连接而不是 end()
+        res.writeHead(partial ? 206 : 200, headers);
+        if (len > 0) {
+            logErr('stream.empty', new Error(`没取到字节（期望 ${len}）`));
+            try { res.destroy(); } catch (_) {}
+            return;
+        }
         res.end();
         return;
     }
@@ -716,6 +723,17 @@ export async function streamTo(req, res, peer, id, fileName) {
                 // 背压：等 drain，避免内存暴涨
                 await new Promise((r2) => res.once('drain', r2));
             }
+        }
+        // 🔴 用户 2026-10-29「加载出来了画面，但是就是超时播放不了」：
+        //   上游提前耗尽（TG 侧 done、FLOOD_WAIT 后中途放弃）时，原来直接
+        //   `res.end()` —— 但响应头里已经写了 `Content-Length: len`，
+        //   播放器等的是剩下的字节，**连接却是"正常结束"** ⇒ 它既不报错
+        //   也不继续收，就一直缓冲到自己的超时（15s 的"加载超时"）。
+        //   字节没发够就必须 destroy，让播放器立刻看到网络中断并自己重试。
+        if (len > 0 && sent < len) {
+            logErr('stream.short', new Error(`只发出 ${sent}/${len} 字节`));
+            try { res.destroy(); } catch (_) {}
+            return;
         }
         res.end();
     } catch (e) {

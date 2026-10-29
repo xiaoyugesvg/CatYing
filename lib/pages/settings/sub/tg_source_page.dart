@@ -452,10 +452,28 @@ class _TgSourcePageState extends State<TgSourcePage> {
     );
   }
 
+  /// 区块标题：主题色竖条 + 加粗文字（原来只有一行浅灰小字，整页像一份
+  /// 没分段的表单；改成和首页/海阔同一套"竖条 + 标题"之后层次立刻出来）
   Widget _section(String t) => Padding(
-        padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
-        child: Text(t,
-            style: TextStyle(color: AppTheme.textTertiary, fontSize: 11.5)),
+        padding: const EdgeInsets.fromLTRB(4, 14, 4, 8),
+        child: Row(
+          children: [
+            Container(
+              width: 3,
+              height: 12,
+              decoration: BoxDecoration(
+                color: AppTheme.accentOnSurface,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: 7),
+            Text(t,
+                style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700)),
+          ],
+        ),
       );
 
   Widget _card(Widget child) =>

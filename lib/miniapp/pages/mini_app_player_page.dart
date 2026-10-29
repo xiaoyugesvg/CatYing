@@ -60,7 +60,11 @@ class _MiniAppPlayerPageState extends State<MiniAppPlayerPage> {
           responseType: ResponseType.bytes,
           headers: const {'Range': 'bytes=0-1'},
           validateStatus: (_) => true,
-          receiveTimeout: const Duration(seconds: 6),
+          // TG 取流要先回一趟 Telegram 机房拿首块，6s 对慢网/大文件太紧，
+          // 会把"只是慢"报成失败（用户 2026-10-29「加载出来画面但播放超时」）。
+          // Node 侧已按实际区间收窄请求（探流只取 4KB 而不是 256KB），
+          // 这里放宽到 15s 只是兜底。
+          receiveTimeout: const Duration(seconds: 15),
         ),
       );
       final code = r.statusCode ?? 0;
@@ -81,6 +85,14 @@ class _MiniAppPlayerPageState extends State<MiniAppPlayerPage> {
           } catch (_) {}
         }
       }
+    } on DioException catch (e) {
+      // 超时不要说成"无法连接"——两者给用户的下一步动作不一样
+      err = (e.type == DioExceptionType.receiveTimeout ||
+              e.type == DioExceptionType.connectionTimeout)
+          ? '取流超时（15 秒没收到数据）。\n'
+              '大文件/慢网下第一次起播可能就要这么久，点「重试」再试一次；\n'
+              '仍然不行就去 TG 设置里开「内置代理池」。'
+          : '无法连接 TG 取流服务：${e.message ?? e}';
     } catch (e) {
       err = '无法连接 TG 取流服务：$e';
     }
@@ -115,6 +127,9 @@ class _MiniAppPlayerPageState extends State<MiniAppPlayerPage> {
       url: widget.url,
       videoTitle: widget.title.isEmpty ? '播放' : widget.title,
       headers: widget.headers,
+      // TG 源每个分片都要回一趟 Telegram 机房，首块+缓冲延迟天然比 CDN 高。
+      // 15s 的通用阈值会把"慢"误判成"坏"（弹出「加载超时」），这里放到 45s。
+      stallSeconds: _isTg ? 45 : 15,
       // 顶栏返回键由播放器自带、且**无条件显示**；不传 onBack 时点了
       // 什么都不会发生（只能靠系统手势退出）—— 2026-10-15 修复。
       onBack: () => Navigator.of(context).maybePop(),

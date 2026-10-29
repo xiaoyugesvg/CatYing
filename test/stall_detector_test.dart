@@ -118,4 +118,37 @@ void main() {
     d.markProgress(1, now: at(7));
     expect(d.idleFor(at(7)).inSeconds, 0);
   });
+
+  /// 用户 2026-10-29：「TG 视频加载出来画面了，但就是超时播放不了」
+  ///
+  /// 根因之一：TG 源每个分片都要回一趟 Telegram 机房，首块 + 缓冲的延迟
+  /// 天然比 CDN 直链高，**15s 的通用阈值会把"慢"误判成"坏"** ——
+  /// 画面已经出来（首帧解码成功），位置还没开始走，就被判「加载超时」
+  /// 盖了一层提示，看着就像"播不了"。
+  ///
+  /// 所以 `VideoPlayerWidget.stallSeconds` 开放出来，TG 传 45。
+  /// 这条测试把两种阈值的**行为差异**钉住，防止以后又被改回一刀切。
+  test('TG 慢源：15s 会误报，45s 阈值下同样的等待不算卡死', () {
+    // 通用阈值：第 15 秒就报（对 TG 就是误报）
+    final fast = StallDetector(thresholdSeconds: 15, now: base);
+    expect(fast.tick(buffering: true, playing: true, now: at(15)), isTrue,
+        reason: '15s 阈值在 TG 上就是误报来源');
+
+    // TG 阈值：同样的 15 秒、甚至 44 秒都不该报
+    final tg = StallDetector(thresholdSeconds: 45, now: base);
+    for (final s in [15, 30, 44]) {
+      expect(tg.tick(buffering: true, playing: true, now: at(s)), isFalse,
+          reason: 'TG 源第 $s 秒还在正常缓冲，不该弹「加载超时」');
+    }
+    // 真的超过 45s 才报（该报的时候还是要报，别把真故障也放过）
+    expect(tg.tick(buffering: true, playing: true, now: at(45)), isTrue,
+        reason: '45s 都没动静就是真卡了，必须提示可重试');
+  });
+
+  test('TG 阈值下位置一旦前进，立刻解除卡死判定', () {
+    final tg = StallDetector(thresholdSeconds: 45, now: base);
+    expect(tg.tick(buffering: true, playing: true, now: at(45)), isTrue);
+    tg.markProgress(3, now: at(46));
+    expect(tg.stalled, isFalse, reason: '开始播了就不该再挂着「加载超时」');
+  });
 }

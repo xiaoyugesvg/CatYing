@@ -288,22 +288,36 @@ class _TgHomePageState extends State<TgHomePage> {
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(
             color: on
-                ? AppTheme.accentOnSurface.withValues(alpha: 0.16)
+                ? AppTheme.accentSurface
                 : AppTheme.backgroundTertiary,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: on
-                  ? AppTheme.accentOnSurface
+                  ? AppTheme.accentOnSurface.withValues(alpha: 0.55)
                   : AppTheme.borderLight.withValues(alpha: 0.6),
-              width: on ? 1 : 0.6,
+              width: 0.6,
             ),
           ),
           child: Row(
             children: [
-              Icon(mode == 'login' ? Icons.lock_outline : Icons.public,
-                  size: 16,
-                  color: on ? AppTheme.accentOnSurface : AppTheme.textTertiary),
-              const SizedBox(width: 6),
+              // 首字色块当头像（与顶栏一致）
+              Container(
+                width: 26,
+                height: 26,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: on
+                      ? AppTheme.accentOnSurface.withValues(alpha: 0.22)
+                      : AppTheme.backgroundCard,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                    mode == 'login' ? Icons.lock_outline : Icons.public,
+                    size: 14,
+                    color:
+                        on ? AppTheme.accentOnSurface : AppTheme.textTertiary),
+              ),
+              const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -315,21 +329,27 @@ class _TgHomePageState extends State<TgHomePage> {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 12.5,
-                        fontWeight: on ? FontWeight.w600 : FontWeight.w500,
-                        color:
-                            on ? AppTheme.accentOnSurface : AppTheme.textPrimary,
+                        fontWeight: on ? FontWeight.w700 : FontWeight.w500,
+                        height: 1.2,
+                        color: on
+                            ? AppTheme.accentOnSurface
+                            : AppTheme.textPrimary,
                       ),
                     ),
+                    const SizedBox(height: 2),
                     Text('@$peer',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                            fontSize: 10, color: AppTheme.textTertiary)),
+                            fontSize: 10,
+                            height: 1.2,
+                            color: AppTheme.textTertiary)),
                   ],
                 ),
               ),
               if (on)
-                Icon(Icons.check, size: 15, color: AppTheme.accentOnSurface),
+                Icon(Icons.check_circle_rounded,
+                    size: 16, color: AppTheme.accentOnSurface),
             ],
           ),
         ),
@@ -363,16 +383,30 @@ class _TgHomePageState extends State<TgHomePage> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
               child: Row(
                 children: [
                   Text('切换群组',
                       style: TextStyle(
-                          fontSize: 15,
+                          fontSize: 16,
                           fontWeight: FontWeight.w700,
                           color: AppTheme.textPrimary)),
+                  const SizedBox(width: 7),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: AppTheme.backgroundTertiary,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text('${all.length}',
+                        style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textSecondary)),
+                  ),
                   const Spacer(),
-                  Text('${all.length} 个',
+                  Text('点一下切换',
                       style: TextStyle(
                           fontSize: 11, color: AppTheme.textTertiary)),
                 ],
@@ -414,11 +448,21 @@ class _TgHomePageState extends State<TgHomePage> {
   // ── 点击条目：操作弹窗 ──────────────────────────────────
   void _itemSheet(Map<String, dynamic> it) {
     final title = (it['title'] ?? '').toString();
+    final thumb = (it['thumb'] ?? '').toString();
+    final dur = (it['duration'] as num?)?.toInt() ?? 0;
+    final size = (it['size'] as num?)?.toInt() ?? 0;
+    final zh = it['_zh'];
+    final shown = (zh is String && zh.isNotEmpty) ? zh : title;
     Get.bottomSheet(
       Container(
         decoration: BoxDecoration(
           color: AppTheme.backgroundSecondary,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+          border: Border(
+            top: BorderSide(
+                color: AppTheme.borderLight.withValues(alpha: 0.6),
+                width: 0.6),
+          ),
         ),
         child: SafeArea(
           top: false,
@@ -434,34 +478,111 @@ class _TgHomePageState extends State<TgHomePage> {
                   borderRadius: BorderRadius.circular(10),
                 ),
               ),
+              // ── 头部：封面 + 标题 + meta（原来只有一行光秃秃的标题）──
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
-                child: Text(title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.textPrimary)),
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: SizedBox(
+                        width: 96,
+                        height: 54,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            thumb.isEmpty
+                                ? Container(
+                                    color: AppTheme.backgroundTertiary,
+                                    child: Icon(Icons.movie_outlined,
+                                        size: 20,
+                                        color: AppTheme.textTertiary))
+                                : Image.network(_tg.absolute(thumb),
+                                    fit: BoxFit.cover,
+                                    cacheWidth: 192,
+                                    errorBuilder: (_, __, ___) => Container(
+                                          color: AppTheme.backgroundTertiary,
+                                          child: Icon(Icons.movie_outlined,
+                                              size: 20,
+                                              color: AppTheme.textTertiary),
+                                        )),
+                            if (dur > 0)
+                              Positioned(
+                                right: 3,
+                                bottom: 3,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 4, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.62),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(_dur(dur),
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.w600)),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 11),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(shown,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  height: 1.35,
+                                  color: AppTheme.textPrimary)),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 5,
+                            runSpacing: 4,
+                            children: [
+                              if (size > 0)
+                                _metaPill(
+                                    Icons.sd_storage_outlined, _size(size)),
+                              if (dur > 0)
+                                _metaPill(Icons.schedule_rounded, _dur(dur)),
+                              _metaPill(Icons.alternate_email_rounded,
+                                  _peer.isEmpty ? '未知频道' : _peer),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
+              Divider(
+                  height: 1,
+                  thickness: 0.6,
+                  color: AppTheme.borderLight.withValues(alpha: 0.6)),
               // 操作项也做成**一行两个的卡片**（用户 2026-10-25：
               // 「切换源以及长按的也是卡片网格式的」）
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 14),
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
                 child: GridView.count(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   crossAxisCount: 2,
                   mainAxisSpacing: 8,
                   crossAxisSpacing: 8,
-                  childAspectRatio: 2.6,
+                  childAspectRatio: 2.9,
                   children: [
                     _actionCard(Icons.play_circle_outline, '播放', () {
                       Get.back();
                       _play(it);
-                    }),
-                    _actionCard(Icons.bookmark_add_outlined, '收藏当前频道',
-                        () async {
+                    }, primary: true),
+                    _actionCard(Icons.bookmark_add_outlined, '收藏频道', () async {
                       Get.back();
                       await _tg.addChannel(_peer, title: _title, mode: _mode);
                       await _reloadGroups();
@@ -471,6 +592,12 @@ class _TgHomePageState extends State<TgHomePage> {
                       Get.back();
                       final url = 'https://t.me/$_peer/${it['id']}';
                       await _copy(url);
+                    }),
+                    _actionCard(Icons.translate_rounded,
+                        (zh is String && zh.isNotEmpty) ? '还原原文' : '翻译标题',
+                        () {
+                      Get.back();
+                      _toggleZh(it);
                     }),
                   ],
                 ),
@@ -484,21 +611,45 @@ class _TgHomePageState extends State<TgHomePage> {
   }
 
   /// 操作弹窗里的一张动作卡（一行两个）
-  Widget _actionCard(IconData icon, String label, VoidCallback onTap) {
+  ///
+  /// [primary] = 主操作（播放）：图标块用实心强调色，和另外三个区分开。
+  Widget _actionCard(IconData icon, String label, VoidCallback onTap,
+      {bool primary = false}) {
     return InkWell(
       borderRadius: BorderRadius.circular(12),
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
-          color: AppTheme.backgroundTertiary,
+          color: primary
+              ? AppTheme.accentOnSurface.withValues(alpha: 0.20)
+              : AppTheme.backgroundTertiary,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-              color: AppTheme.borderLight.withValues(alpha: 0.6), width: 0.6),
+            color: primary
+                ? AppTheme.accentOnSurface.withValues(alpha: 0.55)
+                : AppTheme.borderLight.withValues(alpha: 0.6),
+            width: 0.6,
+          ),
         ),
         child: Row(
           children: [
-            Icon(icon, size: 18, color: AppTheme.accentOnSurface),
+            Container(
+              width: 24,
+              height: 24,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: primary
+                    ? AppTheme.accentOnSurface.withValues(alpha: 0.30)
+                    : AppTheme.backgroundCard,
+                borderRadius: BorderRadius.circular(7),
+              ),
+              child: Icon(icon,
+                  size: 15,
+                  color: primary
+                      ? AppTheme.accentOnSurface
+                      : AppTheme.textSecondary),
+            ),
             const SizedBox(width: 8),
             Expanded(
               child: Text(label,
@@ -506,7 +657,7 @@ class _TgHomePageState extends State<TgHomePage> {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                       fontSize: 12.5,
-                      fontWeight: FontWeight.w500,
+                      fontWeight: primary ? FontWeight.w600 : FontWeight.w500,
                       color: AppTheme.textPrimary)),
             ),
           ],
@@ -573,57 +724,84 @@ class _TgHomePageState extends State<TgHomePage> {
 
   Widget _header() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 6, 6),
+      padding: const EdgeInsets.fromLTRB(14, 8, 8, 4),
       child: Row(
         children: [
-          // 左：切换群组
-          InkWell(
-            borderRadius: BorderRadius.circular(20),
-            onTap: _openSwitchSheet,
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(10, 6, 8, 6),
-              decoration: BoxDecoration(
-                color: AppTheme.backgroundTertiary,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.swap_horiz_rounded,
-                      size: 16, color: AppTheme.textSecondary),
-                  const SizedBox(width: 4),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 120),
-                    child: Text(
-                      _title.isEmpty ? '选择群组' : _title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.textPrimary),
-                    ),
+          // 左：当前频道（头像 + 名称 + @peer/类型），点开切换
+          if (!_searching)
+            Flexible(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: _openSwitchSheet,
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(6, 5, 8, 5),
+                  decoration: BoxDecoration(
+                    color: AppTheme.backgroundTertiary,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                        color: AppTheme.borderLight.withValues(alpha: 0.5),
+                        width: 0.6),
                   ),
-                  Icon(Icons.expand_more_rounded,
-                      size: 17, color: AppTheme.textTertiary),
-                ],
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _channelAvatar(),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _title.isEmpty ? '选择群组' : _title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w700,
+                                  height: 1.2,
+                                  color: AppTheme.textPrimary),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _peer.isEmpty
+                                  ? '公开频道 / 私有群'
+                                  : '@$_peer · ${_mode == 'login' ? '私有群' : '公开频道'}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: 10.5,
+                                  height: 1.2,
+                                  color: AppTheme.textTertiary),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      Icon(Icons.expand_more_rounded,
+                          size: 16, color: AppTheme.textTertiary),
+                    ],
+                  ),
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 8),
           // 中：搜索框（点开才展开）
           Expanded(
             child: _searching
                 ? Container(
-                    height: 34,
+                    height: 36,
+                    margin: const EdgeInsets.only(left: 8),
                     padding: const EdgeInsets.symmetric(horizontal: 10),
                     decoration: BoxDecoration(
                       color: AppTheme.backgroundTertiary,
-                      borderRadius: BorderRadius.circular(18),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                          color: AppTheme.borderLight.withValues(alpha: 0.5),
+                          width: 0.6),
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.search,
+                        Icon(Icons.search_rounded,
                             size: 16, color: AppTheme.textTertiary),
                         const SizedBox(width: 6),
                         Expanded(
@@ -636,7 +814,7 @@ class _TgHomePageState extends State<TgHomePage> {
                             decoration: InputDecoration(
                               isDense: true,
                               border: InputBorder.none,
-                              hintText: '在当前群内搜索',
+                              hintText: '在当前频道内搜索',
                               hintStyle: TextStyle(
                                   fontSize: 12, color: AppTheme.textTertiary),
                             ),
@@ -647,31 +825,62 @@ class _TgHomePageState extends State<TgHomePage> {
                   )
                 : const SizedBox.shrink(),
           ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            tooltip: '搜索',
-            onPressed: _toggleSearch,
-            icon: Icon(_searching ? Icons.close : Icons.search,
-                size: 20, color: AppTheme.textSecondary),
-          ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            tooltip: _grid ? '切换为列表' : '切换为网格',
-            onPressed: _toggleView,
-            icon: Icon(_grid ? Icons.view_list_rounded : Icons.grid_view_rounded,
-                size: 20, color: AppTheme.textSecondary),
-          ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            tooltip: 'TG 设置',
-            onPressed: () async {
+          _iconBtn(_searching ? Icons.close_rounded : Icons.search_rounded,
+              _searching ? '关闭搜索' : '搜索', _toggleSearch),
+          if (!_searching) ...[
+            _iconBtn(
+                _grid ? Icons.view_list_rounded : Icons.grid_view_rounded,
+                _grid ? '切换为列表' : '切换为网格',
+                _toggleView),
+            _iconBtn(Icons.settings_outlined, 'TG 设置', () async {
               await Get.to(() => const TgSourcePage());
               await _reloadGroups();
-            },
-            icon: Icon(Icons.settings_outlined,
-                size: 20, color: AppTheme.textSecondary),
-          ),
+            }),
+          ],
         ],
+      ),
+    );
+  }
+
+  /// 频道头像位：没有真头像，用频道名首字做色块（比一排图标更像"频道"）
+  Widget _channelAvatar() {
+    final name = _title.trim();
+    final ch = name.isEmpty ? 'T' : name.characters.first.toUpperCase();
+    return Container(
+      width: 30,
+      height: 30,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: AppTheme.accentSurface,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        ch,
+        style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: AppTheme.accentOnSurface),
+      ),
+    );
+  }
+
+  /// 顶栏图标按钮（统一 34×34 圆角方块，替代原来大小不一的 IconButton）
+  Widget _iconBtn(IconData icon, String tip, VoidCallback onTap) {
+    return SizedBox(
+      width: 34,
+      height: 34,
+      child: IconButton(
+        tooltip: tip,
+        padding: EdgeInsets.zero,
+        visualDensity: VisualDensity.compact,
+        splashRadius: 18,
+        style: IconButton.styleFrom(
+          backgroundColor: AppTheme.backgroundTertiary,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10)),
+        ),
+        onPressed: onTap,
+        icon: Icon(icon, size: 18, color: AppTheme.textSecondary),
       ),
     );
   }
@@ -713,20 +922,50 @@ class _TgHomePageState extends State<TgHomePage> {
           // 两列卡片）重复，去掉这条 tab 栏，统一从左上角切换。
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
               child: Row(
                 children: [
-                  Text(_query.isEmpty ? '最新' : '搜索结果 ${list.length}',
+                  // 主题色竖条 + 标题 + 计数（与海阔/影视的区块标题同一套观感）
+                  Container(
+                    width: 3,
+                    height: 13,
+                    decoration: BoxDecoration(
+                      color: AppTheme.accentOnSurface,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  Text(_query.isEmpty ? '最新' : '搜索结果',
                       style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
                           color: AppTheme.textPrimary)),
+                  if (_query.isEmpty ? list.isNotEmpty : true) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: AppTheme.backgroundTertiary,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text('${list.length}',
+                          style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.textSecondary)),
+                    ),
+                  ],
                   const Spacer(),
                   if (_loading)
                     const SizedBox(
                         width: 14,
                         height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2)),
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                  else
+                    Text(_grid ? '网格' : '列表',
+                        style: TextStyle(
+                            fontSize: 11, color: AppTheme.textTertiary)),
                 ],
               ),
             ),
@@ -791,19 +1030,39 @@ class _TgHomePageState extends State<TgHomePage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.telegram, size: 40, color: AppTheme.textTertiary),
-            const SizedBox(height: 12),
-            Text('还没有可看的群组\n公开频道直接贴名字就能看，私有群需要扫码登录',
+            Container(
+              width: 68,
+              height: 68,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AppTheme.backgroundTertiary,
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(
+                    color: AppTheme.borderLight.withValues(alpha: 0.6),
+                    width: 0.6),
+              ),
+              child: Icon(Icons.telegram,
+                  size: 32, color: AppTheme.textTertiary),
+            ),
+            const SizedBox(height: 16),
+            Text('还没有可看的频道',
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.textPrimary)),
+            const SizedBox(height: 8),
+            Text('公开频道直接贴名字就能看（免登录）；\n私有群要先扫码登录',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                     fontSize: 12.5, height: 1.7, color: AppTheme.textTertiary)),
-            const SizedBox(height: 14),
-            FilledButton(
+            const SizedBox(height: 18),
+            FilledButton.icon(
               onPressed: () async {
                 await Get.to(() => const TgSourcePage());
                 await _reloadGroups();
               },
-              child: const Text('去设置'),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('去添加频道'),
             ),
           ],
         ),
@@ -815,86 +1074,126 @@ class _TgHomePageState extends State<TgHomePage> {
   Widget _banner() {
     final items = _bannerItems;
     return SizedBox(
-      height: 168,
-      child: PageView.builder(
-        controller: _bannerCtrl,
-        itemCount: items.length,
-        onPageChanged: (i) => setState(() => _bannerIndex = i),
-        itemBuilder: (context, i) {
-          final it = items[i];
-          return GestureDetector(
-            onTap: () => _itemSheet(it),
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 5, vertical: 6),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                color: AppTheme.backgroundTertiary,
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  Image.network(
-                    _tg.absolute((it['thumb'] ?? '').toString()),
-                    fit: BoxFit.cover,
-                    cacheWidth: 900,
-                    errorBuilder: (_, __, ___) => Container(
-                      color: AppTheme.backgroundTertiary,
-                    ),
+      height: 172,
+      child: Stack(
+        children: [
+          PageView.builder(
+            controller: _bannerCtrl,
+            itemCount: items.length,
+            onPageChanged: (i) => setState(() => _bannerIndex = i),
+            itemBuilder: (context, i) {
+              final it = items[i];
+              return GestureDetector(
+                onTap: () => _itemSheet(it),
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 5, vertical: 6),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(18),
+                    color: AppTheme.backgroundTertiary,
+                    border: Border.all(
+                        color: AppTheme.borderLight.withValues(alpha: 0.5),
+                        width: 0.6),
                   ),
-                  // 底部渐变，保证文字可读
-                  Positioned.fill(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.transparent,
-                            Colors.black.withValues(alpha: 0.62),
-                          ],
-                          stops: const [0.45, 1.0],
+                  clipBehavior: Clip.antiAlias,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Image.network(
+                        _tg.absolute((it['thumb'] ?? '').toString()),
+                        fit: BoxFit.cover,
+                        cacheWidth: 900,
+                        errorBuilder: (_, __, ___) => Container(
+                          color: AppTheme.backgroundTertiary,
                         ),
                       ),
-                    ),
-                  ),
-                  Positioned(
-                    left: 14,
-                    right: 14,
-                    bottom: 12,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          (it['title'] ?? '').toString(),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              height: 1.3),
+                      // 底部渐变，保证文字可读
+                      Positioned.fill(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.black.withValues(alpha: 0.10),
+                                Colors.transparent,
+                                Colors.black.withValues(alpha: 0.70),
+                              ],
+                              stops: const [0.0, 0.42, 1.0],
+                            ),
+                          ),
                         ),
-                        const SizedBox(height: 3),
-                        Text(
-                          [
-                            if ((it['duration'] as num? ?? 0) > 0)
-                              _dur((it['duration'] as num).toInt()),
-                            if ((it['size'] as num? ?? 0) > 0)
-                              _size((it['size'] as num).toInt()),
-                          ].join('  ·  '),
-                          style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.82),
-                              fontSize: 11),
+                      ),
+                      // 左上角不放"最新"徽标：下面区块标题就叫「最新」，
+                      // 重复标一遍只是噪音。页码放右上角就够。
+                      Positioned(
+                        left: 14,
+                        right: 14,
+                        bottom: 12,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              (it['title'] ?? '').toString(),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.w700,
+                                  height: 1.3),
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Icon(Icons.play_circle_fill_rounded,
+                                    size: 13,
+                                    color: Colors.white.withValues(alpha: 0.9)),
+                                const SizedBox(width: 4),
+                                Text(
+                                  [
+                                    if ((it['duration'] as num? ?? 0) > 0)
+                                      _dur((it['duration'] as num).toInt()),
+                                    if ((it['size'] as num? ?? 0) > 0)
+                                      _size((it['size'] as num).toInt()),
+                                  ].join('  ·  '),
+                                  style: TextStyle(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.85),
+                                      fontSize: 11),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
+              );
+            },
+          ),
+          // 右上角页码（比底部小圆点更不挡画面）
+          if (items.length > 1)
+            Positioned(
+              right: 18,
+              top: 16,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.20), width: 0.6),
+                ),
+                child: Text('${_bannerIndex + 1}/${items.length}',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600)),
               ),
             ),
-          );
-        },
+        ],
       ),
     );
   }
@@ -904,16 +1203,18 @@ class _TgHomePageState extends State<TgHomePage> {
     final title = (it['title'] ?? '').toString();
     final thumb = (it['thumb'] ?? '').toString();
     final dur = (it['duration'] as num?)?.toInt() ?? 0;
+    final zh = it['_zh'];
+    final shown = (zh is String && zh.isNotEmpty) ? zh : title;
     // 用户 2026-10-25：名称**不放进卡片**（卡片只留 16:9 封面），
     // 否则固定高度的网格里多出一块文字区 ⇒ 卡片之间空一大截。
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(14),
       onTap: () => _itemSheet(it),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           ClipRRect(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(14),
             child: AspectRatio(
               aspectRatio: 16 / 9,
               child: Stack(
@@ -936,52 +1237,81 @@ class _TgHomePageState extends State<TgHomePage> {
                             size: 22, color: AppTheme.textTertiary),
                       ),
                     ),
+                  // 底部一条淡渐变：让时长胶囊在任何封面上都读得清
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.transparent,
+                            Colors.black.withValues(alpha: 0.38),
+                          ],
+                          stops: const [0.62, 1.0],
+                        ),
+                      ),
+                    ),
+                  ),
+                  // 细描边：浅色封面在浅色背景上不糊
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                            color: AppTheme.borderLight.withValues(alpha: 0.45),
+                            width: 0.6),
+                      ),
+                    ),
+                  ),
                   if (dur > 0)
                     Positioned(
-                      right: 5,
-                      bottom: 5,
+                      right: 6,
+                      bottom: 6,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 5, vertical: 2),
+                            horizontal: 5.5, vertical: 2),
                         decoration: BoxDecoration(
                           color: Colors.black.withValues(alpha: 0.62),
-                          borderRadius: BorderRadius.circular(5),
+                          borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(_dur(dur),
                             style: const TextStyle(
                                 color: Colors.white,
-                                fontSize: 9.5,
+                                fontSize: 10,
                                 fontWeight: FontWeight.w600)),
                       ),
                     ),
-                  Positioned(
-                    left: 5,
-                    top: 5,
-                    child: Icon(Icons.play_circle_fill_rounded,
-                        size: 20,
-                        color: Colors.white.withValues(alpha: 0.9),
-                        shadows: const [
-                          Shadow(color: Colors.black26, blurRadius: 4)
-                        ]),
-                  ),
                 ],
               ),
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 7),
           // 名称在卡片下方、居中（点一下还是切译文）
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () => _toggleZh(it),
-            child: Text(
-              (it['_zh'] is String && (it['_zh'] as String).isNotEmpty)
-                  ? it['_zh'] as String
-                  : title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                  color: AppTheme.textPrimary, fontSize: 12.5, height: 1.3),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Flexible(
+                  child: Text(
+                    shown,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 12.5,
+                        height: 1.3),
+                  ),
+                ),
+                if (zh is String && zh.isNotEmpty) ...[
+                  const SizedBox(width: 3),
+                  Icon(Icons.translate_rounded,
+                      size: 11, color: AppTheme.accentOnSurface),
+                ],
+              ],
             ),
           ),
         ],
@@ -994,38 +1324,67 @@ class _TgHomePageState extends State<TgHomePage> {
     final thumb = (it['thumb'] ?? '').toString();
     final dur = (it['duration'] as num?)?.toInt() ?? 0;
     final size = (it['size'] as num?)?.toInt() ?? 0;
+    final zh = it['_zh'];
+    final shown = (zh is String && zh.isNotEmpty) ? zh : title;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         onTap: () => _itemSheet(it),
         child: Container(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(9),
           decoration: BoxDecoration(
             color: AppTheme.backgroundCard,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+                color: AppTheme.borderLight.withValues(alpha: 0.5),
+                width: 0.6),
           ),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               ClipRRect(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(10),
                 child: SizedBox(
-                  width: 108,
-                  height: 62,
-                  child: thumb.isEmpty
-                      ? Container(
-                          color: AppTheme.backgroundTertiary,
-                          child: Icon(Icons.movie_outlined,
-                              size: 22, color: AppTheme.textTertiary))
-                      : Image.network(_tg.absolute(thumb),
-                          fit: BoxFit.cover,
-                          cacheWidth: 216,
-                          errorBuilder: (_, __, ___) => Container(
-                                color: AppTheme.backgroundTertiary,
-                                child: Icon(Icons.movie_outlined,
-                                    size: 22, color: AppTheme.textTertiary),
-                              )),
+                  width: 112,
+                  height: 63,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      thumb.isEmpty
+                          ? Container(
+                              color: AppTheme.backgroundTertiary,
+                              child: Icon(Icons.movie_outlined,
+                                  size: 22, color: AppTheme.textTertiary))
+                          : Image.network(_tg.absolute(thumb),
+                              fit: BoxFit.cover,
+                              cacheWidth: 224,
+                              errorBuilder: (_, __, ___) => Container(
+                                    color: AppTheme.backgroundTertiary,
+                                    child: Icon(Icons.movie_outlined,
+                                        size: 22,
+                                        color: AppTheme.textTertiary),
+                                  )),
+                      if (dur > 0)
+                        Positioned(
+                          right: 4,
+                          bottom: 4,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 1.5),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.62),
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                            child: Text(_dur(dur),
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w600)),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(width: 10),
@@ -1036,35 +1395,77 @@ class _TgHomePageState extends State<TgHomePage> {
                     GestureDetector(
                       behavior: HitTestBehavior.opaque,
                       onTap: () => _toggleZh(it),
-                      child: Text(
-                          (it['_zh'] is String &&
-                                  (it['_zh'] as String).isNotEmpty)
-                              ? it['_zh'] as String
-                              : title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: 13,
-                              height: 1.35)),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              shown,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  color: AppTheme.textPrimary,
+                                  fontSize: 13.5,
+                                  height: 1.35),
+                            ),
+                          ),
+                          if (zh is String && zh.isNotEmpty) ...[
+                            const SizedBox(width: 4),
+                            Icon(Icons.translate_rounded,
+                                size: 12, color: AppTheme.accentOnSurface),
+                          ],
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: 5),
-                    Text(
-                      [
-                        if (dur > 0) _dur(dur),
-                        if (size > 0) _size(size),
-                      ].join('  ·  '),
-                      style: TextStyle(
-                          color: AppTheme.textTertiary, fontSize: 11),
-                    ),
+                    const SizedBox(height: 7),
+                    // meta 用胶囊，比原来一串「·」分隔的灰字更整齐。
+                    // ⚠️ 时长已经在封面右下角标了，这里不再重复，只留体积。
+                    if (size > 0)
+                      Wrap(
+                        spacing: 5,
+                        runSpacing: 4,
+                        children: [
+                          _metaPill(Icons.sd_storage_outlined, _size(size)),
+                        ],
+                      ),
                   ],
                 ),
               ),
-              Icon(Icons.play_circle_outline,
-                  color: AppTheme.accentOnSurface, size: 22),
+              const SizedBox(width: 6),
+              Container(
+                width: 32,
+                height: 32,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppTheme.accentSurface,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.play_arrow_rounded,
+                    size: 19, color: AppTheme.accentOnSurface),
+              ),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// 列表行里的小胶囊（时长 / 体积）
+  Widget _metaPill(IconData icon, String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundTertiary,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 10, color: AppTheme.textTertiary),
+          const SizedBox(width: 3),
+          Text(text,
+              style: TextStyle(fontSize: 10.5, color: AppTheme.textSecondary)),
+        ],
       ),
     );
   }

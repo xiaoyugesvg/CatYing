@@ -122,6 +122,13 @@ class VideoPlayerWidget extends StatefulWidget {
   /// 播放设置弹窗的最大高度（父级传入播放器所在区域高度），见构造函数注释
   final double? sheetMaxHeight;
 
+  /// 「加载卡死」判定阈值（秒）。默认 15s。
+  ///
+  /// 为什么要开放这个参数：TG 源每个分片都要回一趟 Telegram 机房，
+  /// 首块 + 缓冲的延迟天然比 CDN 直链高，15s 会把"慢"误判成"坏"。
+  /// 调用方按源类型放宽（见 `MiniAppPlayerPage`）。
+  final int stallSeconds;
+
   final VoidCallback? onPlaying;
   final ValueChanged<Duration>? onPositionChanged;
   final VoidCallback? onEnded;
@@ -182,6 +189,7 @@ class VideoPlayerWidget extends StatefulWidget {
     /// 弹窗本身是从屏幕底部弹出的，只能靠限高来"止步"在播放器范围内。
     /// null 时回退到屏幕高度的 72%。
     this.sheetMaxHeight,
+    this.stallSeconds = 15,
     this.onPlaying,
     this.onPositionChanged,
     this.onEnded,
@@ -258,7 +266,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   ///
   /// 抽成独立类是为了**可测**：这个 State 依赖 media_kit 原生库，
   /// 测试里构造不出来，判定逻辑埋在里面就没法验证。
-  final StallDetector _stall = StallDetector();
+  ///
+  /// 阈值由 [VideoPlayerWidget.stallSeconds] 决定：普通直链 15s 够用，
+  /// 但 TG 这种"每 256KB 都要回一趟 Telegram 机房"的源首块本来就慢，
+  /// 15s 会误报成「加载超时」（用户 2026-10-29）。
+  late final StallDetector _stall =
+      StallDetector(thresholdSeconds: widget.stallSeconds);
 
   /// 卡死检测定时器（每秒 tick 一次）
   Timer? _stallTimer;
