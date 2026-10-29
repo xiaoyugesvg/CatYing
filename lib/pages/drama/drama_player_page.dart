@@ -19,7 +19,6 @@ import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/widgets/ios_av_player.dart';
 import 'package:tvbox/widgets/ks_player.dart';
 import 'package:tvbox/widgets/mpv_app_player.dart';
-import 'package:tvbox/widgets/parse_sniff_sheet.dart';
 import 'package:tvbox/pages/detail/controller.dart';
 import 'package:tvbox/widgets/playback_surface.dart';
 
@@ -66,6 +65,11 @@ class _DramaPlayerPageState extends State<DramaPlayerPage> {
   Timer? _tickTimer;
   Timer? _waitTimer;
   Timer? _uiTimer;
+
+  /// 播完自动下一集（2026-10-29 新增）：监听当前播放器内核的 completed 广播。
+  /// 换内核会重建播放器，订阅随旧实例一起取消、再绑新实例。
+  StreamSubscription<bool>? _completedSub;
+  bool _completedBound = false;
 
   int _index = 0;
   bool _ui = true;
@@ -267,6 +271,8 @@ class _DramaPlayerPageState extends State<DramaPlayerPage> {
     _waitTimer?.cancel();
     _uiTimer?.cancel();
     _urlWorker?.dispose();
+    _completedSub?.cancel();
+    _completedSub = null;
     _pageCtrl.dispose();
     _saveHistory(force: true);
     _prog.dispose();
@@ -277,6 +283,29 @@ class _DramaPlayerPageState extends State<DramaPlayerPage> {
     _c.onClose();
     unawaited(SystemUiController.exit('dramaPlayer'));
     super.dispose();
+  }
+
+  /// 绑定「播完 → 自动下一集」（每个播放器实例只绑一次）。
+  ///
+  /// 与详情页 `onEnded` 同一套语义：AVPlayer 内核且「自动播放下一集」
+  /// 开关关闭时不自动切；其余内核（KS / MPV）默认自动。
+  void _bindCompleted() {
+    final p = _player;
+    if (p == null || _completedBound) return;
+    _completedBound = true;
+    _completedSub = p.stream.completed.listen((done) {
+      if (!done || !mounted || _switching) return;
+      final prefs = PlayerPrefs.instance;
+      if (prefs.vodEngine.value == PlayerEngine.avplayer &&
+          !prefs.avAutoNext.value) {
+        return;
+      }
+      final eps = _c.currentEpisodes;
+      if (_index >= eps.length - 1) return;
+      // 播完保存本集进度，再翻到下一集（视觉与手动下滑一致）
+      _saveHistory(force: true);
+      _jumpTo(_index + 1);
+    });
   }
 
   AppPlayer _newPlayer() {
@@ -321,6 +350,7 @@ class _DramaPlayerPageState extends State<DramaPlayerPage> {
       return;
     }
     _player ??= _newPlayer();
+    _bindCompleted();
     final headers = _c.playHeaders;
     // 续播位置：从「继续观看」/历史进来时，第一集要直接跳回上次看到的地方；
     // 用掉就清零，免得切下一集又从中间开始
@@ -594,27 +624,6 @@ class _DramaPlayerPageState extends State<DramaPlayerPage> {
         ),
         const SizedBox(height: 12),
         _pill(icon: Icons.forum_outlined, onTap: _showDanmuTip),
-        const SizedBox(height: 12),
-        // 嗅探（2026-10-28）：短剧源也可能返回网页播放页，单独成按钮，
-        // 无论设置开关是否打开都常驻显示（与详情页底栏「嗅」对称）。
-        _pill(
-          label: '嗅',
-          onTap: () => ParseSniffSheet.show(
-            context,
-            section: ParseSniffSection.sniff,
-            onSniff: _c.openSniff,
-          ),
-        ),
-        const SizedBox(height: 12),
-        // 解析（2026-10-28）
-        _pill(
-          label: '解',
-          onTap: () => ParseSniffSheet.show(
-            context,
-            section: ParseSniffSection.parse,
-            onPickLine: (url) => _c.selectParseLine(url),
-          ),
-        ),
         const SizedBox(height: 12),
         _pill(
           icon: Icons.keyboard_arrow_up_rounded,
@@ -1049,6 +1058,11 @@ class _DramaPlayerPageState extends State<DramaPlayerPage> {
     final headers = _c.playHeaders;
     final p = _newPlayer();
     _player = p;
+    // 换内核 = 新播放器实例 → 重新绑定播完自动下一集
+    _completedSub?.cancel();
+    _completedSub = null;
+    _completedBound = false;
+    _bindCompleted();
     p.open(
       AppMedia(
         url,
