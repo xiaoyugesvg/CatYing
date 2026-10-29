@@ -176,3 +176,5 @@ ios/Podfile.lock
 
 # 一次性分析输出（dart/flutter analyze 的临时导出，2026-10-29 起不入库）
 /analyze_check.txt
+# UI 预览产物（非源码）
+outputs/

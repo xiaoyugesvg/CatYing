@@ -221,10 +221,22 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                               fontWeight: FontWeight.w600,
                               color: label)),
                       const Spacer(),
-                      Text('Edge 免费 / MiMo / Azure / 自定义',
+                      // 用户 2026-10-29：原来这里是「Edge 免费 / MiMo / Azure /
+                      // 自定义」，在 390pt 宽的机型上 **Row 溢出**（debug 黄黑
+                      // 条纹、release 硬裁）—— 复刻 UI 图时量出来的。
+                      // 现在：①文案砍到三个具名类型（自定义在弹层里）；②外面
+                      // 再包一层 Flexible + 省略号，窄屏/大字号下只会截断不会溢出。
+                      Flexible(
+                        child: Text(
+                          'Edge / MiMo / Azure',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.right,
                           style: TextStyle(
                               fontSize: AppTheme.fontFootnote,
-                              color: JellyTheme.textSecondary)),
+                              color: JellyTheme.textSecondary),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -318,7 +330,12 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
         color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: JellyTheme.primary.withValues(alpha: isDark ? 0.5 : 0.28),
+          // 深色下 `primary` 是 #3A3A3A，压 #2A2A2C 的卡片底几乎看不出描边
+          // （用户 2026-10-29 追问「界面真是这样么」时在复刻图里暴露的），
+          // 深色改用白色低透明度，浅色仍走 primary。
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.18)
+              : JellyTheme.primary.withValues(alpha: 0.28),
           width: 0.8,
         ),
       ),
@@ -328,7 +345,9 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
             width: 38,
             height: 38,
             decoration: BoxDecoration(
-              color: JellyTheme.primary.withValues(alpha: isDark ? 0.22 : 0.12),
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.10)
+                  : JellyTheme.primary.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(11),
             ),
             child: Icon(
@@ -476,7 +495,11 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
         borderRadius: BorderRadius.circular(14),
         border: selected
             ? Border.all(
-                color: JellyTheme.primary.withValues(alpha: isDark ? 0.6 : 0.4),
+                // 同 `_currentEngineCard`：深色下 primary 与卡片底同明度，
+                // 「哪个在用」会看不出来（用户 2026-10-29）。
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.30)
+                    : JellyTheme.primary.withValues(alpha: 0.4),
                 width: 0.8,
               )
             : null,
@@ -522,8 +545,11 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                       ? Icons.check_circle_rounded
                       : Icons.radio_button_unchecked,
                   size: 22,
-                  color:
-                      selected ? JellyTheme.primary : JellyTheme.textSecondary,
+                  // 深色下 primary(#3A3A3A) 在 #2A2A2C 卡片上等于隐形 ——
+                  // 选中标记改用前景白，才看得出「这条在用」。
+                  color: selected
+                      ? (isDark ? Colors.white : JellyTheme.primary)
+                      : JellyTheme.textSecondary,
                 ),
                 tooltip: selected ? '当前使用中' : '设为当前使用',
                 onPressed: onSelect,

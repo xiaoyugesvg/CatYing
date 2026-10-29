@@ -690,9 +690,9 @@ mixin _ReaderPart06 on _BookSourceReaderPageState {
                                 ? Icons.check_circle_rounded
                                 : Icons.circle_outlined,
                             size: 20,
-                            color: !_ttsFollowSystem
-                                ? JellyTheme.primary
-                                : _fgMuted,
+                            // 深色下 `JellyTheme.primary`(#3A3A3A) 落在面板底上
+                            // 等于隐形，选中标记改用前景色（用户 2026-10-29）。
+                            color: !_ttsFollowSystem ? _fg : _fgMuted,
                           ),
                         ],
                       ),
@@ -746,9 +746,7 @@ mixin _ReaderPart06 on _BookSourceReaderPageState {
                                 ? Icons.check_circle_rounded
                                 : Icons.circle_outlined,
                             size: 20,
-                            color: _ttsFollowSystem
-                                ? JellyTheme.primary
-                                : _fgMuted,
+                            color: _ttsFollowSystem ? _fg : _fgMuted,
                           ),
                         ],
                       ),
@@ -1418,7 +1416,8 @@ mixin _ReaderPart06 on _BookSourceReaderPageState {
                         '测试连接',
                         style: TextStyle(
                           fontSize: 13,
-                          color: JellyTheme.primary,
+                          // 同上：这个对话框是深底的，primary 在这里读不出来。
+                          color: fg,
                         ),
                       ),
                     ),
