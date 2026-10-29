@@ -41,6 +41,8 @@ class TtsSource {
     this.sendsSpeed = false,
     // EasyVoice「AI 智能推荐配音」：让服务端用大模型自动分角色/音色
     this.useAiVoice = false,
+    // 复用「AI 管理」里的接口地址 / API Key / 模型（mimo / openai 用）
+    this.useAiConfig = false,
     // ── 调优 ────────────────────────────────────────────────
     this.maxConcurrency = 2,
     this.minIntervalMs = 200,
@@ -108,6 +110,18 @@ class TtsSource {
 
   /// 只有 easyvoice 支持 AI 推荐配音
   bool get aiVoiceAvailable => type == 'easyvoice';
+
+  /// 复用「AI 管理」配置（设置 → AI 管理里的接口地址 / API Key / 模型）。
+  ///
+  /// 为什么：MiMo 与 OpenAI 兼容源本身就是 chat / speech 接口，
+  /// 用户通常已经在 AI 管理里填过一遍。再让他把地址和 Key 抄一遍
+  /// 是纯粹的重复劳动，而且换服务商时要改两处。
+  /// 打开后本源不再读自己的 [endpoint] / [modelId]，也**不再读
+  /// 独立存的 API Key**（直接用 AI 管理那一份）。
+  final bool useAiConfig;
+
+  /// 只有 mimo / openai 支持复用 AI 管理配置
+  bool get aiConfigAvailable => type == 'mimo' || type == 'openai';
 
   // ── 调优 ──────────────────────────────────────────────────
   /// 并发上限：同时在飞的请求数
@@ -186,6 +200,7 @@ class TtsSource {
           // 旧的 `/api/v1/create` 任务接口不一定还在 ⇒ 先走稳的 generateJson。
           // 想要多角色再自己打开（打不开会自动回退普通合成，见 tts_service）。
           useAiVoice: false,
+          useAiConfig: false,
           maxRetries: 2,
         );
       case 'http':
@@ -245,6 +260,7 @@ class TtsSource {
     bool? hiFi,
     bool? sendsSpeed,
     bool? useAiVoice,
+    bool? useAiConfig,
     int? maxConcurrency,
     int? minIntervalMs,
     int? prefetchSentences,
@@ -271,6 +287,7 @@ class TtsSource {
       hiFi: hiFi ?? this.hiFi,
       sendsSpeed: sendsSpeed ?? this.sendsSpeed,
       useAiVoice: useAiVoice ?? this.useAiVoice,
+      useAiConfig: useAiConfig ?? this.useAiConfig,
       maxConcurrency: maxConcurrency ?? this.maxConcurrency,
       minIntervalMs: minIntervalMs ?? this.minIntervalMs,
       prefetchSentences: prefetchSentences ?? this.prefetchSentences,
@@ -299,6 +316,7 @@ class TtsSource {
         'hiFi': hiFi,
         'sendsSpeed': sendsSpeed,
         'useAiVoice': useAiVoice,
+        'useAiConfig': useAiConfig,
         'maxConcurrency': maxConcurrency,
         'minIntervalMs': minIntervalMs,
         'prefetchSentences': prefetchSentences,
@@ -329,6 +347,7 @@ class TtsSource {
         hiFi: j['hiFi'] == true,
         sendsSpeed: j['sendsSpeed'] == true,
         useAiVoice: j['useAiVoice'] == true,
+        useAiConfig: j['useAiConfig'] == true,
         maxConcurrency: (j['maxConcurrency'] as num?)?.toInt() ?? 2,
         minIntervalMs: (j['minIntervalMs'] as num?)?.toInt() ?? 200,
         prefetchSentences: (j['prefetchSentences'] as num?)?.toInt() ?? 3,

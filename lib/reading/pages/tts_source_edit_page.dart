@@ -110,14 +110,18 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
   /// 其余类型只做到**校验配置完整性并如实报告**，不假装"测试成功"。
   Future<void> _test() async {
     final problems = <String>[];
+    // 开了「复用 AI 管理」就不用再检查本源自己的地址 / Key
+    final useAi = _s.useAiConfig && _s.aiConfigAvailable;
     if (_s.type == 'azure') {
       if (_region.text.trim().isEmpty && _customHost.text.trim().isEmpty) {
         problems.add('区域或自定义主机至少填一个');
       }
       if (_voice.text.trim().isEmpty) problems.add('音色没填');
     } else if (_s.type == 'mimo' || _s.type == 'openai') {
-      if (_endpoint.text.trim().isEmpty) problems.add('接口地址没填');
-      if (_modelId.text.trim().isEmpty) problems.add('模型 ID 没填');
+      if (!useAi) {
+        if (_endpoint.text.trim().isEmpty) problems.add('接口地址没填');
+        if (_modelId.text.trim().isEmpty) problems.add('模型 ID 没填');
+      }
     } else if (_s.type == 'http') {
       if (_endpoint.text.trim().isEmpty) problems.add('接口模板没填');
     } else if (_s.type == 'easyvoice') {
@@ -125,7 +129,8 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
       // AI 推荐配音模式下音色可留空（由大模型推荐）
       if (_voice.text.trim().isEmpty && !_s.useAiVoice) problems.add('音色没填');
     }
-    if (_apiKey.text.trim().isEmpty &&
+    if (!useAi &&
+        _apiKey.text.trim().isEmpty &&
         _s.type != 'easyvoice' &&
         _s.type != 'http' &&
         _s.type != 'edge') {
@@ -134,6 +139,35 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
     if (problems.isNotEmpty) {
       setState(() {
         _testResult = '还差这些：\n· ${problems.join('\n· ')}';
+      });
+      return;
+    }
+
+    // mimo / openai / azure：真发一次合成，别再只查字段（那是假成功）
+    if (_s.type == 'mimo' ||
+        _s.type == 'openai' ||
+        _s.type == 'azure') {
+      setState(() {
+        _busy = true;
+        _testResult = '正在请求合成…';
+      });
+      // 先把表单里的最新值落盘：probeSource 读的是存储里的源
+      final built = _s.copyWith(
+        endpoint: _endpoint.text.trim(),
+        region: _region.text.trim(),
+        customHost: _customHost.text.trim(),
+        modelId: _modelId.text.trim(),
+        voice: _voice.text.trim(),
+        stylePrompt: _stylePrompt.text.trim(),
+        styleTag: _styleTag.text.trim(),
+        extraParams: _extraParams.text.trim(),
+      );
+      await TtsSourceStore.instance.upsert(built, apiKey: _apiKey.text);
+      final r = await TtsService.instance.probeSource(built);
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _testResult = r;
       });
       return;
     }
@@ -321,6 +355,11 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
               _row('音色', _voice, hint: 'zh-CN-XiaoxiaoNeural'),
             ] else if (_s.type == 'edge') ...[
               // 内置：不需要任何地址 / Key
+            ] else if (_s.useAiConfig && _s.aiConfigAvailable) ...[
+              _row('接口地址', _endpoint,
+                  hint: '跟随「设置 → AI 管理」', readOnly: true),
+              _note('已开启「复用 AI 管理」：接口地址与 API Key 直接取 AI 管理里的那一份，'
+                  '换服务商只需改一处。想单独填就关掉上面的开关。'),
             ] else ...[
               _row('接口地址', _endpoint,
                   hint: _s.type == 'mimo'
@@ -341,9 +380,18 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
               _note('HTTP 模板源不需要 API Key；需要鉴权的服务把请求头写在上面。'
                   '保存后自动设为「当前使用」。')
             else ...[
-              _row('API Key', _apiKey, hint: '必填', obscure: true),
-              _note('API Key 存在系统密钥库里，不写进配置、也不进备份。'
-                  '换机后需要重填一次。'),
+              if (_s.aiConfigAvailable)
+                _switchRow(
+                    '复用 AI 管理',
+                    '直接用「设置 → AI 管理」里的接口地址与 API Key，'
+                        '换服务商只需改一处，不用在这里重填',
+                    _s.useAiConfig,
+                    (v) => setState(() => _s = _s.copyWith(useAiConfig: v))),
+              if (!_s.aiConfigAvailable || !_s.useAiConfig) ...[
+                _row('API Key', _apiKey, hint: '必填', obscure: true),
+                _note('API Key 存在系统密钥库里，不写进配置、也不进备份。'
+                    '换机后需要重填一次。'),
+              ],
             ],
           ]),
 

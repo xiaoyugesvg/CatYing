@@ -898,7 +898,9 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
           ),
           const SizedBox(height: 10),
           Text(
-            '宠物对话固定用这份配置；阅读可以单独配一套。Key 只存本机。',
+            '宠物对话固定用这份配置；阅读可以单独配一套。Key 只存本机。\n'
+            '听书朗读里的「小米 MiMo / OpenAI 兼容」源可以打开「复用 AI 管理」，'
+            '直接借这份地址与 Key，不用再填一遍。',
             style: TextStyle(
                 fontSize: 11.5, height: 1.55, color: AppTheme.textTertiary),
           ),

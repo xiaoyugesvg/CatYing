@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:tvbox/reading/models/tts_source.dart';
 import 'package:tvbox/reading/services/tts_source_store.dart';
@@ -26,10 +27,28 @@ class TtsEnginePage extends StatefulWidget {
 }
 
 class _TtsEnginePageState extends State<TtsEnginePage> {
+  /// 系统朗读引擎是否可用（null = 还没问出来）
+  bool? _sysAvailable;
+
   @override
   void initState() {
     super.initState();
     TtsSourceStore.instance.init();
+    _probeSystemEngine();
+  }
+
+  /// 真去问一次原生 `available`，别把「未检测到」写死。
+  Future<void> _probeSystemEngine() async {
+    var ok = true;
+    try {
+      const ch = MethodChannel('tts_engine');
+      ok = await ch.invokeMethod<bool>('available') ?? true;
+    } catch (_) {
+      // 通道不可用（比如桌面端没实现）→ 按可用处理，不吓用户
+      ok = true;
+    }
+    if (!mounted) return;
+    setState(() => _sysAvailable = ok);
   }
 
   /// 「朗读源类型」弹层（截图 IMG_8088）
@@ -195,7 +214,8 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                     Text(
                       TtsSourceStore.instance.activeId.isEmpty
                           ? '系统朗读（使用中）'
-                          : '未使用',
+                          : '未使用'
+                              '${TtsSourceStore.instance.active?.name.isNotEmpty == true ? '（当前走「${TtsSourceStore.instance.active!.name}」）' : ''}',
                       style: TextStyle(
                           fontSize: AppTheme.fontSubhead,
                           color: TtsSourceStore.instance.activeId.isEmpty
@@ -204,8 +224,14 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '未检测到已安装的朗读引擎。若系统设置·文字转语音里能试听，'
-                      '通常是引擎被禁用或系统限制了应用查询已安装引擎。',
+                      // 2026-10-29：原来这段「未检测到已安装的朗读引擎」
+                      // 是**无条件**显示的 —— 系统引擎明明可用也照说不误，
+                      // 用户会以为自己手机坏了。改成真去问一次原生。
+                      _sysAvailable == false
+                          ? '未检测到已安装的朗读引擎。若系统设置·文字转语音里能试听，'
+                              '通常是引擎被禁用或系统限制了应用查询已安装引擎。'
+                          : '使用系统自带语音合成，无需联网。'
+                              '想换更好的音色请在下面添加朗读源。',
                       style: TextStyle(
                           fontSize: AppTheme.fontFootnote,
                           height: 1.6,

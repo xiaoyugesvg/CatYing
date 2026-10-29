@@ -8,6 +8,7 @@ import 'package:get/get.dart';
 import 'package:media_kit/media_kit.dart';
 
 import 'package:tvbox/reading/models/tts_source.dart';
+import 'package:tvbox/reading/services/ai_service.dart';
 import 'package:tvbox/reading/source/global_proxy.dart';
 import 'package:tvbox/reading/services/tts_now_playing.dart';
 import 'package:tvbox/reading/services/tts_source_store.dart';
@@ -24,16 +25,24 @@ import 'package:tvbox/services/nodejs_manager.dart';
 /// 不会被链接** → Flutter 启动时找不到插件 → **装完就闪退**
 /// （flutter_tts 就是这么崩的）。TTS 是系统自带能力，没必要为它引插件。
 ///
-/// ── 网络朗读源（EasyVoice）─────────────────────────────────────
-/// 「朗读引擎」页里把某个 `easyvoice` 源设为「当前使用」后，朗读会改走
+/// ── 网络朗读源 ────────────────────────────────────────────────
+/// 「朗读引擎」页里把某个网络源设为「当前使用」后，朗读会改走
 /// **HTTP 合成 + media_kit 播放**（dio / media_kit 都已在项目依赖里，
 /// 零新增原生插件）：
-///   · 每段 POST `/api/v1/tts/generateJson`（Edge-TTS 免费音色）拿 mp3；
-///   · media_kit 播放该 mp3，念完自动下一段，高亮照旧；
+///   · `easyvoice` POST `/api/v1/tts/generateJson`（Edge-TTS 免费音色）拿 mp3；
+///   · `http`      按 URL 模板直接 GET/POST 拿音频字节；
+///   · `edge`      走 App 内置 Node（`/tts/edge`），免地址免 Key；
+///   · `mimo`      小米 MiMo **chat 接口**，正文走 assistant 消息，
+///                 音频按 base64 返回（固定 wav）；
+///   · `openai`    `/audio/speech` 通用形状；
+///   · `azure`     Azure 语音 REST（SSML）；
+///   · media_kit 播放音频，念完自动下一段，高亮照旧；
 ///   · 暂停 / 继续 / 停止 / 跳段 / 倍速全部由播放器接管；
 ///   · 合成失败时按源的「失败自动降级」开关切回系统朗读继续读。
-/// 其余类型（azure/mimo/openai）只做了配置校验，合成尚未接入，
-/// 朗读始终走系统引擎。
+///
+/// ⚠️ 2026-10-29 之前 `mimo` / `openai` / `azure` 只做了配置校验、
+/// **合成没接**，用户把它们设成「使用中」后实际仍走系统引擎，
+/// 表现就是「设置成功但一点效果都没有」。现已全部接入。
 ///
 /// ── 分段策略 ──────────────────────────────────────────────────
 /// 把整章按段落切开、**一段一段念**（不是整段丢给引擎）：
@@ -48,6 +57,21 @@ class TtsService extends GetxService {
   }
 
   static const MethodChannel _ch = MethodChannel('tts_engine');
+
+  /// 走网络合成（HTTP + media_kit 播放）的类型。
+  ///
+  /// 2026-10-29 补：原来只有 easyvoice / http / edge 三种能真正发声，
+  /// `mimo` / `openai` / `azure` 虽然在「朗读引擎」页里能配、能设成
+  /// 「使用中」，但 `_netSource` 的判定把它们排除在外 → 静默回落系统朗读。
+  /// 用户看到的就是「设置成功但没效果」。现在六种全部接上。
+  static const Set<String> _networkTypes = {
+    'easyvoice',
+    'http',
+    'edge',
+    'mimo',
+    'openai',
+    'azure',
+  };
 
   /// 正在朗读
   final isSpeaking = false.obs;
@@ -224,13 +248,10 @@ class TtsService extends GetxService {
   /// 开始朗读整段文本
   Future<void> speak(String text,
       {int startAt = 0, List<String?>? segmentVoices}) async {
-    // 刷新当前朗读源：朗读引擎页里选中的 easyvoice 源生效，否则原生
+    // 刷新当前朗读源：朗读引擎页里选中的网络源生效，否则原生
     await TtsSourceStore.instance.init();
     final active = TtsSourceStore.instance.active;
-    _netSource = (active != null &&
-            (active.type == 'easyvoice' ||
-                active.type == 'http' ||
-                active.type == 'edge'))
+    _netSource = (active != null && _networkTypes.contains(active.type))
         ? active
         : null;
     var segs = splitSegments(text);
@@ -445,23 +466,40 @@ class TtsService extends GetxService {
           (_segmentVoices != null && i < _segmentVoices!.length)
               ? _segmentVoices![i]
               : null;
-      final bytes = src.type == 'http'
-          ? await _synthesizeHttp(src, seg, rate.value)
-          : src.type == 'edge'
-              ? await _synthesizeEdge(src, seg)
-              : await _synthesizeEasyVoice(src, seg, voiceOverride: segVoice);
+      final List<int>? bytes;
+      switch (src.type) {
+        case 'http':
+          bytes = await _synthesizeHttp(src, seg, rate.value);
+          break;
+        case 'edge':
+          bytes = await _synthesizeEdge(src, seg);
+          break;
+        case 'mimo':
+          bytes = await _synthesizeMimo(src, seg);
+          break;
+        case 'openai':
+          bytes = await _synthesizeOpenAi(src, seg, voiceOverride: segVoice);
+          break;
+        case 'azure':
+          bytes = await _synthesizeAzure(src, seg, voiceOverride: segVoice);
+          break;
+        default:
+          bytes = await _synthesizeEasyVoice(src, seg, voiceOverride: segVoice);
+      }
       _netSynthesizing = false;
       if (_stopRequested) return;
       if (bytes == null || bytes.isEmpty) throw '服务返回空音频';
       if (!isSpeaking.value) return; // 合成期间被暂停/停止
-      await _playNetBytes(bytes);
+      // MiMo 固定返回 wav，其余按源的格式给扩展名（media_kit 靠它选解复用器）
+      await _playNetBytes(bytes,
+          ext: src.type == 'mimo' ? 'wav' : _extOf(src.audioFormat));
     } catch (e) {
       _netSynthesizing = false;
       if (_stopRequested) return;
       if (src.fallbackToSystem) {
         // 合成失败 → 按源开关切回系统朗读继续读，提示一次
         lastError.value =
-            '${src.type == 'edge' ? '内置朗读' : '网络朗读'}失败，已切回系统朗读：$e';
+            '${_labelOf(src)}失败，已切回系统朗读：$e';
         isSpeaking.value = true;
         isPaused.value = false;
         await _speakCurrent();
@@ -471,6 +509,383 @@ class TtsService extends GetxService {
       }
     }
   }
+
+  static String _labelOf(TtsSource src) {
+    switch (src.type) {
+      case 'edge':
+        return '内置朗读';
+      case 'mimo':
+        return '小米 MiMo 朗读';
+      case 'azure':
+        return 'Azure 朗读';
+      case 'openai':
+        return 'OpenAI 兼容朗读';
+      default:
+        return '网络朗读';
+    }
+  }
+
+  /// 朗读源连通性自检：**真合成一句**再回来报结果。
+  ///
+  /// 之前「测试连接」对 mimo / openai / azure 只做「字段填了没」的
+  /// 静态检查，还口口声声说"配置完整" —— 用户以为通了，一播还是
+  /// 系统声音。现在这几类一律真发一次请求，拿不到音频就如实报错。
+  Future<String> probeSource(TtsSource src) async {
+    const text = '这是一个测试。';
+    final List<int>? bytes;
+    try {
+      switch (src.type) {
+        case 'mimo':
+          bytes = await _synthesizeMimo(src, text);
+          break;
+        case 'openai':
+          bytes = await _synthesizeOpenAi(src, text);
+          break;
+        case 'azure':
+          bytes = await _synthesizeAzure(src, text);
+          break;
+        case 'http':
+          bytes = await _synthesizeHttp(src, text, rate.value);
+          break;
+        default:
+          bytes = await _synthesizeEasyVoice(src, text);
+      }
+    } catch (e) {
+      return '请求失败：$e';
+    }
+    if (bytes == null || bytes.isEmpty) {
+      return '服务返回了空音频 —— 接口地址或模型 ID 可能不对。';
+    }
+    final kb = (bytes.length / 1024).toStringAsFixed(0);
+    final head = bytes.take(4).toList();
+    final looksAudio = head.isNotEmpty &&
+        ((head[0] == 0x49 && head.length > 1 && head[1] == 0x44) || // ID3
+            (head[0] == 0xFF) || // mp3 frame
+            (head[0] == 0x52 && head[1] == 0x49 && head[2] == 0x46)); // RIFF/wav
+    return looksAudio
+        ? '连通：返回 $kb KB 音频，可以正常朗读。'
+        : '返回了内容但不是音频（$kb KB，首字节 ${head.map((b) => b.toRadixString(16)).join(' ')}）。'
+            '多半是接口地址指向了网页或错误页。';
+  }
+
+  /// 音频扩展名归一（mp3 / wav / opus / aac / flac）
+  static String _extOf(String fmt) {
+    final f = fmt.trim().toLowerCase();
+    if (f.isEmpty) return 'mp3';
+    if (f == 'pcm') return 'wav';
+    return f;
+  }
+
+  /// 读源的 API Key（存在独立键里，不在源配置里）
+  Future<String> _keyOf(TtsSource src) =>
+      TtsSourceStore.instance.apiKey(src.id);
+
+  /// 解析本源实际要用的「接口地址 / Key / 模型」。
+  ///
+  /// 打开 [TtsSource.useAiConfig] 时直接取「AI 管理」那一份 ——
+  /// 用户在设置里配过一次就够，不必在朗读源里再抄一遍。
+  Future<({String base, String key, String model})> _resolveConn(
+      TtsSource src, String defaultModel,
+      {bool borrowModel = true}) async {
+    if (src.useAiConfig && src.aiConfigAvailable) {
+      final ai = AiService();
+      if (!ai.isConfigured) {
+        throw '已开启「复用 AI 管理」，但 AI 管理里还没填 API Key';
+      }
+      // 只有 MiMo 才借用 AI 管理的模型名 —— 它本来就是一个 chat 模型；
+      // OpenAI 兼容的 /audio/speech 是**独立的 TTS 模型**，
+      // 拿 AI 管理里的对话模型去打必然 404，所以那边只用地址和 Key。
+      final m = src.modelId.trim().isNotEmpty
+          ? src.modelId.trim()
+          : (borrowModel && ai.model.trim().isNotEmpty
+              ? ai.model.trim()
+              : defaultModel);
+      return (
+        base: _chatBase(ai.baseUrl),
+        key: ai.apiKey.trim(),
+        model: m,
+      );
+    }
+    return (
+      base: _chatBase(src.endpoint),
+      key: (await _keyOf(src)).trim(),
+      model: src.modelId.trim().isEmpty ? defaultModel : src.modelId.trim(),
+    );
+  }
+
+  /// 从 chat / speech 响应里把 base64 音频抠出来。
+  ///
+  /// MiMo 按 OpenAI 音频输出形状返回 `choices[0].message.audio.data`；
+  /// 不同兼容服务还会把音频塞在 `data` / `audio` / `result.audio` 里，
+  /// 这里按已知路径依次试，都不中就再全局扫一遍找最长的 base64 串。
+  static String? _pickBase64Audio(dynamic json) {
+    if (json is! Map) return null;
+    final paths = <List<String>>[
+      ['choices', '0', 'message', 'audio', 'data'],
+      ['choices', '0', 'message', 'audio'],
+      ['choices', '0', 'delta', 'audio', 'data'],
+      ['choices', '0', 'message', 'content'],
+      ['data', 'audio'],
+      ['data'],
+      ['audio'],
+      ['result', 'audio'],
+      ['audio_content'],
+    ];
+    for (final p in paths) {
+      dynamic cur = json;
+      for (final k in p) {
+        if (cur is Map) {
+          cur = cur[k];
+        } else if (cur is List && int.tryParse(k) != null) {
+          final idx = int.parse(k);
+          cur = idx < cur.length ? cur[idx] : null;
+        } else {
+          cur = null;
+        }
+        if (cur == null) break;
+      }
+      if (cur is String && cur.trim().length > 64) return cur.trim();
+      if (cur is Map) {
+        final b = cur['data'];
+        if (b is String && b.trim().length > 64) return b.trim();
+      }
+    }
+    // 兜底：递归找最长的、看起来像 base64 的字符串
+    String? best;
+    void walk(dynamic v) {
+      if (v is String) {
+        final s = v.trim();
+        if (s.length > 64 &&
+            !s.contains(' ') &&
+            RegExp(r'^[A-Za-z0-9+/=\r\n]+$').hasMatch(s)) {
+          if (best == null || s.length > best!.length) best = s;
+        }
+      } else if (v is Map) {
+        for (final e in v.values) {
+          walk(e);
+        }
+      } else if (v is List) {
+        for (final e in v) {
+          walk(e);
+        }
+      }
+    }
+
+    walk(json);
+    return best;
+  }
+
+  /// 小米 MiMo：**chat 接口**，不是 `/audio/speech`。
+  ///
+  /// 协议（见 [TtsSource] 类文档，来自官方说明）：
+  ///   · 风格指令 → `user` 消息
+  ///   · 正文     → `assistant` 消息
+  ///   · 没有语速字段（语速写进风格指令）
+  ///   · 音频按 base64 返回，格式固定 wav
+  Future<List<int>?> _synthesizeMimo(TtsSource src, String text) async {
+    final conn = await _resolveConn(src, 'mimo-v2.5-tts');
+    final base = conn.base;
+    if (base.isEmpty) throw '接口地址为空';
+    final key = conn.key;
+    if (key.isEmpty) throw '未填 API Key';
+
+    // 风格标签加在正文最前（「(开心) 今天天气不错」）
+    final tag = src.styleTag.trim();
+    final body = text.trim();
+    final content = tag.isEmpty ? body : '$tag$body';
+    final prompt = src.stylePrompt.trim().isEmpty
+        ? '请用自然、适合有声书朗读的语气念下面这段文字。'
+        : src.stylePrompt.trim();
+
+    final messages = <Map<String, String>>[
+      {'role': 'user', 'content': prompt},
+      {'role': 'assistant', 'content': content},
+    ];
+
+    final data = <String, dynamic>{
+      'model': conn.model,
+      'messages': messages,
+      'stream': false,
+      // 要求返回音频（OpenAI 音频输出形状）；不认这个字段的服务会忽略它
+      'modalities': ['text', 'audio'],
+      'audio': {
+        'format': 'wav',
+        if (src.voice.trim().isNotEmpty) 'voice': src.voice.trim(),
+        if (src.hiFi) 'sample_rate': 48000,
+      },
+    };
+    // 附加参数（JSON 对象）合并进去，给用户留一个逃生口
+    final extra = _jsonObject(src.extraParams);
+    if (extra != null) data.addAll(extra);
+
+    final dio = _synthDio(src, key);
+    try {
+      final r = await dio.post<dynamic>(
+        '$base/chat/completions',
+        data: data,
+        options: Options(
+          headers: {'Content-Type': 'application/json'},
+          responseType: ResponseType.json,
+          sendTimeout: Duration(seconds: src.timeoutSec),
+          receiveTimeout: Duration(seconds: src.timeoutSec + 25),
+        ),
+      );
+      final b64 = _pickBase64Audio(r.data);
+      if (b64 == null) {
+        throw '接口没有返回音频（响应里找不到 base64 音频字段）';
+      }
+      return base64Decode(b64.replaceAll(RegExp(r'\s'), ''));
+    } on DioException catch (e) {
+      throw _dioMsg(e);
+    } finally {
+      dio.close(force: true);
+    }
+  }
+
+  /// OpenAI /audio/speech 兼容形状（siliconflow、gpt-sovits 网关等都照这个）
+  Future<List<int>?> _synthesizeOpenAi(TtsSource src, String text,
+      {String? voiceOverride}) async {
+    final conn = await _resolveConn(src, 'tts-1', borrowModel: false);
+    final base = conn.base;
+    if (base.isEmpty) throw '接口地址为空';
+    final key = conn.key;
+    if (key.isEmpty) throw '未填 API Key';
+
+    final voice = (voiceOverride != null && voiceOverride.trim().isNotEmpty)
+        ? voiceOverride.trim()
+        : (src.voice.trim().isEmpty ? 'alloy' : src.voice.trim());
+    final fmt = _extOf(src.audioFormat);
+
+    final data = <String, dynamic>{
+      'model': conn.model,
+      'input': text,
+      'voice': voice,
+      'response_format': fmt,
+      // 只有用户明确打开「发送语速参数」才带 speed ——
+      // 有的服务不认这个字段会整体 400
+      if (src.sendsSpeed)
+        'speed': (0.25 + rate.value * 1.75).clamp(0.25, 4.0),
+    };
+    final extra = _jsonObject(src.extraParams);
+    if (extra != null) data.addAll(extra);
+
+    final dio = _synthDio(src, key);
+    try {
+      final r = await dio.post<List<int>>(
+        '$base/audio/speech',
+        data: data,
+        options: Options(
+          headers: {'Content-Type': 'application/json'},
+          responseType: ResponseType.bytes,
+          sendTimeout: Duration(seconds: src.timeoutSec),
+          receiveTimeout: Duration(seconds: src.timeoutSec + 25),
+          validateStatus: (c) => c != null && c < 400,
+        ),
+      );
+      return r.data;
+    } on DioException catch (e) {
+      throw _dioMsg(e);
+    } finally {
+      dio.close(force: true);
+    }
+  }
+
+  /// Azure 语音服务 REST（SSML）。
+  Future<List<int>?> _synthesizeAzure(TtsSource src, String text,
+      {String? voiceOverride}) async {
+    final key = await _keyOf(src);
+    if (key.isEmpty) throw '未填 API Key';
+    final voice = (voiceOverride != null && voiceOverride.trim().isNotEmpty)
+        ? voiceOverride.trim()
+        : (src.voice.trim().isEmpty
+            ? 'zh-CN-XiaoxiaoNeural'
+            : src.voice.trim());
+    // 语速映射成 SSML prosody rate（0.5 → +0%，1.0 → +100%）
+    final ratePct = ((rate.value - 0.5) / 0.5 * 100).round();
+    final rateAttr = '${ratePct >= 0 ? '+' : ''}$ratePct%';
+    final emotion = src.emotion.trim();
+    final inner = '<prosody rate="$rateAttr">${_xmlEscape(text)}</prosody>';
+    final ssml = '<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
+        'xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="zh-CN">'
+        '<voice name="$voice">'
+        '${emotion.isEmpty ? inner : '<mstts:express-as style="$emotion">$inner</mstts:express-as>'}'
+        '</voice></speak>';
+
+    final fmt = src.hiFi
+        ? 'audio-48khz-96kbitrate-mono-mp3'
+        : 'audio-24khz-48kbitrate-mono-mp3';
+
+    final dio = _synthDio(src, key);
+    try {
+      final r = await dio.post<List<int>>(
+        '${src.azureHost}/cognitiveservices/v1',
+        data: ssml,
+        options: Options(
+          headers: {
+            'Content-Type': 'application/ssml+xml',
+            'X-Microsoft-OutputFormat': fmt,
+            'User-Agent': 'TvBoxTts',
+          },
+          responseType: ResponseType.bytes,
+          sendTimeout: Duration(seconds: src.timeoutSec),
+          receiveTimeout: Duration(seconds: src.timeoutSec + 25),
+          validateStatus: (c) => c != null && c < 400,
+        ),
+      );
+      return r.data;
+    } on DioException catch (e) {
+      throw _dioMsg(e);
+    } finally {
+      dio.close(force: true);
+    }
+  }
+
+  /// 合成用的 Dio：带 Bearer 鉴权 + 全局代理
+  Dio _synthDio(TtsSource src, String key) {
+    final dio = Dio(BaseOptions(
+      connectTimeout: Duration(seconds: src.timeoutSec),
+      receiveTimeout: Duration(seconds: src.timeoutSec + 25),
+      headers: {'Authorization': 'Bearer $key'},
+    ));
+    applyGlobalProxy(dio);
+    return dio;
+  }
+
+  /// 把 `https://host/v1/` 归一成 `https://host/v1`；
+  /// 用户填到 `/chat/completions` 或 `/audio/speech` 也一并削掉。
+  static String _chatBase(String raw) {
+    var b = raw.trim().replaceAll(RegExp(r'/+$'), '');
+    const suffixes = [
+      '/chat/completions',
+      '/audio/speech',
+      '/v1/audio/speech',
+    ];
+    for (final s in suffixes) {
+      if (b.toLowerCase().endsWith(s)) {
+        b = b.substring(0, b.length - s.length);
+        break;
+      }
+    }
+    return b.replaceAll(RegExp(r'/+$'), '');
+  }
+
+  /// 附加参数：合法 JSON 对象才合并，否则忽略（不阻塞朗读）
+  static Map<String, dynamic>? _jsonObject(String raw) {
+    final t = raw.trim();
+    if (t.isEmpty) return null;
+    try {
+      final m = jsonDecode(t);
+      if (m is Map) return Map<String, dynamic>.from(m);
+    } catch (_) {}
+    return null;
+  }
+
+  static String _xmlEscape(String s) => s
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&apos;');
 
   /// 内置 Edge 朗读：直接打 App 自带的 Node（`/tts/edge`）。
   ///
@@ -747,10 +1162,10 @@ class TtsService extends GetxService {
   }
 
   /// 把合成好的 mp3 写临时文件交给 media_kit 播放
-  Future<void> _playNetBytes(List<int> bytes) async {
+  Future<void> _playNetBytes(List<int> bytes, {String ext = 'mp3'}) async {
     final p = _ensureNetPlayer();
     final f = File(
-        '${Directory.systemTemp.path}/tts_${DateTime.now().millisecondsSinceEpoch}.mp3');
+        '${Directory.systemTemp.path}/tts_${DateTime.now().millisecondsSinceEpoch}.$ext');
     await f.writeAsBytes(bytes, flush: true);
     _clearNetTmp();
     _netTmpFile = f;
