@@ -39,8 +39,11 @@ class BuiltinMiniApp {
   final String description;
 }
 
-/// 全部内置小程序（当前未内置任何小程序；保留注册表机制，后续要加内置程序
-/// 时在此追加条目即可，见文件顶部说明）。
+/// 全部内置小程序。
+///
+/// ⚠️ 保持**空列表**：不预装任何程序，避免「程序」列表里凭空多出一条
+/// 用户没要的东西（海阔小程序属于「海阔」模块，不进这里）。
+/// 机制保留，后续真要内置时在此追加条目即可（见文件顶部说明）。
 const List<BuiltinMiniApp> kBuiltinMiniApps = <BuiltinMiniApp>[];
 
 /// 按 appId 找内置项（不是内置的返回 null）

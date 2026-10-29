@@ -274,6 +274,63 @@ class AntBridge {
 
   // 页面加载完成 → 触发 app.show（模拟 onShow）
   setTimeout(function () { emit('app.show', {}); }, 0);
+
+  // ── 海阔（huoyi / jhminiapp）兼容层 ───────────────────────────────
+  //
+  // 海阔小程序的注入对象叫 `window.jhminiapp`，核心入口是通用的
+  // `invoke(api, params)`（而不是逐个具名方法），另外有几个别名
+  // （`getSystemInfo` / `network.text|json|bytes` / `miniApp.*`）。
+  // 这里做一层薄垫片：**同一套宿主能力**，两种调用风格都能用 ——
+  // 从海阔生态搬过来的小程序包不用改一行代码。
+  //
+  // 注意：`invoke` 走的是同一个 `antCall`（同一套权限门禁），
+  // 所以垫片不放大任何权限。
+  var invoke = function (api, params) {
+    if (api === 'request' || api === 'requestJson' ||
+        api === 'requestBytes' || api === 'player.open') {
+      return antCall(api, params || {});
+    }
+    if (api === 'network.text' || api === 'network.bytes' || api === 'network.json') {
+      var o = params || {};
+      // json 走 requestJson（宿主内部会解析并校验），text/bytes 走 request
+      if (api === 'network.json') {
+        return antCall('requestJson', {
+          url: o.url,
+          method: 'GET',
+          headers: o.headers || {}
+        });
+      }
+      var responseType = api === 'network.bytes' ? 'base64' : 'text';
+      return antCall('request', {
+        url: o.url,
+        method: 'GET',
+        responseType: responseType,
+        headers: o.headers || {}
+      }).then(function (res) {
+        return (res && res.data);
+      });
+    }
+    if (api === 'getSystemInfo') return antCall('env.getSystemInfo', {});
+    if (api === 'exitMiniApp') return antCall('exitMiniApp', {});
+    // storage.* / ui.* / clipboard.* / source.* / player.getState 等
+    // 名字与宿主方法一一对应，直接透传
+    return antCall(api, params || {});
+  };
+
+  window.ant.invoke = invoke;
+  window.ant.getSystemInfo = function () { return invoke('getSystemInfo', {}); };
+  window.ant.network = {
+    text: function (url) { return invoke('network.text', { url: url }); },
+    json: function (url) { return invoke('network.json', { url: url }); },
+    bytes: function (url) { return invoke('network.bytes', { url: url }); }
+  };
+  window.ant.miniApp = {
+    onOpen: function () { return antCall('env.getSystemInfo', {}); },
+    getLaunchOptions: function () { return antCall('env.getSystemInfo', {}); },
+    exitMiniApp: function () { return antCall('exitMiniApp', {}); }
+  };
+  // 海阔原生对象名：同一个引用，两边改一处都生效
+  window.jhminiapp = window.ant;
 })();
 ''';
 
