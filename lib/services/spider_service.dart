@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:tvbox/pages/cf_verify_page.dart';
 import 'package:tvbox/widgets/video_player_pip.dart';
+import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/play_context_store.dart';
 import 'package:tvbox/services/cf_session.dart';
@@ -374,6 +375,38 @@ class SpiderService {
           _loadedScriptKey.isEmpty;
     }
     return _loadedScriptUrl != mainScriptUrl || _loadedScriptKey.isEmpty;
+  }
+
+  /// `mainScriptUrl` 未登记时（聚合订阅/多线路配置里第一个 spider 线路的
+  /// api 为空，`AppState._loadSpiderSource` 会提前 return），从订阅源列表
+  /// 推导「主脚本」并登记 —— 否则切回订阅线路时引擎槽位还驻留着本地 JS 源，
+  /// 请求落到旧脚本上表现为「切不过来 / 还是本地 JS 的内容」。
+  ///
+  /// 只认真正能下载进 Node 槽位的脚本（http(s) URL 或相对 .js），
+  /// csp_ 占位 / 空 / .py / jar 一律跳过；找不到时保持空，
+  /// 后续请求由 `_dispatchScript` 给出明确错误而不是静默 404。
+  void _tryDeriveMainScript() {
+    if (mainScriptUrl.isNotEmpty) return;
+    try {
+      final beans = ApiConfig.instance.sourceBeanList;
+      for (final s in beans) {
+        if (!s.isSpiderSource || s.isPythonScriptSource) continue;
+        if (s.key.startsWith('app_')) continue;
+        final u = s.scriptUrl.trim();
+        if (u.isEmpty) continue;
+        final lower = u.toLowerCase();
+        if (lower.startsWith('csp_')) continue; // 占位不是脚本地址
+        final path = lower.split('?').first;
+        if (!lower.startsWith('http') && !path.endsWith('.js')) continue;
+        mainScriptUrl = u;
+        AppLog.instance.log(
+          '[SpiderService] 兜底登记主源脚本: $u（源 ${s.key}）',
+        );
+        return;
+      }
+    } catch (e) {
+      AppLog.instance.w('[SpiderService] 推导主源脚本失败: $e');
+    }
   }
 
   /// script → Python 模块 key（去 .py 后缀 + py_ 前缀）
@@ -1067,6 +1100,35 @@ class SpiderService {
           : await _ensureNodeScript(mainScriptUrl, fallback: key, type: type);
       if (k != null) engineKey = k;
       candidates = List<String>.of(_loadedScriptCandidates);
+    } else {
+      // script 空 / csp_ 占位的订阅线路：请求必须落到「订阅主脚本」上。
+      // 🔴 2026-10-29 兜底（用户：「本地JS和订阅切换的时候，没切换过来」）：
+      //   聚合订阅 / 多线路配置里第一个 spider 线路 api 往往为空，
+      //   `AppState._loadSpiderSource` 提前 return ⇒ `mainScriptUrl` 没登记 ⇒
+      //   `_needMainScriptRefresh` 恒 false ⇒ 直接用线路 key 打引擎 ——
+      //   而引擎槽位已被本地 JS 源（ljs_*.js）顶替 ⇒ 404，表现为
+      //   「切回订阅还是本地 JS 的内容 / 切不过来」。
+      //   这里先尝试从订阅列表推导主脚本登记；仍拿不到就给明确错误。
+      _tryDeriveMainScript();
+      if (_needMainScriptRefresh) {
+        final k = _mainDrpyApi.isNotEmpty
+            ? await _ensureDrpyScript(
+                _mainDrpyApi,
+                _mainDrpyExt,
+                fallback: key,
+                type: type,
+              )
+            : await _ensureNodeScript(mainScriptUrl,
+                fallback: key, type: type);
+        if (k != null) engineKey = k;
+        candidates = List<String>.of(_loadedScriptCandidates);
+      } else if (mainScriptUrl.isEmpty) {
+        lastError =
+            '该线路是订阅脚本线路，但当前没有可载入的主源脚本，'
+            '请重新加载订阅或在「设置 → 引擎管理」里手动加载 Node 源';
+        AppLog.instance.w('[SpiderService] $lastError（key=$key）');
+        return null;
+      }
     }
 
     // ✅ 候选 + 响应验证：404（路由不存在）⇒ 换下一个候选 key 重试（自愈）。

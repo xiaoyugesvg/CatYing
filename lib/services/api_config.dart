@@ -17,6 +17,7 @@ import 'package:tvbox/services/network_manager.dart';
 import 'package:tvbox/services/live_service.dart';
 import 'package:tvbox/services/parse_store.dart';
 import 'package:tvbox/services/host_resolver.dart';
+import 'package:tvbox/services/xbpq/xbpq_service.dart';
 
 /// 配置错误枚举
 enum ConfigError {
@@ -98,6 +99,14 @@ class ApiConfig extends GetxController {
   /// 「本地 JS 源」开关的 prefs 键
   static const String _kLocalJsSourcesEnabled = 'local_js_sources_enabled_v1';
 
+  /// key 是否属于「本地源」三族之一（Python / JS / XBPQ）。
+  ///
+  /// 收敛成一个判断，是为了以后再加一族引擎时不会漏掉主页源回退那几处。
+  static bool _isLocalSourceKey(String key) =>
+      key.startsWith('localpy_') ||
+      key.startsWith('localjs_') ||
+      key.startsWith(SourceBean.xbpqKeyPrefix);
+
   /// 本地源当前是否**参与**（源面板 / 搜索 / 主页源恢复）。
   ///
   /// Python 源看总开关；JS 源还要看 JS 子开关。订阅线路**不受**本地开关影响。
@@ -106,6 +115,9 @@ class ApiConfig extends GetxController {
       return localSourcesEnabled.value && localJsSourcesEnabled.value;
     }
     if (s.key.startsWith('localpy_')) {
+      return localSourcesEnabled.value;
+    }
+    if (s.key.startsWith(SourceBean.xbpqKeyPrefix)) {
       return localSourcesEnabled.value;
     }
     return true;
@@ -122,6 +134,14 @@ class ApiConfig extends GetxController {
   /// 本地 **JS** 源数量（`localjs_`）。
   int get localJsSourceCount =>
       localVideoSources.where((s) => s.key.startsWith('localjs_')).length;
+
+  /// 本地 **XBPQ** 规则源数量（`localxbpq_`）。
+  ///
+  /// 与 PY / JS 一样各数各的：XBPQ 没有独立子开关，跟着「本地爬虫」总开关走，
+  /// 但数量必须分开显示，否则用户看不出自己导了几条规则。
+  int get localXbpqSourceCount => localVideoSources
+      .where((s) => s.key.startsWith(SourceBean.xbpqKeyPrefix))
+      .length;
 
   final parseBeanList = <ParseBean>[].obs;
   final dohList = <(String, String)>[].obs;
@@ -358,6 +378,11 @@ class ApiConfig extends GetxController {
     } catch (e) {
       AppLog.instance.w('[ApiConfig] 读取本地 JS 源失败: $e');
     }
+    try {
+      await XbpqService.instance.ensureLoaded(force: true);
+    } catch (e) {
+      AppLog.instance.w('[ApiConfig] 读取本地 XBPQ 源失败: $e');
+    }
 
     // ── ③ 汇总清单（单条转 bean 出错就跳过它，不整表作废）──
     final list = <SourceBean>[];
@@ -375,13 +400,19 @@ class ApiConfig extends GetxController {
         /* 同上 */
       }
     }
+    for (final bean in XbpqService.instance.sourceBeans) {
+      try {
+        list.add(bean);
+      } catch (_) {
+        /* 同上 */
+      }
+    }
     localVideoSources.assignAll(list);
 
     // ── ④ 主页源回退：**无条件执行**（上面哪一步失败都要跑到这里）──
     try {
       final cur = homeSourceBean.value;
-      if (cur != null &&
-          (cur.key.startsWith('localpy_') || cur.key.startsWith('localjs_'))) {
+      if (cur != null && _isLocalSourceKey(cur.key)) {
         if (!isLocalSourceEnabled(cur)) {
           homeSourceBean.value = sourceBeanList.firstOrNull;
           await prefs?.remove(_kLocalHomeApi);
@@ -395,9 +426,11 @@ class ApiConfig extends GetxController {
             }
           }
           if (updated == null) {
-            // 删掉的是当前本地源：本地还有别的就切过去，否则回订阅线路第一条
+            // 删掉的是当前本地源：**只在启用中的本地源里**挑一个，
+            // 避免落到被「本地 JS 源」子开关关掉的源上（那样主页源等于不可用）。
+            final enabledLocal = list.where(isLocalSourceEnabled).toList();
             homeSourceBean.value =
-                list.firstOrNull ?? sourceBeanList.firstOrNull;
+                enabledLocal.firstOrNull ?? sourceBeanList.firstOrNull;
             // 「全局锁定本地源」的键也要清掉，否则下次恢复会指向已删除的 key
             await prefs?.remove(_kLocalHomeApi);
             AppLog.instance.log(
@@ -1566,8 +1599,8 @@ class ApiConfig extends GetxController {
       final curInList =
           curKey != null &&
           (sources.any((s) => s.key == curKey) ||
-              (localSourcesEnabled.value &&
-                  localVideoSources.any((s) => s.key == curKey)));
+              localVideoSources
+                  .any((s) => s.key == curKey && isLocalSourceEnabled(s)));
       if (!curInList) {
         homeSourceBean.value = sources.firstOrNull;
       }

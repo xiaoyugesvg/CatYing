@@ -7,6 +7,7 @@ import 'package:tvbox/models/source_bean.dart';
 import 'package:tvbox/models/movie_sort.dart';
 import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/spider_service.dart';
+import 'package:tvbox/services/xbpq/xbpq_service.dart';
 import 'package:tvbox/services/network_manager.dart';
 
 /// 源错误枚举
@@ -54,6 +55,11 @@ class SourceService {
 
     if (sourceBean.isSpiderSource) {
       return _getSpiderSort(sourceBean);
+    }
+
+    // XBPQ 规则源：本地规则 + 抓站，没有可请求的 api 地址
+    if (sourceBean.isXbpqSource) {
+      return _xbpqSort(sourceBean);
     }
 
     if (!sourceBean.isSupportedInSwift) {
@@ -283,6 +289,10 @@ class SourceService {
     if (sourceBean.isSpiderSource) {
       return _getSpiderList(sourceBean, sortData,
           page: page, filters: filters);
+    }
+
+    if (sourceBean.isXbpqSource) {
+      return _xbpqList(sourceBean, sortData, page: page);
     }
 
     // 本地 JSON 源：按 type_id 过滤 + 内存分页
@@ -568,6 +578,10 @@ class SourceService {
       return _getSpiderDetail(sourceBean, vodId);
     }
 
+    if (sourceBean.isXbpqSource) {
+      return _xbpqDetail(sourceBean, vodId);
+    }
+
     // 本地 JSON 源：从文件里找这条
     if (sourceBean.isLocalSource) {
       return _localDetail(sourceBean, vodId);
@@ -664,6 +678,10 @@ class SourceService {
 
     if (sourceBean.isSpiderSource) {
       return _spiderSearch(sourceBean, keyword);
+    }
+
+    if (sourceBean.isXbpqSource) {
+      return _xbpqSearch(sourceBean, keyword);
     }
 
     // 本地 JSON 源：在文件里的 list 中做名称包含匹配
@@ -892,6 +910,72 @@ class SourceService {
     final existingParams = uri.queryParameters;
     final mergedParams = {...existingParams, ...queryItems};
     return uri.replace(queryParameters: mergedParams).toString();
+  }
+
+  // ============================================================
+  // XBPQ 规则源（key 前缀 `localxbpq_`）
+  //
+  // 取数逻辑全在 `services/xbpq/` 里（纯 Dart、有 187 条离线自检），这里只做
+  // 「TVBox 协议 → 本项目的 Video / VodInfo」这一步转换，复用既有解析函数，
+  // 因此 XBPQ 源与订阅线路在 UI 上完全同权（分类、搜索、收藏、历史都一样）。
+  // ============================================================
+
+  /// 首页：分类 + 第一页列表。
+  Future<(List<SortData>, List<Video>)> _xbpqSort(SourceBean bean) async {
+    final (classes, videos) = await XbpqService.instance.home(bean.key);
+    final sorts = <SortData>[];
+    for (final c in classes) {
+      final id = (c['type_id'] ?? '').trim();
+      final name = (c['type_name'] ?? '').trim();
+      if (id.isEmpty && name.isEmpty) continue;
+      sorts.add(SortData(id: id, name: name.isEmpty ? id : name));
+    }
+    return (sorts, _parseVideoListFromJson(videos, bean.key));
+  }
+
+  Future<List<Video>> _xbpqList(
+    SourceBean bean,
+    SortData sort, {
+    int page = 1,
+  }) async {
+    final videos = await XbpqService.instance.category(
+      bean.key,
+      categoryId: sort.id,
+      page: page,
+    );
+    return _parseVideoListFromJson(videos, bean.key);
+  }
+
+  Future<VodInfo?> _xbpqDetail(SourceBean bean, String vodId) async {
+    final first = await XbpqService.instance.detail(bean.key, vodId);
+    if (first == null) return null;
+
+    final video = Video.fromJson(first);
+    return VodInfo.fromVideo(
+      video: Video(
+        id: video.id,
+        name: video.name,
+        pic: video.pic,
+        note: video.note,
+        year: video.year,
+        area: video.area,
+        type: video.type,
+        director: video.director,
+        actor: video.actor,
+        des: video.des,
+        sourceKey: bean.key,
+        tid: video.tid,
+        last: video.last,
+        dt: video.dt,
+      ),
+      playFrom: first['vod_play_from'] as String? ?? '',
+      playUrl: first['vod_play_url'] as String? ?? '',
+    );
+  }
+
+  Future<List<Video>> _xbpqSearch(SourceBean bean, String keyword) async {
+    final videos = await XbpqService.instance.search(bean.key, keyword);
+    return _parseVideoListFromJson(videos, bean.key);
   }
 
   // ============================================================

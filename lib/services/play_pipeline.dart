@@ -17,8 +17,7 @@
 //   ③ 直链后缀命中 → 直接播放
 //   ④ 需要解析（主流站 / 源声明 parse=1 / 用户强制）→ 解析接口；
 //      手选线路失败自动回退全接口
-//   ⑤ 解析结果仍是网页 → 用 Content-Type + 首字节确认是否其实是媒体
-//   ⑥ 仍不是媒体 → 交给 WebView 嗅探（由调用方决定内嵌还是嗅探页）
+//   ⑤ 仍不是媒体 → 交给 WebView 嗅探（由调用方决定内嵌还是嗅探页）
 //
 // 全链路**不抛异常**：任何一步失败都只是"这一层没命中"，继续下一层，
 // 真原因写日志并回传给调用方（`PlayResolution.note`）。
@@ -31,7 +30,6 @@ import 'package:tvbox/services/play_route.dart';
 import 'package:tvbox/services/play_url_sanitizer.dart';
 import 'package:tvbox/services/player_prefs.dart';
 import 'package:tvbox/services/sniff_filter.dart';
-import 'package:tvbox/services/web_sniff_service.dart';
 
 /// 取址结果的内容形态。
 enum PlayKind {
@@ -102,7 +100,7 @@ class PlayPipeline {
   /// [sourceSaysDirect] 对应 `parse:0`（源明确声明"这是直链"，但地址可能没后缀）；
   /// [forceParse] 对应"用户在解析面板里主动选了线路"；
   /// [apiBase] 是源 api（相对播放地址按它的 origin 补全）；
-  /// [refererPage] 是解析前的页面地址（MIME 确认 / Referer 兜底用）。
+  /// [refererPage] 是解析前的页面地址（V1 起不再做 MIME 确认，仅兼容保留）。
   Future<PlayResolution> resolve(
     String rawUrl, {
     Map<String, String>? headers,
@@ -153,7 +151,6 @@ class PlayPipeline {
 
     var parserName = '';
     String? parseTarget;
-    var parsed = false;
 
     // ④ 解析接口
     if (needParse && canParse) {
@@ -165,7 +162,6 @@ class PlayPipeline {
         if (outcome != null && outcome.url.isNotEmpty) {
           candidate = outcome.url;
           parserName = outcome.sourceName;
-          parsed = true;
           // 解析接口自带的请求头要随播放一起带上；**源自己给的优先**（更具体）
           final oh = outcome.headers;
           if (oh != null && oh.isNotEmpty) {
@@ -189,30 +185,14 @@ class PlayPipeline {
     // 解析接口可能又给出一个带包裹格式的串（少数站会套娃）
     candidate = sanitizePlayUrl(candidate);
 
-    // ⑤ 直链判定 / 无后缀媒体的服务端确认
-    var confirmed = SniffFilter.isDirectMedia(candidate);
-    if (!confirmed && (parsed || sourceSaysDirect)) {
-      try {
-        confirmed = await WebSniffService.instance.looksLikeMediaByMime(
-          candidate,
-          referer: parsed ? parseTarget : refererPage,
-        );
-      } catch (e) {
-        AppLog.instance.log('[PlayPipeline] MIME 确认失败: $e');
-        confirmed = false;
-      }
-    }
-
-    if (confirmed) {
-      final verified = !SniffFilter.isDirectMedia(candidate);
-      AppLog.instance.log(
-          '[PlayPipeline] 媒体已确认（${verified ? '无后缀·服务端确认' : '后缀'}）: $candidate');
+    // ⑤ 直链判定（V1：不再做 MIME 服务端确认）
+    if (SniffFilter.isDirectMedia(candidate)) {
+      AppLog.instance.log('[PlayPipeline] 直链: $candidate');
       return PlayResolution(
         url: candidate,
         kind: PlayKind.media,
         headers: h,
         parserName: parserName,
-        mediaConfirmed: verified,
       );
     }
 

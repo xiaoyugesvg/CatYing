@@ -100,8 +100,6 @@ class LocalPythonSources {
   ///   · 目录里有 `lp_*.py`、清单里没有 → 补进来（老数据/手动拷入）。
   Future<void> load({bool force = false}) async {
     if (_loaded && !force) return;
-    _loaded = true;
-    _sources.clear();
 
     final dir = await directory();
     if (!await dir.exists()) await dir.create(recursive: true);
@@ -109,6 +107,14 @@ class LocalPythonSources {
     // 旧版把 lp_*.py 放在 python-project/src/spider/video：首次启动搬过来，
     // 避免用户升级后本地源全部消失。
     await _migrateLegacy(dir);
+
+    // 🔴 2026-10-29 与 LocalJsSources 对齐：原来这里是
+    //   `_loaded = true; _sources.clear();` 再慢慢读 —— 一旦 `directory()` /
+    //   `create()` / `_migrateLegacy()` 中途抛错，内存里的本地 PY 源就被清空，
+    //   而 `_loaded` 已是 true ⇒ 之后不带 force 的 load 直接 return，本地 PY 源
+    //   「凭空消失」到重启为止，连带主页源指向它时切不回订阅。
+    //   现在改成**读进临时列表、全部成功才替换**：失败时旧清单原样保留。
+    final next = <LocalPythonSource>[];
 
     final file = await _manifest();
     if (await file.exists()) {
@@ -120,8 +126,8 @@ class LocalPythonSources {
             final s = LocalPythonSource.fromJson(Map<String, dynamic>.from(e));
             if (s.key.isEmpty) continue;
             if (!await File('${dir.path}/${s.key}.py').exists()) continue;
-            if (_sources.any((x) => x.key == s.key)) continue;
-            _sources.add(s);
+            if (next.any((x) => x.key == s.key)) continue;
+            next.add(s);
           }
         }
       } catch (e) {
@@ -135,8 +141,8 @@ class LocalPythonSources {
         final name = f.uri.pathSegments.last;
         final key = name.substring(0, name.length - 3);
         if (!key.startsWith('lp_')) continue;
-        if (_sources.any((x) => x.key == key)) continue;
-        _sources.add(
+        if (next.any((x) => x.key == key)) continue;
+        next.add(
           LocalPythonSource(
             key: key,
             name: key,
@@ -148,6 +154,11 @@ class LocalPythonSources {
       AppLog.instance.w('[LocalPy] 扫描目录失败: $e');
     }
 
+    // 全部读完了才替换（原子换表）
+    _sources
+      ..clear()
+      ..addAll(next);
+    _loaded = true;
     await _applyOrder();
     await _save();
   }

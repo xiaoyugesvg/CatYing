@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:collection';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
@@ -47,19 +46,6 @@ class ParseService {
   static final ParseService instance = ParseService._internal();
 
   static const Duration _timeout = Duration(seconds: 6);
-
-  /// 解析结果缓存 TTL。切集 / 重试 / 自动下一集常在短时间内请求**同一个**
-  /// 地址，串行重解析既慢又白耗接口配额（用户 2026-10-15 反馈"解析影响播放"）。
-  /// 解析站对同一地址的响应短时间内稳定，10 分钟内直接复用。
-  static const Duration _cacheTtl = Duration(minutes: 10);
-  static const int _cacheMax = 32;
-
-  /// LRU 缓存（LinkedHashMap 插入序，命中后移到末尾）
-  final LinkedHashMap<String, _ParseCacheEntry> _cache = LinkedHashMap();
-
-  /// 首选线路（用户手选的 active）的"抢跑窗口"：并发解析时若首选还没回来，
-  /// 先等它这么久；超时就用已返回的其它线路结果，避免卡死。
-  static const Duration _preferWindow = Duration(milliseconds: 1200);
 
   Dio? _dio;
   Dio get _client => _dio ??= _createDio();
@@ -112,14 +98,11 @@ class ParseService {
     return o?.url;
   }
 
-  /// 解析 [url]：**并发**请求可用接口（或仅 [only] 指定的接口），
-  /// 成功返回 [ParseOutcome]（含直链判定），全部失败返回 null。
+  /// 解析 [url]：**串行**遍历可用接口（或仅 [only] 指定的接口），
+  /// 第一个成功即返回；全部失败返回 null。
   ///
-  /// 两点关键改进（用户 2026-10-15 反馈"解析影响播放"）：
-  ///   · **并发**：原来串行遍历，5 个接口各 6 秒超时最坏要等 30 秒才出画面；
-  ///     现在同时发出，谁先返回可用结果用谁（首选线路给 [_preferWindow] 抢跑
-  ///     窗口，避免"手动选了 A 却用了 B"）。
-  ///   · **缓存**：同一地址 10 分钟内直接复用，切集/重试/自动下一集不再重解。
+  /// 2026-10-29 对齐 huoyi：去掉并发 / 缓存 / 直链探针，行为简单可预期
+  /// （多接口时最坏串行 N×6s，换取代码量与失败面的收敛）。
   Future<ParseOutcome?> parseOutcome(
     String url, {
     ParseBean? only,
@@ -128,123 +111,30 @@ class ParseService {
     final target = url.trim();
     if (target.isEmpty) return null;
 
-    // 缓存 key 必须带**接口身份**（only.url）：否则用户点「换解析接口」时
-    // 会命中上一条线路留下的缓存，看起来"换了没反应"（2026-10-15 深挖发现）。
-    final cacheKey = '${only?.url ?? ''}|$target';
-
-    // 缓存命中（LRU：命中后移到末尾）
-    final cached = _cache[cacheKey];
-    if (cached != null) {
-      if (!cached.expired) {
-        _cache.remove(cacheKey);
-        _cache[cacheKey] = cached;
-        AppLog.instance.log('[Parse] 缓存命中 → ${cached.outcome.url}');
-        return cached.outcome;
-      }
-      _cache.remove(cacheKey);
-    }
-
     final all = _parsers();
     List<ParseBean> beans;
     if (only != null) {
       beans = [only];
     } else {
       final active = ParseStore.instance.activeBean;
-      // 选中线路被禁用（或已被删除）→ 视为"自动"（huoyi 同款：禁用选中项回自动）
+      // 选中线路被禁用（或已被删除）→ 视为"自动"（禁用选中项回自动）
       beans = (active == null || !active.enabled)
           ? all
           : [active, ...all.where((b) => b.url != active.url)];
     }
-    if (beans.isEmpty) return null;
 
-    final outcome = beans.length == 1
-        ? await _tryBean(beans.first, target, headers)
-        : await _resolveConcurrently(beans, target, headers);
-    if (outcome != null) {
-      _cache[cacheKey] = _ParseCacheEntry(outcome);
-      while (_cache.length > _cacheMax) {
-        _cache.remove(_cache.keys.first);
-      }
+    for (final bean in beans) {
+      final outcome = await _tryBean(bean, target, headers);
+      if (outcome != null) return outcome;
     }
-    return outcome;
+    return null;
   }
 
-  /// 让某个**播放地址**的解析缓存失效（用户点「重试」/播放失败时调用）。
-  ///
-  /// 为什么必须做：解析出的 m3u8 常带时效签名，缓存 10 分钟内可能已经是过期
-  /// 地址；若重试还命中同一条缓存，用户会陷入"点重试→同一个坏地址→再失败"
-  /// 的死循环，永远恢复不了（2026-10-15 深挖发现）。
-  void invalidate(String url) {
-    final target = url.trim();
-    if (target.isEmpty) return;
-    _cache.removeWhere((k, _) => k.endsWith('|$target'));
-  }
+  /// 兼容保留：V1 已去掉解析缓存，此处为空实现（UI / 设置页仍在调用）。
+  void invalidate(String url) {}
 
-  /// 清空解析缓存（解析线路被增删改后调用，保证"改完立即生效"）。
-  void clearCache() => _cache.clear();
-
-  /// 同时发出的解析请求上限（滑动窗口）。
-  ///
-  /// 并发把"5 个接口 × 6 秒串行 = 30 秒"压成"≈6 秒"（谁先回来用谁）；
-  /// 但用户可能配十几条接口，一次全发容易被解析站限流、失败率反而上升。
-  /// 限制在飞数量、多的排队补发 —— 常见场景（接口 ≤ 8 条）行为完全不变。
-  static const int _maxConcurrent = 8;
-
-  /// 并发请求所有候选，第一个可用结果即返回（首选线路有抢跑窗口）。
-  Future<ParseOutcome?> _resolveConcurrently(
-    List<ParseBean> beans,
-    String target,
-    Map<String, String>? headers,
-  ) {
-    final completer = Completer<ParseOutcome?>();
-    final successes = <int, ParseOutcome>{};
-    var finished = 0;
-    var started = 0;
-    Timer? window;
-
-    void completeFromBest() {
-      if (completer.isCompleted || successes.isEmpty) return;
-      final best = successes.keys.reduce((a, b) => a < b ? a : b);
-      completer.complete(successes[best]);
-    }
-
-    /// 按 [_maxConcurrent] 补发请求（有请求完成就再放一个进去）
-    void pump() {
-      while (!completer.isCompleted &&
-          started < beans.length &&
-          started - finished < _maxConcurrent) {
-        final idx = started++;
-        unawaited(_tryBean(beans[idx], target, headers).then((o) {
-          if (completer.isCompleted) return;
-          finished++;
-          if (o != null) {
-            successes[idx] = o;
-            if (idx == 0) {
-              // 首选（用户手选线路 / 列表第一条）成功：立刻采用
-              window?.cancel();
-              completer.complete(o);
-              return;
-            }
-            // 非首选先到：给首选一个抢跑窗口，超时再用目前最好的
-            window ??= Timer(_preferWindow, completeFromBest);
-          }
-          if (finished == beans.length) {
-            window?.cancel();
-            if (successes.isEmpty) {
-              completer.complete(null);
-            } else {
-              completeFromBest();
-            }
-            return;
-          }
-          pump(); // 空出一个并发位 → 补发下一个
-        }));
-      }
-    }
-
-    pump();
-    return completer.future;
-  }
+  /// 兼容保留：V1 已去掉解析缓存，此处为空实现。
+  void clearCache() {}
 
   /// 用单个解析接口请求一次（所有异常吞掉，返回 null）。
   Future<ParseOutcome?> _tryBean(
@@ -260,7 +150,7 @@ class ParseService {
       // 也随 [ParseOutcome] 带出去供**播放**使用（防盗链场景）。
       final beanHeaders = _headerOf(bean);
       final mergedHeaders = <String, String>{
-        if (headers != null) ...headers,
+        ...?headers,
         ...?beanHeaders,
       };
 
@@ -326,17 +216,6 @@ class ParseService {
           !wantFormats.contains(ext)) {
         AppLog.instance.log(
             '[Parse] 接口「${bean.name}」结果格式 $ext 不在允许列表，跳过');
-        return null;
-      }
-
-      // ── 直链可用性探测（2026-10-21 第二批「分级回退」）──────────
-      // 解析站经常"成功返回一个已经时效/防盗链的直链"，播放器一开就 403。
-      // 这里只对**直链**发一个 `Range: bytes=0-0` 探针：
-      //   · 明确 4xx/5xx → 视为本条解析失败，让其它接口的结果顶上
-      //   · 网络异常/超时 → **按可用处理**（不能因为一次探测抖动丢掉结果）
-      if (_isDirectMedia(extracted) &&
-          !await _probeDirect(extracted, beanHeaders)) {
-        AppLog.instance.log('[Parse] 接口「${bean.name}」直链不可用，跳过');
         return null;
       }
 
@@ -641,56 +520,4 @@ class ParseService {
     return false;
   }
 
-  /// 直链探针：只请求 `Range: bytes=0-0`，拿到状态码立刻断开。
-  ///
-  /// 只有拿到**明确的**坏链状态码（404 / 410 / 5xx）才判不可用；
-  /// 401 / 403 / 416 与网络异常/超时一律**按可用处理** ——
-  /// 探测本身信息量有限（没有播放页 Referer、有的 CDN 不支持 Range），
-  /// 因为一次探测就把一条本来能播的链接丢掉，代价远大于收益。
-  Future<bool> _probeDirect(String url, Map<String, String>? headers) async {
-    ResponseBody? body;
-    try {
-      final resp = await _client.get<ResponseBody>(
-        url,
-        options: Options(
-          responseType: ResponseType.stream,
-          // 探测只是"筛掉明显坏链"，不能把首播拖慢：最多等 2.5 秒
-          receiveTimeout: const Duration(milliseconds: 2500),
-          sendTimeout: const Duration(milliseconds: 2500),
-          headers: <String, String>{
-            ...?headers,
-            'Range': 'bytes=0-0',
-          },
-          validateStatus: (_) => true,
-        ),
-      );
-      body = resp.data;
-      final code = resp.statusCode ?? 0;
-      // 401 / 403 / 416 **不算坏链**（2026-10-28 深挖）：
-      //   · 403 —— 解析出的直链大多带防盗链，本探测**拿不到播放页 Referer**，
-      //     被 403 是常态，不代表链接失效。判死等于把能播的结果丢掉，
-      //     于是又回到"解析明明成功却播不了"；
-      //   · 416 —— 部分 CDN 不支持 `Range: bytes=0-0`，直接回
-      //     `416 Range Not Satisfiable`，链接本身完全正常。
-      // 只把 404 / 410 / 5xx 这类**明确**的坏链当失败。
-      if (code == 401 || code == 403 || code == 416) return true;
-      if (code >= 400) return false;
-      return true;
-    } catch (e) {
-      AppLog.instance.log('[Parse] 直链探测异常（按可用处理）: $e');
-      return true;
-    } finally {
-      try {
-        await body?.stream.listen(null).cancel();
-      } catch (_) {}
-    }
-  }
-}
-
-/// 解析结果缓存条目（10 分钟过期）
-class _ParseCacheEntry {
-  final ParseOutcome outcome;
-  final DateTime at;
-  _ParseCacheEntry(this.outcome) : at = DateTime.now();
-  bool get expired => DateTime.now().difference(at) > ParseService._cacheTtl;
 }

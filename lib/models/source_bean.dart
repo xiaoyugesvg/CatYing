@@ -82,11 +82,22 @@ class SourceBean {
 
   bool get isConfigCenter => key == 'baseset';
 
+  /// XBPQ 规则源的 key 前缀。
+  ///
+  /// 与 `localjs_` / `localpy_` 同族：都是用户导入的本地源，靠 key 前缀区分
+  /// 引擎。放在模型里是为了让「判定」不依赖 service（避免循环 import）。
+  static const String xbpqKeyPrefix = 'localxbpq_';
+
+  /// 是否为 XBPQ 规则源（用户导入的爬虫规则 JSON）。
+  bool get isXbpqSource => key.startsWith(xbpqKeyPrefix);
+
   /// 源类型分类（供源切换 UI 分组展示）。
   ///
   /// 只依据本模型已有字段（[type] / [api] / [jar]）判定，判定不出的一律归
   /// [SourceKind.unknown]；项目里没有依据的概念（如"猫源""TVBox"）不会臆造。
   SourceKind get sourceKind {
+    // key 前缀优先：XBPQ 源的 type 只是占位值，不能按 type 归类。
+    if (isXbpqSource) return SourceKind.xbpq;
     // type==4 → T4 远程接口（字段注释「4 Remote」；source_service 对 type==4
     // 走 filter/extend 分支请求）。
     if (type == 4) return SourceKind.t4;
@@ -190,6 +201,9 @@ enum SourceKind {
   /// T3 Spider 源：type 3，由 .jar 提供
   jar,
 
+  /// 用户导入的 XBPQ 规则源（key 前缀 `localxbpq_`）
+  xbpq,
+
   /// 无法判定
   unknown;
 
@@ -206,6 +220,8 @@ enum SourceKind {
         return 'Python';
       case SourceKind.jar:
         return 'Jar';
+      case SourceKind.xbpq:
+        return 'XBPQ';
       case SourceKind.unknown:
         return '未分类';
     }

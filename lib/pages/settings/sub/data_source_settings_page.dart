@@ -16,6 +16,7 @@ import 'package:tvbox/pages/settings/sub/cf_sites_page.dart';
 import 'package:tvbox/pages/settings/sub/engine_settings_page.dart';
 import 'package:tvbox/pages/settings/sub/local_python_sources_page.dart';
 import 'package:tvbox/pages/settings/sub/local_js_sources_page.dart';
+import 'package:tvbox/pages/settings/sub/local_xbpq_sources_page.dart';
 import 'package:tvbox/pages/settings/sub/parse_settings_page.dart';
 import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 import 'package:tvbox/pages/settings/sub/tg_source_page.dart';
@@ -319,6 +320,24 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
               },
               onTap: () async {
                 await Get.to(() => const LocalJsSourcesPage());
+                if (mounted) setState(() {});
+              },
+            ),
+          ),
+        ),
+        Obx(
+          () => _card(
+            SettingsRow(
+              icon: Icons.rule_rounded,
+              title: 'XBPQ 规则源',
+              // 没有独立子开关：跟着上面的「本地爬虫」总开关走，
+              // 所以这里只做状态说明，不再放第二个 Switch。
+              subtitle: ApiConfig.instance.localSourcesEnabled.value
+                  ? '已启用：规则源会出现在源面板 / 搜索里'
+                  : '已关闭：随「本地爬虫」开关一起生效',
+              value: '${ApiConfig.instance.localXbpqSourceCount} 个',
+              onTap: () async {
+                await Get.to(() => const LocalXbpqSourcesPage());
                 if (mounted) setState(() {});
               },
             ),
