@@ -1,0 +1,353 @@
+import core.widgets;
+import peek.home;
+
+widget ToolIcon = GestureDetector(
+  onTap: args.onTap,
+  child: Container(
+    padding: [8.0],
+    child: Icon(icon: args.icon, size: 20.0, color: 0xFF232323),
+  ),
+);
+
+widget TabButton = GestureDetector(
+  onTap: event "selectType" { typeId: args.typeId },
+  child: Container(
+    padding: [12.0, 8.0],
+    margin: [0.0, 0.0, 8.0, 0.0],
+    decoration: {
+      type: "box",
+      color: switch args.selected {
+        true: 0xFF2E7D74,
+        false: 0x00000000,
+      },
+      borderRadius: [16.0],
+    },
+    child: Text(
+      text: args.name,
+      style: {
+        color: switch args.selected {
+          true: 0xFFFFFFFF,
+          false: 0xFF232323,
+        },
+        fontSize: 13.0,
+        fontWeight: "w600",
+      },
+    ),
+  ),
+);
+
+widget FilterChip = GestureDetector(
+  onTap: event "selectFilter" {
+    key: args.option.filterKey,
+    value: args.option.value,
+  },
+  child: Container(
+    padding: [10.0, 6.0],
+    margin: [0.0, 0.0, 8.0, 8.0],
+    decoration: {
+      type: "box",
+      color: switch args.option.selected {
+        true: 0xFF2E7D74,
+        false: 0xFFFFFFFF,
+      },
+      borderRadius: [12.0],
+      border: [
+        {
+          color: switch args.option.selected {
+            true: 0xFF2E7D74,
+            false: 0xFFD8D8D8,
+          },
+          width: 1.0,
+        },
+      ],
+    },
+    child: Text(
+      text: args.option.name,
+      style: {
+        color: switch args.option.selected {
+          true: 0xFFFFFFFF,
+          false: 0xFF232323,
+        },
+        fontSize: 12.0,
+      },
+    ),
+  ),
+);
+
+widget FilterGroup = Container(
+  padding: [12.0, 4.0, 12.0, 4.0],
+  child: Column(
+    crossAxisAlignment: "start",
+    children: [
+      Text(
+        text: args.group.name,
+        style: { color: 0xFF7A7A7A, fontSize: 12.0, fontWeight: "w600" },
+      ),
+      SizedBox(height: 6.0),
+      Wrap(
+        spacing: 0.0,
+        runSpacing: 0.0,
+        children: [
+          ...for option in args.group.options: FilterChip(option: option),
+        ],
+      ),
+    ],
+  ),
+);
+
+widget PosterItem = GestureDetector(
+  onTap: event "openItem" { index: args.item.index },
+  child: Column(
+    crossAxisAlignment: "start",
+    children: [
+      Expanded(
+        child: ClipRRect(
+          borderRadius: [10.0],
+          child: T4Image(url: args.item.pic, fit: "cover"),
+        ),
+      ),
+      SizedBox(height: 6.0),
+      Text(
+        text: args.item.name,
+        maxLines: 1,
+        overflow: "ellipsis",
+        style: { color: 0xFF232323, fontSize: 13.0, fontWeight: "w600" },
+      ),
+      Text(
+        text: args.item.remarks,
+        maxLines: 1,
+        overflow: "ellipsis",
+        style: { color: 0xFF7A7A7A, fontSize: 12.0 },
+      ),
+    ],
+  ),
+);
+
+widget RowItem = GestureDetector(
+  onTap: event "openItem" { index: args.item.index },
+  child: Container(
+    color: 0xFFFFFFFF,
+    padding: [12.0],
+    child: Row(
+      children: [
+        ClipRRect(
+          borderRadius: [8.0],
+          child: SizedBox(
+            width: 96.0,
+            height: 128.0,
+            child: T4Image(url: args.item.pic, fit: "cover"),
+          ),
+        ),
+        SizedBox(width: 12.0),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: "start",
+            children: [
+              Text(
+                text: args.item.name,
+                maxLines: 2,
+                overflow: "ellipsis",
+                style: {
+                  color: 0xFF232323,
+                  fontSize: 15.0,
+                  fontWeight: "w700",
+                },
+              ),
+              SizedBox(height: 4.0),
+              Text(
+                text: args.item.remarks,
+                style: { color: 0xFF7A7A7A, fontSize: 12.0 },
+              ),
+              Text(
+                text: args.item.year,
+                style: { color: 0xFF7A7A7A, fontSize: 12.0 },
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  ),
+);
+
+widget BannerItem = GestureDetector(
+  onTap: event "openItem" { index: args.item.index },
+  child: Container(
+    margin: [12.0, 6.0],
+    decoration: { type: "box", borderRadius: [12.0] },
+    child: ClipRRect(
+      borderRadius: [12.0],
+      child: Stack(
+        children: [
+          T4Image(url: args.item.pic, fit: "cover"),
+          Positioned(
+            left: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+            child: Container(
+              color: 0x99000000,
+              padding: [12.0, 8.0],
+              child: Column(
+                crossAxisAlignment: "start",
+                children: [
+                  Text(
+                    text: args.item.name,
+                    maxLines: 1,
+                    overflow: "ellipsis",
+                    style: {
+                      color: 0xFFFFFFFF,
+                      fontSize: 15.0,
+                      fontWeight: "w700",
+                    },
+                  ),
+                  Text(
+                    text: args.item.remarks,
+                    style: { color: 0xFFFFFFFF, fontSize: 12.0 },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  ),
+);
+
+widget Header = Container(
+  color: 0xFFF2F2F0,
+  padding: [12.0, 12.0, 12.0, 4.0],
+  child: Column(
+    children: [
+      Row(
+        children: [
+          Expanded(
+            child: Text(
+              text: data.home.source,
+              maxLines: 1,
+              overflow: "ellipsis",
+              style: {
+                color: 0xFF232323,
+                fontSize: 16.0,
+                fontWeight: "w700",
+              },
+            ),
+          ),
+          ToolIcon(
+            icon: data.home.icons.search,
+            onTap: event "openSearch" {},
+          ),
+          ToolIcon(
+            icon: data.home.icons.refresh,
+            onTap: event "refresh" {},
+          ),
+          ToolIcon(
+            icon: data.home.icons.layout,
+            onTap: event "showDisplayStylePicker" {},
+          ),
+          ToolIcon(
+            icon: data.home.icons.filter,
+            onTap: event "toggleFilters" {},
+          ),
+        ],
+      ),
+      SizedBox(height: 8.0),
+      SingleChildScrollView(
+        scrollDirection: "horizontal",
+        child: Row(
+          children: [
+            ...for entry in data.home.classes: TabButton(
+              typeId: entry.typeId,
+              name: entry.typeName,
+              selected: entry.selected,
+            ),
+          ],
+        ),
+      ),
+      switch data.home.showFilters {
+        true: Column(
+          children: [
+            ...for group in data.home.filters: FilterGroup(group: group),
+          ],
+        ),
+        false: SizedBoxShrink(),
+      },
+    ],
+  ),
+);
+
+widget SectionTitle = Container(
+  color: 0xFFF2F2F0,
+  padding: [12.0, 8.0],
+  child: Row(
+    children: [
+      Text(
+        text: ["全部剧集 · ", data.home.totalLabel, "部"],
+        style: { color: 0xFF232323, fontSize: 14.0, fontWeight: "w700" },
+      ),
+      Spacer(),
+      GestureDetector(
+        onTap: event "showSourcePicker" {},
+        child: Text(
+          text: "换源",
+          style: { color: 0xFF2E7D74, fontSize: 13.0 },
+        ),
+      ),
+    ],
+  ),
+);
+
+widget root = Container(
+  color: 0xFFF2F2F0,
+  child: PeekStickyGrid(
+    heroHeight: 0.0,
+    pinnedHeight: data.home.stickyHeaderHeight,
+    sectionHeight: 40.0,
+    crossAxisCount: switch data.home.displayStyle {
+      "grid": data.home.gridColumns,
+      "largeGrid": data.home.largeGridColumns,
+      "banner": data.home.bannerColumns,
+      "list": 1,
+      "list2": 1,
+      "textList": 1,
+      "card": 1,
+      default: data.home.gridColumns,
+    },
+    childAspectRatio: switch data.home.displayStyle {
+      "grid": 0.72,
+      "largeGrid": 0.72,
+      "banner": 1.2,
+      "list": data.home.wideListRatio,
+      "list2": data.home.textListRatio,
+      "textList": data.home.textListRatio,
+      "card": 2.1,
+      default: 0.72,
+    },
+    mainAxisSpacing: 8.0,
+    crossAxisSpacing: 8.0,
+    hero: SizedBoxShrink(),
+    pinnedHeader: Header(),
+    sectionHeader: SectionTitle(),
+    empty: Container(
+      alignment: "center",
+      padding: [0.0, 48.0],
+      child: Text(
+        text: switch data.home.loading {
+          true: "加载中…",
+          false: "暂无内容",
+        },
+        style: { color: 0xFF7A7A7A, fontSize: 14.0 },
+      ),
+    ),
+    children: [
+      ...for item in data.home.items: switch data.home.displayStyle {
+        "list": RowItem(item: item),
+        "list2": RowItem(item: item),
+        "textList": RowItem(item: item),
+        "banner": BannerItem(item: item),
+        "card": BannerItem(item: item),
+        default: PosterItem(item: item),
+      },
+    ],
+  ),
+);

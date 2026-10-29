@@ -9,6 +9,7 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/models/movie.dart';
 import 'package:tvbox/models/movie_sort.dart';
+import 'package:tvbox/models/source_bean.dart';
 import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:tvbox/widgets/engine_load_panel.dart';
 import 'package:tvbox/widgets/source_switch_sheet.dart';
@@ -20,6 +21,10 @@ import 'package:tvbox/widgets/home_search_bar.dart';
 import 'package:tvbox/services/main_tab_controller.dart';
 import 'package:tvbox/services/nav_feature_service.dart';
 import 'package:tvbox/reading/services/settings_service.dart';
+import 'package:tvbox/rfw_theme/rfw_home_theme.dart';
+import 'package:tvbox/rfw_theme/rfw_theme_data.dart';
+import 'package:tvbox/rfw_theme/rfw_theme_events.dart';
+import 'package:tvbox/rfw_theme/rfw_theme_store.dart';
 
 /// 首页 - 对应 Swift HomeView
 class HomePage extends StatefulWidget {
@@ -1001,6 +1006,264 @@ class _HomePageState extends State<HomePage> {
       // Python 源（type=3 且脚本是 .py）：home/category 空列表要给出明确提示
       final isPySource = source?.isPythonScriptSource ?? false;
 
+      // ── RFW 主题（影视首页皮肤）────────────────────────────────
+      // 开启后整个「分类 + 筛选 + 推荐 + 片单」区域交给 .rfwtxt 描述，
+      // 顶部的源切换/搜索栏仍是原生的（主题只管内容区）。
+      // ValueListenableBuilder 是因为 rfwThemeModeNotifier 是 ValueNotifier，
+      // 不在 Obx 的追踪范围内 —— 不包一层的话在设置里开关不会立刻生效。
+      return ValueListenableBuilder<bool>(
+        valueListenable: rfwThemeModeNotifier,
+        builder: (context, rfwOn, _) {
+          if (rfwOn) {
+            return _buildRfwContent(
+              isLoading: isLoading,
+              errorMsg: errorMsg,
+              homeVideos: homeVideos,
+              videos: videos,
+              sorts: sorts,
+              selectedSortId: selectedSortId,
+              sourceName: source?.name ?? '',
+            );
+          }
+          return _buildNativeContent(
+            isLoading: isLoading,
+            errorMsg: errorMsg,
+            homeVideos: homeVideos,
+            videos: videos,
+            sorts: sorts,
+            selectedSortId: selectedSortId,
+            hasMore: hasMore,
+            source: source,
+            isPySource: isPySource,
+          );
+        },
+      );
+    });
+  }
+
+  /// RFW 主题渲染：把首页状态压成 `data.home`，动作回灌到控制器。
+  Widget _buildRfwContent({
+    required bool isLoading,
+    required String? errorMsg,
+    required List<Video> homeVideos,
+    required List<Video> videos,
+    required List<SortData> sorts,
+    required String? selectedSortId,
+    required String sourceName,
+  }) {
+    final media = MediaQuery.of(context);
+    return RfwHomeTheme(
+      data: buildRfwHomeData(
+        RfwHomeDataInput(
+          categories: sorts,
+          category: selectedSortId ?? '',
+          items: videos,
+          recommend: homeVideos,
+          filters: _controller.currentFilters,
+          selectedFilters: Map<String, String>.from(
+            _controller.selectedFilters,
+          ),
+          displayStyle: rfwDisplayStyleNotifier.value,
+          gridColumns: PlayerPrefs.instance.gridColumns.value.clamp(2, 4),
+          largeGridColumns: 2,
+          bannerColumns: 1,
+          loading: isLoading,
+          errorMessage: errorMsg ?? '',
+          sourceName: sourceName,
+          screenWidth: media.size.width,
+          isLandscape: media.orientation == Orientation.landscape,
+        ),
+      ),
+      onAction: _onRfwAction,
+    );
+  }
+
+  /// RFW 主题发来的动作 → 复用原生逻辑。
+  ///
+  /// 主题只能通过这里影响宿主：它拿不到 controller、拿不到 Navigator，
+  /// 只能"请求"宿主做事，宿主决定做不做。
+  void _onRfwAction(RfwThemeAction action) {
+    switch (action.kind) {
+      case RfwThemeActionKind.openItem:
+        final list = _controller.videos;
+        if (action.index < list.length) {
+          Get.toNamed('/detail', arguments: list[action.index]);
+        }
+        return;
+      case RfwThemeActionKind.openRecommend:
+        final list = _controller.homeVideos;
+        if (action.index < list.length) {
+          Get.toNamed('/detail', arguments: list[action.index]);
+        }
+        return;
+      case RfwThemeActionKind.longPressItem:
+        // 主题的长按与点按等价（原生网格里长按也没有专属菜单）
+        final list = _controller.videos;
+        if (action.index < list.length) {
+          Get.toNamed('/detail', arguments: list[action.index]);
+        }
+        return;
+      case RfwThemeActionKind.selectCategory:
+        final match = _controller.sorts.firstWhere(
+          (s) => s.id == action.typeId,
+          orElse: () => SortData(),
+        );
+        if (match.id.isNotEmpty) _controller.selectSort(match);
+        return;
+      case RfwThemeActionKind.selectFilter:
+        _controller.selectFilter(action.key, action.value);
+        return;
+      case RfwThemeActionKind.toggleFilters:
+      case RfwThemeActionKind.showFilterPicker:
+        _openFilterSheet();
+        return;
+      case RfwThemeActionKind.showDisplayStylePicker:
+        _openRfwDisplayStyleSheet();
+        return;
+      case RfwThemeActionKind.showCategoryPicker:
+        _openRfwCategorySheet();
+        return;
+      case RfwThemeActionKind.showSourcePicker:
+      case RfwThemeActionKind.showApiConfigPicker:
+        SourceSwitchSheet.show(context);
+        return;
+      case RfwThemeActionKind.refresh:
+        _controller.refresh();
+        return;
+      case RfwThemeActionKind.openSearch:
+        widget.onSearchTap?.call();
+        return;
+      case RfwThemeActionKind.showNativeAppBar:
+      case RfwThemeActionKind.navigateBack:
+        // 首页是 Tab 根页面：没有可返回的栈，顶部栏也始终是原生的
+        return;
+    }
+  }
+
+  /// 主题内的「显示样式」选择（grid / banner / list / textList …）
+  Future<void> _openRfwDisplayStyleSheet() async {
+    const options = <(String, String)>[
+      ('grid', '网格'),
+      ('largeGrid', '大网格'),
+      ('banner', '横幅'),
+      ('list', '列表'),
+      ('textList', '纯文字列表'),
+      ('card', '卡片'),
+    ];
+    final cur = rfwDisplayStyleNotifier.value;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 10),
+              child: Row(
+                children: [
+                  Text(
+                    '显示样式',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: AppTheme.fontHeadline,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            for (final (value, label) in options)
+              ListTile(
+                title: Text(
+                  label,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontSubhead,
+                  ),
+                ),
+                trailing: value == cur
+                    ? Icon(Icons.check_rounded, color: AppTheme.accentColor)
+                    : null,
+                onTap: () {
+                  saveRfwDisplayStyle(value);
+                  Navigator.pop(ctx);
+                },
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 主题内的分类选择（分类多到一行放不下时用）
+  Future<void> _openRfwCategorySheet() async {
+    final sorts = _controller.sorts.toList();
+    if (sorts.isEmpty) return;
+    final cur = _controller.selectedSort.value?.id;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+              child: Text(
+                '选择分类',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontHeadline,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            for (final s in sorts)
+              ListTile(
+                title: Text(
+                  s.name,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontSubhead,
+                  ),
+                ),
+                trailing: s.id == cur
+                    ? Icon(Icons.check_rounded, color: AppTheme.accentColor)
+                    : null,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _controller.selectSort(s);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 原生首页渲染（RFW 关闭时走这里，逻辑与原实现一致）
+  Widget _buildNativeContent({
+    required bool isLoading,
+    required String? errorMsg,
+    required List<Video> homeVideos,
+    required List<Video> videos,
+    required List<SortData> sorts,
+    required String? selectedSortId,
+    required bool hasMore,
+    required SourceBean? source,
+    required bool isPySource,
+  }) {
+
       if (isLoading && videos.isEmpty) {
         return const AppLoading();
       }
@@ -1209,7 +1472,6 @@ class _HomePageState extends State<HomePage> {
           );
         }),
       );
-    });
   }
 
   // ignore: unused_element

@@ -5,6 +5,8 @@ import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/reading/services/settings_service.dart';
 import 'package:tvbox/services/nav_feature_service.dart';
 import 'package:tvbox/pages/settings/sub/nav_appearance_page.dart';
+import 'package:tvbox/pages/settings/sub/rfw_theme_page.dart';
+import 'package:tvbox/rfw_theme/rfw_theme_store.dart';
 import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 
@@ -112,6 +114,74 @@ class HomePagesSettingsPage extends StatelessWidget {
           );
         }),
         const SizedBox(height: AppTheme.spacingLG),
+
+        // ---------- RFW 首页主题（只作用于影视首页） ----------
+        ListenableBuilder(
+          listenable: rfwThemeModeNotifier,
+          builder: (context, _) {
+            final on = rfwThemeModeNotifier.value;
+            return SettingsGroup(
+              title: '影视首页主题',
+              children: [
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const RfwThemePage()),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.auto_awesome_outlined,
+                          size: 20,
+                          color: AppTheme.textSecondary,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'RFW 主题',
+                                style: TextStyle(
+                                  color: AppTheme.textPrimary,
+                                  fontSize: AppTheme.fontSubhead,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '用 .rfwtxt 描述首页排版，只影响影视首页',
+                                style: TextStyle(
+                                  color: AppTheme.textTertiary,
+                                  fontSize: AppTheme.fontCaption,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          color: AppTheme.textTertiary,
+                          size: 20,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                unifiedSwitchRow(
+                  icon: Icons.dashboard_customize_outlined,
+                  title: '启用 RFW 主题',
+                  subtitle: on ? '影视首页由主题渲染' : '关闭，使用原生首页',
+                  value: on,
+                  onChanged: (v) => saveRfwThemeMode(v),
+                ),
+              ],
+            );
+          },
+        ),
 
         // ---------- 悬浮导航栏（全 App 三条底栏统一生效） ----------
         ListenableBuilder(

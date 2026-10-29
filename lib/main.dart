@@ -64,6 +64,7 @@ import 'package:tvbox/music/services/library_store.dart';
 import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/widgets/video_player_pip.dart';
 import 'package:tvbox/webhome/webhtv_playback_sync_service.dart';
+import 'package:tvbox/rfw_theme/rfw_theme_store.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -213,6 +214,9 @@ Future<void> _initAppServices() async {
 
   // RSS 订阅源（设置里的「RSS 管理」+ 底栏 RSS 模块）
   await bootRestore('RssStore.load', RssStore.instance.load);
+
+  // RFW 主题（影视首页皮肤）的开关 / 选中项 / 显示样式
+  await bootRestore('loadRfwThemePreferences', loadRfwThemePreferences);
 
   // 播放内核与选项
   // #10：字号缩放是外观设置，由 AppTheme 负责加载（PlayerPrefs 是兼容壳）

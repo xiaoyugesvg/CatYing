@@ -94,6 +94,7 @@ dependencies:
   quickjs_engine:
     path: packages/quickjs_engine
   mobile_scanner: ^7.4.2
+  rfw: ^2.0.0
   # cached_network_image 3.3.1 已移除（A2）：它与 cached_network_image_ce
   # 是**两条平行的完整实现**（各带 platform_interface / web 子包），
   # 同时编译进 App 且各自维护磁盘缓存 → 同一个网络图在影视和音乐会存两份。
@@ -116,6 +117,9 @@ flutter:
     #   注册表见 lib/miniapp/services/builtin_mini_apps.dart；
     #   首次启动由 MiniAppService.seedBuiltins() 解包到 Documents/miniapps/<appId>/。
     - assets/miniapps/
+    # RFW 主题（.rfwtxt）：**影视首页皮肤**，见 lib/rfw_theme/。
+    #   只描述首页（分类/筛选/推荐/片单），换皮肤不影响其他模块。
+    - assets/rfw_themes/
     - assets/nodejs-project/dist/
     - assets/nodejs-project/src/
     # ⚠️ 2026-10-27 清理：原 `assets/nodejs-project/src/spider/{,video,book,pan}/`

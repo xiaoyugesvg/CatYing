@@ -11,6 +11,7 @@ import 'package:tvbox/widgets/ios_av_player.dart';
 import 'package:tvbox/widgets/ks_player.dart';
 import 'package:tvbox/widgets/mpv_app_player.dart';
 import 'package:tvbox/widgets/video_player.dart';
+import 'package:tvbox/widgets/live_danmu.dart';
 import 'package:tvbox/room/room_models.dart';
 import 'package:tvbox/room/room_session.dart';
 import 'package:tvbox/room/room_source_picker.dart';
@@ -54,6 +55,40 @@ class _RoomPageState extends State<RoomPage> {
   double _lastPos = 0;
   DateTime _lastPosAt = DateTime.now();
   int _lastMsgCount = 0;
+
+  /// 聊天弹幕开关（房间内有效，不落盘：每次进房间默认开）
+  bool _danmuOn = true;
+
+  /// 聊天消息 → 弹幕。只取普通文本消息，系统提示（"xx 加入房间"）不上弹幕。
+  ///
+  /// 颜色按 userId 散列取一个柔和色，这样同一个人说话颜色固定，
+  /// 一眼能分出是谁在说，又不会像纯白那样糊在亮画面上。
+  List<LiveDanmuItem> get _danmuItems {
+    const palette = [
+      Color(0xFFFFFFFF),
+      Color(0xFFFFD666),
+      Color(0xFF7ED6FF),
+      Color(0xFFB6F09C),
+      Color(0xFFFFA8C8),
+    ];
+    final list = _session.messages;
+    final out = <LiveDanmuItem>[];
+    for (final m in list) {
+      if (m.system) continue;
+      if (m.type != 'text') continue;
+      final text = m.content.trim();
+      if (text.isEmpty) continue;
+      final h = m.userId.hashCode.abs();
+      out.add(
+        LiveDanmuItem(
+          id: m.id,
+          text: text,
+          color: palette[h % palette.length],
+        ),
+      );
+    }
+    return out;
+  }
 
   @override
   void initState() {
@@ -388,6 +423,15 @@ class _RoomPageState extends State<RoomPage> {
           ],
         ),
         actions: [
+          // 聊天弹幕开关：默认开（边看边聊才是「一起看」的乐趣）
+          IconButton(
+            tooltip: _danmuOn ? '关闭聊天弹幕' : '开启聊天弹幕',
+            icon: Icon(
+              _danmuOn ? Icons.subtitles_rounded : Icons.subtitles_off_rounded,
+              color: _danmuOn ? _accent : _sub,
+            ),
+            onPressed: () => setState(() => _danmuOn = !_danmuOn),
+          ),
           if (_session.isHost)
             IconButton(
               tooltip: '选片',
@@ -465,15 +509,32 @@ class _RoomPageState extends State<RoomPage> {
                       ],
                     ),
                   )
-                : VideoPlayerWidget(
-                    // key 跟随播放器实例：换内核/重建时整体 remount，避免残留旧纹理
-                    key: ObjectKey(player),
-                    player: player,
-                    url: media.url,
-                    headers: media.headers.isEmpty ? null : media.headers,
-                    videoTitle: media.title,
-                    initialVideoFit: VideoFitType.contain,
-                    onBack: _leave,
+                : Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      VideoPlayerWidget(
+                        // key 跟随播放器实例：换内核/重建时整体 remount，避免残留旧纹理
+                        key: ObjectKey(player),
+                        player: player,
+                        url: media.url,
+                        headers: media.headers.isEmpty ? null : media.headers,
+                        videoTitle: media.title,
+                        initialVideoFit: VideoFitType.contain,
+                        onBack: _leave,
+                      ),
+                      // 聊天弹幕：压在画面上、不吃点击（IgnorePointer 在控件内部）
+                      Positioned.fill(
+                        child: LiveDanmuOverlay(
+                          items: _danmuItems,
+                          enabled: _danmuOn,
+                          fontSize: 15,
+                          speed: 105,
+                          maxTracks: 5,
+                          topPadding: 40,
+                          bottomPadding: 56,
+                        ),
+                      ),
+                    ],
                   ),
           ),
         ),
