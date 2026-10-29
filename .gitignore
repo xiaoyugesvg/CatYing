@@ -164,7 +164,11 @@ build/
 /mpv-dev-x86_64-*.7z
 /ANGLE.7z
 
-test*
+# 临时产物（原来写成 `test*`，会把 test/ 目录整棵忽略 —— 新增测试文件
+# 加不进版本库，只能 `git add -f`。2026-10-29 复核后改精确）
+/test*.txt
+/test*.log
+/test*.json
 # CocoaPods lock：本项目由 CI 在 macOS 上跑 pod install 生成。
 # 不要提交它 —— 之前提交的那份是从别的项目变体抄来的（锁了 16 个无关 pod、
 # 缺 4 个新插件），会误导 pod install 装错依赖版本。

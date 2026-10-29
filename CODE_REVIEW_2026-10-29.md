@@ -235,3 +235,22 @@ grep -rn "SettingsHelp" lib/ | grep -v settings_shared.dart
 - `_crop_cord.png` / `_crop_me_top.png` 仍在根目录且被跟踪（疑似设计参考图，未替你删）。
 
 **顺手发现（未改，提醒）**：`.gitignore` 里有一条 `test*`，会把**新增**的 `test/` 文件一并忽略（已跟踪的照常）。以后新增测试文件需要 `git add -f`，或把这条规则写精确。
+
+---
+
+## 八、旧报告（2026-10-26）遗留项收尾（2026-10-29 21:15）
+
+本轮把上一份报告里剩下的 N5 / N6 / N8 / R5 / R7 一并处理完。
+
+| 项 | 原问题 | 处理 |
+|---|---|---|
+| **N8** | 体检默认 12 路并发；收尾时**只要不是 healthy 就自动停用** | ① `_concurrency` 12 → 6（芯片仍可选 1/2/3/4/6/8/12）；② 停用策略收紧：只停 `dead` **且非网络超时**的源，`partial`（能搜到看不了）/ `suspect`（搜索 0 条，可能只是关键词无结果）/ 超时一律**只标记不停用**；③ 收尾提示按项列出「已停用 N 个确认失效 / M 个超时保留 / K 个部分可用保留」 |
+| **R7** | rex 解析有 25s 超时，但**没有防串号** | 新增 `_resolveSeq` 代次号，`_loadStreams` 的三处回写前都校验 `seq == _resolveSeq`：切条目 / `_loadDetail` 换真实 link 触发二次解析时，旧响应不再覆盖新结果 |
+| **R5** | TG 错误只有一句裸 message，无法定位 | Node 侧 `/tg` 统一 catch 改为回 `{error, stack, action, where}`（模块加载失败同样带 stack）；Dart 侧 `TgService.post` 从 `DioException.response.data` 把 body 捞回来写 `AppLog`（500 时 Dio 默认丢 body，光改 Node 没用） |
+| **N6** | `close_sinks` 未启用，StreamController 漏 close 无静态防线 | `analysis_options.yaml` 启用；全仓 **0 条新增告警**（原先担心的 `_stopCtrl` 无需改动） |
+| **N5** | 3 处 `CurvedAnimation` 未 dispose | `book_page_cover` / `book_page_curl`：字段类型从 `Animation<double>` 改为 `CurvedAnimation`，`dispose()` 里显式释放；`staggered_entrance`：两条曲线都存字段（原来 `_slide` 里那条是内联的，压根没法释放）并释放 |
+| — | `.gitignore` 的 `test*` 把 `test/` 整棵忽略 | 改为 `/test*.txt`、`/test*.log`、`/test*.json`，新增测试文件不再需要 `git add -f` |
+
+**验证**：`flutter analyze lib test` → 0 error / 0 warning；`flutter test` → 634 / 634 通过。
+
+**仍未动（需要你决定，不是缺陷）**：根目录 `_crop_cord.png` / `_crop_me_top.png` 两张图仍被跟踪 —— 看着像抠图参考，删不删你说。

@@ -1130,7 +1130,13 @@ const mgmtServer = createServer((req, res) => {
                 console.error('[tg] load fail:', (e && e.stack) || e);
                 try {
                     res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-                    res.end(JSON.stringify({ ok: false, error: 'TG 模块加载失败：' + ((e && e.message) || String(e)) }));
+                    res.end(JSON.stringify({
+                        ok: false,
+                        error: 'TG 模块加载失败：' + ((e && e.message) || String(e)),
+                        // 复核 R5：堆栈一起回，App 侧写日志便于定位（UI 仍只显 error）
+                        stack: (e && e.stack) || '',
+                        where: 'tg/load',
+                    }));
                 } catch (_) {}
             }
         })();

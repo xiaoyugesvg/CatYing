@@ -362,7 +362,18 @@ export async function handle(req, res, url) {
                 json(res, 200, { ok: false, error: '未知 action: ' + action });
         }
     } catch (e) {
-        console.error('[tg] route error:', (e && e.stack) || e);
-        json(res, 500, { ok: false, error: (e && e.message) || String(e) });
+        // 复核 R5：以前只回 `e.message`，`X.next is not a function` 这种
+        // 打包 / 运行时错误光看一句 message 完全定位不到模块和行号。
+        // 现在把 stack + action 一起回给客户端（App 侧写进日志，UI 仍只显 message）。
+        const msg = (e && e.message) || String(e);
+        const stack = (e && e.stack) || '';
+        console.error('[tg] route error:', stack || msg);
+        json(res, 500, {
+            ok: false,
+            error: msg,
+            stack,
+            action,
+            where: 'tg/' + action,
+        });
     }
 }

@@ -18,6 +18,9 @@ class StaggeredEntrance extends StatefulWidget {
 class _StaggeredEntranceState extends State<StaggeredEntrance>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
+  // 两个 CurvedAnimation 都存成字段：它们要显式 dispose（复核报告 N5）。
+  late final CurvedAnimation _fadeCurve;
+  late final CurvedAnimation _slideCurve;
   late final Animation<double> _fade;
   late final Animation<Offset> _slide;
 
@@ -28,11 +31,13 @@ class _StaggeredEntranceState extends State<StaggeredEntrance>
       vsync: this,
       duration: const Duration(milliseconds: 380),
     );
-    _fade = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
+    _fadeCurve = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
+    _slideCurve = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
+    _fade = _fadeCurve;
     _slide = Tween<Offset>(
       begin: const Offset(0, 0.08),
       end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
+    ).animate(_slideCurve);
     // 按 index 错开延迟，形成瀑布效果
     final delay = (widget.index % 20) * 45;
     Future.delayed(Duration(milliseconds: delay), () {
@@ -42,6 +47,8 @@ class _StaggeredEntranceState extends State<StaggeredEntrance>
 
   @override
   void dispose() {
+    _fadeCurve.dispose();
+    _slideCurve.dispose();
     _controller.dispose();
     super.dispose();
   }

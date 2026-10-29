@@ -77,7 +77,9 @@ class BookPageCurl extends StatefulWidget {
 class _BookPageCurlState extends State<BookPageCurl>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
-  late final Animation<double> _anim;
+
+  /// 具体类型 [CurvedAnimation]：需要在 dispose 里显式释放（复核报告 N5）。
+  late final CurvedAnimation _anim;
   final GlobalKey _pageKey = GlobalKey();
 
   _Phase _phase = _Phase.idle; // idle / rasterizing / animating
@@ -105,6 +107,7 @@ class _BookPageCurlState extends State<BookPageCurl>
   @override
   void dispose() {
     _pageImage?.dispose();
+    _anim.dispose();
     _ctrl.dispose();
     super.dispose();
   }

@@ -42,6 +42,9 @@ class _RexDetailPageState extends State<RexDetailPage> {
   bool _streamsLoading = false;
   String? _streamsError;
 
+  /// `_loadStreams()` 的代次号：只有最后一次发起的解析能回写结果。
+  int _resolveSeq = 0;
+
   @override
   void initState() {
     super.initState();
@@ -84,6 +87,9 @@ class _RexDetailPageState extends State<RexDetailPage> {
   }
 
   Future<void> _loadStreams() async {
+    // 代次号：切条目 / `_loadDetail` 把简写 link 换成真实 link 后会**再解析一次**，
+    // 旧请求晚回来时不能把新结果覆盖掉（复核报告 R7 的"防串号"）。
+    final seq = ++_resolveSeq;
     setState(() {
       _streamsLoading = true;
       _streamsError = null;
@@ -95,20 +101,20 @@ class _RexDetailPageState extends State<RexDetailPage> {
       final streams = await _service
           .resource(widget.module, _item)
           .timeout(const Duration(seconds: 25));
-      if (!mounted) return;
+      if (!mounted || seq != _resolveSeq) return;
       setState(() {
         _streams = streams;
         _streamsLoading = false;
       });
     } on TimeoutException {
-      if (!mounted) return;
+      if (!mounted || seq != _resolveSeq) return;
       setState(() {
         _streams = const [];
         _streamsError = '解析线路超时（25 秒）：可能是网络慢或模块响应慢，点「重新解析」再试';
         _streamsLoading = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || seq != _resolveSeq) return;
       setState(() {
         // 清空旧线路：解析失败时留着上一次的结果（可能已过期）更误导
         _streams = const [];

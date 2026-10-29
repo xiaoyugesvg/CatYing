@@ -53,6 +53,9 @@ linter:
     - camel_case_extensions
     - camel_case_types
     - cancel_subscriptions
+    # 2026-10-29 复核 N6：StreamController 不 close 没有静态防线，这条补上。
+    # 启用时会给既有的 `_stopCtrl` 报一条 —— 已在源码里补 `close()`。
+    - close_sinks
     - cascade_invocations
     - prefer_const_constructors
     - prefer_const_declarations

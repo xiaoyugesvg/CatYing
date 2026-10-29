@@ -46,7 +46,11 @@ class BookPageCover extends StatefulWidget {
 class _BookPageCoverState extends State<BookPageCover>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
-  late final Animation<double> _anim;
+
+  /// 用具体类型 [CurvedAnimation] 而不是 `Animation<double>`：
+  /// 它自己是 `AnimationWithParentMixin`，需要在 dispose 里显式释放
+  /// （`close_sinks` 之外的一条规范，见复核报告 N5）。
+  late final CurvedAnimation _anim;
   bool _animating = false;
   int _direction = 0; // 1=下一页(从右滑入), -1=上一页(从左滑入)
 
@@ -72,6 +76,7 @@ class _BookPageCoverState extends State<BookPageCover>
 
   @override
   void dispose() {
+    _anim.dispose();
     _ctrl.dispose();
     super.dispose();
   }

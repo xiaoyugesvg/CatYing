@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/nodejs_manager.dart';
 import 'package:tvbox/services/remote_engine.dart';
 
@@ -175,6 +176,22 @@ class TgService {
       if (d is Map) return d.cast<String, dynamic>();
       return {'ok': false, 'error': '返回格式异常'};
     } on DioException catch (e) {
+      // 复核 R5：Node 侧 500 会把 `{error, stack, action}` 一起回在 body 里，
+      // 但 DioException 默认只留状态码、把 body 丢掉 —— 这里捞回来写日志，
+      // 用户界面上仍只显一句 error（堆栈给他看也没用）。
+      final body = e.response?.data;
+      if (body is Map) {
+        final m = body.cast<String, dynamic>();
+        final stack = (m['stack'] ?? '').toString();
+        final where = (m['where'] ?? 'tg/$action').toString();
+        if (stack.isNotEmpty) {
+          AppLog.instance.w('[TG] $where 失败: ${m['error']}\n$stack');
+        }
+        return {
+          'ok': false,
+          'error': (m['error'] ?? _short(e)).toString(),
+        };
+      }
       return {'ok': false, 'error': _short(e)};
     } catch (e) {
       return {'ok': false, 'error': '$e'};

@@ -48,7 +48,14 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
   late final BookSourceStore store = widget.store ?? BookSourceStore.instance;
 
   _Phase _phase = _Phase.idle;
-  int _concurrency = 12;
+
+  /// 默认并发 6（原来 12）。
+  ///
+  /// 2026-10-29 复核（N8）：12 路并发在弱网 / 源站限流时，大量请求会**超时**
+  /// 而被判成「网络不通」；而体检收尾又按结果自动停用 —— 用户本来能用的源
+  /// 被悄悄关掉，只会觉得「源怎么都没了」。降到 6，弱机也不至于把 UI 拖死。
+  /// 芯片里仍可选 1/2/3/4/6/8/12。
+  int _concurrency = 6;
   int _done = 0;
 
   /// 已测结果缓存（按源 id）；页面退出后体检继续写服务缓存，下次进入可续显
@@ -189,14 +196,29 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
         });
       },
     );
-    // 体检完默认停用失效源（用户 2026-10-20：检测不能用就默认关闭）。
+    // 体检完默认停用**确认失效**的源（用户 2026-10-20：检测不能用就默认关闭）。
     // 结果从服务缓存取：即使用户中途退出页面，这里也能照常收尾。
-    final dead = _bookSources.where((s) {
+    //
+    // ⚠️ 2026-10-29 复核收紧（N8）：原来「只要不是 healthy 就停用」，两个误伤：
+    //   ① **网络类超时**（并发高 / 弱网）本来能用的源被判成挂了 → 现在跳过；
+    //   ② `partial`（能搜到、看不了）/ `suspect`（搜索 0 条，可能只是关键词
+    //      无结果）也不是"失效" → 现在只标记、不停用。
+    //   403 / 404 / 5xx 这类服务端明确答复仍照旧停用（它们确实是坏了）。
+    final dead = <BookSource>[];
+    final keptNetwork = <BookSource>[];
+    final keptWeak = <BookSource>[];
+    for (final s in _bookSources) {
+      if (!s.enabled) continue;
       final h = service.healthCache[s.id];
-      return s.enabled &&
-          h != null &&
-          h.level != BookSourceHealthLevel.healthy;
-    }).toList();
+      if (h == null || h.level == BookSourceHealthLevel.healthy) continue;
+      if (_isTimeoutLikeFail(h)) {
+        keptNetwork.add(s);
+      } else if (h.level == BookSourceHealthLevel.dead) {
+        dead.add(s);
+      } else {
+        keptWeak.add(s);
+      }
+    }
     for (final s in dead) {
       await store.setEnabled(s.id, false);
     }
@@ -205,10 +227,22 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
       _phase = _Phase.done;
       _done = _total;
     });
-    if (dead.isNotEmpty) {
-      _toast('体检完成：已自动停用 ${dead.length} 个失效源');
-    }
+    final parts = <String>[
+      if (dead.isNotEmpty) '已停用 ${dead.length} 个确认失效的源',
+      if (keptNetwork.isNotEmpty) '${keptNetwork.length} 个超时/连不上，保留未停用',
+      if (keptWeak.isNotEmpty) '${keptWeak.length} 个部分可用，保留未停用',
+    ];
+    if (parts.isNotEmpty) _toast('体检完成：${parts.join('，')}');
   }
+
+  /// 这次失败是不是「网络侧超时 / 连不上」—— 体检收尾时**唯一**不停用的一类。
+  ///
+  /// 判据只用 [SourceFailKind.network]（超时 / 拒连 / DNS）：
+  /// 403（[SourceFailKind.denied]）、404 / 5xx（[SourceFailKind.apiBroken]）
+  /// 都是服务端明确答复，说明源确实坏了，照旧自动停用。
+  static bool _isTimeoutLikeFail(BookSourceHealth h) =>
+      h.level == BookSourceHealthLevel.dead &&
+      describeSourceFail(h.detail, what: '该源').kind == SourceFailKind.network;
 
   Future<void> _optimize() async {
     final usable = _bookSources
