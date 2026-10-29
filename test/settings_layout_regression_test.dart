@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/pages/settings/sub/danmu_settings_page.dart';
 import 'package:tvbox/pages/settings/sub/data_source_settings_page.dart';
 import 'package:tvbox/pages/settings/sub/home_pages_settings_page.dart';
@@ -199,5 +200,51 @@ void main() {
     // 两行 + 标题应该是 200 上下；远超说明被撑爆
     expect(size.height, lessThan(400), reason: 'SettingsGroup 高度失控：$size');
     expect(find.byType(ErrorWidget).evaluate(), isEmpty);
+  });
+
+  /// 分组标题必须是「主题色竖条 + 12.5 加粗」——
+  /// 与 `tg_source_page._section`、TG 首页区块标题同一套。
+  ///
+  /// 反向验证过：把样式回退成旧的「11 号浅灰、无竖条」这条会红。
+  testWidgets('SettingsGroup 标题：竖条 + 12.5 w700 textSecondary', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SizedBox(
+          width: 390,
+          height: 844,
+          child: ListView(
+            children: const [
+              SettingsGroup(
+                title: '连接',
+                children: [
+                  SettingsRow(icon: Icons.info_outline, title: '行一'),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    // 1) 标题文字样式
+    final text = tester.widget<Text>(find.text('连接'));
+    final style = text.style!;
+    expect(style.fontSize, 12.5, reason: '标题字号应与 TG 设置页一致');
+    expect(style.fontWeight, FontWeight.w700);
+    expect(style.color, AppTheme.textSecondary);
+
+    // 2) 竖条存在：3 宽 / 12 高 / accentOnSurface 底 / 圆角 2
+    final bars = tester
+        .widgetList<Container>(find.byType(Container))
+        .where((c) {
+      final d = c.decoration;
+      if (d is! BoxDecoration) return false;
+      return d.color == AppTheme.accentOnSurface;
+    }).toList();
+    expect(bars, isNotEmpty, reason: '分组标题缺少主题色竖条');
+    final barSize = tester.getSize(find.byWidget(bars.first));
+    expect(barSize.width, 3);
+    expect(barSize.height, 12);
   });
 }

@@ -644,17 +644,38 @@ class SettingsGroup extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (title != null) ...[
-          const SizedBox(height: 10),
+          // ── 分组标题统一成「主题色竖条 + 加粗标题」────────────────
+          //
+          // 原来是「11 号浅灰小字、无竖条」—— 11 个设置子页的分区标题
+          // 全是一片灰字，页面上看不出分段（用户 2026-10-30：
+          // 「TG 设置页那个竖条标题挺好，其余页也这样」）。
+          // 现在与 `tg_source_page._section`、TG 首页/海阔的区块标题
+          // **完全同一套**（竖条 3×12 + 间距 7 + 12.5 加粗 textSecondary），
+          // 一处改动 = 所有走 SettingsGroup 的子页一起统一。
           Padding(
-            padding: const EdgeInsets.only(left: 4, bottom: 6),
-            child: Text(
-              title!,
-              style: TextStyle(
-                color: AppTheme.textTertiary,
-                fontSize: AppTheme.fontCaption,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.4,
-              ),
+            padding: const EdgeInsets.fromLTRB(4, 14, 4, 8),
+            child: Row(
+              children: [
+                Container(
+                  width: 3,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: AppTheme.accentOnSurface,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    title!,
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
