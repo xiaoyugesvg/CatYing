@@ -1045,6 +1045,10 @@ class _DetailPageState extends State<DetailPage> {
 
   /// 等待播放地址期间的阶段文案。
   String _loadingStageText() {
+    // 解析线路阶段有更具体的文案（"正在用「解析一」解析…"）就优先用它 ——
+    // 网页地址解析可能要几秒，光说"正在获取播放地址"用户以为卡死了
+    final hint = _controller.resolveHint;
+    if (hint.isNotEmpty) return hint;
     if (_controller.isResolving.value) return '正在获取播放地址…';
     return '正在准备播放…';
   }

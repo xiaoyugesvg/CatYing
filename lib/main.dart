@@ -65,6 +65,8 @@ import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/widgets/video_player_pip.dart';
 import 'package:tvbox/webhome/webhtv_playback_sync_service.dart';
 import 'package:tvbox/rfw_theme/rfw_theme_store.dart';
+import 'package:tvbox/services/m3u8_ad_filter.dart';
+import 'package:tvbox/services/parse_lines.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -217,6 +219,12 @@ Future<void> _initAppServices() async {
 
   // RFW 主题（影视首页皮肤）的开关 / 选中项 / 显示样式
   await bootRestore('loadRfwThemePreferences', loadRfwThemePreferences);
+
+  // m3u8 分片级去广告（插播片段过滤）
+  await bootRestore('M3u8AdFilter.load', M3u8AdFilter.load);
+
+  // 解析线路（网页播放地址 → 媒体直链）的选中项 / 自定义线路
+  await bootRestore('ParseLineStore.load', ParseLineStore.instance.load);
 
   // 播放内核与选项
   // #10：字号缩放是外观设置，由 AppTheme 负责加载（PlayerPrefs 是兼容壳）

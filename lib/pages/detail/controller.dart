@@ -26,6 +26,9 @@ import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/webhome/webhtv_site_health_page.dart';
 import 'package:tvbox/pages/detail/simple_image_reader_page.dart';
 import 'package:tvbox/pages/detail/simple_text_reader_page.dart';
+import 'package:tvbox/services/media_resolver.dart';
+import 'package:tvbox/services/media_sniffer.dart';
+import 'package:tvbox/services/parse_lines.dart';
 
 class PlaybackQualityOption {
   static const String autoIdentifier = 'auto';
@@ -1023,6 +1026,23 @@ class DetailController extends GetxController with WidgetsBindingObserver {
           headers = Map<String, String>.from(resolution.headers);
           playHeaders.value = headers;
           if (resolution.isPage) {
+            // ── 先试「嗅探解析」（用户 2026-10-29）──────────────────
+            // 网页形态的播放地址里往往藏着真正的 m3u8（页面自己用 JS 拼出来），
+            // 直接判"这条线路播不了"太浪费。解析成功就交给原生播放器；
+            // 失败才走 setPlaybackError 的既有机制（顺延候选 / 换线路）。
+            AppLog.instance
+                .log('[Play] Spider 返回网页地址，尝试嗅探解析: $playCandidate');
+            final sniffed =
+                await _sniffPageForMedia(playCandidate, headers);
+            if (_spiderResolveToken != token) return;
+            if (sniffed != null) {
+              AppLog.instance.log('[Play] 嗅探解析成功: $sniffed');
+              _spiderTrustedMedia = true;
+              playUrl.value = sniffed;
+              playbackSessionId.value = _newUuid();
+              isPlaying.value = true;
+              return;
+            }
             // 影视模块不允许网页播放（2026-10-29）：交给 setPlaybackError 的
             // 既有机制先顺延候选 / 换线路，全试完再把原因写给用户。
             AppLog.instance
@@ -1249,6 +1269,19 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     candidate = resolution.url;
     playHeaders.value = Map<String, String>.from(resolution.headers);
     if (resolution.isPage) {
+      // ── 先试「嗅探解析」（用户 2026-10-29）──────────────────────
+      // 普通 CMS / 直链线路也可能返回网页（或一条解析接口链接）：
+      // 在页面里把媒体地址嗅出来再交给原生播放器，比直接判死有用得多。
+      AppLog.instance.log('[Play] 返回网页地址，尝试嗅探解析: $candidate');
+      final sniffed = await _sniffPageForMedia(candidate, playHeaders);
+      if (_playbackStartToken != token) return;
+      if (sniffed != null) {
+        AppLog.instance.log('[Play] 嗅探解析成功: $sniffed');
+        playUrl.value = sniffed;
+        playbackSessionId.value = _newUuid();
+        isPlaying.value = true;
+        return;
+      }
       // 影视模块不允许网页播放（2026-10-29）：不内嵌 WebView，按"这条线路
       // 播不了"处理 —— 先自动顺延同集其它候选 / 下一条线路，全试完才提示。
       AppLog.instance.log('[Play] 网页地址，影视模块不播网页: $candidate');
@@ -1270,6 +1303,58 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     playbackSessionId.value = _newUuid();
     isPlaying.value = true;
   }
+
+  /// 网页形态的播放地址 → 后台解析出媒体直链（失败返回 null）。
+  ///
+  /// 覆盖用户说的两种情形：
+  ///   · 源给的**原播放地址**本身就是网页（`/play/123.html`）；
+  ///   · 详情页里点「播放」，解析出来的是一条**解析接口链接**
+  ///     （`https://jiexi.xx/?url=<原始地址>`）。
+  ///
+  /// ⚠️ 全程**后台**跑：不起 WebView、不弹页面、不打断播放器
+  /// （用户 2026-10-29 明确要求）。解析顺序：先直接抓页面找媒体地址，
+  /// 再按「解析线路」逐条试；一轮没结果会在总预算内重试，
+  /// 因为网页/接口经常要几秒才吐地址。
+  Future<String?> _sniffPageForMedia(
+    String pageUrl,
+    Map<String, String> headers,
+  ) async {
+    if (!pageUrl.startsWith('http')) return null;
+    try {
+      // 线路来源：订阅配置的 parses（没读过就先读一次）
+      final store = ParseLineStore.instance;
+      if (!store.loaded) await store.load();
+      if (store.isEmpty) {
+        final parses = await ApiConfig.instance.readParses();
+        if (parses.isNotEmpty) store.syncFromParses(parses);
+      }
+      final found = await MediaResolver.instance.resolve(
+        pageUrl,
+        headers: headers,
+        onProgress: (msg) {
+          // 只更新一行状态文字，不弹窗、不遮画面
+          _resolveHint.value = msg;
+        },
+      );
+      _resolveHint.value = '';
+      final trimmed = (found ?? '').trim();
+      if (trimmed.isEmpty) return null;
+      if (!MediaSniffer.isMediaUrl(trimmed)) {
+        // 解析结果又是个网页（二次解析页）：当作没解析出来，别把网页丢给播放器
+        AppLog.instance.w('[Play] 解析结果不是媒体地址，丢弃: $trimmed');
+        return null;
+      }
+      return trimmed;
+    } catch (e) {
+      _resolveHint.value = '';
+      AppLog.instance.w('[Play] 解析异常: $e');
+      return null;
+    }
+  }
+
+  /// 解析过程的一行提示（详情页播放区上方显示，不弹窗）
+  final _resolveHint = ''.obs;
+  String get resolveHint => _resolveHint.value;
 
   void resetQualityState() {
     _qualityBaseEpisodeURL = '';

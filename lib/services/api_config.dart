@@ -253,6 +253,32 @@ class ApiConfig extends GetxController {
     }
   }
 
+  /// 读取当前影视配置里的 `parses`（解析线路）。
+  ///
+  /// 用户 2026-10-29：「解析线路就是内置或是订阅里面的」——
+  /// 订阅配置的 `parses` 是线路的主要来源，配置一换就该跟着换，
+  /// 所以这里现读（带 20 秒内存缓存 + 磁盘兜底，不会每次都打网络）。
+  /// 失败返回空列表，调用方按"没有解析线路"处理。
+  Future<List<Map<String, dynamic>>> readParses() async {
+    final url = configUrl.value.trim();
+    if (url.isEmpty) return const [];
+    if (_isSpiderSourceUrl(url)) return const [];
+    try {
+      final text = await _fetchConfigText(normalizeConfigUrl(url));
+      final decoded = jsonDecode(stripJsonComments(text));
+      if (decoded is! Map) return const [];
+      final parses = decoded['parses'];
+      if (parses is! List) return const [];
+      return parses
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } catch (e) {
+      AppLog.instance.w('[ApiConfig] 读取 parses 失败: $e');
+      return const [];
+    }
+  }
+
   /// 仅探测"多仓库入口"并返回可选项。
   /// 返回 null 表示不是多仓库入口；返回数组表示是多仓库入口（数组可能为空）。
   Future<List<MultiRepoOption>?> fetchMultiRepoOptions(String apiUrl) async {

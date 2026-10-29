@@ -11,6 +11,8 @@ import 'package:tvbox/services/player_prefs.dart';
 import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:tvbox/pages/settings/controller.dart';
 import 'package:tvbox/pages/settings/sub/settings_shared.dart';
+import 'package:tvbox/pages/settings/sub/parse_lines_page.dart';
+import 'package:tvbox/services/parse_lines.dart';
 
 /// 设置 → 播放设置
 ///
@@ -214,6 +216,74 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                   onChanged: PlayerPrefs.instance.setAlwaysShowSpeed,
                 )),
           ],
+        ),
+        const SizedBox(height: AppTheme.spacingLG),
+
+        // ---------- 解析线路（网页播放地址 → 媒体直链）----------
+        // 用户 2026-10-29：只要一个「线路切换」入口，其余不做。
+        ListenableBuilder(
+          listenable: ParseLineStore.instance,
+          builder: (context, _) {
+            final store = ParseLineStore.instance;
+            return SettingsGroup(
+              title: '解析线路',
+              hint: '播放地址是网页（含解析接口链接）时，后台自动解析成 m3u8/mp4 '
+                  '再交给播放器；不需要开关。',
+              children: [
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const ParseLinesPage(),
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.alt_route_rounded,
+                          size: 20,
+                          color: AppTheme.textSecondary,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '线路切换',
+                                style: TextStyle(
+                                  color: AppTheme.textPrimary,
+                                  fontSize: AppTheme.fontSubhead,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '当前：${store.selectedName}'
+                                '${store.isEmpty ? '（暂无线路）' : ' · 共 ${store.lines.length} 条'}',
+                                style: TextStyle(
+                                  color: AppTheme.textTertiary,
+                                  fontSize: AppTheme.fontCaption,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          color: AppTheme.textTertiary,
+                          size: 20,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
         ),
         const SizedBox(height: AppTheme.spacingLG),
 

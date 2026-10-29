@@ -28,6 +28,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:tvbox/reading/source/global_proxy.dart';
+import 'package:tvbox/services/m3u8_ad_filter.dart';
 
 class MediaProxyService {
   MediaProxyService._();
@@ -233,6 +234,15 @@ class MediaProxyService {
     String baseUrl,
     Map<String, String> headers,
   ) {
+    // 先做**分片级去广告**（插播片段），再做地址改写 ——
+    // 顺序不能反：清洗要按原始 URL 算「来源指纹」，改写成 127.0.0.1 之后
+    // 所有分片都同源了，就再也分辨不出哪几条是插播。
+    var src = text;
+    if (M3u8AdFilter.enabled.value) {
+      final r = M3u8AdFilter.filter(text, baseUrl);
+      if (r.removed > 0) src = r.text;
+    }
+
     final base = Uri.tryParse(baseUrl);
     String px(String ref) {
       final r = ref.trim();
@@ -257,7 +267,7 @@ class MediaProxyService {
     ];
 
     final out = StringBuffer();
-    for (final line in const LineSplitter().convert(text)) {
+    for (final line in const LineSplitter().convert(src)) {
       final t = line.trim();
       if (t.isEmpty) {
         out.writeln(line);

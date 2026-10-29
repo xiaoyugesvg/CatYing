@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/services/ad_block_service.dart';
+import 'package:tvbox/services/m3u8_ad_filter.dart';
 import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:tvbox/pages/settings/sub/settings_shared.dart';
@@ -675,6 +676,28 @@ class _AdBlockSettingsPageState extends State<AdBlockSettingsPage> {
                 onSwitchChanged: (v) => _svc.setBlockThirdParty(v),
               ),
             ],
+          ),
+
+          // ── m3u8 分片级去广告 ──────────────────────────────────
+          // 与上面「网页去广告」（隐藏元素）是两层：这条管**插播片段**——
+          // 正片是 A 站的分片、广告却从别的 host/目录插进来，网页层拦不住。
+          ValueListenableBuilder<bool>(
+            valueListenable: M3u8AdFilter.enabled,
+            builder: (context, on, _) => SettingsGroup(
+              title: '播放器去广告',
+              hint: '只删「来源明显不同」的插播分片；整段同来源的贴片无法与正片区分，'
+                  '不会乱删（删不准时宁可不删）。',
+              children: [
+                SettingsRow(
+                  icon: Icons.content_cut_rounded,
+                  title: 'm3u8 插播片段过滤',
+                  subtitle: '播放 m3u8 时剔除来自其它 host / 目录的分片',
+                  trailingSwitch: true,
+                  switchValue: on,
+                  onSwitchChanged: (v) => M3u8AdFilter.setEnabled(v),
+                ),
+              ],
+            ),
           ),
 
           SettingsGroup(
