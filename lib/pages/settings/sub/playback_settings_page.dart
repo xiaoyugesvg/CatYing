@@ -110,14 +110,6 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                     onTap: _pickBufferMode,
                   )
                 : const SizedBox.shrink()),
-            Obx(() => PlayerPrefs.instance.vodEngine.value == PlayerEngine.webview
-                ? unifiedSwitchRow(
-                    icon: Icons.javascript,
-                    title: '网页 JS',
-                    value: PlayerPrefs.instance.webviewEnableJs.value,
-                    onChanged: PlayerPrefs.instance.setWebviewEnableJs,
-                  )
-                : const SizedBox.shrink()),
           ],
         ),
         const SizedBox(height: AppTheme.spacingLG),
@@ -234,6 +226,16 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                   title: '自动下一集',
                   value: PlayerPrefs.instance.avAutoNext.value,
                   onChanged: PlayerPrefs.instance.setAvAutoNext,
+                )),
+            // 影视模块已不提供 WebView 内核（2026-10-29）：影视只播媒体直链。
+            // 但「网页播放页」仍被 RSS / 小程序 / 海阔使用，下面这两个开关
+            // 控制的就是那些页面，所以常驻显示。
+            Obx(() => unifiedSwitchRow(
+                  icon: Icons.javascript,
+                  title: '网页 JS',
+                  subtitle: '网页播放（RSS / 海阔 / 小程序）生效',
+                  value: PlayerPrefs.instance.webviewEnableJs.value,
+                  onChanged: PlayerPrefs.instance.setWebviewEnableJs,
                 )),
             Obx(() => unifiedSwitchRow(
                   icon: Icons.screen_lock_landscape_outlined,

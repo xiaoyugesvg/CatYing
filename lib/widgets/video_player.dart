@@ -5638,7 +5638,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         PlayerEngine.avplayer => 'AV',
         PlayerEngine.ksplayer => 'FF',
         PlayerEngine.mpv => 'MPV',
-        PlayerEngine.webview => 'WEB',
       };
       return _iconButton(
         icon: Icons.memory,

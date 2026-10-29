@@ -1,7 +1,10 @@
 /// 播放器引擎类型 - 对应 Swift PlayerEngine
 /// - avplayer：iOS 主内核（video_player / 系统 AVPlayer）
 /// - mpv：备用内核（media_kit / libmpv），兼容桌面与部分流
-/// - webview：网页播放页（WKWebView）
+///
+/// ⚠️ 影视模块**不提供 WebView 内核**（2026-10-29 用户要求）：影视只播媒体
+/// 直链，网页地址一律不内嵌播放。WebView 播放页（`WebviewPlayerPage`）仍被
+/// RSS / 小程序 / 海阔等模块直接使用，与内核选择无关。
 
 import 'dart:io';
 
@@ -11,8 +14,6 @@ enum PlayerEngine {
   avplayer(0, 'AVPlayer播放器'),
   /// MPV 内核（media_kit + libmpv），保留备用
   mpv(1, 'MPV播放器'),
-  /// Webview 内核（webview_flutter + WKWebView），用于网页播放页面
-  webview(2, 'Webview播放器'),
   /// KSPlayer 内核（FFmpeg + Metal），iOS 第四核心「FF」：
   /// AVPlayer 吃不下的格式（MKV/ASS/多音轨等）全兼容，并自带小窗
   ksplayer(3, 'KSPlayer播放器');
@@ -22,12 +23,24 @@ enum PlayerEngine {
 
   const PlayerEngine(this.value, this.title);
 
+  /// 旧版本把 `2` 存成「Webview 播放器」内核（影视模块已移除该内核）。
+  /// 读到这个历史值要落到平台默认内核，否则会卡在一个不存在的内核上。
+  static const int _kLegacyWebviewValue = 2;
+
+  /// 平台默认内核：Apple 用 AVPlayer（与小窗共用同一 AVPlayer），
+  /// 其它平台用 MPV。
+  static PlayerEngine get defaultEngine =>
+      (Platform.isIOS || Platform.isMacOS)
+          ? PlayerEngine.avplayer
+          : PlayerEngine.mpv;
+
   /// 从持久化值恢复播放器选项，并自动兜底到可用引擎
   static PlayerEngine fromStoredValue(int rawValue) {
     // 兼容旧值：0 曾表示 mpv，现在默认 avplayer
+    if (rawValue == _kLegacyWebviewValue) return defaultEngine;
     final engine =
         PlayerEngine.values.where((e) => e.value == rawValue).firstOrNull;
-    if (engine == null) return PlayerEngine.avplayer;
+    if (engine == null) return defaultEngine;
     return engine;
   }
 
@@ -36,9 +49,8 @@ enum PlayerEngine {
   /// - Apple（iOS / macOS）：avplayer 为默认主内核（与系统小窗共用同一 AVPlayer），
   ///   ksplayer（KSPlayer/FFmpeg）为 iOS 备选内核（MKV 等全格式 + 自带小窗），
   ///   mpv（media_kit_libs_ios_video）为备用内核（支持 flv/ts/rtmp 等 AVPlayer
-  ///   不支持的直播格式；默认不启用，用户在设置里切换），
-  ///   webview 用于网页播放页。
-  /// - Android：mpv + webview（无 AVPlayer）。
+  ///   不支持的直播格式；默认不启用，用户在设置里切换）。
+  /// - Android：mpv（无 AVPlayer）。
   /// - 桌面（Windows / Linux）：mpv（window_manager 小窗路径）。
   static List<PlayerEngine> get availableEngines {
     if (Platform.isIOS) {
@@ -46,14 +58,13 @@ enum PlayerEngine {
         PlayerEngine.avplayer,
         PlayerEngine.ksplayer,
         PlayerEngine.mpv,
-        PlayerEngine.webview,
       ];
     }
     if (Platform.isMacOS) {
-      return const [PlayerEngine.avplayer, PlayerEngine.mpv, PlayerEngine.webview];
+      return const [PlayerEngine.avplayer, PlayerEngine.mpv];
     }
     if (Platform.isAndroid) {
-      return const [PlayerEngine.mpv, PlayerEngine.webview];
+      return const [PlayerEngine.mpv];
     }
     return const [PlayerEngine.mpv];
   }

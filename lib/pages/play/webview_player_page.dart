@@ -9,21 +9,15 @@ import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/widgets/ad_block_bubble.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-/// 网页播放器页 - 全屏 WebView 加载网页播放页
+/// 网页播放器页 - 全屏 WebView 加载网页
 ///
-/// 用途：当源返回的播放地址是**网页播放器页**（如 `/player/?url=`）而非
-/// m3u8/mp4 直链时，用 WebView 加载网页上的播放器兜底播放。
-/// 对应 catmovie（CxiaoyuN/movie）的 WebviewView 实现：
-/// 强制横屏 + 黑色背景 + JS 无限制 + 左上角浮动返回按钮。
+/// 用途：RSS / 小程序 / 海阔等模块里，条目或播放地址本身就是**网页**时，
+/// 用全屏 WebView 打开它（影视模块不使用本页 —— 影视只播媒体直链）。
 class WebviewPlayerPage extends StatefulWidget {
   final String url;
   final String? title;
 
-  /// 内嵌模式：详情页播放器区域内嵌显示（4:3 固定高度，不强制横屏）。
-  /// 默认 false = 全屏独立页（Scaffold + 横屏 + 浮动返回）。
-  final bool embedded;
-
-  /// 全屏页是否跟随「网页播放强制横屏」设置。
+  /// 是否跟随「网页播放强制横屏」设置。
   ///
   /// 兜底打开的**普通网页**（海阔条目里的网页、站点首页/搜索页等）不该横屏：
   /// 那些页面是按竖屏排版的，横过来只露出一半（用户 2026-10-18 反馈）。
@@ -33,7 +27,6 @@ class WebviewPlayerPage extends StatefulWidget {
     super.key,
     required this.url,
     this.title,
-    this.embedded = false,
     this.forceLandscape = true,
   });
 
@@ -52,9 +45,8 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
   @override
   void initState() {
     super.initState();
-    // 网页播放页强制横屏（仅全屏页；内嵌模式保持竖屏布局）
-    if (!widget.embedded &&
-        widget.forceLandscape &&
+    // 网页播放页强制横屏
+    if (widget.forceLandscape &&
         PlayerPrefs.instance.webviewForceLandscape.value) {
       SystemUiController.enter(
         'webviewPlayer',
@@ -213,8 +205,7 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
     } catch (_) {}
     // 恢复**进入前**的方向（原来无条件写死"竖屏+左右横屏"，
     // 会把别的页面设定的方向锁覆盖掉）
-    if (!widget.embedded &&
-        widget.forceLandscape &&
+    if (widget.forceLandscape &&
         PlayerPrefs.instance.webviewForceLandscape.value) {
       SystemUiController.exit('webviewPlayer');
     }
@@ -247,10 +238,7 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
                     ? AdBlockBubble(
                         controller: _controller,
                         pageUrl: widget.url,
-                        // 内嵌（详情页 4:3 小窗）贴着右上角，别压住播放控件
-                        margin: widget.embedded
-                            ? const EdgeInsets.only(right: 8, top: 8)
-                            : const EdgeInsets.only(right: 12, bottom: 96),
+                        margin: const EdgeInsets.only(right: 12, bottom: 96),
                       )
                     : const SizedBox.shrink(),
               ),
@@ -314,20 +302,6 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
         ),
       ],
     );
-    if (widget.embedded) {
-      // 内嵌模式：4:3 固定高度（Column 内不会高度塌陷），无 Scaffold/返回按钮
-      return AspectRatio(
-        aspectRatio: 4 / 3,
-        child: ColoredBox(
-          color: Colors.black,
-          child: Stack(
-            children: [
-              Positioned.fill(child: body),
-            ],
-          ),
-        ),
-      );
-    }
     return Scaffold(
       backgroundColor: Colors.black,
       resizeToAvoidBottomInset: false,

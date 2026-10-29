@@ -1831,7 +1831,6 @@ class _LivePageState extends State<LivePage> {
                                 PlayerEngine.avplayer => 'AV',
                                 PlayerEngine.ksplayer => 'FF',
                                 PlayerEngine.mpv => 'MPV',
-                                PlayerEngine.webview => 'WEB',
                               },
                               style: const TextStyle(
                                 color: Colors.white,

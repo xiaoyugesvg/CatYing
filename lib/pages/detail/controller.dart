@@ -689,7 +689,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   String? classifyPlaybackError(String msg) {
     final m = msg.toLowerCase();
     if (m.contains('解析') || m.contains('parse')) {
-      return '播放地址解析失败，可换线路或直接用网页播放';
+      return '播放地址解析失败，可换线路或换源';
     }
     if (m.contains('超时') ||
         m.contains('timeout') ||
@@ -717,7 +717,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
         m.contains('player') ||
         m.contains('codec') ||
         m.contains('黑屏')) {
-      return '播放器无法解码，可换线路或用网页播放';
+      return '播放器无法解码，可换线路或换播放内核';
     }
     return null;
   }
@@ -975,7 +975,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
             );
             return;
           }
-          // ── 统一播放判定（直链 → 原生播放器；网页 → 内嵌网页播放器）──
+          // ── 统一播放判定（直链 → 原生播放器；网页 → 影视模块不播）──
           final resolution = PlayPipeline.instance.resolve(
             resolvedUrl,
             headers: headers,
@@ -986,8 +986,12 @@ class DetailController extends GetxController with WidgetsBindingObserver {
           headers = Map<String, String>.from(resolution.headers);
           playHeaders.value = headers;
           if (resolution.isPage) {
-            // 网页地址 → 详情页挂内嵌 WebviewPlayerPage（App 自己的播放器）
-            AppLog.instance.log('[Play] 网页播放页 → 内嵌网页播放器: $playCandidate');
+            // 影视模块不允许网页播放（2026-10-29）：交给 setPlaybackError 的
+            // 既有机制先顺延候选 / 换线路，全试完再把原因写给用户。
+            AppLog.instance
+                .log('[Play] Spider 网页地址，影视模块不播网页: $playCandidate');
+            setPlaybackError(kMovieWebUrlRejected);
+            return;
           }
           // ── 地址形态兜底（用户 2026-10-15）────────────────────────────
           // 既不是绝对 URL、又补不出 base ⇒ 交给播放器只会白卡 15 秒再弹
@@ -1165,7 +1169,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   /// 取流/播放入口统一入口：在 [_selectedPlayableURL] 基础上接入广告过滤。
   ///
   /// - 命中广告黑名单 → 回退到 fallback（沿用既有回退语义，不抛弃原地址）；
-  /// - 否则原样使用该地址（直链交原生播放器，网页交内嵌 WebView）。
+  /// - 否则原样使用该地址（直链交原生播放器；网页地址**不播**）。
   ///
   /// 无 ads/rules 时，方法内不产生 await，行为与原来的同步赋值一致。
   Future<void> _startPlayback(String fallback) async {
@@ -1185,7 +1189,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       candidate = fallback;
     }
 
-    // ── 统一播放判定：直链 → 原生播放器；网页 → 内嵌网页播放器 ──────
+    // ── 统一播放判定：直链 → 原生播放器；网页 → 拒绝（影视不播网页）──────
     isResolving.value = true;
     late PlayResolution resolution;
     try {
@@ -1205,8 +1209,11 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     candidate = resolution.url;
     playHeaders.value = Map<String, String>.from(resolution.headers);
     if (resolution.isPage) {
-      // 网页地址 → 内嵌网页播放器加载（App 自己的播放器）
-      AppLog.instance.log('[Play] 网页地址 → 内嵌网页播放器: $candidate');
+      // 影视模块不允许网页播放（2026-10-29）：不内嵌 WebView，按"这条线路
+      // 播不了"处理 —— 先自动顺延同集其它候选 / 下一条线路，全试完才提示。
+      AppLog.instance.log('[Play] 网页地址，影视模块不播网页: $candidate');
+      setPlaybackError(kMovieWebUrlRejected);
+      return;
     }
 
     // ── 地址形态兜底（用户 2026-10-15）────────────────────────────────

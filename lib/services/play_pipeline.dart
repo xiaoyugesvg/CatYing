@@ -2,9 +2,12 @@
 //
 // 统一播放判定（播放地址路由的**单一事实来源**）。
 //
-// 只有两条路：
-//   ① 影视直链 → 交给 App 自己的原生播放器；
-//   ② 其它 http(s) 网页 → 交给 App 自己的内嵌网页播放器（WebviewPlayerPage）。
+// 判定结果三种：
+//   ① 媒体直链 → 交给 App 自己的原生播放器；
+//   ② 网页地址 → `PlayKind.page`。**影视模块拿到 page 就拒绝播放**
+//      （2026-10-29 用户要求：影视不内嵌 WebView）；小程序等模块可以自行
+//      决定怎么用（例如交给网页播放页）。
+//   ③ 漫画 / 小说协议 → 交给对应的简易阅读器。
 //
 // 不做任何地址提取：网页里的播放由网页自己完成。
 library;
@@ -13,12 +16,20 @@ import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/play_route.dart';
 import 'package:tvbox/services/play_url_sanitizer.dart';
 
+/// 影视模块拒绝网页地址时的统一文案。
+///
+/// 影视模块（详情页 / 短剧 / 媒体库）只播媒体直链，**不允许**把网页地址
+/// 内嵌进 WebView 播放（2026-10-29 用户要求）。其它模块（RSS / 小程序 /
+/// 海阔 / 阅读 / 音乐）不受影响，仍可打开网页播放页。
+const String kMovieWebUrlRejected =
+    '这个地址是网页而不是视频直链，影视模块不支持网页播放，请切换线路或换源';
+
 /// 取址结果的内容形态。
 enum PlayKind {
   /// 可直接交给原生播放器
   media,
 
-  /// 网页地址 —— 交给内嵌网页播放器
+  /// 网页地址 —— 影视模块会拒绝播放；其它模块可自行处理
   page,
 
   /// `novel://` 正文
@@ -87,7 +98,7 @@ class PlayPipeline {
       }
     }
 
-    AppLog.instance.log('[PlayPipeline] 网页地址 → 内嵌网页播放器: $candidate');
+    AppLog.instance.log('[PlayPipeline] 判定为网页地址: $candidate');
     return PlayResolution(url: candidate, kind: PlayKind.page, headers: h);
   }
 

@@ -20,6 +20,7 @@ import 'package:tvbox/services/tmdb_service.dart';
 import 'package:tvbox/services/detail_page_controller.dart';
 import 'package:tvbox/services/player_fullscreen_controller.dart';
 import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/services/play_pipeline.dart' show kMovieWebUrlRejected;
 import 'package:tvbox/widgets/playback_surface.dart';
 import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:tvbox/widgets/app_player.dart';
@@ -234,22 +235,11 @@ class _DetailPageState extends State<DetailPage> {
   ///
   /// ⚠️ 2026-10-19：必须 await dispose，否则旧引擎未死透就重建会导致
   ///   「黑屏但有声音」（与 _onEngineHotSwap 同一问题）。
-  Future<void> _onEngineChanged() async {
+  void _onEngineChanged() {
     if (!mounted) return;
     final engine = PlayerPrefs.instance.vodEngine.value;
     // 已经有一次热切换在跑（多半就是菜单那条路径触发的）→ 不再叠加
     if (_engineSwapInFlight) return;
-    if (engine == PlayerEngine.webview) {
-      // 网页内核不走原生 Player：释放实例即可，build 会自动改挂 WebviewPlayerPage
-      _playerEngine = engine;
-      final old = _player;
-      _player = null;
-      _lastPlayerUrl = '';
-      _lastPlayerHeadersKey = '';
-      await old?.dispose();
-      setState(() {});
-      return;
-    }
     if (_player != null && _playerEngine == engine) return;
     _onEngineHotSwap(engine);
   }
@@ -720,22 +710,6 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   Future<void> _doEngineHotSwap(PlayerEngine engine) async {
-    if (engine == PlayerEngine.webview) {
-      // 网页内核不走原生 Player
-      _playerEngine = engine;
-      final old = _player;
-      _player = null;
-      _engineSwapping = true;
-      setState(() {}); // 先把旧画面从树里摘掉
-      await old?.dispose();
-      await _waitPlatformViewDetach();
-      if (!mounted) return;
-      _engineSwapping = false;
-      _lastPlayerUrl = '';
-      _lastPlayerHeadersKey = '';
-      setState(() {});
-      return;
-    }
     final url = _controller.playUrl.value ?? '';
     if (url.isEmpty) return;
     final headers = _controller.playHeaders.isNotEmpty
@@ -1117,29 +1091,31 @@ class _DetailPageState extends State<DetailPage> {
         ),
       );
     }
-    // 网页播放器页（非直链媒体 URL）→ 用 App 自己的内嵌网页播放器
+    // 影视模块只播媒体直链（2026-10-29 用户要求）：网页地址**不内嵌 WebView**，
+    // 给一条明确提示而不是把 HTML 丢给播放器（那只会白卡 15 秒再说"加载超时"）。
+    // 正常流程里 controller 已经在取址阶段拦掉了网页地址，这里是历史记录 /
+    // 续播等旁路进来的兜底。
     if (PlaybackSurface.needsWebFallback(url)) {
-      // 内嵌模式: 4:3 固定高度(内部处理), 避免 Column 内高度塌陷致有声无画面
-      return PlaybackSurface.webFallback(
-        url: url,
-        title: _controller.vodInfo.value?.name,
-        embedded: true,
+      return AspectRatio(
+        aspectRatio: 4 / 3,
+        child: Container(
+          color: Colors.black,
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: const Text(
+            kMovieWebUrlRejected,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+          ),
+        ),
       );
     }
     final headers = _controller.playHeaders.isNotEmpty
         ? Map<String, String>.from(_controller.playHeaders)
         : const <String, String>{};
 
-    // 播放内核：AVPlayer 为主，MPV 备用，Webview 管网页播放页。
+    // 播放内核：AVPlayer（Apple 主）/ KSPlayer（iOS 备选）/ MPV（全平台兜底）。
     final engine = PlayerPrefs.instance.vodEngine.value;
-    if (engine == PlayerEngine.webview) {
-      // 同上: 内嵌模式
-      return PlaybackSurface.webFallback(
-        url: url,
-        title: _controller.vodInfo.value?.name,
-        embedded: true,
-      );
-    }
 
     // 把续播位置透传给 _ensurePlayer, 让 libmpv 通过 Media.start 参数
     // 直接从续播位置开始解码, 避免 "先从 0 播几秒再回退" 的现象。

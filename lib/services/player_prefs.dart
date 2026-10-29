@@ -119,7 +119,7 @@ class PlayerPrefs {
 
     // 旧值迁移：
     // 老枚举 mpv=0, webview=1
-    // 新枚举 avplayer=0, mpv=1, webview=2
+    // 新枚举 avplayer=0, mpv=1（曾经的 webview=2 已随影视模块移除）
     final raw = prefs.getInt(AppConstants.playTypeVod);
     int mapped;
     if (raw == null) {
@@ -134,8 +134,14 @@ class PlayerPrefs {
     } else {
       mapped = raw;
     }
+    final vodEngineResolved = PlayerEngine.fromStoredValue(mapped);
+    // 自愈：旧版本可能存了已移除的 Webview 内核（2）→ 把落盘值也改成可用内核，
+    // 否则每次启动都要再迁移一次。
+    if (vodEngineResolved.value != mapped) {
+      mapped = vodEngineResolved.value;
+    }
     await prefs.setInt(AppConstants.playTypeVod, mapped);
-    vodEngine.value = PlayerEngine.fromStoredValue(mapped);
+    vodEngine.value = vodEngineResolved;
 
     // 直播内核（与点播独立持久化；无历史值时默认 AVPlayer，
     // 与旧行为一致 —— 旧版本直播读的就是 vodEngine 的默认值）

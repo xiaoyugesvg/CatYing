@@ -572,6 +572,7 @@ Widget unifiedSwitchRow({
   return SettingsRow(
     icon: icon,
     title: title,
+    subtitle: subtitle,
     trailingSwitch: true,
     switchValue: value,
     switchEnabled: enabled,

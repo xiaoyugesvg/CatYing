@@ -9,6 +9,7 @@ import 'package:tvbox/models/player_engine.dart';
 import 'package:tvbox/models/vod_info.dart';
 import 'package:tvbox/pages/detail/controller.dart';
 import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/services/play_pipeline.dart' show kMovieWebUrlRejected;
 import 'package:tvbox/widgets/app_player.dart';
 import 'package:tvbox/widgets/ios_av_player.dart';
 import 'package:tvbox/widgets/ks_player.dart';
@@ -122,7 +123,18 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
     // 集地址可能是 `id`（无 scheme）—— 绝不能交给播放器兜底，
     // 否则就是 unsupported URL / 15 秒加载超时。
     final u = Uri.tryParse(raw);
-    return (u != null && u.hasScheme) ? raw : '';
+    if (u == null || !u.hasScheme) return '';
+    // 影视模块不播网页地址（2026-10-29）：网页同样不交给播放器。
+    if (PlaybackSurface.needsWebFallback(raw)) return '';
+    return raw;
+  }
+
+  /// 当前集的原始地址是不是「网页」（用于给出明确提示，而不是一直转圈）。
+  bool _episodeUrlIsWebPage() {
+    final eps = _episodes;
+    if (eps.isEmpty) return false;
+    final raw = eps[_currentIndex.clamp(0, eps.length - 1)].url.trim();
+    return PlaybackSurface.needsWebFallback(raw);
   }
 
   void _switchTo(int index) {
@@ -167,7 +179,12 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
         final url = _resolvedUrl();
         final player = _player;
         if (player == null || url.isEmpty) {
-          final err = widget.controller.errorMessage.value;
+          final controllerErr = widget.controller.errorMessage.value;
+          // 影视模块不播网页地址（2026-10-29）：只剩网页地址时给明确提示，
+          // 而不是一直转圈或把 HTML 丢给播放器。
+          final err = (controllerErr != null && controllerErr.isNotEmpty)
+              ? controllerErr
+              : (_episodeUrlIsWebPage() ? kMovieWebUrlRejected : null);
           return Center(
             child: (err != null && err.isNotEmpty)
                 ? Padding(
@@ -183,14 +200,6 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
                     ),
                   )
                 : CircularProgressIndicator(color: AppTheme.accentColor),
-          );
-        }
-        // 网页播放页（非直链媒体）→ 内嵌 WebView 兜底。
-        if (PlaybackSurface.needsWebFallback(url)) {
-          return PlaybackSurface.webFallback(
-            url: url,
-            title: title,
-            embedded: true,
           );
         }
         return VideoPlayerWidget(

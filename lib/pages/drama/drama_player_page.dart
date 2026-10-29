@@ -14,6 +14,7 @@ import 'package:tvbox/models/player_engine.dart';
 import 'package:tvbox/models/vod_info.dart';
 import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/player_prefs.dart';
+import 'package:tvbox/services/play_pipeline.dart' show kMovieWebUrlRejected;
 import 'package:tvbox/widgets/app_player.dart';
 import 'package:tvbox/widgets/ios_av_player.dart';
 import 'package:tvbox/widgets/ks_player.dart';
@@ -322,12 +323,10 @@ class _DramaPlayerPageState extends State<DramaPlayerPage> {
   }
 
   void _open(String url) {
-    // 网页播放页（非直链媒体）→ 用 WebView 兜底播放。
+    // 影视模块只播媒体直链（2026-10-29 用户要求）：网页地址**不再**开 WebView，
+    // 直接给提示。正常流程里 controller 已在取址阶段拦掉，这里是旁路兜底。
     if (PlaybackSurface.needsWebFallback(url)) {
-      Get.to(() => PlaybackSurface.webFallback(
-            url: url,
-            title: _c.vodInfo.value?.name,
-          ));
+      setState(() => _timeoutHint = kMovieWebUrlRejected);
       return;
     }
     _player ??= _newPlayer();
