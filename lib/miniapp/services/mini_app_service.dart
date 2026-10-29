@@ -15,7 +15,6 @@ import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/live_service.dart';
 import 'package:tvbox/services/network_manager.dart';
-import 'package:tvbox/services/parse_store.dart';
 import 'package:tvbox/miniapp/models/mini_app.dart';
 import 'package:tvbox/miniapp/services/builtin_mini_apps.dart';
 
@@ -893,52 +892,8 @@ class MiniAppService extends GetxService {
     );
     apps.add(app);
     _registerVideoSources(app);
-    _registerParses(app);
     await _persist();
     return (ok: true, error: null);
-  }
-
-  /// 把程序的 parses 解析接口合并进全局解析列表（同名 URL 覆盖更新）。
-  /// 这样影视播放 / 嗅探页 / 小程序 parse/jx 线路都能直接用上解析接口。
-  void _registerParses(MiniApp app) {
-    try {
-      final decoded = jsonDecode(app.rawJson);
-      final parses = decoded is Map ? decoded['parses'] : null;
-      if (parses is! List) return;
-      final list = ApiConfig.instance.parseBeanList;
-      final added = <ParseBean>[];
-      for (final p in parses) {
-        if (p is! Map) continue;
-        final url = (p['url'] ?? '').toString().trim();
-        if (url.isEmpty) continue;
-        final name = (p['name'] ?? '').toString();
-        final type = int.tryParse('${p['type'] ?? 0}') ?? 0;
-        final extRaw = p['ext'];
-        final bean = ParseBean(
-          name: name,
-          url: url,
-          type: type,
-          ext: extRaw is Map
-              ? extRaw.map((k, v) => MapEntry(k.toString(), v.toString()))
-              : null,
-        );
-        final existing = list.indexWhere((e) => e.url == url);
-        if (existing >= 0) {
-          list[existing] = bean;
-        } else {
-          list.add(bean);
-        }
-        added.add(bean);
-      }
-      // 同时**落盘**（ParseStore）：否则下一次"按 ParseStore 重灌解析列表"
-      // （切换解析线路 / 打开解析线路管理 / 加载订阅）会把程序带进来的线路冲掉。
-      if (added.isNotEmpty) unawaited(ParseStore.instance.absorb(added));
-      if (parses.isNotEmpty) {
-        AppLog.instance.log('[MiniApp] 已注册 ${parses.length} 条解析接口');
-      }
-    } catch (e) {
-      AppLog.instance.log('[MiniApp] parses 注册失败: $e');
-    }
   }
 
   /// 把程序的影视源注册进视频源列表（可重复调用，先清理旧的）
@@ -1059,8 +1014,6 @@ class MiniAppService extends GetxService {
     ApiConfig.instance.sourceBeanList.removeWhere(
       (s) => s.key.startsWith('${app.id}_'),
     );
-    // 一并移除该程序注册的解析接口（按 url 精确匹配，避免误删用户自建的）
-    _removeRegisteredParses(app);
     // 网页型小程序（zip 装到本地的）：把解包目录也删掉，别留垃圾
     if (app.isWebApp && !app.source.startsWith('http')) {
       try {
@@ -1071,27 +1024,6 @@ class MiniAppService extends GetxService {
       }
     }
     await _persist();
-  }
-
-  void _removeRegisteredParses(MiniApp app) {
-    try {
-      final decoded = jsonDecode(app.rawJson);
-      final parses = decoded is Map ? decoded['parses'] : null;
-      if (parses is! List) return;
-      final urls = parses
-          .whereType<Map>()
-          .map((p) => (p['url'] ?? '').toString().trim())
-          .where((u) => u.isNotEmpty)
-          .toSet();
-      if (urls.isEmpty) return;
-      ApiConfig.instance.parseBeanList.removeWhere((b) => urls.contains(b.url));
-      // 落盘的那份也一并删掉，否则下次重灌解析列表又回来了
-      for (final u in urls) {
-        unawaited(ParseStore.instance.remove(u));
-      }
-    } catch (e) {
-      AppLog.instance.log('[MiniApp] 移除解析接口失败: $e');
-    }
   }
 
   /// 把程序 lives 交给直播服务（直播页展示/播放）

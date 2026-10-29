@@ -13,7 +13,6 @@ import 'package:tvbox/widgets/app_player.dart';
 import 'package:tvbox/widgets/ios_av_player.dart';
 import 'package:tvbox/widgets/ks_player.dart';
 import 'package:tvbox/widgets/mpv_app_player.dart';
-import 'package:tvbox/widgets/parse_sniff_sheet.dart';
 import 'package:tvbox/widgets/video_player.dart';
 import 'package:tvbox/widgets/playback_surface.dart';
 
@@ -126,95 +125,6 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
     return (u != null && u.hasScheme) ? raw : '';
   }
 
-  /// 内嵌网页兜底时的嗅探状态浮层（与详情页 `_withSniffOverlay` 同款）：
-  /// 后台嗅探中 → 底部渐变条「正在嗅探视频地址…」；
-  /// 嗅探放弃（未命中）→ 转「未嗅探到直链」info 提示 + 「换线路」入口。
-  Widget _withSniffOverlay(Widget child) {
-    return Obx(() {
-      final sniffing = widget.controller.isWebSniffing.value;
-      final gaveUp = widget.controller.sniffGaveUp.value;
-      if (!sniffing && !gaveUp) return child;
-      return Stack(
-        children: [
-          child,
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.transparent,
-                    Colors.black.withValues(alpha: 0.75),
-                  ],
-                ),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  if (sniffing) ...[
-                    const SizedBox(
-                      width: 13,
-                      height: 13,
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                        strokeWidth: 2,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    const Flexible(
-                      child: Text(
-                        '正在嗅探视频地址…',
-                        style: TextStyle(color: Colors.white, fontSize: 12.5),
-                      ),
-                    ),
-                  ] else ...[
-                    const Icon(
-                      Icons.info_outline_rounded,
-                      size: 15,
-                      color: Colors.white70,
-                    ),
-                    const SizedBox(width: 8),
-                    const Flexible(
-                      child: Text(
-                        '未嗅探到直链，可换线路或直接观看网页',
-                        style: TextStyle(color: Colors.white, fontSize: 12.5),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(width: 10),
-                  // 嗅探不出结果时，用户不必等失败才能换线路。
-                  GestureDetector(
-                    onTap: () => ParseSniffSheet.show(
-                      context,
-                      section: ParseSniffSection.parse,
-                      onPickLine: (url) =>
-                          widget.controller.selectParseLine(url),
-                    ),
-                    child: const Text(
-                      '换线路',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                        decoration: TextDecoration.underline,
-                        decorationColor: Colors.white70,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      );
-    });
-  }
-
   void _switchTo(int index) {
     final eps = _episodes;
     if (eps.isEmpty) return;
@@ -275,32 +185,13 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
                 : CircularProgressIndicator(color: AppTheme.accentColor),
           );
         }
-        // 网页播放页（非直链媒体）→ 内嵌 WebView 兜底：避免原生播放器黑屏，
-        // 后台嗅探到直链后由 onMediaFound 写回 playUrl，本页同页切原生
-        // （复用下面 playUrl 变化的既有重建逻辑）。2026-10-28 修复（审计 P0-1）。
+        // 网页播放页（非直链媒体）→ 内嵌 WebView 兜底。
         if (PlaybackSurface.needsWebFallback(url)) {
-          return _withSniffOverlay(PlaybackSurface.webFallback(
+          return PlaybackSurface.webFallback(
             url: url,
             title: title,
             embedded: true,
-            // 网页兜底播放没有底栏 → 右上角补「嗅探 / 解析」两个入口（2026-10-28）
-            onSniff: () => ParseSniffSheet.show(
-              context,
-              section: ParseSniffSection.sniff,
-              onSniff: () => widget.controller.openSniff(),
-            ),
-            onSwitchParse: () => ParseSniffSheet.show(
-              context,
-              section: ParseSniffSection.parse,
-              onPickLine: (url) => widget.controller.selectParseLine(url),
-            ),
-            onMediaFound: widget.controller.onWebviewMediaFound,
-            // 后台嗅探进行中 → 播放区显示「正在嗅探视频地址…」
-            onSniffState: (active) =>
-                widget.controller.isWebSniffing.value = active,
-            // 后台嗅探放弃（未命中）→ 浮层转「未嗅探到直链」静态提示
-            onSniffGaveUp: widget.controller.onWebviewSniffGaveUp,
-          ));
+          );
         }
         return VideoPlayerWidget(
           key: ObjectKey(player),
@@ -334,17 +225,6 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
           // 媒体库播放器：顶栏往下挪（避开状态栏）、底栏往上挪一点
           topBarTopPadding: 28,
           bottomBarBottomPadding: 16,
-          // 嗅探 / 解析：常驻按钮（2026-10-28），复用详情页控制器重解当前集。
-          onSniff: () => ParseSniffSheet.show(
-            context,
-            section: ParseSniffSection.sniff,
-            onSniff: () => widget.controller.openSniff(),
-          ),
-          onSwitchParse: () => ParseSniffSheet.show(
-            context,
-            section: ParseSniffSection.parse,
-            onPickLine: (url) => widget.controller.selectParseLine(url),
-          ),
           onPlayNext: () => _switchTo(_currentIndex + 1),
           onPlayPrevious: () => _switchTo(_currentIndex - 1),
           onSelectEpisode: (index) => _switchTo(index),

@@ -1,11 +1,10 @@
-/// 本地源（Python / JS）导入时，遇到**同名**条目的处理方式。
+/// 本地源（Python）导入时，遇到**同名**条目的处理方式。
 ///
 /// 历史行为是"静默自动改名"（`名字 (2)`），用户 2026-10-28 要求改成
-/// **让他自己选**：
-///   「不管是本地py还是本地的js同名导入的时候都要给我选择是替换还是重命名」
+/// **让他自己选**：替换还是重命名。
 ///
-/// 放在 models 层（而不是页面里）是因为**两个 service 都要用**：
-/// `LocalPythonSources.importCode` / `LocalJsSources.importCode` 都要按它分支。
+/// 放在 models 层（而不是页面里）是因为 service 要用它分支：
+/// `LocalPythonSources.importCode` 按它处理同名导入。
 enum ImportConflict {
   /// 自动改名：`名字 (2)`、`名字 (3)`…（原来的默认行为）
   rename,

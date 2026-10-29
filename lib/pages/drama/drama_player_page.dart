@@ -15,7 +15,6 @@ import 'package:tvbox/models/vod_info.dart';
 import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/player_prefs.dart';
 import 'package:tvbox/widgets/app_player.dart';
-import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/widgets/ios_av_player.dart';
 import 'package:tvbox/widgets/ks_player.dart';
 import 'package:tvbox/widgets/mpv_app_player.dart';
@@ -323,29 +322,11 @@ class _DramaPlayerPageState extends State<DramaPlayerPage> {
   }
 
   void _open(String url) {
-    // 网页播放页（非直链媒体）→ 用 WebView 兜底播放，后台嗅探到直链后由
-    // onMediaFound 写回 playUrl，本页再切原生播放（避免原生播放器黑屏）。
-    // 2026-10-28 修复（审计 P0-1）。
+    // 网页播放页（非直链媒体）→ 用 WebView 兜底播放。
     if (PlaybackSurface.needsWebFallback(url)) {
       Get.to(() => PlaybackSurface.webFallback(
             url: url,
             title: _c.vodInfo.value?.name,
-            onMediaFound: (found) {
-              // 弹掉网页播放页、直链写回控制器；_urlWorker 会重新驱动 _open
-              // （此时已是直链），由底层 drama 页切原生播放。
-              if (found.isNotEmpty) {
-                if (Navigator.of(context).canPop()) {
-                  Navigator.of(context).pop();
-                }
-                _c.playUrl.value = found;
-              }
-            },
-            // 后台嗅探放弃（未命中）→ 用户别对着网页干等（2026-10-28）
-            onSniffGaveUp: () {
-              if (mounted) {
-                AppToast.message('未嗅探到直链，可返回换线路或直接观看网页');
-              }
-            },
           ));
       return;
     }

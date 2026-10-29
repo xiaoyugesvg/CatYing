@@ -1009,7 +1009,7 @@ class RssReader {
 
   /// 播放页 → 视频直链（苹果 CMS 的 `player_aaaa` 配置里通常直接带 m3u8）。
   ///
-  /// 解析不到（加密 / JS 动态拼地址）返回 null，调用方退回嗅探播放。
+  /// 解析不到（加密 / JS 动态拼地址）返回 null，调用方退回网页播放。
   static Future<String?> resolvePlayUrl(
       RssSource source, String pageUrl) async {
     try {

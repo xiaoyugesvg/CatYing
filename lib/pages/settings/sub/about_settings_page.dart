@@ -9,7 +9,7 @@ import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 
 /// 设置 → 关于
 ///
-/// 从原 settings/view.dart 拆出：版本、站点数量、解析数量、关于版本弹窗。
+/// 从原 settings/view.dart 拆出：版本、站点数量、关于版本弹窗。
 class AboutSettingsPage extends StatelessWidget {
   const AboutSettingsPage({super.key});
 
@@ -32,11 +32,6 @@ class AboutSettingsPage extends StatelessWidget {
                   icon: Icons.public,
                   title: '站点数量',
                   value: '${ApiConfig.instance.sourceBeanList.length}',
-                )),
-            Obx(() => SettingsRow(
-                  icon: Icons.auto_fix_high,
-                  title: '解析数量',
-                  value: '${ApiConfig.instance.parseBeanList.length}',
                 )),
             SettingsRow(
               icon: Icons.person_outline,

@@ -28,7 +28,6 @@ import 'package:path_provider/path_provider.dart';
 
 import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/player_prefs.dart';
-import 'package:tvbox/services/local_js_sources.dart';
 import 'package:tvbox/services/nodejs_platform.dart';
 import 'package:tvbox/reading/services/settings_service.dart';
 
@@ -571,22 +570,10 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
     return true;
   }
 
-  /// 把 `ljs_*.js` / `file://` / 绝对路径 解析成本地文件真实路径；不是本地源返回 null。
-  ///
-  /// 本地 JS 源的 api 是 `ljs_<hash>.js`（相对标识），真实路径由
-  /// [LocalJsSources.pathOf] 按当前 Documents 目录拼出来。
+  /// 把 `file://` / 绝对路径 解析成本地文件真实路径；不是本地路径返回 null。
   Future<String?> _resolveLocalJsPath(String raw) async {
     final s = raw.trim();
     if (s.isEmpty) return null;
-    // 本地 JS 源标识：ljs_<hash>.js
-    final m = RegExp(r'^(ljs_[A-Za-z0-9]+)\.js$').firstMatch(s);
-    if (m != null) {
-      final key = m.group(1)!;
-      final p = await LocalJsSources.instance.pathOf(key);
-      if (await File(p).exists()) return p;
-      AppLog.instance.w('[IOSNodeJS] 本地 JS 源文件不存在: $p');
-      return null;
-    }
     // file:// 或绝对路径（调试 / 手动指定用）
     String? candidate;
     if (s.startsWith('file://')) {

@@ -17,7 +17,6 @@ import 'package:tvbox/pages/settings/sub/general_settings_page.dart';
 import 'package:tvbox/pages/settings/sub/home_pages_settings_page.dart';
 import 'package:tvbox/pages/settings/sub/metadata_settings_page.dart';
 import 'package:tvbox/pages/settings/sub/playback_settings_page.dart';
-import 'package:tvbox/pages/settings/sub/sniff_settings_page.dart';
 
 /// 设置主页面
 ///
@@ -129,14 +128,6 @@ class _SettingsPageState extends State<SettingsPage> {
                   icon: Icons.play_circle_outline,
                   title: '播放管理',
                   onTap: () => Get.to(() => const PlaybackSettingsPage()),
-                ),
-                const SizedBox(height: AppTheme.spacingMD),
-                // 嗅探解析（用户 2026-10-28：从「播放管理」里提出来做成
-                // 顶层入口，统一管理嗅探开关 / 解析接口 / 过滤规则，避免藏太深）
-                _categoryTile(
-                  icon: Icons.radar_rounded,
-                  title: '嗅探解析',
-                  onTap: () => Get.to(() => const SniffSettingsPage()),
                 ),
                 const SizedBox(height: AppTheme.spacingMD),
                 _categoryTile(

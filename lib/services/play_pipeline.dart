@@ -1,12 +1,12 @@
 // lib/services/play_pipeline.dart
 //
-// 统一播放判定（**已彻底移除嗅探 / 解析**）。
+// 统一播放判定（播放地址路由的**单一事实来源**）。
 //
-// 现在只有两条路：
+// 只有两条路：
 //   ① 影视直链 → 交给 App 自己的原生播放器；
 //   ② 其它 http(s) 网页 → 交给 App 自己的内嵌网页播放器（WebviewPlayerPage）。
 //
-// 不再调用任何解析接口、不再注入嗅探脚本、也不再打开嗅探/解析页面。
+// 不做任何地址提取：网页里的播放由网页自己完成。
 library;
 
 import 'package:tvbox/services/app_log.dart';

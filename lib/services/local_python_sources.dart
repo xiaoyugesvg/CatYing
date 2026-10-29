@@ -108,7 +108,7 @@ class LocalPythonSources {
     // 避免用户升级后本地源全部消失。
     await _migrateLegacy(dir);
 
-    // 🔴 2026-10-29 与 LocalJsSources 对齐：原来这里是
+    // 🔴 2026-10-29 修正：原来这里是
     //   `_loaded = true; _sources.clear();` 再慢慢读 —— 一旦 `directory()` /
     //   `create()` / `_migrateLegacy()` 中途抛错，内存里的本地 PY 源就被清空，
     //   而 `_loaded` 已是 true ⇒ 之后不带 force 的 load 直接 return，本地 PY 源

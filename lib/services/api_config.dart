@@ -6,7 +6,6 @@ import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/local_python_sources.dart';
-import 'package:tvbox/services/local_js_sources.dart';
 import 'package:tvbox/services/moontv_converter.dart';
 import 'package:tvbox/services/prefs_mirror.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -15,7 +14,6 @@ import 'package:tvbox/models/source_bean.dart';
 import 'package:tvbox/common/constants.dart';
 import 'package:tvbox/services/network_manager.dart';
 import 'package:tvbox/services/live_service.dart';
-import 'package:tvbox/services/parse_store.dart';
 import 'package:tvbox/services/host_resolver.dart';
 import 'package:tvbox/services/xbpq/xbpq_service.dart';
 
@@ -82,38 +80,20 @@ class ApiConfig extends GetxController {
   /// 所以「订阅管理 → 本地爬虫」里依旧能看到、管理已导入的脚本。
   final localSourcesEnabled = false.obs;
 
-  /// 「本地 JS 源」开关（2026-10-28，用户要求：和「本地爬虫」一样能单独开关）。
-  ///
-  /// 语义 = **总开关之下的子开关**：
-  ///   · 本地 Python 源参与 ⇒ `localSourcesEnabled`
-  ///   · 本地 JS 源参与 ⇒ `localSourcesEnabled && localJsSourcesEnabled`
-  ///
-  /// 默认 **true**：这样在加这个开关之前的行为**完全不变**（总开关开着时 JS 源
-  /// 照旧出现在源面板 / 搜索里），只是多了一个能单独关掉 JS 的旋钮。
-  /// 总开关关掉时子开关一律无效 —— 「本地爬虫」仍是本地脚本的总闸。
-  final localJsSourcesEnabled = true.obs;
-
   /// 保存开关的 prefs 键
   static const String _kLocalSourcesEnabled = 'local_sources_enabled_v1';
 
-  /// 「本地 JS 源」开关的 prefs 键
-  static const String _kLocalJsSourcesEnabled = 'local_js_sources_enabled_v1';
-
-  /// key 是否属于「本地源」三族之一（Python / JS / XBPQ）。
+  /// key 是否属于「本地源」两族之一（Python / XBPQ）。
   ///
   /// 收敛成一个判断，是为了以后再加一族引擎时不会漏掉主页源回退那几处。
   static bool _isLocalSourceKey(String key) =>
       key.startsWith('localpy_') ||
-      key.startsWith('localjs_') ||
       key.startsWith(SourceBean.xbpqKeyPrefix);
 
   /// 本地源当前是否**参与**（源面板 / 搜索 / 主页源恢复）。
   ///
-  /// Python 源看总开关；JS 源还要看 JS 子开关。订阅线路**不受**本地开关影响。
+  /// Python / XBPQ 源都看总开关。订阅线路**不受**本地开关影响。
   bool isLocalSourceEnabled(SourceBean s) {
-    if (s.key.startsWith('localjs_')) {
-      return localSourcesEnabled.value && localJsSourcesEnabled.value;
-    }
     if (s.key.startsWith('localpy_')) {
       return localSourcesEnabled.value;
     }
@@ -131,10 +111,6 @@ class ApiConfig extends GetxController {
   int get localPythonSourceCount =>
       localVideoSources.where((s) => s.key.startsWith('localpy_')).length;
 
-  /// 本地 **JS** 源数量（`localjs_`）。
-  int get localJsSourceCount =>
-      localVideoSources.where((s) => s.key.startsWith('localjs_')).length;
-
   /// 本地 **XBPQ** 规则源数量（`localxbpq_`）。
   ///
   /// 与 PY / JS 一样各数各的：XBPQ 没有独立子开关，跟着「本地爬虫」总开关走，
@@ -143,7 +119,6 @@ class ApiConfig extends GetxController {
       .where((s) => s.key.startsWith(SourceBean.xbpqKeyPrefix))
       .length;
 
-  final parseBeanList = <ParseBean>[].obs;
   final dohList = <(String, String)>[].obs;
   final isLoaded = false.obs;
   final configUrl = ''.obs;
@@ -312,8 +287,7 @@ class ApiConfig extends GetxController {
 
   /// 获取指定 key 的源（订阅线路 + 本地 Python 源）
   ///
-  /// 本地源只在「本地爬虫」开关打开时参与（用户 2026-10-18：默认优先订阅激活的源）；
-  /// 本地 **JS** 源还要看 JS 子开关（[localJsSourcesEnabled]）。
+  /// 本地源只在「本地爬虫」开关打开时参与（用户 2026-10-18：默认优先订阅激活的源）。
   SourceBean? getSource(String key) {
     return sourceBeanList.firstWhereOrNull((s) => s.key == key) ??
         localVideoSources.firstWhereOrNull(
@@ -340,10 +314,10 @@ class ApiConfig extends GetxController {
   ///
   /// 只更新 [localVideoSources]，**不动** [sourceBeanList] —— 订阅线路与本地源是两套。
   ///
-  /// 🔴 2026-10-29 修（用户：「本地JS和订阅切换的时候，没切换过来」）：
+  /// 🔴 2026-10-29 修（用户：「本地源和订阅切换的时候，没切换过来」）：
   ///   以前整个方法体是**一个 try 包到底** —— `LocalPythonSources.load` /
-  ///   `LocalJsSources.load` / `localVideoSources.assignAll` / 「主页源回退到
-  ///   订阅线路」这四件事共用同一个 catch。只要前面任何一步抛错（本地目录
+  ///   `localVideoSources.assignAll` / 「主页源回退到
+  ///   订阅线路」这几件事共用同一个 catch。只要前面任何一步抛错（本地目录
   ///   权限、清单损坏、路径拿不到…），后面**全部不执行**：
   ///     · 本地源清单停在旧值（删掉的源还在、新导入的看不到）；
   ///     · **主页源回退逻辑永远跑不到** ⇒ 主页源死钉在一个已经不可用的本地源上，
@@ -361,10 +335,6 @@ class ApiConfig extends GetxController {
     // ── ① 开关口径：每次都同步一次（默认关），保证冷启动 / 切订阅时一致 ──
     if (prefs != null) {
       localSourcesEnabled.value = prefs.getBool(_kLocalSourcesEnabled) ?? false;
-      // JS 子开关（默认开）：没写过就跟着「之前的整体行为」走 —— 即总开关开
-      // 着时 JS 源照旧可用，不因为新增这个旋钮而把老用户手里的 JS 源关掉。
-      localJsSourcesEnabled.value =
-          prefs.getBool(_kLocalJsSourcesEnabled) ?? true;
     }
 
     // ── ② 两套本地源各自独立加载：Python 那套抛错不能把 JS 那套一起带走 ──
@@ -372,11 +342,6 @@ class ApiConfig extends GetxController {
       await LocalPythonSources.instance.load(force: true);
     } catch (e) {
       AppLog.instance.w('[ApiConfig] 读取本地 Python 源失败: $e');
-    }
-    try {
-      await LocalJsSources.instance.load(force: true);
-    } catch (e) {
-      AppLog.instance.w('[ApiConfig] 读取本地 JS 源失败: $e');
     }
     try {
       await XbpqService.instance.ensureLoaded(force: true);
@@ -391,13 +356,6 @@ class ApiConfig extends GetxController {
         list.add(e.toSourceBean());
       } catch (_) {
         /* 单条坏数据不影响其它源 */
-      }
-    }
-    for (final e in LocalJsSources.instance.sources) {
-      try {
-        list.add(e.toSourceBean());
-      } catch (_) {
-        /* 同上 */
       }
     }
     for (final bean in XbpqService.instance.sourceBeans) {
@@ -467,21 +425,6 @@ class ApiConfig extends GetxController {
     }
   }
 
-  /// 「本地 JS 源」开关（2026-10-28，用户要「和 PY 本地一样加个开关」）。
-  ///
-  /// 这是**子开关**：总开关（[setLocalSourcesEnabled]）关着时它一律无效。
-  /// 关掉它 ⇒ 本地 JS 源不再出现在源面板 / 搜索里，主页源若是本地 JS 源
-  /// 也会自动切回订阅线路；打开 ⇒ 立刻可用（Node 引擎本来就常驻，
-  /// 不需要像 Python 那样额外启动）。
-  Future<void> setLocalJsSourcesEnabled(bool value) async {
-    if (localJsSourcesEnabled.value == value) return;
-    localJsSourcesEnabled.value = value;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_kLocalJsSourcesEnabled, value);
-    PrefsMirror.snapshotSoon();
-    await reloadLocalVideoSources();
-  }
-
   /// 主页源选择：按**订阅（配置地址）分别记住**。
   ///
   /// 之前只存一个全局 `homeApi` ⇒ 换了订阅、或换个订阅再切回来，都只能拿到
@@ -505,8 +448,8 @@ class ApiConfig extends GetxController {
     final prefs = await SharedPreferences.getInstance();
     // 仍写一份全局键，兼容旧逻辑/旧数据
     await prefs.setString(AppConstants.homeApi, source.key);
-    // 本地源（Python / JS）：全局锁定，不随订阅切换
-    if (source.key.startsWith('localpy_') || source.key.startsWith('localjs_')) {
+    // 本地源（Python）：全局锁定，不随订阅切换
+    if (source.key.startsWith('localpy_')) {
       await prefs.setString(_kLocalHomeApi, source.key);
     } else {
       await prefs.remove(_kLocalHomeApi);
@@ -1317,7 +1260,7 @@ class ApiConfig extends GetxController {
       }
 
       // 解码成功但缺少可用内容
-      throw ConfigError.parseError.message('配置缺少可用站点（sites / parses）');
+      throw ConfigError.parseError.message('配置缺少可用站点（sites）');
     }
 
     throw ConfigError.parseError.message('配置格式不受支持');
@@ -1610,23 +1553,6 @@ class ApiConfig extends GetxController {
           '${homeSourceBean.value?.key}，/config 返回后再校正',
         );
       }
-
-      // 解析线路（parses）：**并入本地持久化的 ParseStore**，不再"订阅有就有、
-      // 没就没"。用户 2026-10-14：换一个不带 parses 的订阅，之前拉到的线路
-      // 立刻消失，播放器上的「解析」按钮就没线路可切了。
-      // 现在：订阅下发的只 merge，本地已有的（含手动添加的）一律保留。
-      if (config.parses != null && config.parses!.isNotEmpty) {
-        await ParseStore.instance.absorb(
-          config.parses!.map(
-            (p) => ParseBean(
-              name: p.name ?? '',
-              url: p.url ?? '',
-              type: p.type?.value ?? 0,
-            ),
-          ),
-        );
-      }
-      parseBeanList.value = ParseStore.instance.list;
 
       // 解析 DoH 列表
       if (config.doh != null) {

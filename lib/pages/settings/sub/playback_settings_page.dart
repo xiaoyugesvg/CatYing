@@ -11,7 +11,6 @@ import 'package:tvbox/services/player_prefs.dart';
 import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:tvbox/pages/settings/controller.dart';
 import 'package:tvbox/pages/settings/sub/settings_shared.dart';
-import 'package:tvbox/pages/settings/sub/sniff_settings_page.dart';
 
 /// 设置 → 播放设置
 ///
@@ -230,13 +229,6 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
         SettingsGroup(
           title: '其他',
           children: [
-            // 嗅探规则：影视直链过滤、广告黑/白名单、按域名决定是否解析
-            SettingsRow(
-              icon: Icons.travel_explore,
-              title: '嗅探设置',
-              subtitle: '影视直链过滤 · 广告黑名单 · 指定解析网站',
-              onTap: () => Get.to(() => const SniffSettingsPage()),
-            ),
             Obx(() => unifiedSwitchRow(
                   icon: Icons.skip_next_outlined,
                   title: '自动下一集',

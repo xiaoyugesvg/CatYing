@@ -187,73 +187,6 @@ class AnyCodableValue {
   int get hashCode => Object.hash(_type, _stringValue, _intValue, _doubleValue, _boolValue);
 }
 
-// MARK: - 解析接口配置
-
-/// 解析接口配置 - 对应 Swift ParseBean
-class ParseBean {
-  final String name;
-  final String url;
-  /// 0:嗅探 1:解析
-  final int type;
-  final Map<String, String>? ext;
-
-  /// 启用/禁用（2026-10-28，对齐 huoyi ParseInterface.enabled）：
-  /// 禁用的线路不参与解析（自动/换线路都跳过），禁用当前选中项时选中回"自动"。
-  final bool enabled;
-
-  const ParseBean({
-    this.name = '',
-    this.url = '',
-    this.type = 0,
-    this.ext,
-    this.enabled = true,
-  });
-
-  factory ParseBean.fromJson(Map<String, dynamic> json) {
-    return ParseBean(
-      name: json['name'] as String? ?? '',
-      url: json['url'] as String? ?? '',
-      type: _parseInt(json['type']),
-      ext: _parseExtMap(json['ext']),
-      // 旧数据没有 enabled 字段 → 默认启用，不破坏已有线路
-      enabled: json['enabled'] as bool? ?? true,
-    );
-  }
-
-  static int _parseInt(dynamic value) {
-    if (value == null) return 0;
-    if (value is int) return value;
-    if (value is String) return int.tryParse(value) ?? 0;
-    return 0;
-  }
-
-  static Map<String, String>? _parseExtMap(dynamic value) {
-    if (value == null) return null;
-    if (value is Map) {
-      return value.map((k, v) => MapEntry(k.toString(), _extValue(v)));
-    }
-    return null;
-  }
-
-  /// ext 的值统一成字符串。
-  ///
-  /// ⚠️ 嵌套 Map/List 必须用 **jsonEncode**：TVBox 的 `ext.header` 有两种写法 ——
-  /// JSON 字符串（`"header": "{\"User-Agent\":\"…\"}"`）与**对象**
-  /// （`"header": {"User-Agent":"…"}`）。对象若走 `toString()` 会得到 Dart 的
-  /// `{User-Agent: …}` 格式，下游 `jsonDecode` 解不出，请求头被静默丢弃、
-  /// 表现为"解析站要求 UA 却一直解析失败"（2026-10-15 深挖发现）。
-  static String _extValue(dynamic v) {
-    if (v == null) return '';
-    if (v is String) return v;
-    if (v is Map || v is List) {
-      try {
-        return jsonEncode(v);
-      } catch (_) {}
-    }
-    return v.toString();
-  }
-}
-
 // MARK: - API 配置顶层结构
 
 /// API 配置顶层结构 - 对应 JSON 配置文件格式
@@ -261,7 +194,6 @@ class AppConfigData {
   final String? spider;
   final String? wallpaper;
   final List<SiteConfig>? sites;
-  final List<ParseConfig>? parses;
   final List<LiveConfig>? lives;
   final List<DoHConfig>? doh;
   final List<RuleConfig>? rules;
@@ -273,7 +205,6 @@ class AppConfigData {
     this.spider,
     this.wallpaper,
     this.sites,
-    this.parses,
     this.lives,
     this.doh,
     this.rules,
@@ -288,9 +219,6 @@ class AppConfigData {
       wallpaper: json['wallpaper'] as String?,
       sites: (json['sites'] as List<dynamic>?)
           ?.map((e) => SiteConfig.fromJson(e as Map<String, dynamic>))
-          .toList(),
-      parses: (json['parses'] as List<dynamic>?)
-          ?.map((e) => ParseConfig.fromJson(e as Map<String, dynamic>))
           .toList(),
       lives: (json['lives'] as List<dynamic>?)
           ?.map((e) => LiveConfig.fromJson(e as Map<String, dynamic>))
@@ -311,8 +239,7 @@ class AppConfigData {
   bool get hasUsableContent {
     final hasSites = sites?.isNotEmpty ?? false;
     final hasLives = lives?.isNotEmpty ?? false;
-    final hasParses = parses?.isNotEmpty ?? false;
-    return hasSites || hasLives || hasParses;
+    return hasSites || hasLives;
   }
 }
 
@@ -376,24 +303,6 @@ class SiteConfig {
       playUrl: json['playUrl'] as String?,
       categories: (json['categories'] as List<dynamic>?)?.cast<String>(),
       click: json['click'] as String?,
-    );
-  }
-}
-
-class ParseConfig {
-  final String? name;
-  final String? url;
-  final FlexibleInt? type;
-  final FlexibleExt? ext;
-
-  const ParseConfig({this.name, this.url, this.type, this.ext});
-
-  factory ParseConfig.fromJson(Map<String, dynamic> json) {
-    return ParseConfig(
-      name: json['name'] as String?,
-      url: json['url'] as String?,
-      type: json['type'] != null ? FlexibleInt.fromJson(json['type']) : null,
-      ext: json['ext'] != null ? FlexibleExt.fromJson(json['ext']) : null,
     );
   }
 }

@@ -132,14 +132,6 @@ class VideoPlayerWidget extends StatefulWidget {
   final VoidCallback? onPlayNext;
   final VoidCallback? onPlayPrevious;
 
-  /// 底栏「嗅探」按钮回调（不传则不显示该按钮）。影视详情页传入：
-  /// 打开 WebView 嗅探，手动从网页里抓媒体地址。
-  final VoidCallback? onSniff;
-
-  /// 底栏「解析」按钮回调（不传则不显示）。影视详情页传入：
-  /// 弹出解析线路列表，切线路后用新线路重新解析当前集。
-  final VoidCallback? onSwitchParse;
-
   /// 抖音模式（短剧模式）下，无剧集可切（电影）时的上/下一部电影回调。
   /// 有剧集时切集走 [onPlayNext]/[onPlayPrevious]，电影时用这两个。
   final VoidCallback? onDramaNextMovie;
@@ -197,8 +189,6 @@ class VideoPlayerWidget extends StatefulWidget {
     this.onFullScreenChanged,
     this.onPlayNext,
     this.onPlayPrevious,
-    this.onSniff,
-    this.onSwitchParse,
     this.onDramaNextMovie,
     this.onDramaPrevMovie,
     this.onSelectEpisode,
@@ -3936,9 +3926,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                       },
                     ),
                   // 右侧功能组：**不固定宽度**，交给 Expanded + FittedBox ——
-                  // 详情页新增了「嗅探 / 解析」后按钮变多，窄屏（iPhone）上
-                  // 原来的固定 Row 会直接溢出（黄黑条）。scaleDown 只在真的
-                  // 放不下时整体等比缩小，放得下时与原来完全一致（右对齐）。
+                  // 详情页按钮较多时，窄屏（iPhone）上原来的固定 Row 会直接
+                  // 溢出（黄黑条）。scaleDown 只在真的放不下时整体等比缩小，
+                  // 放得下时与原来完全一致（右对齐）。
                   //
                   // ⚠️ 这里**不能**再留一个 `Spacer()`：它和 Expanded 各占一半
                   //    剩余宽度 ⇒ Expanded 只剩半屏，FittedBox 会误判"放不下"
@@ -3991,40 +3981,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                 onTap: () {
                                   _scheduleHideControls();
                                   setState(() => _showEpisodeSheet = true);
-                                },
-                              ),
-                            // 「嗅探」按钮：汉字「嗅」。无论设置里的开关是否打开，
-                            // 只要页面支持就**常驻显示**（用户 2026-10-28：拆成两个
-                            // 独立按钮、不要"开了嗅探才有按钮"——否则嗅探关着时点
-                            // 不开、播放器还被错误顶掉，直接死循环）。
-                            if (widget.onSniff != null)
-                              _iconButton(
-                                icon: Icons.travel_explore_rounded,
-                                size: 22,
-                                width: 36,
-                                onTap: () {
-                                  _scheduleHideControls();
-                                  widget.onSniff!();
-                                },
-                                child: const Text(
-                                  '嗅',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 17,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              ),
-                            // 「解析」按钮：切换解析线路，同样常驻（图标用奖章/VIP
-                            // 样式，用户 2026-10-14：解析接口本身就是"会员级"能力）。
-                            if (widget.onSwitchParse != null)
-                              _iconButton(
-                                icon: Icons.workspace_premium_rounded,
-                                size: 22,
-                                width: 36,
-                                onTap: () {
-                                  _scheduleHideControls();
-                                  widget.onSwitchParse!();
                                 },
                               ),
                             // 弹幕开关 / 播放器核心切换：**2026-10-14 已移到顶栏**

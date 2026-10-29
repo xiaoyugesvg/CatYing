@@ -11,7 +11,7 @@
 //     让 `SourceService` 现有的 `_parseVideoListFromJson` / `VodInfo.fromVideo`
 //     直接复用，不必为 XBPQ 另写一套模型转换。
 //
-// key 约定：`localxbpq_<规则哈希前 12 位>` —— 与 `localjs_` / `localpy_` 同族，
+// key 约定：`localxbpq_<规则哈希前 12 位>` —— 与 `localpy_` 同族，
 // 这样源面板、主页源回退、本地源开关等既有逻辑都能直接复用。
 
 import 'dart:convert';
@@ -61,7 +61,7 @@ class XbpqService {
 
   static final XbpqService instance = XbpqService._();
 
-  /// 源 key 前缀（与 `localjs_` / `localpy_` 同族）。
+  /// 源 key 前缀（与 `localpy_` 同族）。
   static const String keyPrefix = 'localxbpq_';
 
   static const String _prefsKey = 'xbpq_rules_v1';
@@ -278,9 +278,8 @@ class XbpqService {
 
   /// 取播放地址 → `{url, parse, header}`。
   ///
-  /// 目前播放链路还没接这个钩子（详情页给的是**播放页地址**，由
-  /// `PlayPipeline` 嗅探/解析）。这里先备着：接上之后能直接用规则里的
-  /// 「跳转播放链接」取直链，比嗅探更准。
+  /// 目前播放链路还没接这个钩子（详情页给的是**播放页地址**）。这里先备着：
+  /// 接上之后能直接用规则里的「跳转播放链接」取直链，比开网页播放更准。
   Future<Map<String, dynamic>> playUrl(
     String key,
     String pageUrl, {

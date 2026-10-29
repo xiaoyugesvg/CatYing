@@ -28,7 +28,6 @@ import 'package:tvbox/widgets/ks_player.dart';
 import 'package:tvbox/widgets/mpv_app_player.dart';
 import 'package:tvbox/widgets/video_player.dart';
 import 'package:tvbox/widgets/video_player_pip.dart';
-import 'package:tvbox/widgets/playback_surface.dart';
 import 'package:tvbox/widgets/window_fullscreen.dart';
 import 'package:tvbox/pages/drama/drama_player_page.dart';
 import 'package:tvbox/pages/search/controller.dart' show TvSearchController;
@@ -1012,7 +1011,7 @@ class _DetailPageState extends State<DetailPage> {
         return _buildPlayerWidget(isFull: isFull, isPip: isPip);
       } else {
         // 正在播但 URL 尚未就绪：超时后置错误，避免永久转圈。
-        // ⚠️ 正在走解析接口取址时不启动这个计时 —— 解析本身可能要好几秒，
+        // ⚠️ 正在取址时不启动这个计时 —— 取流本身可能要好几秒，
         // 误报"播放地址获取超时"会把用户从观看里打断（用户 2026-10-15）。
         if (!_controller.isResolving.value) {
           _playerErrorTimer ??= Timer(const Duration(seconds: 15), () {
@@ -1235,10 +1234,6 @@ class _DetailPageState extends State<DetailPage> {
       },
       onSetSkipIntro: (s) => _controller.setSkipIntroSeconds(s),
       onSetSkipOutro: (s) => _controller.setSkipOutroSeconds(s),
-      // 底栏「嗅探」「解析」两个独立按钮（2026-10-28 改为常驻、不依赖开关）：
-      // 分别打开对应面板，面板开关与「设置」实时同步。
-      onSniff: _openSniffSheet,
-      onSwitchParse: _openParseSheet,
       // 播放器错误（原生 onError / 加载失败）以前无处可去，只表现为白转圈；
       // 这里接进控制器的错误态，详情页即可显示文案 + 重试。
       onError: () => _controller.setPlaybackError('播放失败，请点重试或切换其他线路'),
@@ -1256,30 +1251,8 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
-  /// 底栏「嗅探」按钮 → 只开嗅探面板（嗅探总开关 + 播放带 Referer +
-  /// 「开启嗅探并嗅探 / 立即嗅探当前页」）。面板开关与「设置」实时同步。
-  Future<void> _openSniffSheet() async {
-    await ParseSniffSheet.show(
-      context,
-      section: ParseSniffSection.sniff,
-      onSniff: _controller.openSniff,
-    );
-    if (mounted) setState(() {});
-  }
-
-  /// 底栏「解析」按钮 → 只开解析面板（解析总开关 + 脚本内置优先级 +
-  /// 线路列表；选中即重解当前集，见 [DetailController.selectParseLine]）。
-  Future<void> _openParseSheet() async {
-    await ParseSniffSheet.show(
-      context,
-      section: ParseSniffSection.parse,
-      onPickLine: (url) => _controller.selectParseLine(url),
-    );
-    if (mounted) setState(() {});
-  }
-
-  /// 错误态下的操作按钮（重试 / 嗅 / 解），统一圆角样式，保证失败页也能
-  /// 直接进嗅探 / 解析，不再"顶掉播放器导致死循环"（2026-10-28）。
+  /// 错误态下的操作按钮（重试 / 换线路），统一圆角样式，保证失败页也能
+  /// 直接操作，不再"顶掉播放器导致死循环"（2026-10-28）。
   Widget _errorActionButton(String label, IconData icon, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
@@ -2714,7 +2687,7 @@ class _PillChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 与「换源 / 解析线路」弹层里的选项行保持同一套选中语言：
+    // 与「换源」弹层里的选项行保持同一套选中语言：
     // 主题色浅底 + 细描边 + ✓，未选中为灰底无描边。
     return GestureDetector(
       onTap: onTap,
@@ -2759,7 +2732,7 @@ class _PillChip extends StatelessWidget {
   }
 }
 
-/// 详情页底部弹层的拖拽把手（换源 / 解析线路共用）
+/// 详情页底部弹层的拖拽把手（换源弹层使用）
 class _SheetGrabber extends StatelessWidget {
   const _SheetGrabber();
 
@@ -2777,7 +2750,7 @@ class _SheetGrabber extends StatelessWidget {
   }
 }
 
-/// 详情页底部弹层的标题行（换源 / 解析线路共用）
+/// 详情页底部弹层的标题行（换源弹层使用）
 class _SheetHeader extends StatelessWidget {
   const _SheetHeader({required this.title, this.subtitle, this.trailing});
 
@@ -2830,7 +2803,7 @@ class _SheetHeader extends StatelessWidget {
   }
 }
 
-/// 详情页底部弹层的统一选项行（换源候选 / 解析线路共用）
+/// 详情页底部弹层的统一选项行（换源候选项使用）
 class _SheetOptionTile extends StatelessWidget {
   const _SheetOptionTile({
     required this.title,
@@ -2843,8 +2816,7 @@ class _SheetOptionTile extends StatelessWidget {
   final String? subtitle;
   final Widget? leading;
 
-  /// 目前所有调用方都不需要"选中态"（解析线路的选中态已改到
-  /// `ParseSniffSheet` 里）；保留字段让样式分支不动，恒 false。
+  /// 目前所有调用方都不需要"选中态"；保留字段让样式分支不动，恒 false。
   final bool selected = false;
   final VoidCallback onTap;
 

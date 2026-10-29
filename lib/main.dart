@@ -25,7 +25,6 @@ import 'package:tvbox/services/background_service.dart';
 import 'package:tvbox/services/dio_factory.dart' show installGlobalDnsOverrides;
 import 'package:tvbox/services/epg_service.dart';
 import 'package:tvbox/services/live_service.dart';
-import 'package:tvbox/services/parse_store.dart';
 import 'package:tvbox/reading/services/book_download_service.dart';
 import 'package:tvbox/reading/services/book_font_service.dart';
 import 'package:tvbox/reading/services/settings_service.dart';
@@ -143,7 +142,7 @@ void main() async {
   //   初始化链**顺序一字未动**地继续跑，跑完再把真正的 `TVBoxApp` 挂上去。
   //
   // ⚠️ 刻意**不**把初始化链拆开重排：那条链里"谁必须早于谁"的注释有几十处
-  //   （书源要早于 SourceManager、下载清单要早于 PlayerManager、ParseStore 要早于
+  //   （书源要早于 SourceManager、下载清单要早于 PlayerManager、
   //   ApiConfig 首次加载…），重排等于重新验证一遍全部启动语义，风险远大于收益。
   //   这里只是把它整段搬进函数，执行顺序完全不变。
   final booted = ValueNotifier<bool>(false);
@@ -215,10 +214,6 @@ Future<void> _initAppServices() async {
   // RSS 订阅源（设置里的「RSS 管理」+ 底栏 RSS 模块）
   await bootRestore('RssStore.load', RssStore.instance.load);
 
-  // 解析线路（parses）落盘恢复：订阅下发的线路只并入、不再整表清空，
-  // 所以必须早于 ApiConfig 首次加载配置（见 ParseStore 顶部说明）。
-  await bootRestore('ParseStore.load', ParseStore.instance.load);
-
   // 播放内核与选项
   // #10：字号缩放是外观设置，由 AppTheme 负责加载（PlayerPrefs 是兼容壳）
     await AppTheme.loadFontScale();
@@ -228,9 +223,6 @@ Future<void> _initAppServices() async {
 
   // 注册 ApiConfig 为 GetxController - 对应 Swift ApiConfig.shared
   Get.put<ApiConfig>(ApiConfig());
-
-  // 把落盘的解析线路灌回 ApiConfig 的列表（启动即显示，不必等订阅加载）
-  ApiConfig.instance.parseBeanList.value = ParseStore.instance.list;
 
   // 注册 AppState 为 GetxController - 对应 Swift @StateObject private var appState = AppState()
   Get.put<AppState>(AppState());

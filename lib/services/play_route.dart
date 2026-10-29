@@ -1,42 +1,20 @@
 /// 播放地址分流工具 —— 影视端（`detail/controller`）与小程序端
 /// （`ant.player.open`）共用的**单一事实来源**。
 ///
-/// 分流规则（2026-10-14 按用户明确要求）：
-///   · **主流正版站**（爱奇艺 / 腾讯视频 / 芒果TV / 优酷 / 哔哩哔哩 …）
-///     有防盗链与加密，直接嗅探拿到的地址多半播不了 ⇒ **必须先过解析接口**，
-///     解析结果再交给嗅探兜底；
-///   · **其余站点** ⇒ **直接嗅探**（在 WebView 里抓页面发出的媒体请求），
-///     不走解析接口，省一次请求也避免被解歪。
+/// 分流规则：
+///   · **可直接播放的媒体直链**（后缀在 [kDefaultMediaExtensions] /
+///     [kAudioExtensions] 内）⇒ 交给原生播放器；
+///   · **其它地址**（网页页面、未知协议）⇒ 交给内嵌 WebView 播放器，
+///     由网页自己完成播放；
 ///   · **非视频内容**（漫画 `pics://` / 小说 `novel://`）⇒ 见文件尾部两个
 ///     协议解析函数，按内容走简易阅读器。
 library;
 
 import 'dart:convert';
 
-/// 「必须先解析」的站点域名清单。要加要删都只改这一处。
-///
-/// 匹配用**域名边界**（`host == 域名` 或 `host.endsWith('.域名')`），
-/// 所以 `evil-iqiyi.com` 这类前缀伪造不会被误判。
-const Set<String> kParseFirstHosts = {
-  'iqiyi.com', // 爱奇艺
-  'qq.com', // 腾讯视频（v.qq.com）
-  'mgtv.com', // 芒果TV
-  'hunantv.com', // 芒果备用域
-  'youku.com', // 优酷
-  'bilibili.com', // 哔哩哔哩
-  'b23.tv', // B站短链
-  'acfun.cn', // AcFun
-  'le.com', // 乐视
-  'sohu.com', // 搜狐视频
-  'pptv.com', // PP视频
-  '1905.com', // 电影网
-  'migu.cn', // 咪咕视频
-};
-
 /// **默认**可直接交给播放器的媒体后缀。
 ///
-/// 用户可在「播放设置 → 嗅探设置 → 影视直链后缀」里增删（例如加 `.m4a`、
-/// 去掉 `.wmv`）；自定义清单存在 [PlayerPrefs.mediaExtensions]，为空则用这份默认。
+/// 固定的出厂清单，各链路判定"是否直链"都以它为准。
 const List<String> kDefaultMediaExtensions = [
   '.m3u8',
   '.mp4',
@@ -56,8 +34,8 @@ const List<String> kDefaultMediaExtensions = [
 /// **音频直链**后缀：影视后缀清单（[kDefaultMediaExtensions]，用户可自定义）
 /// 之外的补充白名单。
 ///
-/// 解析接口 / 源偶尔给出纯音频地址（音乐源直链），这几类也交给原生播放器。
-/// 集中一处，避免 parse_service 与 detail/view 各写一份、顺序还不一致
+/// 源偶尔给出纯音频地址（音乐源直链），这几类也交给原生播放器。
+/// 集中一处，避免 detail/view 等处各写一份、顺序还不一致
 /// （2026-10-15 核对一致性时发现）。
 const List<String> kAudioExtensions = [
   '.mp3',
@@ -70,8 +48,7 @@ const List<String> kAudioExtensions = [
 
 /// 取 URL 的媒体后缀（小写、带点，如 `.m3u8`）；**不在清单内则返回空串**。
 ///
-/// [exts] 不传则用 [kDefaultMediaExtensions]；调用方一般应传用户当前生效的
-/// 清单（见 `SniffFilter.mediaExtensions`）。
+/// [exts] 不传则用 [kDefaultMediaExtensions]；要看纯音频可传 [kAudioExtensions]。
 /// 只看 path 的最后一段（忽略查询串/锚点），与 [looksLikeDirectMedia] 同一口径。
 String mediaExtOf(String url, {List<String>? exts}) {
   final list = exts ?? kDefaultMediaExtensions;
@@ -87,7 +64,7 @@ String mediaExtOf(String url, {List<String>? exts}) {
 /// URL 看起来是不是**可直接播放**的媒体地址。
 ///
 /// [exts] 不传则用 [kDefaultMediaExtensions]（保持纯函数、方便单测）；
-/// 业务侧应传用户当前生效的清单，见 `SniffFilter.isDirectMedia`。
+/// 业务侧可传 [kAudioExtensions] 之类更宽的清单。
 bool looksLikeDirectMedia(String url, {List<String>? exts}) {
   final list = exts ?? kDefaultMediaExtensions;
   final raw = url.trim().toLowerCase();
@@ -101,16 +78,6 @@ bool looksLikeDirectMedia(String url, {List<String>? exts}) {
   final path = Uri.tryParse(raw)?.path.toLowerCase() ?? raw;
   for (final ext in list) {
     if (path.endsWith(ext)) return true;
-  }
-  return false;
-}
-
-/// 该地址是否属于「必须先解析」的站点。
-bool needParseFirst(String url) {
-  final host = Uri.tryParse(url)?.host.toLowerCase() ?? '';
-  if (host.isEmpty) return false;
-  for (final h in kParseFirstHosts) {
-    if (host == h || host.endsWith('.$h')) return true;
   }
   return false;
 }

@@ -18,13 +18,10 @@ import 'package:tvbox/reading/source/global_proxy.dart';
 import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/play_pipeline.dart';
-import 'package:tvbox/services/player_prefs.dart';
-import 'package:tvbox/services/sniff_filter.dart';
 import 'package:tvbox/services/source_service.dart';
 import 'package:tvbox/services/spider_service.dart';
 import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/widgets/playback_surface.dart';
-import 'package:tvbox/pages/play/sniff_player_page.dart';
 import 'package:tvbox/miniapp/pages/mini_app_player_page.dart';
 
 /// 官方 ant JSAPI SDK v4 桥（Dart 侧实现）。
@@ -979,8 +976,6 @@ class AntBridge {
   static Future<Object?> _playerOpen(Map<String, dynamic> args) async {
     final url = (args['url'] ?? '').toString();
     final title = (args['title'] ?? '').toString();
-    final parse = (args['parse'] ?? 0).toString();
-    final jx = (args['jx'] ?? 0).toString();
     if (url.isEmpty) throw AntError('INVALID_PARAMS', 'player.open: url 必填');
 
     var headers = args['headers'] is Map
@@ -988,35 +983,19 @@ class AntBridge {
             .map((k, v) => MapEntry(k.toString(), v.toString()))
         : const <String, String>{};
 
-    // 与影视端 / 海阔**共用同一条** [PlayPipeline]（2026-10-29 重构）：
+    // 与影视端 / 海阔**共用同一条** [PlayPipeline]：
     //   ① 直链 → 原生播放器；
-    //   ② 主流站 / 线路标了 parse|jx → 解析接口，解出直链直接播，
-    //      解出网页继续走下一步；
-    //   ③ 仍是网页 → 嗅探开关打开进嗅探页，否则内嵌网页播放器。
-    final resolution = await PlayPipeline.instance.resolve(
+    //   ② 其余网页地址 → 内嵌网页播放器。
+    final resolution = PlayPipeline.instance.resolve(
       url,
       headers: headers,
-      sourceWantsParse:
-          parse == '1' || jx == '1' || SniffFilter.shouldParse(url),
-      refererPage: url,
     );
     if (resolution.isPage) {
-      if (PlayerPrefs.instance.sniffEnabled.value) {
-        AppLog.instance.log('[AntBridge] player.open 转嗅探: ${resolution.url}');
-        // 把小程序传入的请求头带给嗅探页（嗅探到直链后播放要用）
-        Get.to(() => SniffPlayerPage(
-            url: resolution.url,
-            title: title,
-            headers: resolution.headers.isEmpty ? null : resolution.headers));
-        return {'route': 'sniff', 'url': resolution.url, 'sniff': true};
-      }
-      // 嗅探总开关关闭（默认）：网页地址不再进嗅探页，改用内嵌网页
-      // 播放器打开——直接丢给原生播放器会黑屏（2026-10-15）。
       AppLog.instance.log(
-          '[AntBridge] player.open 嗅探已关闭，网页地址转内嵌网页播放器: ${resolution.url}');
+          '[AntBridge] player.open 网页地址转内嵌网页播放器: ${resolution.url}');
       Get.to(() => PlaybackSurface.webFallback(
           url: resolution.url, title: title));
-      return {'route': 'webview', 'url': resolution.url, 'sniff': false};
+      return {'route': 'webview', 'url': resolution.url};
     }
     if (!resolution.isMedia) {
       // novel:// / pics:// —— 阅读器形态，不该从 player.open 进来

@@ -84,7 +84,7 @@ class SourceBean {
 
   /// XBPQ 规则源的 key 前缀。
   ///
-  /// 与 `localjs_` / `localpy_` 同族：都是用户导入的本地源，靠 key 前缀区分
+  /// 与 `localpy_` 同族：都是用户导入的本地源，靠 key 前缀区分
   /// 引擎。放在模型里是为了让「判定」不依赖 service（避免循环 import）。
   static const String xbpqKeyPrefix = 'localxbpq_';
 

@@ -4,12 +4,10 @@ import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:get/get.dart';
 import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/models/local_python_source.dart';
-import 'package:tvbox/models/local_js_source.dart';
 import 'package:tvbox/models/source_bean.dart';
 import 'package:tvbox/models/subscription.dart';
 import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/local_python_sources.dart';
-import 'package:tvbox/services/local_js_sources.dart';
 import 'package:tvbox/services/source_kind.dart';
 import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/widgets/card_action_sheet.dart';
@@ -57,12 +55,8 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   /// 是否正在看「失效线路」分类（顶部「失效 N」切换）
   bool _showInvalid = false;
 
-  /// 0 = 本地 Python / 1 = 本地 JS / 2 = 订阅线路
-  ///
-  /// 用户 2026-10-27：「本地将 PY、JS 源分开了，也就是 tab 栏有 3 个均分，
-  /// 名称分别是 PY本地、JS本地 以及 订阅」—— 原来本地 PY/JS 混在一个 tab 里，
-  /// 一堆脚本名看不出哪个是哪个。
-  int _tab = 2;
+  /// 0 = 本地 Python / 1 = 订阅线路
+  int _tab = 1;
 
   /// 首次构建时按当前主页源决定默认 tab（本地源 → 本地 tab）
   bool _tabInited = false;
@@ -145,158 +139,35 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
       LocalPythonSources.instance.sources
           .firstWhereOrNull((s) => s.sourceKey == bean.key);
 
-  /// 本地 JS 源 bean → 本地脚本（key 带 `localjs_` 前缀）
-  LocalJsSource? _jsOf(SourceBean bean) => LocalJsSources.instance.sources
-      .firstWhereOrNull((s) => s.sourceKey == bean.key);
-
-  /// 长按本地源 → **卡片式**菜单（Python / JS 各一套动作）。
+  /// 长按本地源 → **卡片式**菜单。
   ///
-  /// 用户 2026-10-20：「本地 py 源这个上面也加个长按弹窗分享、编辑、删除等」；
-  /// 2026-10-27 新增本地 JS 源后，长按同样给改名 / 分享 / 删除。
+  /// 用户 2026-10-20：「本地 py 源这个上面也加个长按弹窗分享、编辑、删除等」。
   Future<void> _localSourceMenu(SourceBean bean) async {
     final py = _localOf(bean);
-    if (py != null) {
-      await showCardActions(
-        context,
-        title: bean.name,
-        subtitle: '本地 Python · ${py.key}.py',
-        actions: [
-          CardAction(
-            icon: Icons.drive_file_rename_outline,
-            label: '编辑',
-            onTap: () => _renameLocal(py),
-          ),
-          CardAction(
-            icon: Icons.ios_share_rounded,
-            label: '分享',
-            onTap: () => _shareLocal(py),
-          ),
-          CardAction(
-            icon: Icons.delete_outline_rounded,
-            label: '删除',
-            danger: true,
-            onTap: () => _deleteLocal(py),
-          ),
-        ],
-      );
-      return;
-    }
-    final js = _jsOf(bean);
-    if (js == null) return;
+    if (py == null) return;
     await showCardActions(
       context,
       title: bean.name,
-      subtitle: '本地 JS · ${js.key}.js',
+      subtitle: '本地 Python · ${py.key}.py',
       actions: [
         CardAction(
           icon: Icons.drive_file_rename_outline,
           label: '编辑',
-          onTap: () => _renameJs(js),
+          onTap: () => _renameLocal(py),
         ),
         CardAction(
           icon: Icons.ios_share_rounded,
           label: '分享',
-          onTap: () => _shareJs(js),
+          onTap: () => _shareLocal(py),
         ),
         CardAction(
           icon: Icons.delete_outline_rounded,
           label: '删除',
           danger: true,
-          onTap: () => _deleteJs(js),
+          onTap: () => _deleteLocal(py),
         ),
       ],
     );
-  }
-
-  Future<void> _renameJs(LocalJsSource local) async {
-    final ctrl = TextEditingController(text: local.name);
-    final name = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.backgroundSecondary,
-        title: Text(
-          '重命名',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: AppTheme.fontHeadline,
-          ),
-        ),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          style: TextStyle(color: AppTheme.textPrimary),
-          decoration: const InputDecoration(hintText: '显示名称'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-            child: const Text('确定'),
-          ),
-        ],
-      ),
-    );
-    if (name == null || name.isEmpty) return;
-    final r = await LocalJsSources.instance.rename(local.key, name);
-    if (!r.ok) {
-      AppToast.error(r.message ?? '改名失败');
-      return;
-    }
-    await ApiConfig.instance.reloadLocalVideoSources();
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _shareJs(LocalJsSource local) async {
-    final code = await LocalJsSources.instance.readCode(local.key);
-    if (code == null || code.isEmpty) {
-      AppToast.error('找不到脚本文件');
-      return;
-    }
-    await Clipboard.setData(ClipboardData(text: code));
-    AppToast.message('脚本内容已复制到剪贴板');
-  }
-
-  Future<void> _deleteJs(LocalJsSource local) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.backgroundSecondary,
-        title: Text(
-          '删除本地源？',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: AppTheme.fontHeadline,
-          ),
-        ),
-        content: Text(
-          '将删除脚本文件，不可恢复。',
-          style: TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: AppTheme.fontSubhead,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
-            child: const Text('删除'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    await LocalJsSources.instance.remove(local.key);
-    await ApiConfig.instance.reloadLocalVideoSources();
-    if (!mounted) return;
-    setState(() {});
-    AppToast.message('已删除');
   }
 
   Future<void> _renameLocal(LocalPythonSource local) async {
@@ -395,10 +266,9 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   Future<void> _moveSource(String fromKey, String toKey) async {
     if (fromKey == toKey) return;
     final isLocal =
-        (fromKey.startsWith('localpy_') || fromKey.startsWith('localjs_')) &&
-        (toKey.startsWith('localpy_') || toKey.startsWith('localjs_'));
+        fromKey.startsWith('localpy_') && toKey.startsWith('localpy_');
     if (isLocal) {
-      // 本地源顺序存在各自 service 里（订阅线路表不管本地源）
+      // 本地源顺序存在 service 里（订阅线路表不管本地源）
       final visible = _filteredSourcesFrom(
         List<SourceBean>.of(ApiConfig.instance.localVideoSources),
       ).map((s) => s.key).toList();
@@ -407,11 +277,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
       if (from < 0 || to < 0) return;
       final moved = visible.removeAt(from);
       visible.insert(to.clamp(0, visible.length), moved);
-      if (fromKey.startsWith('localjs_')) {
-        await LocalJsSources.instance.reorderWithin(visible);
-      } else {
-        await LocalPythonSources.instance.reorderWithin(visible);
-      }
+      await LocalPythonSources.instance.reorderWithin(visible);
       await ApiConfig.instance.reloadLocalVideoSources();
       return;
     }
@@ -524,20 +390,16 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
     final key = _selectedKey;
     if (key == null) return;
     final py = _filteredSourcesFrom(_localPySources);
-    final js = _filteredSourcesFrom(_localJsSources);
     final subs = _filteredSourcesFrom(
       // ignore: invalid_use_of_protected_member
       ApiConfig.instance.sourceBeanList.value,
     );
-    // 选中源在哪个 tab：本地 PY → 0，本地 JS → 1，其余（订阅线路）→ 2
-    int targetTab = 2;
+    // 选中源在哪个 tab：本地 PY → 0，其余（订阅线路）→ 1
+    int targetTab = 1;
     List<SourceBean> list = subs;
     if (py.any((s) => s.key == key)) {
       targetTab = 0;
       list = py;
-    } else if (js.any((s) => s.key == key)) {
-      targetTab = 1;
-      list = js;
     }
     if (_tab != targetTab) {
       setState(() => _tab = targetTab);
@@ -591,13 +453,6 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
     // ignore: invalid_use_of_protected_member
     final all = ApiConfig.instance.localVideoSources.value;
     return all.where((s) => s.key.startsWith('localpy_')).toList();
-  }
-
-  /// 本地 **JS** 源（key 前缀 `localjs_`）
-  List<SourceBean> get _localJsSources {
-    // ignore: invalid_use_of_protected_member
-    final all = ApiConfig.instance.localVideoSources.value;
-    return all.where((s) => s.key.startsWith('localjs_')).toList();
   }
 
   /// tab 胶囊（与漫源仓库 / RSS 分类同一套样式）
@@ -750,17 +605,11 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   }
 
   Future<void> _selectSource(SourceBean source) async {
-    // 选本地源 ⇒ 顺手打开对应开关（与本地源管理页同一语义），
+    // 选本地源 ⇒ 顺手打开「本地爬虫」开关（与本地源管理页同一语义），
     // 否则主页源会被订阅线路覆盖。
-    // ⚠️ 本地 JS 源还有自己的子开关：不一起打开的话，选了也仍然不生效
-    //（`isLocalSourceEnabled` 会判它为"未启用"）。
     final isPy = source.key.startsWith('localpy_');
-    final isJs = source.key.startsWith('localjs_');
-    if ((isPy || isJs) && !ApiConfig.instance.localSourcesEnabled.value) {
+    if (isPy && !ApiConfig.instance.localSourcesEnabled.value) {
       await ApiConfig.instance.setLocalSourcesEnabled(true);
-    }
-    if (isJs && !ApiConfig.instance.localJsSourcesEnabled.value) {
-      await ApiConfig.instance.setLocalJsSourcesEnabled(true);
     }
     await ApiConfig.instance.setHomeSource(source);
     if (!mounted) return;
@@ -771,16 +620,12 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   Widget build(BuildContext context) {
     final h = MediaQuery.of(context).size.height;
     // 首次打开：当前主页源是本地源 → 直接落在对应 tab
-    // （localpy_ → 0，localjs_ → 1）
+    // （localpy_ → 0，订阅 → 1）
     if (!_tabInited) {
       _tabInited = true;
       final key = _selectedKey;
-      if (key != null) {
-        if (key.startsWith('localpy_')) {
-          _tab = 0;
-        } else if (key.startsWith('localjs_')) {
-          _tab = 1;
-        }
+      if (key != null && key.startsWith('localpy_')) {
+        _tab = 0;
       }
     }
     // 面板高度 = 1/3 屏 × 1.2（用户要求"变成现在的 1.2 倍"）：
@@ -915,24 +760,19 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                   onChanged: (v) => setState(() => _keyword = v.trim()),
                 ),
               ),
-              // tab：PY本地 / JS本地 / 订阅（用户 2026-10-27：「本地将 PY、JS 源
-              // 分开了，也就是 tab 栏有 3 个均分，名称分别是 PY本地、JS本地以及
-              // 订阅」）—— 与漫源仓库同一套胶囊样式。
+              // tab：PY本地 / 订阅 —— 与漫源仓库同一套胶囊样式。
               // 本地源即使「本地爬虫」开关关着也显示：用户点它即会打开开关。
               Obx(() {
                 // ignore: invalid_use_of_protected_member
                 final localCount = ApiConfig.instance.localVideoSources.length;
                 if (localCount == 0) return const SizedBox.shrink();
                 final pyCount = _localPySources.length;
-                final jsCount = _localJsSources.length;
                 final subName =
                     SubscriptionService.instance.active?.name ?? '订阅线路';
                 return Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                   child: Row(
                     children: [
-                      // ⚠️ 三个 tab **各占三分之一**（用户 2026-10-27）。
-                      //   原来两个是 Expanded 各一半；现在拆成 3 个均分。
                       Expanded(
                         child: _tabPill(
                           'PY本地 $pyCount',
@@ -943,17 +783,9 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: _tabPill(
-                          'JS本地 $jsCount',
+                          subName,
                           _tab == 1,
                           () => setState(() => _tab = 1),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: _tabPill(
-                          subName,
-                          _tab == 2,
-                          () => setState(() => _tab = 2),
                         ),
                       ),
                     ],
@@ -969,18 +801,14 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                   final all = ApiConfig.instance.sourceBeanList.value;
                   final selectedKey = _selectedKey;
                   final subs = _filteredSourcesFrom(all);
-                  // 本地 Python / 本地 JS 各占一个 tab（用户 2026-10-27），
-                  // 不跟订阅线路、也不跟彼此混排。
+                  // 本地 Python 源单独占一个 tab，不跟订阅线路混排。
                   // 管理页里的脚本即使「本地爬虫」开关关着也要能在这里看到并选择
                   //（选中时会自动打开开关，见 _selectSource）。
                   final py = _filteredSourcesFrom(_localPySources);
-                  final js = _filteredSourcesFrom(_localJsSources);
                   // 本地源被删光时 tab 条整条隐藏，此时列表必须回落成订阅线路
-                  final localCount = py.length + js.length;
-                  final tab =
-                      (_tab == 0 || _tab == 1) && localCount == 0 ? 2 : _tab;
-                  final isLocal = tab == 0 || tab == 1;
-                  final list = tab == 0 ? py : (tab == 1 ? js : subs);
+                  final tab = _tab == 0 && py.isEmpty ? 1 : _tab;
+                  final isLocal = tab == 0;
+                  final list = tab == 0 ? py : subs;
                   if (list.isEmpty) {
                     return Center(
                       child: Text(

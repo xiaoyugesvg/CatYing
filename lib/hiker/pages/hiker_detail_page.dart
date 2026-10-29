@@ -8,11 +8,11 @@ import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/miniapp/pages/mini_app_player_page.dart';
 import 'package:tvbox/pages/detail/simple_image_reader_page.dart';
 import 'package:tvbox/pages/detail/simple_text_reader_page.dart';
-import 'package:tvbox/pages/play/sniff_player_page.dart';
 import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/play_pipeline.dart';
-import 'package:tvbox/services/sniff_filter.dart';
+import 'package:tvbox/services/play_route.dart';
 import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/playback_surface.dart';
 import 'package:tvbox/hiker/models/hiker_source.dart';
 import 'package:tvbox/hiker/services/hiker_engine.dart';
 import 'package:tvbox/hiker/services/hiker_prefs.dart';
@@ -118,7 +118,7 @@ class _Candidate {
     this.pic = '',
   });
 
-  bool get isDirect => !lazy && SniffFilter.isDirectMedia(url);
+  bool get isDirect => !lazy && looksLikeDirectMedia(url);
 
   /// 解开后能不能"直接打开"（播放器 / 看图 / 阅读 / 网页 / 提示都算）。
   /// 只解出一条候选时宿主会自动打开它，省一次点击 —— 官方也是直接打开。
@@ -589,10 +589,10 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
           AppToast.error('这个播放地址解析不了：${_short(url)}');
           return;
         }
-        // 源给的 header 作补充；调用方（详情规则 / 解析接口）给的**优先**
+        // 源给的 header 作补充；调用方（详情规则）给的**优先**
         final pjHeaders = <String, String>{...pj.headers, ...c.headers};
         final direct = pj.urls.firstWhere(
-          SniffFilter.isDirectMedia,
+          looksLikeDirectMedia,
           orElse: () => pj.urls.first,
         );
         await _resolveAndPlay(direct, pjHeaders);
@@ -644,9 +644,9 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
 
       case HikerLinkKind.x5:
       case HikerLinkKind.web:
-      case HikerLinkKind.videoSniff:
-        // 都是"在网页里打开"：X5 全屏、强制网页、自动提取视频。
-        // 一律进**嗅探页**：抓到 m3u8/mp4 自动切原生播放器，抓不到仍留在网页里。
+      case HikerLinkKind.videoWeb:
+        // 都是"在网页里打开"：X5 全屏、强制网页、视频链接。
+        // 统一进内嵌 WebView 播放器，由网页自己完成播放。
         await _pushWeb(hikerStripScheme(url), headers: c.headers);
         return;
 
@@ -752,18 +752,14 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
 
   /// 海阔媒体统一分发（2026-10-29 重构：与影视端共用 [PlayPipeline]）。
   ///
-  /// 之前海阔自己写了一份"直链 → 解析 → 嗅探"，判据和详情页漂移：
-  /// 主流站网页地址直接进原生播放器会黑屏，且永远拿不到直链。
-  /// 现在链路只有一条：
-  ///   ① 直链 / 解析得到直链 → 原生播放器；
-  ///   ② 仍是网页 → 嗅探页兜底（自动嗅探 m3u8）。
+  /// 链路只有一条：
+  ///   ① 直链 → 原生播放器；
+  ///   ② 仍是网页 → 内嵌网页播放器兜底。
   Future<void> _resolveAndPlay(String url, Map<String, String> headers) async {
-    final resolution = await PlayPipeline.instance.resolve(
+    final resolution = PlayPipeline.instance.resolve(
       url,
       headers: headers,
-      sourceWantsParse: SniffFilter.shouldParse(url),
       apiBase: null,
-      refererPage: url,
     );
     switch (resolution.kind) {
       case PlayKind.media:
@@ -777,18 +773,16 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
     }
   }
 
-  /// 进内嵌网页：**自动嗅探**网页里的 m3u8/mp4（不依赖全局嗅探开关）。
+  /// 进内嵌网页播放器。
   ///
-  /// 海阔源经常只给网页、不给直链；进嗅探页后：
-  /// 抓到直链 → 自动切原生播放器；抓不到 → 仍留在网页里可手动看。
-  /// 嗅探期间保持**竖屏**（站点页面不是播放器，横屏只露一半）。
+  /// 海阔源经常只给网页、不给直链；进网页播放器后由用户自行在页面里点播。
+  /// 保持**竖屏**（站点页面不是播放器，横屏只露一半）。
   Future<void> _pushWeb(String url, {Map<String, String> headers = const {}}) {
     return Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => SniffPlayerPage(
+        builder: (_) => PlaybackSurface.webFallback(
           url: url,
           title: widget.item.title,
-          headers: headers.isEmpty ? null : headers,
           forceLandscape: false,
         ),
       ),

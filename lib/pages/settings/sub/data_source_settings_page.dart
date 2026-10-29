@@ -15,15 +15,13 @@ import 'package:tvbox/pages/settings/controller.dart';
 import 'package:tvbox/pages/settings/sub/cf_sites_page.dart';
 import 'package:tvbox/pages/settings/sub/engine_settings_page.dart';
 import 'package:tvbox/pages/settings/sub/local_python_sources_page.dart';
-import 'package:tvbox/pages/settings/sub/local_js_sources_page.dart';
 import 'package:tvbox/pages/settings/sub/local_xbpq_sources_page.dart';
-import 'package:tvbox/pages/settings/sub/parse_settings_page.dart';
 import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 import 'package:tvbox/pages/settings/sub/tg_source_page.dart';
 
 /// 设置 → 订阅管理
 ///
-/// 从原 settings/view.dart 拆出：订阅列表、主页数据、本地爬虫、解析线路、
+/// 从原 settings/view.dart 拆出：订阅列表、主页数据、本地爬虫、
 /// 引擎管理、影视转换、重置配置。
 /// （用户 2026-10-18：去掉「点播接口地址」与「RSS 管理」卡片；
 ///  每一项单独一张卡片，顺序按上面排列。）
@@ -306,28 +304,6 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
         Obx(
           () => _card(
             SettingsRow(
-              icon: Icons.code_rounded,
-              title: '本地 JS 源',
-              subtitle: ApiConfig.instance.localJsSourcesEnabled.value
-                  ? '已启用：本地 JS 源会出现在源面板 / 搜索里'
-                  : '已关闭：本地 JS 源不参与（本地爬虫开关仍有效）',
-              value: '${ApiConfig.instance.localJsSourceCount} 个',
-              trailingSwitch: true,
-              switchValue: ApiConfig.instance.localJsSourcesEnabled.value,
-              onSwitchChanged: (v) async {
-                await ApiConfig.instance.setLocalJsSourcesEnabled(v);
-                if (mounted) setState(() {});
-              },
-              onTap: () async {
-                await Get.to(() => const LocalJsSourcesPage());
-                if (mounted) setState(() {});
-              },
-            ),
-          ),
-        ),
-        Obx(
-          () => _card(
-            SettingsRow(
               icon: Icons.rule_rounded,
               title: 'XBPQ 规则源',
               // 没有独立子开关：跟着上面的「本地爬虫」总开关走，
@@ -340,16 +316,6 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
                 await Get.to(() => const LocalXbpqSourcesPage());
                 if (mounted) setState(() {});
               },
-            ),
-          ),
-        ),
-        Obx(
-          () => _card(
-            SettingsRow(
-              icon: Icons.link_rounded,
-              title: '解析线路',
-              value: '${ApiConfig.instance.parseBeanList.length} 条',
-              onTap: () => Get.to(() => const ParseSettingsPage()),
             ),
           ),
         ),

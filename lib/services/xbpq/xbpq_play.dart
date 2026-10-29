@@ -332,8 +332,8 @@ class XbpqPlay {
   /// 播放页 → `{url, parse, header}`。
   ///
   /// 顺序：地址本身是直链 → 规则「跳转播放链接」（含二级页再取一次）→
-  /// 播放页 player_data / iframe base64 → 都不是就 `parse: 1` 交给
-  /// CatYing 的解析/嗅探管线（它在 V1 里已经是单页抓取 + 排序取最优）。
+  /// 播放页 player_data / iframe base64 → 都不是就把原页面交回去，
+  /// 由调用方按网页播放兜底。
   Future<Map<String, dynamic>> playUrl({
     required XbpqRule rule,
     required String base,
@@ -376,7 +376,7 @@ class XbpqPlay {
       if (_looksLikeMedia(media)) return _direct(media, page);
     }
 
-    // 规则与通用兜底都没拿到直链：交给解析/嗅探管线。
+    // 规则与通用兜底都没拿到直链：把原页面交回去（网页播放兜底）。
     return {'url': page, 'parse': 1, 'header': {'Referer': ref}};
   }
 
@@ -406,8 +406,7 @@ class XbpqPlay {
     return deduped;
   }
 
-  /// P4 内部用于决定「要不要再抓一层」；最终直链判定在集成层统一走
-  /// `SniffFilter.isDirectMedia`（用户可自定义后缀），本处只做后缀粗判。
+  /// P4 内部用于决定「要不要再抓一层」；本处只做后缀粗判。
   static final RegExp _mediaSuffix =
       RegExp(r'\.(m3u8|mp4|flv|mkv|mov|m4s|mpd|ts)(\?|#|$)',
           caseSensitive: false);

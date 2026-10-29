@@ -256,11 +256,6 @@ class SpiderService {
     // 必须退化为标准 /{key}/{type}/{action} 形态。
     if (a.toLowerCase().startsWith('csp_')) return '';
     if (a.startsWith('http')) return '';
-    // 本地 JS 源（`ljs_xxx.js`，见 LocalJsSource.api）：它只是引擎里的
-    // 「脚本标识」，**不是路径基址** —— 引擎照样在
-    // `/spider/<key>/<type>/<action>` 下注册路由。
-    // 原来把它当 apiBase ⇒ 拼出 `ljs_xxx.js/home` ⇒ 必然 404。
-    if (RegExp(r'^ljs_[A-Za-z0-9]+\.js$').hasMatch(a)) return '';
     return a;
   }
 
@@ -1384,8 +1379,8 @@ class SpiderService {
   /// 统一 `playerContent` 的返回：
   ///
   /// 很多 catvod / TVBox 源把 `header` 写成 **JSON 字符串**
-  /// （如 NO视频：`"header": json.dumps({...})`），而播放器/嗅探页要的是
-  /// Map —— 不转的话请求头会被静默丢掉，表现为"解析成功却 403/黑屏"。
+  /// （如 NO视频：`"header": json.dumps({...})`），而播放器要的是
+  /// Map —— 不转的话请求头会被静默丢掉，表现为"取到地址却 403/黑屏"。
   Map<String, dynamic>? _normalizePlayResult(Map<String, dynamic>? r) {
     if (r == null) return null;
     // Python 源（T3 规范）返回的是 `playUrl`（见 assets/python-project/.../__init__.py），

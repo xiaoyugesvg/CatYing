@@ -845,7 +845,7 @@ class MusicApi {
   //   2. 分类/搜索/详情全是 HTML 页面：列表 `<li> > div.img a` 卡片解析
   //   3. 播放：章节页 `/bookId/0-page.html` → POST `/?s=api-getneoplay`
   //      （bookId & isPay=0 & page）→ JSON `{url: mp3 直链}`
-  //   4. API 失败 → 返回失败（不回落嗅探：音乐播放器无嗅探能力）
+  //   4. API 失败 → 返回失败（不回落网页播放：音乐播放器只吃直链）
 
   static const _t15Site = 'https://www.ting15.com';
   static const _t15Ua =
@@ -1137,7 +1137,7 @@ class MusicApi {
         );
       }
     } catch (_) {
-      // API 失败 → 回落客户端嗅探（把章节页交给播放器解析）
+      // API 失败 → 直接返回失败（音乐播放器没有网页播放兜底）
     }
     return MusicUrlInfo(
       ok: false,

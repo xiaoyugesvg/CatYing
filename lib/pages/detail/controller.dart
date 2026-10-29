@@ -685,11 +685,11 @@ class DetailController extends GetxController with WidgetsBindingObserver {
 
   /// P1-3：把播放错误文案归到 5 类，返回可操作建议（未命中返回 null）。
   ///
-  /// 命中优先级：解析 → 超时 → 403/404/防盗链 → 地址无效 → 解码/播放器。
+  /// 命中优先级：地址解析 → 超时 → 403/404/防盗链 → 地址无效 → 解码/播放器。
   String? classifyPlaybackError(String msg) {
     final m = msg.toLowerCase();
     if (m.contains('解析') || m.contains('parse')) {
-      return '解析线路可能失效，可换解析接口，或直接用网页播放';
+      return '播放地址解析失败，可换线路或直接用网页播放';
     }
     if (m.contains('超时') ||
         m.contains('timeout') ||
@@ -1084,10 +1084,6 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     return fallback;
   }
 
-  /// 是否已是已知直链媒体（后缀命中）。
-  bool _looksLikeDirectMedia(String url) => looksLikeDirectMedia(url);
-
-
   /// 能直接交给播放器/阅读器的**地址形态白名单前缀**。
   ///
   /// ⚠️ 不能只看 `Uri.tryParse(url).hasScheme`：源给的"地址"里常含非法 URI 字符
@@ -1160,18 +1156,18 @@ class DetailController extends GetxController with WidgetsBindingObserver {
 
   /// `_startPlayback` 的代次号。
   ///
-  /// 普通链路（CMS / 直链）也要防"旧结果顶掉新集"：解析接口是 await 的，
+  /// 普通链路（CMS / 直链）也要防"旧结果顶掉新集"：取流是 await 的，
   /// 快速连点两集时，先发起那次回来后会**无条件**写 `playUrl` —— 表现就是
   /// "点了下一集，画面又跳回上一集"。Spider 链路早有 `_spiderResolveToken`，
   /// 这里补上同一套。
   String _playbackStartToken = '';
 
-  /// 取流/播放入口统一入口：在 [_selectedPlayableURL] 基础上接入广告过滤与解析接口。
+  /// 取流/播放入口统一入口：在 [_selectedPlayableURL] 基础上接入广告过滤。
   ///
   /// - 命中广告黑名单 → 回退到 fallback（沿用既有回退语义，不抛弃原地址）；
-  /// - 非直链媒体后缀且解析器可用 → 走 parses 接口，成功替换、失败保持原地址。
+  /// - 否则原样使用该地址（直链交原生播放器，网页交内嵌 WebView）。
   ///
-  /// 无 ads/rules 且无 parses 时，方法内不产生 await，行为与原来的同步赋值一致。
+  /// 无 ads/rules 时，方法内不产生 await，行为与原来的同步赋值一致。
   Future<void> _startPlayback(String fallback) async {
     final token = _newUuid();
     _playbackStartToken = token;

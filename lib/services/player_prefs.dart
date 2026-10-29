@@ -10,19 +10,6 @@ class PlayerPrefs {
   static final PlayerPrefs instance = PlayerPrefs._();
   PlayerPrefs._();
 
-  /// 嗅探黑名单的**出厂默认值**：常见的切片广告路径/厂商关键词
-  ///（小写子串匹配，命中即丢弃）。用户编辑过黑名单后以用户内容为准。
-  static const List<String> kDefaultSniffBlacklist = [
-    '/ads/',
-    '/ad/',
-    '/advert',
-    '/guanggao/',
-    '/qita/',
-    '/promo/',
-    'doubleclick',
-    'googlead',
-  ];
-
   /// 当前点播内核
   final vodEngine = PlayerEngine.avplayer.obs;
 
@@ -42,71 +29,8 @@ class PlayerPrefs {
   /// Webview：强制横屏
   final webviewForceLandscape = true.obs;
 
-  /// Webview：允许页面 JS（解析站需要）
+  /// Webview：允许页面 JS
   final webviewEnableJs = true.obs;
-
-  // ============================================================
-  // 嗅探 / 解析 规则（用户 2026-10-15：
-  // 「嗅探只要 m3u8、MP4、flv 等影视链接；加个嗅探设置，
-  //  能指定不嗅探哪些链接、只嗅探哪些链接去广告；解析也限定网页类型」）
-  // ============================================================
-
-  /// 嗅探**黑名单**关键词（小写子串匹配，命中的媒体链接直接丢弃，去广告用）。
-  /// 首次安装给一组常见广告路径默认值；用户清空/编辑后以用户内容为准。
-  final sniffBlacklist = <String>[].obs;
-
-  /// 嗅探**白名单**关键词（小写子串匹配）。非空时**只**嗅探命中的链接，
-  /// 为空表示不限制（仍受后缀 + 黑名单约束）。
-  final sniffWhitelist = <String>[].obs;
-
-  /// **需要解析**的额外域名（在 play_route.dart 内置的主流站点清单之外追加）。
-  /// 域名边界匹配：`a.com` 命中 `a.com` 与 `*.a.com`，不命中 `evil-a.com`。
-  final parseHostsExtra = <String>[].obs;
-
-  /// **不解析**的域名（优先级最高，命中即不做解析直接嗅探/播放）。
-  /// 用来从内置清单里剔除（例如不想让 qq.com 走解析）。
-  final parseHostsBlock = <String>[].obs;
-
-  /// **影视直链后缀清单**（用户 2026-10-15：「后缀列表要能自己加/删」）。
-  ///
-  /// 每项带点（如 `.m3u8`），默认**空** = 用 play_route.kDefaultMediaExtensions
-  /// 出厂清单。填了就以用户清单为准 —— 它同时决定：
-  ///   · 什么算"可直接播放的直链"（各链路的直链判定）；
-  ///   · 嗅探只接受哪些后缀（含嗅探页 JS 里注入的正则）。
-  /// 注意「空」不是"什么都不认"，而是"回退出厂清单"，避免误清空后全播不了。
-  final mediaExtensions = <String>[].obs;
-
-  /// **解析结果只要哪些媒体格式**（在影视直链清单里的子集）。空 = 不限。
-  /// 解析接口返回的直链若不在勾选格式内，视为未命中（继续试其它接口）。
-  final parseFormats = <String>[].obs;
-
-  /// **嗅探总开关**（用户 2026-10-15：设置里要能开关嗅探）。
-  /// 默认**关闭**（2026-10-15 用户要求）：网页地址不进嗅探页，直接落
-  /// 内嵌网页播放器；开启后网页地址**自动**进嗅探页抓 m3u8/mp4 直链。
-  final sniffEnabled = false.obs;
-
-  /// **解析总开关**（用户 2026-10-15：设置里要能开关解析）。
-  /// 默认**关闭**（2026-10-15 用户要求）：任何网页都不请求解析接口；
-  /// 开启后命中规则的网页先请求解析接口。
-  final parseEnabled = false.obs;
-
-  /// **脚本内置解析优先**（2026-10-28）。
-  ///
-  /// 用户问：「解析是直接用脚本内置还是解析线路？如果脚本有内置的咋弄？」
-  /// Spider / 聚合源常自带解析（`parse:1` / `jx:1`，或直接返回自家解析站地址）。
-  ///   · `true`（默认）= 尊重脚本作者：脚本声明要解析时，App **不插手**，
-  ///     直接用脚本给的地址；
-  ///   · `false` = 一律用用户自己的解析线路（并把脚本解析地址里的
-  ///     `url=` 内层原始页面取出来重解）。
-  /// 用户在「解析 / 嗅探」面板里**主动选过线路**后会自动置 false 并持久化。
-  final preferScriptParse = true.obs;
-
-  /// **嗅探播放是否带 Referer**（用户 2026-10-15 拍板加的开关）。
-  ///
-  /// 开启后，嗅探/解析到的直链在播放时会带上 `Referer: <当前网页地址>` ——
-  /// 有些 CDN 强制校验 Referer，不带就 403；但也有站点不校验 Referer 时
-  /// 带上反而被拒，所以**默认关闭**（= 维持不带 Referer 的既有行为）。
-  final sniffSendReferer = false.obs;
 
   /// 静音后台保活 Node（关掉更省电、锁屏无「播放中」，但 Node 可能被冻结）
   final silentKeepAlive = true.obs;
@@ -227,35 +151,6 @@ class PlayerPrefs {
         prefs.getBool('webview_force_landscape') ?? false;
     webviewEnableJs.value = prefs.getBool('webview_enable_js') ?? true;
 
-    // 嗅探 / 解析规则：
-    // 黑名单首次安装（键不存在）给出厂默认；用户主动清空后存的是 []，
-    // getStringList 返回空数组 ⇒ 尊重用户的"清空"，不会又塞回默认值。
-    sniffBlacklist
-      ..clear()
-      ..addAll(prefs.getStringList('sniff_blacklist') ??
-          kDefaultSniffBlacklist);
-    sniffWhitelist
-      ..clear()
-      ..addAll(prefs.getStringList('sniff_whitelist') ?? const []);
-    parseHostsExtra
-      ..clear()
-      ..addAll(prefs.getStringList('parse_hosts_extra') ?? const []);
-    parseHostsBlock
-      ..clear()
-      ..addAll(prefs.getStringList('parse_hosts_block') ?? const []);
-    mediaExtensions
-      ..clear()
-      ..addAll(prefs.getStringList('media_extensions') ?? const []);
-    parseFormats
-      ..clear()
-      ..addAll(prefs.getStringList('parse_formats') ?? const []);
-    // 嗅探/解析总开关：默认关闭（用户 2026-10-15 要求）
-    sniffEnabled.value = prefs.getBool('sniff_enabled') ?? false;
-    parseEnabled.value = prefs.getBool('parse_enabled') ?? false;
-    // 脚本内置解析优先：默认 true（尊重脚本作者）
-    preferScriptParse.value = prefs.getBool('prefer_script_parse') ?? true;
-    // 嗅探播放带 Referer：默认关闭（维持既有"不带 Referer"行为）
-    sniffSendReferer.value = prefs.getBool('sniff_send_referer') ?? false;
     final step = prefs.getInt('play_time_step') ?? 0;
     playTimeStep.value = step > 0 ? step : 10;
     silentKeepAlive.value = prefs.getBool('silent_keepalive') ?? true;
@@ -477,110 +372,6 @@ class PlayerPrefs {
     webviewEnableJs.value = v;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('webview_enable_js', v);
-  }
-
-  // ---- 嗅探 / 解析 规则 setter ----
-
-  /// 统一写一个字符串列表规则项：去空白、去空行、去重后落盘并刷新内存。
-  Future<void> _setRuleList(RxList<String> field, String key,
-      List<String> values) async {
-    final cleaned = <String>{
-      for (final v in values.map((e) => e.trim()))
-        if (v.isNotEmpty) v.toLowerCase(),
-    }.toList();
-    field
-      ..clear()
-      ..addAll(cleaned);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(key, cleaned);
-  }
-
-  /// 嗅探黑名单（不嗅探的链接关键词）
-  Future<void> setSniffBlacklist(List<String> v) =>
-      _setRuleList(sniffBlacklist, 'sniff_blacklist', v);
-
-  /// 嗅探白名单（非空时只嗅探命中的链接）
-  Future<void> setSniffWhitelist(List<String> v) =>
-      _setRuleList(sniffWhitelist, 'sniff_whitelist', v);
-
-  /// 需要解析的额外域名
-  Future<void> setParseHostsExtra(List<String> v) =>
-      _setRuleList(parseHostsExtra, 'parse_hosts_extra', v);
-
-  /// 不解析的域名
-  Future<void> setParseHostsBlock(List<String> v) =>
-      _setRuleList(parseHostsBlock, 'parse_hosts_block', v);
-
-  /// 嗅探总开关
-  Future<void> setSniffEnabled(bool v) async {
-    sniffEnabled.value = v;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('sniff_enabled', v);
-  }
-
-  /// 解析总开关
-  Future<void> setParseEnabled(bool v) async {
-    parseEnabled.value = v;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('parse_enabled', v);
-  }
-
-  /// 脚本内置解析优先（true = 尊重脚本；false = 一律用用户解析线路）
-  Future<void> setPreferScriptParse(bool v) async {
-    preferScriptParse.value = v;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('prefer_script_parse', v);
-  }
-
-  /// 嗅探播放是否带 Referer（默认关）
-  Future<void> setSniffSendReferer(bool v) async {
-    sniffSendReferer.value = v;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('sniff_send_referer', v);
-  }
-
-  /// 解析 / 嗅探结果落播放地址时，是否该补一条 `Referer: <页面地址>`（P2-2 一致性）。
-  ///
-  /// 统一判定，供各链路（详情 / 海阔 / RSS / 小程序 / TG 桥）共用，避免只有
-  /// 详情页和嗅探页生效、其它链路漏接：
-  ///   · 开关打开（默认关，维持不带 Referer 的既有行为）；
-  ///   · [pageUrl] 是 http(s)（本地 `id` / 自定义 scheme 不当 Referer）；
-  ///   · 且与媒体地址不同（同一地址不必补）。
-  bool shouldSendRefererFor(String pageUrl, String mediaUrl) {
-    if (!sniffSendReferer.value) return false;
-    final page = pageUrl.trim();
-    if (page.isEmpty || !page.startsWith('http')) return false;
-    return page != mediaUrl.trim();
-  }
-
-  /// 影视直链后缀清单（空 = 用出厂清单）
-  Future<void> setMediaExtensions(List<String> v) =>
-      _setRuleList(mediaExtensions, 'media_extensions', v);
-
-  /// 解析结果只要哪些媒体格式（空 = 不限）
-  Future<void> setParseFormats(List<String> v) =>
-      _setRuleList(parseFormats, 'parse_formats', v);
-
-  /// 把嗅探黑名单恢复成出厂默认（其余各项清空）。
-  Future<void> resetSniffRules() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList('sniff_blacklist', kDefaultSniffBlacklist);
-    await prefs.setStringList('sniff_whitelist', const []);
-    await prefs.setStringList('parse_hosts_extra', const []);
-    await prefs.setStringList('parse_hosts_block', const []);
-    await prefs.setStringList('media_extensions', const []);
-    await prefs.setStringList('parse_formats', const []);
-    // 嗅探播放带 Referer 也回到默认（关闭）
-    await prefs.setBool('sniff_send_referer', false);
-    sniffSendReferer.value = false;
-    sniffBlacklist
-      ..clear()
-      ..addAll(kDefaultSniffBlacklist);
-    sniffWhitelist.clear();
-    parseHostsExtra.clear();
-    parseHostsBlock.clear();
-    mediaExtensions.clear();
-    parseFormats.clear();
   }
 
   Future<void> setSilentKeepAlive(bool v) async {

@@ -25,7 +25,6 @@ library;
 import 'dart:convert';
 
 import 'package:tvbox/services/play_route.dart' as play_route;
-import 'package:tvbox/services/sniff_filter.dart';
 
 /// 链接类别 —— 与官方 [dealWithUrl] 的分支一一对应（顺序也照抄官方）。
 enum HikerLinkKind {
@@ -52,7 +51,7 @@ enum HikerLinkKind {
   /// 图片地址（官方 `UrlDetector.isImage` 的后缀集合）→ 图集/大图预览
   image,
 
-  /// 影视直链（当前生效清单，见 [SniffFilter.isDirectMedia]）→ 原生播放器
+  /// 影视直链（当前生效清单，见 [play_route.looksLikeDirectMedia]）→ 原生播放器
   media,
 
   /// 海阔的**播放地址 JSON**（`{"urls":[…],"headers":{…}}`）—— 见 [hikerPlayJson]。
@@ -68,8 +67,9 @@ enum HikerLinkKind {
   /// `x5Play://http://…` —— 强制用播放器播该地址
   x5Play,
 
-  /// `video://https://…` —— 官方行为是进播放器**自动提取**网页里的视频
-  videoSniff,
+  /// `video://https://…` —— 官方行为是进播放器提取网页里的视频；
+  /// 本版统一按"在网页里打开"处理（内嵌 WebView 播放）。
+  videoWeb,
 
   /// `toast://文本` —— 只弹提示
   toast,
@@ -95,7 +95,7 @@ enum HikerLinkKind {
 
 /// 官方 `UrlDetector` 的**图片后缀**集合（原样照抄，含它的大小写重复项）。
 ///
-/// ⚠️ 与 [SniffFilter.mediaExtensions] **不重叠**：那是"影视直链"（视频+音频，
+/// ⚠️ 与 [play_route.kDefaultMediaExtensions] **不重叠**：那是"影视直链"（视频+音频，
 /// 用户可自定义）；这里只判"这是不是一张图"，用来决定进图集阅读器还是播放器。
 const List<String> kHikerImageExtensions = [
   '.ico',
@@ -270,19 +270,17 @@ HikerLinkKind hikerLinkKind(String raw) {
   }
   if (lower.startsWith('download://')) return HikerLinkKind.download;
 
-  // ⑧ 强制播放 / 自动提取视频
+  // ⑧ 强制播放 / 网页视频
   if (lower.startsWith('x5play://')) return HikerLinkKind.x5Play;
-  if (lower.startsWith('video://')) return HikerLinkKind.videoSniff;
+  if (lower.startsWith('video://')) return HikerLinkKind.videoWeb;
 
   // ⑨ 图片（官方 UrlDetector.isImage）
   if (hikerIsImageUrl(s)) return HikerLinkKind.image;
 
   // ⑩ 影视直链 → 原生播放器（全项目唯一事实来源）
-  if (SniffFilter.isDirectMedia(s)) return HikerLinkKind.media;
+  if (play_route.looksLikeDirectMedia(s)) return HikerLinkKind.media;
 
-  // ⑩' 音频直链（音乐源）：影视清单之外的 [kAudioExtensions] 补判 —— 与
-  //     `parse_service._isDirectMedia` / `detail/view` 是**同一口径**
-  //     （那两处也是这么补的，别在这里自创第三种写法）。
+  // ⑩' 音频直链（音乐源）：影视清单之外的 [kAudioExtensions] 补判。
   final path = Uri.tryParse(s)?.path.toLowerCase() ?? '';
   for (final ext in play_route.kAudioExtensions) {
     if (path.endsWith(ext)) return HikerLinkKind.media;
@@ -449,8 +447,8 @@ HikerInlineRule? splitHikerInlineRule(String url) {
       return (kind: '播放 JSON', detail: u.isEmpty ? s : u);
     case HikerLinkKind.x5Play:
       return (kind: '视频（强制播放器）', detail: hikerStripScheme(s));
-    case HikerLinkKind.videoSniff:
-      return (kind: '视频（需嗅探）', detail: hikerStripScheme(s));
+    case HikerLinkKind.videoWeb:
+      return (kind: '视频（网页播放）', detail: hikerStripScheme(s));
     case HikerLinkKind.x5:
     case HikerLinkKind.web:
       return (kind: '网页', detail: hikerStripScheme(s));

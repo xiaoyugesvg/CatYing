@@ -54,7 +54,7 @@ class GeneralSettingsPage extends StatelessWidget {
               icon: Icons.vpn_lock_outlined,
               title: '网络代理',
               subtitle: '全局代理地址 + 按域名匹配的代理规则'
-                  '（全项目请求 / 书源 / RSS / 嗅探都会跟着走）',
+                  '（全项目请求 / 书源 / RSS 都会跟着走）',
               onTap: () => Get.to(() => const WebhtvProxyPage()),
             ),
             SettingsRow(
