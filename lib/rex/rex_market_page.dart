@@ -317,6 +317,40 @@ class _RexMarketPageState extends State<RexMarketPage> {
 
   // ── UI ───────────────────────────────────────────────────────
 
+  /// 导入下拉里的单条菜单项：左侧强调色图标色块 + 文案，整体圆角卡片风。
+  PopupMenuItem<String> _buildImportMenuItem(
+      String value, IconData icon, String label) {
+    return PopupMenuItem<String>(
+      value: value,
+      height: 48,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 156),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: _accent.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Center(
+                child: Icon(icon, size: 18, color: _accent),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(label,
+                style: TextStyle(
+                    fontSize: AppTheme.fontBody,
+                    fontWeight: FontWeight.w500,
+                    color: _fg)),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -338,6 +372,12 @@ class _RexMarketPageState extends State<RexMarketPage> {
           PopupMenuButton<String>(
             tooltip: '导入模块',
             padding: EdgeInsets.zero,
+            offset: const Offset(0, 6),
+            color: Theme.of(context).colorScheme.surface,
+            elevation: 10,
+            shadowColor: Colors.black.withValues(alpha: 0.28),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
             icon: Icon(Icons.add_circle_outline_rounded, color: _fg),
             onSelected: _importing
                 ? null
@@ -357,43 +397,11 @@ class _RexMarketPageState extends State<RexMarketPage> {
                         break;
                     }
                   },
-            itemBuilder: (_) => const [
-              PopupMenuItem(
-                value: 'link',
-                child: ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.link_rounded, size: 19),
-                  title: Text('链接（单个模块地址）'),
-                ),
-              ),
-              PopupMenuItem(
-                value: 'text',
-                child: ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.notes_rounded, size: 19),
-                  title: Text('文本（粘贴模块源码）'),
-                ),
-              ),
-              PopupMenuItem(
-                value: 'scan',
-                child: ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.qr_code_scanner_rounded, size: 19),
-                  title: Text('二维码'),
-                ),
-              ),
-              PopupMenuItem(
-                value: 'file',
-                child: ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.folder_open_rounded, size: 19),
-                  title: Text('本地（.js 文件）'),
-                ),
-              ),
+            itemBuilder: (_) => [
+              _buildImportMenuItem('link', Icons.link_rounded, '链接'),
+              _buildImportMenuItem('text', Icons.notes_rounded, '文本'),
+              _buildImportMenuItem('scan', Icons.qr_code_scanner_rounded, '二维码'),
+              _buildImportMenuItem('file', Icons.folder_open_rounded, '本地'),
             ],
           ),
           const SizedBox(width: 4),

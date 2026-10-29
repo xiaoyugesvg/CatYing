@@ -169,3 +169,6 @@ test*
 # 不要提交它 —— 之前提交的那份是从别的项目变体抄来的（锁了 16 个无关 pod、
 # 缺 4 个新插件），会误导 pod install 装错依赖版本。
 ios/Podfile.lock
+
+# 一次性分析输出（dart/flutter analyze 的临时导出，2026-10-29 起不入库）
+/analyze_check.txt

@@ -173,6 +173,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 // ⚠️ 与「程序」里的 TVBox 小程序是**两套体系**，互不影响。
                 _categoryTile(
                   icon: Icons.rocket_launch_outlined,
+                  iconAsset: 'assets/icons/hiker.png',
                   title: '海阔设置',
                   onTap: () => Get.to(() => const HikerSettingsPage()),
                 ),
@@ -214,6 +215,8 @@ class _SettingsPageState extends State<SettingsPage> {
     required IconData icon,
     required String title,
     required VoidCallback onTap,
+    /// 有彩色品牌图标时优先用它（海阔视界启动图），与首页 / 底栏保持一致。
+    String? iconAsset,
   }) {
     return GlassPress(
       onTap: onTap,
@@ -242,7 +245,12 @@ class _SettingsPageState extends State<SettingsPage> {
                     width: 0.5,
                   ),
                 ),
-                child: Icon(icon, size: 18, color: AppTheme.accentColor),
+                child: iconAsset != null
+                    ? Padding(
+                        padding: const EdgeInsets.all(6),
+                        child: Image.asset(iconAsset, fit: BoxFit.contain),
+                      )
+                    : Icon(icon, size: 18, color: AppTheme.accentColor),
               ),
               const SizedBox(width: 14),
               Expanded(

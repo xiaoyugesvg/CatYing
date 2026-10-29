@@ -7,7 +7,6 @@ import 'package:tvbox/models/subscription.dart';
 import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/pages/settings/controller.dart';
 import 'package:tvbox/pages/subscription/edit_page.dart';
-import 'package:tvbox/pages/subscription/moontv_converter_page.dart';
 import 'package:tvbox/pages/subscription/pin_dialog.dart';
 import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/reading/widgets/swipe_action_tile.dart';
@@ -71,12 +70,6 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                     tooltip: '立即同步全部',
                     onPressed: _syncAll,
                   ),
-          ),
-          // 「转换」：MoonTV / LunaTV video.json → TVBox 订阅
-          IconButton(
-            icon: Icon(Icons.swap_horiz_rounded, color: AppTheme.accentColor),
-            tooltip: '影视仓转换器',
-            onPressed: () => Get.to(() => const MoonTvConverterPage()),
           ),
           // 「编辑」：进入多选模式（长按卡片也能进）
           GestureDetector(

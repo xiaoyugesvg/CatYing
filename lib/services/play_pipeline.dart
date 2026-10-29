@@ -65,6 +65,7 @@ class PlayPipeline {
     String rawUrl, {
     Map<String, String>? headers,
     String? apiBase,
+    bool trustMedia = false,
   }) {
     final h = <String, String>{...?headers};
     final raw = rawUrl.trim();
@@ -85,6 +86,16 @@ class PlayPipeline {
     // ② 清洗 + 补全
     var candidate = sanitizePlayUrl(raw);
     candidate = absolutize(candidate, apiBase);
+
+    // ── Spider / JS 源已解析出的直链：直接当媒体（用户 2026-10-29 选定）──
+    // JS / 爬虫源会把"真实播放地址"解析出来，但形态常无 .m3u8/.mp4 后缀
+    // （token / 重定向端点），`looksLikeDirectMedia` 认不出就误判成网页、
+    // 被影视模块拒绝。此处 spider 来源时直接当媒体交给原生播放器；但仍排除
+    // 明显是 HTML 页面的地址（保留"影视不内嵌 WebView"约定——真网页不会进
+    // 播放器，只会因加载失败报错，不会渲染 HTML）。
+    if (trustMedia && isPlayableShape(candidate) && !_isWebPage(candidate)) {
+      return PlayResolution(url: candidate, kind: PlayKind.media, headers: h);
+    }
 
     // ③ 直链 → 原生播放器
     if (looksLikeDirectMedia(candidate)) {
@@ -128,6 +139,19 @@ class PlayPipeline {
     }
     final u = Uri.tryParse(raw);
     return u != null && u.hasScheme;
+  }
+
+  /// 明显是 HTML 网页地址（路径以网页后缀结尾）——这类仍按"网页"处理，
+  /// 不交给原生播放器，保留"影视不内嵌 WebView"的约定。
+  static const List<String> _kWebPageExtensions = [
+    '.html', '.htm', '.php', '.asp', '.aspx', '.jsp', '.shtml',
+  ];
+  static bool _isWebPage(String url) {
+    final path = Uri.tryParse(url)?.path.toLowerCase() ?? '';
+    for (final ext in _kWebPageExtensions) {
+      if (path.endsWith(ext)) return true;
+    }
+    return false;
   }
 
   static const List<String> kPlayablePrefixes = [

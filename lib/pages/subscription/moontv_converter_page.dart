@@ -258,7 +258,7 @@ class _MoonTvConverterPageState extends State<MoonTvConverterPage> {
                                 child:
                                     CircularProgressIndicator(strokeWidth: 2),
                               )
-                            : const Icon(Icons.swap_horiz_rounded, size: 18),
+                            : const Icon(Icons.sync, size: 18),
                         label: Text(_busy ? '转换中…' : '转换'),
                         style: FilledButton.styleFrom(
                           backgroundColor: AppTheme.accentOnSurface,

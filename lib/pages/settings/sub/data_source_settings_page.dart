@@ -108,94 +108,113 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
   }
 
   // ── 远程引擎卡片（总开关关掉时只显示一行）────────────────
+  // 复用 _card 的统一 AppCard（不再自己再套一层 AppCard，否则"卡片套卡片"
+  // 显得和别的卡片不一样）；头部也对齐 SettingsRow 的样式
+  // （图标进强调色圆角容器 + 同款标题/副标题 + 同款开关）。
   Widget _remoteCard() {
-    return AppCard(
-      dense: true,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 10, 10, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    final accent = AppTheme.accentOnSurface;
+    // ⚠️ 这里**不要**再套 Padding：外层 `_card()` 的 AppCard(dense) 已经给了
+    // horizontal 12 / vertical 4 的内边距，再叠 14 会让本卡片比同级 SettingsRow
+    // 多缩进 14px（2026-10-29 复核发现）。
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
           children: [
-            Row(
-              children: [
-                Icon(Icons.cloud_outlined,
-                    size: 20, color: AppTheme.textSecondary),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('远程引擎',
-                          style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.textPrimary)),
-                      const SizedBox(height: 2),
-                      Text('把源脚本放自己服务器跑；不开就一直用本机',
-                          style: TextStyle(
-                              fontSize: 11, color: AppTheme.textTertiary)),
-                    ],
-                  ),
-                ),
-                Switch.adaptive(
-                  value: _remote.enabled,
-                  onChanged: (v) => _setRemote(enabled: v),
-                ),
-              ],
-            ),
-            if (_remote.enabled) ...[
-              const SizedBox(height: 10),
-              _remoteField(_remoteBaseCtrl, '地址', 'http://192.168.1.10:8080'),
-              const SizedBox(height: 8),
-              _remoteField(_remoteTokenCtrl, 'Token（可空）', 'X-Token'),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: _remoteBusy ? null : _testRemote,
-                  icon: const Icon(Icons.wifi_tethering, size: 17),
-                  label: Text(_remoteBusy ? '测试中…' : '测试连接'),
-                ),
+            Container(
+              width: 36,
+              height: 36,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(10),
+                border:
+                    Border.all(color: accent.withValues(alpha: 0.22), width: 0.5),
               ),
-              if (_remoteMsg != null) ...[
-                const SizedBox(height: 8),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      _remoteOk
-                          ? Icons.check_circle_outline
-                          : Icons.error_outline,
-                      size: 15,
-                      color: _remoteOk ? Colors.green : Colors.orangeAccent,
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        _remoteMsg!,
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          height: 1.5,
-                          color: _remoteOk
-                              ? AppTheme.textSecondary
-                              : Colors.orangeAccent,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-              const SizedBox(height: 10),
-              _remoteSwitch('TG', '频道列表与播放都指向服务器', _remote.useTg,
-                  (v) => _setRemote(useTg: v)),
-              _remoteSwitch('书源', 'Legado 规则在服务器上执行', _remote.useBook,
-                  (v) => _setRemote(useBook: v)),
-              _remoteSwitch('py 源', '需服务端带 Python 桥（本版只保存开关）',
-                  _remote.usePy, (v) => _setRemote(usePy: v)),
-            ],
+              child: Icon(Icons.cloud_outlined, size: 18, color: accent),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('远程引擎',
+                      style: TextStyle(
+                          fontSize: AppTheme.fontSubhead + 0.5,
+                          fontWeight: FontWeight.w500,
+                          color: AppTheme.textPrimary)),
+                  const SizedBox(height: 2),
+                  Text('把源脚本放自己服务器跑；不开就一直用本机',
+                      style: TextStyle(
+                          fontSize: AppTheme.fontCaption,
+                          height: 1.3,
+                          color: AppTheme.textTertiary)),
+                ],
+              ),
+            ),
+            Transform.scale(
+              scale: 0.85,
+              child: Switch(
+                value: _remote.enabled,
+                activeThumbColor: AppTheme.accentColor,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                onChanged: (v) => _setRemote(enabled: v),
+              ),
+            ),
           ],
         ),
-      ),
+          if (_remote.enabled) ...[
+            const SizedBox(height: 10),
+            _remoteField(_remoteBaseCtrl, '地址', 'http://192.168.1.10:8080'),
+            const SizedBox(height: 8),
+            _remoteField(_remoteTokenCtrl, 'Token（可空）', 'X-Token'),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _remoteBusy ? null : _testRemote,
+                icon: const Icon(Icons.wifi_tethering, size: 17),
+                label: Text(_remoteBusy ? '测试中…' : '测试连接'),
+              ),
+            ),
+            if (_remoteMsg != null) ...[
+              const SizedBox(height: 8),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    _remoteOk
+                        ? Icons.check_circle_outline
+                        : Icons.error_outline,
+                    size: 15,
+                    color: _remoteOk ? Colors.green : Colors.orangeAccent,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _remoteMsg!,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        height: 1.5,
+                        color: _remoteOk
+                            ? AppTheme.textSecondary
+                            : Colors.orangeAccent,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 10),
+            _remoteSwitch('TG', '频道列表与播放都指向服务器', _remote.useTg,
+                (v) => _setRemote(useTg: v)),
+            _remoteSwitch('书源', 'Legado 规则在服务器上执行', _remote.useBook,
+                (v) => _setRemote(useBook: v)),
+            _remoteSwitch('py 源', '需服务端带 Python 桥（本版只保存开关）',
+                _remote.usePy, (v) => _setRemote(usePy: v)),
+          ],
+        ],
     );
   }
 
@@ -260,6 +279,40 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
   Widget build(BuildContext context) {
     return SettingsSubPage(
       title: '订阅管理',
+      // 说明收进右上角「?」（用户 2026-10-29：卡片里的小字别直接铺在卡片下）。
+      // 卡片只留一行状态副标题，长解释都在这里。
+      help: const [
+        SettingsHelpItem(
+          icon: Icons.rss_feed,
+          title: '订阅管理 / 主页数据',
+          body: '「订阅管理」是源列表（一条订阅里可能含很多站点）；「主页数据」'
+              '决定首页当前用哪一个源。本地源与订阅互不覆盖，换订阅不会丢本地源。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.terminal_rounded,
+          title: '本地爬虫 / XBPQ',
+          body: '「本地爬虫」是总开关：关掉后只用订阅里激活的源。XBPQ 没有独立'
+              '开关，跟着它一起生效；本地 Python 源与 XBPQ 规则源都在子页里管理。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.cloud_outlined,
+          title: '远程引擎',
+          body: '把源脚本放到你自己的服务器上跑，手机端只负责显示；不开就一直用'
+              '本机引擎。开启后填地址（可带 Token），「测试连接」会真的发一次请求。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.shield_outlined,
+          title: 'Cloudflare 验证',
+          body: '验证一次后所有模块自动复用，不再反复弹窗；某个站点又开始 403 '
+              '说明验证过期，进去重新验证一次即可。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.telegram,
+          title: 'Telegram 源 / 影视转换',
+          body: 'Telegram 源：扫码登录后，把自己加入的群 / 频道当片库。'
+              '影视转换：把 MoonTV / LunaTV 的 video.json 转成 TVBox 站点。',
+        ),
+      ],
       children: [
         // 每一项都是**独立卡片**（不再是一整张大卡片里塞多行）
         _card(
@@ -305,7 +358,7 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
           () => _card(
             SettingsRow(
               icon: Icons.rule_rounded,
-              title: 'XBPQ 规则源',
+              title: 'XBPQ',
               // 没有独立子开关：跟着上面的「本地爬虫」总开关走，
               // 所以这里只做状态说明，不再放第二个 Switch。
               subtitle: ApiConfig.instance.localSourcesEnabled.value
@@ -350,7 +403,7 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
         // 影视仓转换器：MoonTV / LunaTV 的 video.json → TVBox 站点
         _card(
           SettingsRow(
-            icon: Icons.swap_horiz_rounded,
+            icon: Icons.sync,
             title: '影视转换',
             value: 'MoonTV video.json',
             onTap: () => Get.to(() => const MoonTvConverterPage()),

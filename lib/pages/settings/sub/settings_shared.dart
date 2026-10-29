@@ -384,6 +384,130 @@ class SettingsDialogs {
   }
 }
 
+/// 设置/管理页右上角「?」说明弹窗里的一条说明。
+class SettingsHelpItem {
+  final IconData? icon;
+  final String title;
+  final String body;
+
+  const SettingsHelpItem({
+    this.icon,
+    required this.title,
+    required this.body,
+  });
+}
+
+/// 设置/管理页右上角的「?」说明按钮 + 弹窗。
+///
+/// 用户（本会话）：「卡片里的小字说明别直接铺在卡片下，
+/// 改成在页面右上角放个 ? 图标，想看就点开看。」
+///
+/// 原先这些说明是 `SettingsRow.subtitle`（卡片下方灰色小字），
+/// 现在收进这里：点 ? 弹出一张统一的卡片式说明列表，卡片本身只留标题。
+class SettingsHelp {
+  SettingsHelp._();
+
+  /// 右上角「?」按钮（与 `action` 并列）。
+  static Widget helpButton({required VoidCallback onPressed}) {
+    return IconButton(
+      tooltip: '说明',
+      onPressed: onPressed,
+      icon: Icon(Icons.help_outline_rounded,
+          color: AppTheme.textPrimary, size: 22),
+    );
+  }
+
+  /// 弹出说明弹窗（AlertDialog 风格，与 SettingsDialogs 统一）。
+  static Future<void> show(
+    BuildContext context,
+    String pageTitle,
+    List<SettingsHelpItem> items,
+  ) {
+    return showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppTheme.radiusLG)),
+        title: Row(
+          children: [
+            Icon(Icons.help_outline_rounded,
+                size: 22, color: AppTheme.accentColor),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(pageTitle,
+                  style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: AppTheme.fontTitle3,
+                      fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.separated(
+            shrinkWrap: true,
+            itemCount: items.length,
+            separatorBuilder: (_, __) => Divider(
+                color: AppTheme.borderLight, height: 1, thickness: 0.5),
+            itemBuilder: (c, i) {
+              final it = items[i];
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (it.icon != null) ...[
+                      Container(
+                        width: 30,
+                        height: 30,
+                        margin: const EdgeInsets.only(top: 1),
+                        decoration: BoxDecoration(
+                          color: AppTheme.accentColor.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: Icon(it.icon,
+                            size: 17, color: AppTheme.accentColor),
+                      ),
+                      const SizedBox(width: 10),
+                    ],
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(it.title,
+                              style: TextStyle(
+                                  color: AppTheme.textPrimary,
+                                  fontSize: AppTheme.fontSubhead,
+                                  fontWeight: FontWeight.w600,
+                                  height: 1.3)),
+                          const SizedBox(height: 3),
+                          Text(it.body,
+                              style: TextStyle(
+                                  color: AppTheme.textSecondary,
+                                  fontSize: AppTheme.fontFootnote,
+                                  height: 1.45)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('知道了',
+                style: TextStyle(color: AppTheme.accentColor)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// 分类子页的统一外壳：标题栏 + 可滚动的分组内容。
 ///
 /// 让 8 个子页外观一致，也省掉每页重复写 Scaffold/AppBar。
@@ -394,11 +518,15 @@ class SettingsSubPage extends StatefulWidget {
   /// 右上角可选操作（如"重置"）
   final Widget? action;
 
+  /// 右上角「?」说明按钮内容；非空时展示 ? 按钮，点击弹出说明列表。
+  final List<SettingsHelpItem>? help;
+
   const SettingsSubPage({
     super.key,
     required this.title,
     required this.children,
     this.action,
+    this.help,
   });
 
   @override
@@ -411,6 +539,7 @@ class _SettingsSubPageState extends State<SettingsSubPage> {
   String get title => widget.title;
   List<Widget> get children => widget.children;
   Widget? get action => widget.action;
+  List<SettingsHelpItem>? get help => widget.help;
 
   /// 离开设置子页就落一次盘。
   ///
@@ -476,7 +605,12 @@ class _SettingsSubPageState extends State<SettingsSubPage> {
         iconTheme: IconThemeData(color: AppTheme.textPrimary),
         title: Text(title,
             style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTheme.fontTitle3)),
-        actions: action == null ? null : [action!],
+        actions: [
+          if (help != null && help!.isNotEmpty)
+            SettingsHelp.helpButton(
+                onPressed: () => SettingsHelp.show(context, title, help!)),
+          if (action != null) action!,
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),

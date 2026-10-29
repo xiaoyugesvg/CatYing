@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:tvbox/services/cf_session.dart';
 import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/pages/cf_verify_page.dart';
+import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 
 /// 「Cloudflare 站点验证」管理页。
 ///
@@ -27,6 +28,32 @@ class _CfSitesPageState extends State<CfSitesPage> {
 
   /// 每个站点的最近一次测试结论
   final Map<String, ({bool ok, String msg})> _results = {};
+
+  /// 右上角「?」里的说明。
+  ///
+  /// 用户 2026-10-29：卡片里的小字说明别直接铺在卡片下，收进右上角 ? 点开看。
+  /// （早先这里做成"首次进入弹一次"的居中弹窗，关掉就再也找不回来 ——
+  ///  而用户遇到 403 时恰恰最需要重读这段，所以改回常驻可查。）
+  static const List<SettingsHelpItem> _help = [
+    SettingsHelpItem(
+      icon: Icons.verified_user_outlined,
+      title: '这些站点是做什么的',
+      body: '已经完成过人机验证的站点，之后所有模块（视频源 / 网页 / 图片）'
+          '都会自动复用，不会再反复要求你操作。',
+    ),
+    SettingsHelpItem(
+      icon: Icons.error_outline_rounded,
+      title: '又开始 403 怎么办',
+      body: '说明验证过期了，重新验证一次即可（右上角「全部测试」可以逐条'
+          '试一遍还活不活）。',
+    ),
+    SettingsHelpItem(
+      icon: Icons.delete_sweep_outlined,
+      title: '什么时候需要清除',
+      body: '换 IP、Cookie 失效、或者某个站点一直验证不过时，删掉那一条再重新'
+          '验证即可；「清除全部」会一次性清空所有站点。',
+    ),
+  ];
 
   @override
   void initState() {
@@ -153,6 +180,8 @@ class _CfSitesPageState extends State<CfSitesPage> {
       appBar: AppBar(
         title: const Text('Cloudflare 验证'),
         actions: [
+          SettingsHelp.helpButton(
+              onPressed: () => SettingsHelp.show(context, 'Cloudflare 验证', _help)),
           if (_hosts.isNotEmpty)
             IconButton(
               tooltip: '全部测试',
@@ -177,23 +206,6 @@ class _CfSitesPageState extends State<CfSitesPage> {
           : ListView(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 90),
               children: [
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Text(
-                      '这些站点已经完成过人机验证，之后所有模块（视频源 / 网页 / 图片）'
-                      '都会自动复用，不会再反复要求你操作。\n\n'
-                      '如果某个站点又开始 403，说明验证过期，重新验证一次即可。'
-                      '右上角可以「全部测试」，逐条试一遍还活不活。',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        height: 1.55,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 6),
                 if (_hosts.isEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 40),

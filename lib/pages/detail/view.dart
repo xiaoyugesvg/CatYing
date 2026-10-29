@@ -1114,9 +1114,6 @@ class _DetailPageState extends State<DetailPage> {
         ? Map<String, String>.from(_controller.playHeaders)
         : const <String, String>{};
 
-    // 播放内核：AVPlayer（Apple 主）/ KSPlayer（iOS 备选）/ MPV（全平台兜底）。
-    final engine = PlayerPrefs.instance.vodEngine.value;
-
     // 把续播位置透传给 _ensurePlayer, 让 libmpv 通过 Media.start 参数
     // 直接从续播位置开始解码, 避免 "先从 0 播几秒再回退" 的现象。
     // _ensurePlayer 内部把 dispose/open 放到 post-frame，这里不阻塞 build。

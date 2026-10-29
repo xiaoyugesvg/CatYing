@@ -269,7 +269,7 @@ class _LocalXbpqSourcesPageState extends State<LocalXbpqSourcesPage> {
     final all = XbpqService.instance.entries;
 
     return SettingsSubPage(
-      title: 'XBPQ 规则源',
+      title: 'XBPQ',
       children: [
         SettingsGroup(
           children: [

@@ -980,6 +980,9 @@ class DetailController extends GetxController with WidgetsBindingObserver {
             resolvedUrl,
             headers: headers,
             apiBase: spiderInfo.api,
+            // Spider / JS 源已把真实播放地址解析出来了：直接当媒体交给
+            // 原生播放器，不再用「后缀」去猜它是不是网页（用户 2026-10-29）。
+            trustMedia: true,
           );
           if (_spiderResolveToken != token) return;
           final playCandidate = resolution.url;

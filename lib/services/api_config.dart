@@ -385,7 +385,7 @@ class ApiConfig extends GetxController {
           }
           if (updated == null) {
             // 删掉的是当前本地源：**只在启用中的本地源里**挑一个，
-            // 避免落到被「本地 JS 源」子开关关掉的源上（那样主页源等于不可用）。
+            // 避免落到被「本地爬虫」总开关关掉的源上（那样主页源等于不可用）。
             final enabledLocal = list.where(isLocalSourceEnabled).toList();
             homeSourceBean.value =
                 enabledLocal.firstOrNull ?? sourceBeanList.firstOrNull;
@@ -1576,10 +1576,10 @@ class ApiConfig extends GetxController {
     try {
       final prefs = await SharedPreferences.getInstance();
 
-      // ① 本地 Python / JS 源是「全局选择」：只要它还存在于本地目录，就永远优先，
+      // ① 本地 Python 源是「全局选择」：只要它还存在于本地目录，就永远优先，
       //    不因切换订阅 / 激活其他线路而改变。
-      //    ⚠️ 仅在「本地爬虫」开关打开时生效（用户 2026-10-18：优先订阅激活的源）；
-      //    本地 JS 源还要看 JS 子开关。
+      //    ⚠️ 仅在「本地爬虫」开关打开时生效（用户 2026-10-18：优先订阅激活的源）。
+      //    （本地 JS 源已随 c23852d 整体移除，这里不再有 JS 子开关。）
       final localKey = prefs.getString(_kLocalHomeApi);
       if (localKey != null && localKey.isNotEmpty) {
         final local = localVideoSources

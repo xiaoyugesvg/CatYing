@@ -317,8 +317,10 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
             ),
           ),
           const SizedBox(height: 12),
-          // 5 个模式块（图标 + 名称；用户 2026-10-15：纯文字 chip 不够好）
+          // 5 个模式块（只显文字、不要图标 —— 用户 2026-10-29 最新要求；
+          // 覆盖 2026-10-15「加符号」的决定）
           JellyModePicker(
+            showSymbol: false,
             fg: isDark ? Colors.white : JellyTheme.textPrimaryLight,
             items: [
               for (final m in _mangaModes)
@@ -487,8 +489,9 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
             ),
           ),
           const SizedBox(height: 12),
-          // 5 个模式块（图标 + 名称；与上方漫画阅读模式同款）
+          // 5 个模式块（只显文字、不要图标 —— 用户 2026-10-29 最新要求）
           JellyModePicker(
+            showSymbol: false,
             fg: isDark ? Colors.white : JellyTheme.textPrimaryLight,
             items: [
               for (final m in _bookModes)

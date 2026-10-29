@@ -184,27 +184,23 @@ class HikerStateView extends StatelessWidget {
 }
 
 /// 海阔模块的方形 Logo（主页顶栏 / 引导页复用）
+///
+/// 图标用「海阔视界」App 启动图（assets/icons/hiker.png），与底栏 / 分类
+/// 入口完全一致（见 [NavFeature.iconAsset]）。
 class HikerLogo extends StatelessWidget {
   final double size;
   const HikerLogo({super.key, this.size = 34});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            AppTheme.accentColor.withValues(alpha: 0.65),
-            AppTheme.accentColor,
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(size * 0.34),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(size * 0.34),
+      child: Image.asset(
+        'assets/icons/hiker.png',
+        width: size,
+        height: size,
+        fit: BoxFit.contain,
       ),
-      child: Icon(Icons.rocket_launch_rounded, color: Colors.white, size: size * 0.56),
     );
   }
 }
