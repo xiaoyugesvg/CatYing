@@ -795,6 +795,8 @@ class _HikerHomePageState extends State<HikerHomePage> {
             warn: !s.usable,
             // 分类 tab 与「海阔源管理」页同一口径（源自己的 group）
             group: s.groupLabel,
+            // 一级 tab：海阔脚本 / 海阔小程序脚本（两类都有时才出现）
+            kind: s.kindLabel,
             selected: s.id == _store.currentId,
           ),
       ],

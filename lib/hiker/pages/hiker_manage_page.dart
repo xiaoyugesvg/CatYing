@@ -182,6 +182,12 @@ class _HikerManagePageState extends State<HikerManagePage> {
 
   bool _busy = false;
   String _group = ''; // 空 = 全部分组
+
+  /// 类型筛选：'' = 全部；'script' = 海阔脚本；'miniapp' = 海阔小程序脚本
+  ///
+  /// 用户 2026-10-29：「这个海阔要分海阔脚本和海阔小程序脚本」——
+  /// 两类源在管理页各占一个 tab，一眼能看出哪些是自带多页模块的小程序。
+  String _kind = '';
   bool _usableOnly = false;
 
   /// 搜索（AppBar 的放大镜切换）
@@ -792,9 +798,14 @@ class _HikerManagePageState extends State<HikerManagePage> {
     });
   }
 
-  /// 当前可见的源（分组 → 仅可用 → 搜索词）
+  /// 当前可见的源（类型 → 分组 → 仅可用 → 搜索词）
   List<HikerSource> _visibleSources() {
     var list = _store.filterSources(group: _group);
+    if (_kind == 'script') {
+      list = list.where((s) => !s.isMiniAppScript).toList();
+    } else if (_kind == 'miniapp') {
+      list = list.where((s) => s.isMiniAppScript).toList();
+    }
     if (_usableOnly) list = list.where((s) => s.usable).toList();
     final q = _query.trim().toLowerCase();
     if (q.isNotEmpty) {
@@ -803,7 +814,8 @@ class _HikerManagePageState extends State<HikerManagePage> {
             (s) =>
                 s.title.toLowerCase().contains(q) ||
                 s.author.toLowerCase().contains(q) ||
-                s.groupLabel.toLowerCase().contains(q),
+                s.groupLabel.toLowerCase().contains(q) ||
+                s.kindLabel.contains(q),
           )
           .toList();
     }
@@ -1003,21 +1015,56 @@ class _HikerManagePageState extends State<HikerManagePage> {
   );
 
   Widget _filterBar(List<String> groups, int shown) {
+    final scriptCount = _store.sources.where((s) => !s.isMiniAppScript).length;
+    final miniAppCount = _store.sources.where((s) => s.isMiniAppScript).length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SizedBox(
-          height: 30,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            children: [
-              _chip('全部', _group.isEmpty, () => setState(() => _group = '')),
-              ...groups.map(
-                (g) => _chip(g, _group == g, () => setState(() => _group = g)),
-              ),
-            ],
+        // ── 类型：海阔脚本 / 海阔小程序脚本 ──────────────────────
+        // 只在两种类型都存在时显示，避免单一类型的用户白看一行
+        if (scriptCount > 0 && miniAppCount > 0) ...[
+          SizedBox(
+            height: 30,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                _chip(
+                  '全部 ${_store.sources.length}',
+                  _kind.isEmpty,
+                  () => setState(() => _kind = ''),
+                ),
+                _chip(
+                  '海阔脚本 $scriptCount',
+                  _kind == 'script',
+                  () => setState(() => _kind = 'script'),
+                ),
+                _chip(
+                  '海阔小程序脚本 $miniAppCount',
+                  _kind == 'miniapp',
+                  () => setState(() => _kind = 'miniapp'),
+                ),
+              ],
+            ),
           ),
-        ),
+          const SizedBox(height: 6),
+        ],
+        if (groups.isNotEmpty)
+          SizedBox(
+            height: 30,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                _chip(
+                  '全部',
+                  _group.isEmpty,
+                  () => setState(() => _group = ''),
+                ),
+                ...groups.map(
+                  (g) => _chip(g, _group == g, () => setState(() => _group = g)),
+                ),
+              ],
+            ),
+          ),
         const SizedBox(height: 6),
         Row(
           children: [
@@ -1223,6 +1270,7 @@ class _HikerManagePageState extends State<HikerManagePage> {
                   Text(
                     '${s.author}'
                     '${s.version > 0 ? ' · v${s.version}' : ''}'
+                    ' · ${s.kindLabel}'
                     ' · ${s.groupLabel}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -1326,6 +1374,7 @@ class _HikerManagePageState extends State<HikerManagePage> {
           Text(
             '${s.author.isEmpty ? '佚名' : s.author}'
             '${s.version > 0 ? ' · v${s.version}' : ''}'
+            ' · ${s.kindLabel}'
             ' · ${s.groupLabel}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,

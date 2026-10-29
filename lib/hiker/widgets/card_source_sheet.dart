@@ -21,6 +21,10 @@ class CardSourceItem {
   /// 留空 = 不参与分类（分类 tab 会自动隐藏）。
   final String group;
 
+  /// 类型名（**一级** tab 用）。海阔用它分「海阔脚本 / 海阔小程序脚本」，
+  /// 留空 = 不参与类型分组；只有出现两种以上类型时才显示这一行。
+  final String kind;
+
   const CardSourceItem({
     required this.id,
     required this.title,
@@ -28,6 +32,7 @@ class CardSourceItem {
     this.selected = false,
     this.warn = false,
     this.group = '',
+    this.kind = '',
   });
 }
 
@@ -140,6 +145,9 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
   /// `groupLabel`，排序后平铺成胶囊；没有分类（或只有一个）时不显示 tab 行。
   String _group = '';
 
+  /// 当前类型（'' = 全部）。海阔用「海阔脚本 / 海阔小程序脚本」两级 tab。
+  String _kind = '';
+
   /// 面板内的源列表 —— 删除后要原地消失，所以用可变副本，不直接读 widget.items
   late final List<CardSourceItem> _items = List.of(widget.items);
 
@@ -182,6 +190,7 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
     selected: v,
     warn: e.warn,
     group: e.group,
+    kind: e.kind,
   );
 
   /// 右上角「定位」：清掉分类/关键词过滤，再滚到当前选中的源。
@@ -189,6 +198,7 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
     if (!_hasSelected) return;
     setState(() {
       _group = '';
+      _kind = '';
       _keyword = '';
       _searchController.clear();
     });
@@ -215,9 +225,22 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
     return l;
   }
 
-  /// 先按分类过滤，再按关键词过滤（两者叠加）
+  /// 全部类型（去重，按出现顺序）
+  List<String> get _kinds {
+    final seen = <String>[];
+    for (final e in _items) {
+      final k = e.kind.trim();
+      if (k.isNotEmpty && !seen.contains(k)) seen.add(k);
+    }
+    return seen;
+  }
+
+  /// 先按类型过滤，再按分类，最后按关键词（三者叠加）
   List<CardSourceItem> get _list {
     var l = _items;
+    if (_kind.isNotEmpty) {
+      l = l.where((e) => e.kind.trim() == _kind).toList();
+    }
     if (_group.isNotEmpty) {
       l = l.where((e) => e.group.trim() == _group).toList();
     }
@@ -464,6 +487,7 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
     final h = MediaQuery.of(context).size.height;
     final list = _list;
     final groups = _groups;
+    final kinds = _kinds;
     // 有副标题时卡片要高一档，否则两行字会被压扁
     final hasSub = _items.any((e) => (e.subtitle ?? '').isNotEmpty);
 
@@ -550,6 +574,39 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
                   ],
                 ),
               ),
+              // 类型 tab（一级）：海阔脚本 / 海阔小程序脚本。
+              // 只有两种以上类型同时存在时才显示 —— 单一类型白占一行。
+              if (kinds.length >= 2)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 0, 2),
+                  child: SizedBox(
+                    height: 30,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: [
+                        _groupChip(
+                          '全部类型',
+                          _kind.isEmpty,
+                          () => setState(() {
+                            _kind = '';
+                            _group = '';
+                          }),
+                        ),
+                        for (final k in kinds)
+                          _groupChip(
+                            k,
+                            _kind == k,
+                            () => setState(() {
+                              _kind = k;
+                              // 换类型时清掉分类：两个类型的分类集合不同，
+                              // 留着旧分类会出现"切过去一片空白"
+                              _group = '';
+                            }),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
               // 分类 tab：与「海阔源管理」页同一口径（源自己的 group），
               // 只有一个分类时不显示（省一行高度）
               if (groups.length >= 2)
