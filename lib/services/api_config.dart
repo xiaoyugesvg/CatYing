@@ -316,33 +316,75 @@ class ApiConfig extends GetxController {
     return result;
   }
 
-  /// 重新读取「本地 Python 源」清单（导入/删除后调用）。
+  /// 重新读取「本地源」清单（导入/删除/切开关后调用）。
   ///
   /// 只更新 [localVideoSources]，**不动** [sourceBeanList] —— 订阅线路与本地源是两套。
+  ///
+  /// 🔴 2026-10-29 修（用户：「本地JS和订阅切换的时候，没切换过来」）：
+  ///   以前整个方法体是**一个 try 包到底** —— `LocalPythonSources.load` /
+  ///   `LocalJsSources.load` / `localVideoSources.assignAll` / 「主页源回退到
+  ///   订阅线路」这四件事共用同一个 catch。只要前面任何一步抛错（本地目录
+  ///   权限、清单损坏、路径拿不到…），后面**全部不执行**：
+  ///     · 本地源清单停在旧值（删掉的源还在、新导入的看不到）；
+  ///     · **主页源回退逻辑永远跑不到** ⇒ 主页源死钉在一个已经不可用的本地源上，
+  ///       用户切回订阅线路也切不动，表现为「切了源没反应 / 内容不显示」。
+  ///   现在四件事各自独立兜住：任何一步失败都不影响其余步骤，
+  ///   尤其「主页源回退」一定会执行。
   Future<void> reloadLocalVideoSources() async {
+    SharedPreferences? prefs;
     try {
-      final prefs = await SharedPreferences.getInstance();
-      // 每次都同步一次开关（默认关）：保证冷启动 / 切订阅时口径一致
+      prefs = await SharedPreferences.getInstance();
+    } catch (e) {
+      AppLog.instance.w('[ApiConfig] 读取本地源开关失败: $e');
+    }
+
+    // ── ① 开关口径：每次都同步一次（默认关），保证冷启动 / 切订阅时一致 ──
+    if (prefs != null) {
       localSourcesEnabled.value = prefs.getBool(_kLocalSourcesEnabled) ?? false;
       // JS 子开关（默认开）：没写过就跟着「之前的整体行为」走 —— 即总开关开
       // 着时 JS 源照旧可用，不因为新增这个旋钮而把老用户手里的 JS 源关掉。
       localJsSourcesEnabled.value =
           prefs.getBool(_kLocalJsSourcesEnabled) ?? true;
-      await LocalPythonSources.instance.load(force: true);
-      await LocalJsSources.instance.load(force: true);
-      final list = <SourceBean>[
-        ...LocalPythonSources.instance.sources.map((e) => e.toSourceBean()),
-        ...LocalJsSources.instance.sources.map((e) => e.toSourceBean()),
-      ];
-      localVideoSources.assignAll(list);
+    }
 
-      // 当前主页源是本地源：对应开关关闭 ⇒ 立刻回到订阅激活的第一条线路
+    // ── ② 两套本地源各自独立加载：Python 那套抛错不能把 JS 那套一起带走 ──
+    try {
+      await LocalPythonSources.instance.load(force: true);
+    } catch (e) {
+      AppLog.instance.w('[ApiConfig] 读取本地 Python 源失败: $e');
+    }
+    try {
+      await LocalJsSources.instance.load(force: true);
+    } catch (e) {
+      AppLog.instance.w('[ApiConfig] 读取本地 JS 源失败: $e');
+    }
+
+    // ── ③ 汇总清单（单条转 bean 出错就跳过它，不整表作废）──
+    final list = <SourceBean>[];
+    for (final e in LocalPythonSources.instance.sources) {
+      try {
+        list.add(e.toSourceBean());
+      } catch (_) {
+        /* 单条坏数据不影响其它源 */
+      }
+    }
+    for (final e in LocalJsSources.instance.sources) {
+      try {
+        list.add(e.toSourceBean());
+      } catch (_) {
+        /* 同上 */
+      }
+    }
+    localVideoSources.assignAll(list);
+
+    // ── ④ 主页源回退：**无条件执行**（上面哪一步失败都要跑到这里）──
+    try {
       final cur = homeSourceBean.value;
       if (cur != null &&
           (cur.key.startsWith('localpy_') || cur.key.startsWith('localjs_'))) {
         if (!isLocalSourceEnabled(cur)) {
           homeSourceBean.value = sourceBeanList.firstOrNull;
-          await prefs.remove(_kLocalHomeApi);
+          await prefs?.remove(_kLocalHomeApi);
           AppLog.instance.log('[ApiConfig] 本地源开关已关闭，主页源切回订阅线路');
         } else {
           SourceBean? updated;
@@ -357,14 +399,18 @@ class ApiConfig extends GetxController {
             homeSourceBean.value =
                 list.firstOrNull ?? sourceBeanList.firstOrNull;
             // 「全局锁定本地源」的键也要清掉，否则下次恢复会指向已删除的 key
-            await prefs.remove(_kLocalHomeApi);
+            await prefs?.remove(_kLocalHomeApi);
+            AppLog.instance.log(
+              '[ApiConfig] 主页源指向的本地源已不存在，已切到 '
+              '${homeSourceBean.value?.key ?? '(空)'}',
+            );
           } else if (updated.name != cur.name) {
             homeSourceBean.value = updated;
           }
         }
       }
     } catch (e) {
-      AppLog.instance.w('[ApiConfig] 读取本地 Python 源失败: $e');
+      AppLog.instance.w('[ApiConfig] 主页源回退失败: $e');
     }
   }
 

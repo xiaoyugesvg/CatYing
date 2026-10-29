@@ -1,4 +1,6 @@
-﻿import 'package:cached_network_image_ce/cached_network_image.dart';
+﻿import 'dart:async';
+
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import 'package:tvbox/common/theme.dart';
@@ -6,6 +8,7 @@ import 'package:tvbox/models/movie.dart';
 import 'package:tvbox/models/movie_sort.dart';
 import 'package:tvbox/models/source_bean.dart';
 import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/source_service.dart';
 import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/pages/drama/drama_banner.dart';
@@ -86,11 +89,49 @@ class _DramaPageState extends State<DramaPage> {
   /// 判断前后台切换（见 pages/content_view.dart:426）。
   bool _tabActive = false;
 
+  /// 首页源变化的监听（影视里切「本地 JS ↔ 订阅」要能传导到短剧页）。
+  ///
+  /// 🔴 2026-10-29 修（用户：「是本地JS和订阅切换的时候，没切换过来」）：
+  ///   短剧页以前**完全不监听** `homeSourceBean` —— 在影视里换了源，
+  ///   短剧页还挂着上一次解析出来的那个源（往往是已经没内容的本地 JS 源），
+  ///   于是「切了源但短剧没变 / 内容不显示、扫描不成功」。
+  StreamSubscription<SourceBean?>? _homeSub;
+
+  /// 上次看到的首页源 key（Rx.stream 订阅时会先推一次当前值，用它挡掉）
+  String? _lastHomeKey;
+
+  /// 首页源在**后台**变化了 → 等切回这个 tab 再重载（不在后台白扫一遍）
+  bool _pendingHomeReload = false;
+
   @override
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
+    _lastHomeKey = ApiConfig.instance.homeSourceBean.value?.key;
+    _homeSub =
+        ApiConfig.instance.homeSourceBean.stream.listen(_onHomeSourceChanged);
     _load();
+  }
+
+  /// 首页源换了 → 短剧页跟着换（解析结果没变就不打扰，避免白闪）。
+  Future<void> _onHomeSourceChanged(SourceBean? s) async {
+    final key = s?.key ?? '';
+    if (key == (_lastHomeKey ?? '')) return;
+    _lastHomeKey = key;
+    if (!mounted) return;
+    final next = await _currentSource();
+    if (!mounted || next == null) return;
+    if (next.key == _source?.key) return;
+    if (!_tabActive) {
+      // 用户现在在别的 tab：记一笔，切回短剧时再扫（省一次后台请求）
+      _pendingHomeReload = true;
+      return;
+    }
+    AppLog.instance.log(
+      '[Drama] 首页源变化 → 短剧跟随切换: ${_source?.key ?? '(空)'} → ${next.key}',
+    );
+    // clearFirst：旧源的内容不能挂在新源名下
+    await _load(clearFirst: true);
   }
 
   @override
@@ -99,6 +140,15 @@ class _DramaPageState extends State<DramaPage> {
     final active = TickerMode.valuesOf(context).enabled;
     if (active == _tabActive) return;
     _tabActive = active;
+    // 在后台期间首页源换过了 → 这次切回来先把源跟上（不看有没有旧内容）
+    if (active && _pendingHomeReload) {
+      _pendingHomeReload = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _load(clearFirst: true);
+      });
+      return;
+    }
     // 从别的 tab 切回来，且上次没拿到内容（或报错了）→ 自动补一次，
     // 不用用户再下拉。已有内容时不动，避免每次切 tab 都白闪一下。
     // 放到帧后再 setState：didChangeDependencies 还在 build 阶段里。
@@ -113,6 +163,8 @@ class _DramaPageState extends State<DramaPage> {
 
   @override
   void dispose() {
+    _homeSub?.cancel();
+    _homeSub = null;
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
     super.dispose();
@@ -164,6 +216,8 @@ class _DramaPageState extends State<DramaPage> {
       keys: await DramaSettings.sourceKeys(),
       pickedKey: await DramaSettings.pickedSourceKey(),
       homeSource: ApiConfig.instance.homeSourceBean.value,
+      // 挑源时的首页 key：和现在的首页源不一致 ⇒ 那次挑的已过期，跟首页走
+      pickedHomeKey: await DramaSettings.pickedHomeKey(),
     );
   }
 
@@ -298,21 +352,32 @@ class _DramaPageState extends State<DramaPage> {
     }
 
     // ── 扫描成功，但没有任何分类命中短剧关键词 ───────────────────
-    if (probe.groups.isEmpty) {
-      // 源返回的分类列表本身就是空的 → 更可能是接口异常，提示不同文案
-      final emptySorts = probe.sortCount == 0;
+    //
+    // 2026-10-29：源**有分类**、只是没命中关键词时，退化为「显示全部分类」，
+    // 避免整页空白（用户反馈「内容不显示，扫描不成功」）。真·空分类
+    // （接口异常）仍走原来的错误提示。
+    final emptySorts = probe.sortCount == 0;
+    if (probe.groups.isEmpty && emptySorts) {
+      AppLog.instance.log(
+          '[Drama] 分类为空: ${source.name} type=${source.type} api=${source.api}');
       await _showCacheFallback(
         source,
         gen: gen,
-        hint: emptySorts
-            ? '「${source.name}」返回的分类为空（接口可能异常），先显示上次缓存的内容'
-            : '「${source.name}」现在没有匹配短剧关键词的分类，先显示上次缓存的内容',
-        errorText: emptySorts
-            ? '「${source.name}」返回的分类为空\n接口可能异常，请稍后点「重试」'
-            : '「${source.name}」没有匹配短剧关键词的分类\n'
-                '点左上角源名换一个源，或在「设置」里改关键词',
+        hint: '「${source.name}」返回的分类为空（接口可能异常），先显示上次缓存的内容',
+        errorText: '「${source.name}」返回的分类为空\n'
+            '接口可能异常，可点「重试」或左上角换个源',
       );
       return;
+    }
+
+    // 关键词命中优先；没命中但源有分类 → 用全部分类兜底
+    final keywordFallback = probe.groups.isEmpty && probe.allSorts.isNotEmpty;
+    final groups = keywordFallback
+        ? [for (final sort in probe.allSorts) _DramaGroup(source, sort)]
+        : probe.groups;
+    if (keywordFallback) {
+      AppLog.instance.log(
+          '[Drama] 关键词未命中，退化为全部分类: ${source.name} (${probe.allSorts.length} 类)');
     }
 
     // 落盘：保留其他源的缓存，整组替换这个源的
@@ -321,7 +386,7 @@ class _DramaPageState extends State<DramaPage> {
     final merged = <Map<String, String>>[
       for (final r in oldRows)
         if (r['source'] != source.key) r,
-      for (final g in probe.groups)
+      for (final g in groups)
         {
           'source': g.source.key,
           'id': g.sort.id,
@@ -332,9 +397,13 @@ class _DramaPageState extends State<DramaPage> {
     await DramaSettings.saveGroups(merged);
     if (!mounted || gen != _loadGen) return;
     setState(() {
-      _groups = probe.groups;
-      _groupIdx = savedIdx.clamp(0, probe.groups.length - 1);
+      _groups = groups;
+      _groupIdx = savedIdx.clamp(0, groups.length - 1);
       _scanHint = '';
+      if (keywordFallback) {
+        _softHint = '「${source.name}」没有匹配短剧关键词的分类，'
+            '已显示全部分类（可在「短剧设置」里调整关键词）';
+      }
     });
     await _refreshHistorySources();
     if (!mounted || gen != _loadGen) return;
@@ -393,17 +462,26 @@ class _DramaPageState extends State<DramaPage> {
     });
   }
 
-  Future<({List<_DramaGroup> groups, bool ok, String error, int sortCount})>
-      _probeSource(SourceBean s) async {
+  Future<
+      ({
+        List<_DramaGroup> groups,
+        List<SortData> allSorts,
+        bool ok,
+        String error,
+        int sortCount
+      })> _probeSource(SourceBean s) async {
     try {
+      // 20s：getSort 内部可能串行发 2 次请求（ac=class → ac=videolist 兜底），
+      // 12s 在慢源上容易误判「扫描失败」（2026-10-29）。
       final r = await SourceService.instance
           .getSort(s)
-          .timeout(const Duration(seconds: 12));
+          .timeout(const Duration(seconds: 20));
       return (
         groups: [
           for (final sort in r.$1)
             if (_keywords.any(sort.name.contains)) _DramaGroup(s, sort),
         ],
+        allSorts: r.$1,
         ok: true,
         error: '',
         sortCount: r.$1.length,
@@ -411,6 +489,7 @@ class _DramaPageState extends State<DramaPage> {
     } catch (e) {
       return (
         groups: const <_DramaGroup>[],
+        allSorts: const <SortData>[],
         ok: false,
         error: e.toString().split('\n').first,
         sortCount: 0,
@@ -534,7 +613,12 @@ class _DramaPageState extends State<DramaPage> {
       currentKey: _source?.key,
     );
     if (picked == null || !mounted) return;
-    await DramaSettings.savePickedSourceKey(picked.key);
+    await DramaSettings.savePickedSourceKey(
+      picked.key,
+      // 记下「挑的时候首页是哪个」：之后在影视里换了首页源，这条记录就失效，
+      // 短剧页跟着首页源走（见 DramaSettings.pickedHomeKey 的说明）。
+      homeKey: ApiConfig.instance.homeSourceBean.value?.key ?? '',
+    );
     if (!mounted) return;
     // 换源就**直接重扫**（用户 2026-10-27：「切换不同的源不能直接刷新扫描
     // 加载吗？非要我自己手动刷新」）。原来这里走 `_load()` 的缓存优先分支，

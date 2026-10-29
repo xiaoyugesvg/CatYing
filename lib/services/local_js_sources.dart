@@ -97,13 +97,21 @@ class LocalJsSources {
   /// 对账规则：
   ///   · 清单里有、文件没了 → 丢掉；
   ///   · 目录里有 `ljs_*.js`、清单里没有 → 补进来（手动拷入）。
+  ///
+  /// 🔴 2026-10-29 修：原来是「先 `_sources.clear()` + `_loaded = true`，再慢慢读」，
+  ///   一旦中途抛错（`directory()` / `create()` 拿不到路径、权限不足等），
+  ///   内存里的本地 JS 源就变成**空表**、而 `_loaded` 已是 true ——
+  ///   之后不带 force 的 `load()` 直接 return，本地 JS 源会「凭空消失」到重启为止，
+  ///   连带主页源指向它时切不回订阅（用户：「本地JS和订阅切换的时候，没切换过来」）。
+  ///   现在改成**读进临时列表、全部成功才替换**：失败时旧清单原样保留。
   Future<void> load({bool force = false}) async {
     if (_loaded && !force) return;
-    _loaded = true;
-    _sources.clear();
 
     final dir = await directory();
     if (!await dir.exists()) await dir.create(recursive: true);
+
+    // 先读到临时列表：任何一步抛错都不会动到现有 _sources
+    final next = <LocalJsSource>[];
 
     final file = await _manifest();
     if (await file.exists()) {
@@ -115,8 +123,8 @@ class LocalJsSources {
             final s = LocalJsSource.fromJson(Map<String, dynamic>.from(e));
             if (s.key.isEmpty) continue;
             if (!await File('${dir.path}/${s.key}.js').exists()) continue;
-            if (_sources.any((x) => x.key == s.key)) continue;
-            _sources.add(s);
+            if (next.any((x) => x.key == s.key)) continue;
+            next.add(s);
           }
         }
       } catch (e) {
@@ -130,8 +138,8 @@ class LocalJsSources {
         final name = f.uri.pathSegments.last;
         final key = name.substring(0, name.length - 3);
         if (!key.startsWith('ljs_')) continue;
-        if (_sources.any((x) => x.key == key)) continue;
-        _sources.add(
+        if (next.any((x) => x.key == key)) continue;
+        next.add(
           LocalJsSource(
             key: key,
             name: key,
@@ -143,6 +151,11 @@ class LocalJsSources {
       AppLog.instance.w('[LocalJs] 扫描目录失败: $e');
     }
 
+    // 全部读完了才替换（原子换表）
+    _sources
+      ..clear()
+      ..addAll(next);
+    _loaded = true;
     await _applyOrder();
     await _save();
   }

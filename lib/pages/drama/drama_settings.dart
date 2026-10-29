@@ -34,6 +34,18 @@ class DramaSettings {
   /// 列表页一次只扫这一个源；空串 = 跟随首页当前源。
   static const _kPicked = 'drama_picked_source_v1';
 
+  /// 「挑这个源的时候，首页源是哪个」。
+  ///
+  /// 🔴 2026-10-29 修（用户：「是本地JS和订阅切换的时候，没切换过来」）：
+  ///   以前 `pickedKey` 是**永久**生效的 —— 在短剧页挑过一次源之后，
+  ///   在影视里把首页源从「本地 JS 源」切到「订阅线路」，短剧页**完全不理**，
+  ///   继续扫那个已经没内容的本地 JS 源 ⇒ 表现为「切了源但短剧还是老样子 /
+  ///   内容不显示、扫描不成功」。
+  ///   现在把「挑的时候首页是哪个」一起记下来：首页源没变 ⇒ 挑的源优先
+  ///   （保留"短剧单独用一个源"的能力）；首页源变了 ⇒ 认定这次挑的已过期，
+  ///   短剧页跟着首页源走。
+  static const _kPickedHome = 'drama_picked_home_v1';
+
   static Future<String> pickedSourceKey() async {
     try {
       final sp = await SharedPreferences.getInstance();
@@ -43,10 +55,34 @@ class DramaSettings {
     }
   }
 
-  static Future<void> savePickedSourceKey(String key) async {
+  /// 挑 [pickedSourceKey] 时首页是哪个源（空串 = 老数据/没记录过）。
+  static Future<String> pickedHomeKey() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      return sp.getString(_kPickedHome) ?? '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// 记住短剧页选的源。
+  ///
+  /// [homeKey] 传「选的时候首页源 key」，用于判断这次选择是否已过期
+  /// （见 [_kPickedHome]）。不传 = 不更新那条记录（保持向后兼容）。
+  static Future<void> savePickedSourceKey(
+    String key, {
+    String? homeKey,
+  }) async {
     try {
       final sp = await SharedPreferences.getInstance();
       await sp.setString(_kPicked, key);
+      if (homeKey != null) {
+        if (homeKey.isEmpty) {
+          await sp.remove(_kPickedHome);
+        } else {
+          await sp.setString(_kPickedHome, homeKey);
+        }
+      }
     } catch (_) {}
   }
 
@@ -118,23 +154,48 @@ class DramaSettings {
   /// 解析短剧页「当前应显示的源」。
   ///
   /// 规则（与左上角切换器的可选范围保持一致）：
-  ///   1. 记录里挑过的 key **且在白名单内** → 用它；
-  ///   2. 白名单非空 → 取第一个（勾选的源被删/取消勾选时自动落位）；
-  ///   3. 白名单为空（没勾过）→ 跟随首页当前源。
+  ///   1. 记录里挑过的 key **且在白名单内**、**且首页源没变过** → 用它；
+  ///   2. 首页源换过（挑的时候记的首页 key ≠ 当前首页 key）→ 跟着首页源走
+  ///      （首页源不在白名单内时才退到白名单第一个）；
+  ///   3. 白名单非空 → 取第一个（勾选的源被删/取消勾选时自动落位）；
+  ///   4. 白名单为空（没勾过）→ 跟随首页当前源。
+  ///
+  /// 🔴 规则 1 的「首页源没变过」是 2026-10-29 加的（见 [pickedHomeKey]）：
+  ///   没有这一条，短剧页一旦挑过源就永久钉死，影视里切「本地 JS ↔ 订阅」
+  ///   完全传导不过来。
   static SourceBean? resolveCurrentSource({
     required List<SourceBean> all,
     required Set<String> keys,
     required String pickedKey,
     required SourceBean? homeSource,
+    String pickedHomeKey = '',
   }) {
     final allowed = filterBySelection(all, keys);
-    final inWhite = keys.isEmpty || allowed.any((s) => s.key == pickedKey);
-    if (pickedKey.isNotEmpty && inWhite) {
+    final homeKey = homeSource?.key ?? '';
+    bool inWhite(String k) => keys.isEmpty || allowed.any((s) => s.key == k);
+    SourceBean? find(String k) {
       for (final s in all) {
-        if (s.key == pickedKey) return s;
+        if (s.key == k) return s;
       }
+      return null;
     }
+
+    // ① 挑过的源 —— 只在「首页源没换过」时才认
+    final pickStale = pickedHomeKey.isNotEmpty && pickedHomeKey != homeKey;
+    if (pickedKey.isNotEmpty && !pickStale && inWhite(pickedKey)) {
+      final hit = find(pickedKey);
+      if (hit != null) return hit;
+    }
+
+    // ② 首页源换过 ⇒ 跟着首页源（它在白名单内才认，否则往下落位）
+    if (pickStale && homeSource != null && inWhite(homeKey)) {
+      return find(homeKey) ?? homeSource;
+    }
+
+    // ③ 白名单第一个
     if (keys.isNotEmpty && allowed.isNotEmpty) return allowed.first;
+
+    // ④ 跟随首页当前源
     return homeSource;
   }
 
