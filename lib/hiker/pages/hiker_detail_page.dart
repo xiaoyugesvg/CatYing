@@ -86,6 +86,25 @@ const String kHikerLazyPrefix = 'hiker://lazy#';
 }
 
 /// 一条候选播放地址
+/// 解析结果的四个分组（2026-10-30）。
+///
+/// 按"点了会发生什么"分，而不是按脚本返回顺序 —— 脚本详情页里
+/// 「倒序 / 清晰度 / 弹幕开关 / 剧集」这些操作项与真正的播放地址
+/// 混在一起时，用户完全看不出哪个能播。
+enum _CandGroup {
+  /// 直链可播（m3u8 / mp4 / playJson / x5）
+  play,
+
+  /// 图片 / 图集
+  image,
+
+  /// 需要再打开一层（延迟规则 / 网页 / 阅读 / 搜索）
+  open,
+
+  /// 操作项与纯提示（弹幕开关 / 清晰度 / 剧集占位 / 说明）
+  info,
+}
+
 class _Candidate {
   final String url;
   final String note; // 来源说明（详情规则 / 条目地址 / 选集 / 立即播放）
@@ -140,6 +159,13 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
 
   /// 简介是否已展开（长简介默认收 4 行，避免把「解析结果」顶出屏幕）
   bool _descOpen = false;
+
+  /// 「操作与提示」组是否展开（默认收起）。
+  ///
+  /// 脚本详情页里「倒序 / 360p / 720p / 1080p / 弹幕：关 / 第46集」这类条目
+  /// 往往占解析结果的大半（用户实测 55 条里 40+ 是这类），全铺出来会把
+  /// 真正能播的地址埋掉 —— 默认折叠，点标题才展开。
+  bool _infoOpen = false;
 
   /// 规则用 `addListener('onClose', …)` 登记的回调：**离开本页时回放**
   ///（海阔里由原生在页面关闭时执行，多为"清 MyVar / 清缓存"）
@@ -1284,46 +1310,284 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
   Widget _candidateArea() {
     // 详情里出现「播放线路：」标记 → 按海阔官方布局分区渲染
     //（线路分组 / 标签 / 剧照 / 暂不可播，参考 huoyi hiker_miniapp 的 fromItems）。
-    // 没有标记时保持原有平铺，向后兼容。
+    // 没有标记时按"点了会发生什么"分组（见下）。
     if (_candidates.any(_isLineMarker)) return _groupedCandidates();
-    final rows = <Widget>[];
-    final pending = <_Candidate>[];
-    void flush() {
-      while (pending.isNotEmpty) {
-        final n = pending.length >= 3 ? 3 : pending.length;
-        final slice = pending.sublist(0, n);
-        pending.removeRange(0, n);
-        rows.add(
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (var i = 0; i < 3; i++) ...[
-                  if (i > 0) const SizedBox(width: 8),
-                  Expanded(
-                    child: i < slice.length
-                        ? _candidateCard(slice[i])
-                        : const SizedBox.shrink(),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        );
+
+    // ── 2026-10-30：平铺分支改为**按动作类型分组** ──────────────────
+    //
+    // 用户：「是图片就是图片系列，是视频播放就是视频播放按钮」
+    //      「排序、清晰度以及列表、弹幕都什么呀…分开分清楚」
+    //
+    // 原来一律三列平铺：脚本详情页里的「倒序 / 360p / 1080p / 弹幕：关 /
+    // 第46集」与真正的播放地址长得一模一样，55 条挤在一起根本分不出
+    // 哪个能播、哪个是图片、哪个只是个开关。现在分四段：
+    //   · 可播放  → 三列卡片（播放图标）
+    //   · 图片    → 缩略图网格（能直接看出是图）
+    //   · 需要打开 → 三列卡片（网页 / 阅读 / 搜索 / 延迟规则）
+    //   · 操作与提示 → 默认折叠，点标题展开
+    final labels = <_Candidate>[];
+    final metas = <_Candidate>[];
+    final play = <_Candidate>[];
+    final images = <_Candidate>[];
+    final opens = <_Candidate>[];
+    final infos = <_Candidate>[];
+    for (final c in _candidates) {
+      if (_isLabel(c)) {
+        labels.add(c);
+        continue;
+      }
+      // 「主演：…」「简介：…」这类是**元信息**，不是可点地址 ——
+      // 用户 2026-10-30：「那些主演信息、视频简介也没正确对应」。
+      // 原来它们被当成普通候选铺成卡片，和播放地址混在一起；
+      // 这里抽出来单独成块（纯文本，不可点）。
+      if (_isMetaLine(c)) {
+        metas.add(c);
+        continue;
+      }
+      switch (_groupOf(c)) {
+        case _CandGroup.play:
+          play.add(c);
+        case _CandGroup.image:
+          images.add(c);
+        case _CandGroup.open:
+          opens.add(c);
+        case _CandGroup.info:
+          infos.add(c);
       }
     }
 
-    for (final c in _candidates) {
-      if (_isLabel(c)) {
-        flush();
-        rows.add(_labelRow(c));
-      } else {
-        pending.add(c);
-      }
-    }
-    flush();
+    final rows = <Widget>[
+      for (final l in labels) _labelRow(l),
+      if (metas.isNotEmpty) ...[
+        const SizedBox(height: 10),
+        _metaBlock(metas),
+      ],
+      if (play.isNotEmpty) ...[
+        const SizedBox(height: 10),
+        _candGroupTitle(
+            '可播放', play.length, Icons.play_circle_outline_rounded),
+        ..._cardsRows(play),
+      ],
+      if (images.isNotEmpty) ...[
+        const SizedBox(height: 10),
+        _candGroupTitle('图片', images.length, Icons.photo_library_outlined),
+        _imageTiles(images),
+      ],
+      if (opens.isNotEmpty) ...[
+        const SizedBox(height: 10),
+        _candGroupTitle('需要打开', opens.length, Icons.open_in_new_rounded),
+        ..._cardsRows(opens),
+      ],
+      if (infos.isNotEmpty) ...[
+        const SizedBox(height: 10),
+        _candGroupTitle(
+          '操作与提示',
+          infos.length,
+          Icons.info_outline_rounded,
+          trailing: _infoOpen ? '收起' : '展开',
+          onTap: () => setState(() => _infoOpen = !_infoOpen),
+        ),
+        if (_infoOpen) ..._cardsRows(infos),
+      ],
+    ];
     return Column(mainAxisSize: MainAxisSize.min, children: rows);
+  }
+
+  /// 解析结果的分组维度 —— 按"点了会发生什么"，而不是按脚本给的顺序。
+  static _CandGroup _groupOf(_Candidate c) {
+    final (label, _) = _actionOf(c);
+    return switch (label) {
+      '播放' => _CandGroup.play,
+      '看图' => _CandGroup.image,
+      '打开' || '网页' || '阅读' || '搜索' => _CandGroup.open,
+      _ => _CandGroup.info,
+    };
+  }
+
+  /// 元信息行：`主演：岳训宇、李琦…` / `简介：…` / `类型：…`
+  ///
+  /// 这些是脚本详情页的**文字信息**，点了没有任何动作，不该占一个卡片位。
+  static final RegExp _reMetaLine = RegExp(
+    r'^(主演|导演|编剧|类型|地区|年份|语言|别名|简介|剧情简介|片长|更新时间|评分)\s*[:：]',
+  );
+
+  static bool _isMetaLine(_Candidate c) =>
+      !c.lazy && _reMetaLine.hasMatch(c.note.trim());
+
+  /// 元信息块：一行一条，纯文本不可点（与「简介」卡片同一套外观）
+  Widget _metaBlock(List<_Candidate> items) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(13, 10, 13, 10),
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundCard,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.borderLight, width: 0.6),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final c in items)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Text(
+                hikerPlainText(c.note),
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: AppTheme.fontSubhead,
+                  height: 1.5,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 分组标题（图标 + 名字 + 条数；可带右侧「展开 / 收起」）
+  Widget _candGroupTitle(
+    String text,
+    int count,
+    IconData icon, {
+    String? trailing,
+    VoidCallback? onTap,
+  }) {
+    final row = Row(
+      children: [
+        Icon(icon, size: 14, color: AppTheme.accentOnSurface),
+        const SizedBox(width: 6),
+        Text(
+          text,
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 12.5,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          '$count',
+          style: TextStyle(
+            color: AppTheme.textTertiary,
+            fontSize: 11.5,
+          ),
+        ),
+        const Spacer(),
+        if (trailing != null)
+          Text(
+            trailing,
+            style: TextStyle(
+              color: AppTheme.accentOnSurface,
+              fontSize: AppTheme.fontCaption,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+      ],
+    );
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Padding(
+        padding: EdgeInsets.symmetric(vertical: onTap == null ? 0 : 5),
+        child: row,
+      ),
+    );
+  }
+
+  /// 图片组：三列缩略图。
+  ///
+  /// 用户：「是图片就是图片系列」—— 图片类候选原来和播放地址用同一种卡片，
+  /// 完全看不出是图；这里直接铺缩略图，一眼就是"图集"。
+  Widget _imageTiles(List<_Candidate> items) {
+    final rows = <Widget>[];
+    for (var i = 0; i < items.length; i += 3) {
+      final end = (i + 3) > items.length ? items.length : i + 3;
+      final slice = items.sublist(i, end);
+      rows.add(
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var j = 0; j < 3; j++) ...[
+                if (j > 0) const SizedBox(width: 8),
+                Expanded(
+                  child: j < slice.length
+                      ? _imageTile(slice[j])
+                      : const SizedBox.shrink(),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+    return Column(mainAxisSize: MainAxisSize.min, children: rows);
+  }
+
+  Widget _imageTile(_Candidate c) {
+    final src = _firstImageOf(c);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _play(c),
+      onLongPress: () => _copy(c.url),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: AspectRatio(
+              aspectRatio: 3 / 4,
+              child: src.isEmpty
+                  ? Container(
+                      color: AppTheme.backgroundTertiary,
+                      alignment: Alignment.center,
+                      child: Icon(
+                        Icons.photo_outlined,
+                        size: 20,
+                        color: AppTheme.textTertiary,
+                      ),
+                    )
+                  : Image.network(
+                      src,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => Container(
+                        color: AppTheme.backgroundTertiary,
+                        alignment: Alignment.center,
+                        child: Icon(
+                          Icons.broken_image_outlined,
+                          size: 20,
+                          color: AppTheme.textTertiary,
+                        ),
+                      ),
+                    ),
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            c.note.isEmpty ? '图片' : hikerPlainText(c.note),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: AppTheme.fontCaption,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 取一张能直接加载的图片地址：优先引擎给的 `pic`，
+  /// 其次 `pics://a&&b` 里的第一张，最后才回退 http 地址。
+  static String _firstImageOf(_Candidate c) {
+    if (c.pic.trim().isNotEmpty) return c.pic.trim();
+    final u = c.url.trim();
+    if (u.startsWith('pics://')) {
+      final first = u.substring(7).split('&&').first.trim();
+      return first.startsWith('http') ? first : '';
+    }
+    return u.startsWith('http') ? u : '';
   }
 
   /// 「播放线路：」/「播放线路」开头的分节标记

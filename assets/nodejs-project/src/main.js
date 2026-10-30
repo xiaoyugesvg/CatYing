@@ -773,7 +773,23 @@ const mgmtServer = createServer((req, res) => {
                 loadScript(sourcePath).then(
                     () => {
                         res.writeHead(200, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({ success: true, message: 'Source loaded from path' }));
+                        // ⚠️ 必须把**新端口**一起回给 Dart。
+                        //
+                        // 换源时上面刚把 spiderPort 清零，脚本随后用
+                        // catServerFactory 起一个新 server 并 listen(0) ——
+                        // 端口号是**系统重新分配**的，几乎必然与上一个源不同。
+                        // 但 Dart 侧那份 `_spiderPort` 只在 `onCatPawOpenPort`
+                        // 原生回调里更新，中间存在一段空窗：它仍拿旧端口发请求，
+                        // 而旧 server 已经 close ⇒ 连接被拒 / 404 ⇒
+                        // 表现为「切了源内容没变 / 加载失败 / 该源没有返回任何内容」，
+                        // 且因为 `waitForSpiderPort()` 看到旧值 > 0 就直接放行，
+                        // 连等待都不会等。
+                        // 回传端口后 Dart 可以立即对齐，不必依赖回调时序。
+                        res.end(JSON.stringify({
+                            success: true,
+                            message: 'Source loaded from path',
+                            port: spiderPort,
+                        }));
                     },
                     (e) => {
                         console.error('ERROR in /source/loadPath:', e && e.message);

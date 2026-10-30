@@ -49,7 +49,7 @@ class SourceSwitchSheet extends StatefulWidget {
 /// （本地爬虫 / 本地JS / XBPQ）。三族本地源**只在导入过**时才出现。
 enum _SrcGroup {
   subscription('订阅'),
-  localPy('本地爬虫'),
+  localPy('本地PY'),
   localJs('本地JS'),
   xbpq('XBPQ');
 
@@ -166,7 +166,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
       if (s == null) return;
       return _showLocalActions(
         bean: bean,
-        subtitle: '本地爬虫 · ${s.key}.py',
+        subtitle: '本地PY · ${s.key}.py',
         onRename: (name) async {
           final r = await LocalPythonSources.instance.rename(s.key, name);
           return (r.ok, r.message);
@@ -609,30 +609,75 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
     return _SrcGroup.subscription;
   }
 
-  /// tab 胶囊（与漫源仓库 / RSS 分类同一套样式）
-  Widget _tabPill(String label, bool on, VoidCallback onTap) {
+  /// 分类胶囊（放在等分容器里的一个格子）
+  ///
+  /// ── 2026-10-30 重做 ──────────────────────────────────────────
+  /// 用户：「源切换这个按钮太丑了」「这个框要一样的尺寸，2 个就是两等分，
+  /// 3 个就是三等分，4 个就是四等分」。
+  ///
+  /// 原来宽度由文字撑开（`padding: horizontal 12` + 内容自适应），于是
+  /// 「本地PY 155」比「花蚁」宽一倍，一排胶囊参差不齐、看着很乱。
+  /// 现在：
+  ///   · 宽度交给外层 `Expanded` 平分 —— 2/3/4 个就是 2/3/4 等分；
+  ///   · 高度统一 34、圆角 17（原来 30/15 偏矮，和弹窗其它元素不搭）；
+  ///   · 数量用小一号字放在名字后面（11 vs 12.5），等分后 84px 也塞得下
+  ///     「本地PY 155」，不会只剩「本地P…」；
+  ///   · 选中态用 `accentOnSurface` 而非 `accentColor` —— 后者是调色板 primary，
+  ///     水墨主题下是墨灰 #3A3A3A，深色模式里"选中了却看不出来"；
+  ///   · 未选中透明底 + 0.5 细边，与弹窗背景融为一体（原来涂一层灰底显脏）；
+  ///   · 前景色按底色亮度取黑/白（柠檬黄、蕉红这类浅强调色，白字只有 1.5:1）。
+  ///
+  /// [count] 传负数表示不显示数量（订阅线路那一格显示的是订阅名，不是条数）。
+  Widget _tabPill(String label, int count, bool on, VoidCallback onTap) {
+    final accent = AppTheme.accentOnSurface;
+    final onColor =
+        accent.computeLuminance() > 0.179 ? Colors.black : Colors.white;
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        height: 30,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
+        height: 34,
         alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 6),
         decoration: BoxDecoration(
-          color: on ? AppTheme.accentColor : AppTheme.backgroundTertiary,
-          borderRadius: BorderRadius.circular(15),
-          border: on
-              ? null
-              : Border.all(color: AppTheme.borderLight, width: 0.5),
-        ),
-        child: Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: on ? Colors.white : AppTheme.textSecondary,
-            fontSize: AppTheme.fontSubhead,
-            fontWeight: on ? FontWeight.w600 : FontWeight.w400,
+          color: on ? accent : Colors.transparent,
+          borderRadius: BorderRadius.circular(17),
+          border: Border.all(
+            color: on ? Colors.transparent : AppTheme.borderLight,
+            width: 0.5,
           ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: on ? onColor : AppTheme.textSecondary,
+                  fontSize: 12.5,
+                  fontWeight: on ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+            ),
+            if (count >= 0) ...[
+              const SizedBox(width: 3),
+              Text(
+                '$count',
+                style: TextStyle(
+                  color: on
+                      ? onColor.withValues(alpha: 0.72)
+                      : AppTheme.textTertiary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );
@@ -917,7 +962,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                   onChanged: (v) => setState(() => _keyword = v.trim()),
                 ),
               ),
-              // 分类胶囊：订阅线路 + 三族本地源 —— 与漫源仓库同一套胶囊样式。
+              // 分类胶囊：订阅线路 + 三族本地源 —— **等分排列**。
               // 本地源即使对应开关关着也显示（点它即会打开开关）；
               // 但**没导入过的那一族整条不出现**（用户 2026-10-29）。
               Obx(() {
@@ -925,23 +970,27 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                 final subName =
                     SubscriptionService.instance.active?.name ?? '订阅线路';
                 return Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        for (var i = 0; i < groups.length; i++) ...[
-                          if (i > 0) const SizedBox(width: 8),
-                          _tabPill(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+                  child: Row(
+                    children: [
+                      for (var i = 0; i < groups.length; i++) ...[
+                        if (i > 0) const SizedBox(width: 8),
+                        // Expanded 平分：2 个 = 两等分，3 个 = 三等分，
+                        // 4 个 = 四等分（用户 2026-10-30 明确要求）
+                        Expanded(
+                          child: _tabPill(
                             groups[i] == _SrcGroup.subscription
                                 ? subName
-                                : '${groups[i].label} ${_countOf(groups[i])}',
+                                : groups[i].label,
+                            groups[i] == _SrcGroup.subscription
+                                ? -1
+                                : _countOf(groups[i]),
                             _group == groups[i],
                             () => setState(() => _group = groups[i]),
                           ),
-                        ],
+                        ),
                       ],
-                    ),
+                    ],
                   ),
                 );
               }),

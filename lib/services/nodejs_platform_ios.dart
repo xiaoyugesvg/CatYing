@@ -685,6 +685,30 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
         AppLog.instance.log('[IOSNodeJS] 源加载取证: $forensic');
         return (false, '源文件加载失败: $forensic');
       }
+
+      // ── 换源后立刻对齐 spider 端口（2026-10-30）──────────────────
+      //
+      // Node 的 `/source/loadPath` 处理里会先 `spiderPort = 0` 再载入脚本；
+      // 新脚本用 `catServerFactory` 起 server 并 `listen(0)` —— 端口由系统
+      // 重新分配，几乎必然与上一个源不同。
+      //
+      // 而 Dart 侧这份 `_spiderPort` 只靠原生回调 `onCatPawOpenPort` 更新，
+      // 中间有传输空窗：它仍拿**旧端口**发请求，旧 server 已 close ⇒
+      // 连接被拒 / 404 ⇒ 表现为「切了源内容没变」「该源没有返回任何内容」，
+      // 而且 `waitForSpiderPort()` 看到旧值 > 0 会直接放行，连等待都不等。
+      //
+      // Node 现在在 200 响应里回传真实端口，这里直接对齐，不依赖回调时序。
+      final data = response.data;
+      final newPort =
+          data is Map ? (data['port'] as num?)?.toInt() ?? 0 : 0;
+      if (newPort > 0) {
+        if (newPort != _spiderPort) {
+          AppLog.instance.log(
+              '[IOSNodeJS] 换源后端口对齐: $_spiderPort → $newPort');
+        }
+        _spiderPort = newPort;
+        onSpiderPortChanged.value = newPort;
+      }
       return (true, '源加载成功');
     } on DioException catch (e) {
       return (false, '加载请求失败: ${e.message}');

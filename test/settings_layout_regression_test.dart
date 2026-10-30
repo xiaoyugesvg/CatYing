@@ -155,7 +155,13 @@ void main() {
     // 属于测试没跟上产品变更，这里改断言**当前仍存在的行**。
     expect(find.text('主页数据'), findsOneWidget);
     // 「解析线路」行已随嗅探/解析功能整体移除（2026-10-29），改断言当前存在的行。
-    expect(find.text('本地爬虫'), findsOneWidget);
+    // 2026-10-30：用户要求「本地爬虫」统一改名「本地PY」（引擎其实是 Python）。
+    expect(find.text('本地PY'), findsOneWidget);
+    // 同日用户要求去掉卡片副标题小字 —— 它和右侧的「N 个」挤在一行，
+    // 长文案还会换行，把行高撑乱（截图里「已启用：本地源会出现 155 个 /
+    // 在源面板 / 搜索里」就是这么挤出来的）。这里锁住"不再有小字"。
+    expect(find.textContaining('已启用：'), findsNothing);
+    expect(find.textContaining('已关闭：'), findsNothing);
     // 这两行之后的行也必须还在（原来被 ErrorWidget 吃掉了）
     expect(find.text('引擎管理'), findsOneWidget);
     // 2026-10-29：订阅管理页新增了「本地JS」一行，列表变长，

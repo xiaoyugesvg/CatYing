@@ -125,7 +125,11 @@ var backup = 'https://cdn.x.com/a/b/backup.mp4';
       expect(b.apply('https://v.x/a.m3u8'), 'https://jiexi.x/https://v.x/a.m3u8');
     });
 
-    test('订阅 parses 解析：跳过 type=web / 0 / 1 与非 http', () {
+    test('订阅 parses 解析：只跳过 type=web 与非 http', () {
+      // ⚠️ 2026-10-30 行为变更：原来连 type=0 / 1 一起跳过，导致大量订阅的
+      // 解析线路被吃掉（页面「订阅线路」整组不出现）。各 TVBox 分支对
+      // 0/1/2/3/4 的定义并不统一，而本 App 的解析器只做「拼模板 → GET →
+      // 取 url」，根本不看 type ⇒ 只保留 `web` 这一条硬排除。
       final store = ParseLineStore.instance;
       store.syncFromParses([
         {'name': '网页型', 'type': 'web', 'url': 'https://a.com/x'},
@@ -135,8 +139,12 @@ var backup = 'https://cdn.x.com/a/b/backup.mp4';
         {'name': '可用一', 'type': 'json', 'url': 'https://a.com/p?url={url}'},
         {'name': '', 'type': 'json', 'url': 'https://a.com/q?url={url}'},
       ]);
-      expect(store.subscriptionLines.length, 2);
-      expect(store.subscriptionLines.first.name, '可用一');
+      // web 与非 http 被排除，0/1/json 全部保留 ⇒ 4 条
+      expect(store.subscriptionLines.length, 4);
+      expect(
+        store.subscriptionLines.map((l) => l.name).toList(),
+        ['聚合0', '聚合1', '可用一', isNotEmpty],
+      );
       // 没写 name 的自动编号
       expect(store.subscriptionLines.last.name, isNotEmpty);
     });

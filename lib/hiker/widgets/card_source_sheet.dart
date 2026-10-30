@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/hiker/services/hiker_prefs.dart';
 import 'package:tvbox/widgets/card_action_sheet.dart';
 
 /// 「源切换」面板里的一条源。
@@ -233,6 +234,73 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
       if (k.isNotEmpty && !seen.contains(k)) seen.add(k);
     }
     return seen;
+  }
+
+  /// 类型 tab 的**短名**：海阔脚本 → 脚本，海阔小程序脚本 → 程序。
+  ///
+  /// 用户 2026-10-30：「tab 名称应该是全部、脚本、程序」。
+  /// 只缩短显示，`_kind` 里存的仍是全称，过滤口径不变。
+  String _kindShort(String kind) {
+    if (kind.contains('小程序')) return '程序';
+    if (kind.contains('脚本')) return '脚本';
+    return kind;
+  }
+
+  /// 长按分类胶囊改名。
+  ///
+  /// 只改**显示**（写进 `HikerPrefs` 的别名表），不动源数据 ——
+  /// 所以改名后过滤、计数、重新导入都照常按原名走。
+  Future<void> _renameGroup(String raw) async {
+    final ctrl = TextEditingController(
+      text: HikerPrefs.instance.groupLabel(raw),
+    );
+    final r = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        title: Text(
+          '重命名分类',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontHeadline,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '原名：$raw',
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: AppTheme.fontCaption,
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+              decoration: const InputDecoration(hintText: '留空 = 恢复默认'),
+              onSubmitted: (v) => Navigator.pop(ctx, v),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (r == null) return;
+    await HikerPrefs.instance.setGroupAlias(raw, r);
+    if (mounted) setState(() {});
   }
 
   /// 先按类型过滤，再按分类，最后按关键词（三者叠加）
@@ -574,27 +642,38 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
                   ],
                 ),
               ),
-              // 类型 tab（一级）：海阔脚本 / 海阔小程序脚本。
-              // 只有两种以上类型同时存在时才显示 —— 单一类型白占一行。
+              // 类型 tab（一级）：全部 / 脚本 / 程序。
+              //
+              // 2026-10-30 用户：「tab 名称应该是全部、脚本、程序」——
+              // 原来显示全称「全部类型 / 海阔脚本 / 海阔小程序脚本」，
+              // 一行里三个长词挤在一起，小屏上直接被截断。
+              // 类型值本身（`kind`）仍用全称，只有**显示**缩短，
+              // 所以过滤逻辑不受影响。
               if (kinds.length >= 2)
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 0, 2),
-                  child: SizedBox(
-                    height: 30,
-                    child: ListView(
-                      scrollDirection: Axis.horizontal,
-                      children: [
-                        _groupChip(
-                          '全部类型',
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 2),
+                  child: Row(
+                    children: [
+                      // 用户 2026-10-30：「这个框要一样的尺寸，2 个就是两等分，
+                      // 3 个就是三等分，4 个就是四等分」—— 用 Expanded 平分，
+                      // 不再让文字长度决定宽度（原来「海阔小程序脚本」比
+                      // 「全部」宽一倍，一排胶囊参差不齐）。
+                      Expanded(
+                        child: _groupChip(
+                          '全部',
                           _kind.isEmpty,
                           () => setState(() {
                             _kind = '';
                             _group = '';
                           }),
+                          margin: EdgeInsets.zero,
                         ),
-                        for (final k in kinds)
-                          _groupChip(
-                            k,
+                      ),
+                      for (final k in kinds) ...[
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _groupChip(
+                            _kindShort(k),
                             _kind == k,
                             () => setState(() {
                               _kind = k;
@@ -602,13 +681,18 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
                               // 留着旧分类会出现"切过去一片空白"
                               _group = '';
                             }),
+                            margin: EdgeInsets.zero,
                           ),
+                        ),
                       ],
-                    ),
+                    ],
                   ),
                 ),
               // 分类 tab：与「海阔源管理」页同一口径（源自己的 group），
               // 只有一个分类时不显示（省一行高度）
+              //
+              // 2026-10-30 用户：「下面那个名称分组要可以修改」——
+              // 长按胶囊即可改名（存进 `HikerPrefs` 的别名表，只改显示）。
               if (groups.length >= 2)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 0, 2),
@@ -624,9 +708,10 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
                         ),
                         for (final g in groups)
                           _groupChip(
-                            g,
+                            HikerPrefs.instance.groupLabel(g),
                             _group == g,
                             () => setState(() => _group = g),
+                            onLongPress: () => _renameGroup(g),
                           ),
                       ],
                     ),
@@ -739,11 +824,19 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
   }
 
   /// 分类胶囊（与「海阔源管理」页的 `_chip` 同款：选中 = 强调淡底 + 加粗）
-  Widget _groupChip(String label, bool on, VoidCallback onTap) {
+  Widget _groupChip(
+    String label,
+    bool on,
+    VoidCallback onTap, {
+    VoidCallback? onLongPress,
+    EdgeInsets margin = const EdgeInsets.only(right: 8),
+  }) {
     return GestureDetector(
       onTap: onTap,
+      onLongPress: onLongPress,
       child: Container(
-        margin: const EdgeInsets.only(right: 8),
+        height: 30,
+        margin: margin,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         alignment: Alignment.center,
         decoration: BoxDecoration(
@@ -752,6 +845,9 @@ class _CardSourceSheetState extends State<CardSourceSheet> {
         ),
         child: Text(
           label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
           style: TextStyle(
             color: on ? AppTheme.accentOnSurface : AppTheme.textSecondary,
             fontSize: AppTheme.fontCaption,

@@ -136,23 +136,11 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
             ),
             const SizedBox(width: 14),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('远程引擎',
-                      style: TextStyle(
-                          fontSize: AppTheme.fontSubhead + 0.5,
-                          fontWeight: FontWeight.w500,
-                          color: AppTheme.textPrimary)),
-                  const SizedBox(height: 2),
-                  Text('把源脚本放自己服务器跑；不开就一直用本机',
-                      style: TextStyle(
-                          fontSize: AppTheme.fontCaption,
-                          height: 1.3,
-                          color: AppTheme.textTertiary)),
-                ],
-              ),
+              child: Text('远程引擎',
+                  style: TextStyle(
+                      fontSize: AppTheme.fontSubhead + 0.5,
+                      fontWeight: FontWeight.w500,
+                      color: AppTheme.textPrimary)),
             ),
             AppSwitch(
               value: _remote.enabled,
@@ -286,9 +274,10 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
         ),
         SettingsHelpItem(
           icon: Icons.terminal_rounded,
-          title: '本地爬虫 / XBPQ',
-          body: '「本地爬虫」是总开关：关掉后只用订阅里激活的源。XBPQ 没有独立'
-              '开关，跟着它一起生效；本地 Python 源与 XBPQ 规则源都在子页里管理。',
+          title: '本地PY / 本地JS / XBPQ',
+          body: '「本地PY」是 Python 源的总开关：关掉后只用订阅里激活的源。'
+              '本地 PY、本地 JS、XBPQ 三族各自有独立开关与计数，互不影响，'
+              '点进去分别管理。',
         ),
         SettingsHelpItem(
           icon: Icons.cloud_outlined,
@@ -332,10 +321,7 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
           () => _card(
             SettingsRow(
               icon: Icons.terminal_rounded,
-              title: '本地爬虫',
-              subtitle: ApiConfig.instance.localSourcesEnabled.value
-                  ? '已启用：本地源会出现在源面板 / 搜索里'
-                  : '已关闭：优先使用订阅激活的源',
+              title: '本地PY',
               value: '${ApiConfig.instance.localPythonSourceCount} 个',
               trailingSwitch: true,
               switchValue: ApiConfig.instance.localSourcesEnabled.value,
@@ -358,9 +344,6 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
             SettingsRow(
               icon: Icons.code_rounded,
               title: '本地JS',
-              subtitle: ApiConfig.instance.localJsEnabled.value
-                  ? '已启用：JS 源会出现在源面板 / 搜索里'
-                  : '已关闭：JS 源不参与源面板 / 搜索',
               value: '${ApiConfig.instance.localJsSourceCount} 个',
               trailingSwitch: true,
               switchValue: ApiConfig.instance.localJsEnabled.value,
@@ -380,9 +363,6 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
             SettingsRow(
               icon: Icons.rule_rounded,
               title: 'XBPQ',
-              subtitle: ApiConfig.instance.localXbpqEnabled.value
-                  ? '已启用：规则源会出现在源面板 / 搜索里'
-                  : '已关闭：规则源不参与源面板 / 搜索',
               value: '${ApiConfig.instance.localXbpqSourceCount} 个',
               trailingSwitch: true,
               switchValue: ApiConfig.instance.localXbpqEnabled.value,
@@ -412,7 +392,6 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
           SettingsRow(
             icon: Icons.shield_outlined,
             title: 'Cloudflare 验证',
-            subtitle: '验证一次后自动复用，不再重复弹窗',
             onTap: () => Get.to(() => const CfSitesPage()),
           ),
         ),
@@ -421,7 +400,6 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
           SettingsRow(
             icon: Icons.telegram,
             title: 'Telegram 源',
-            subtitle: '扫码登录，用自己加入的群 / 频道当片库',
             onTap: () => Get.to(() => const TgSourcePage()),
           ),
         ),

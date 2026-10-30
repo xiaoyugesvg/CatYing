@@ -22,6 +22,9 @@ class HikerPrefs extends ChangeNotifier {
   static const String _kSortBy = 'hiker_source_sort_v1';
   static const String _kHistory = 'hiker_search_history_v1';
 
+  /// 分类胶囊的「显示名」别名表（原名 → 用户改的名字）。
+  static const String _kGroupAlias = 'hiker_group_alias_v1';
+
   static const List<int> columnOptions = [2, 3, 4];
   static const List<int> timeoutOptions = [15, 30, 45, 60, 90];
   static const List<int> maxItemOptions = [100, 300, 500, 1000];
@@ -34,6 +37,14 @@ class HikerPrefs extends ChangeNotifier {
   bool _showRawUrl = false;
   String _sortBy = 'default';
   List<String> _history = [];
+
+  /// 分类显示名：`原名 → 用户改的名字`。
+  ///
+  /// 源脚本自带的 `group` 常常是 `18+` / `10内网10` / `F频道` 这种短码 ——
+  /// 用户既看不出含义、又改不了（2026-10-30：「下面那个名称分组要可以修改」）。
+  /// 这里存一份别名：**只改显示，不改数据** —— 过滤/统计仍用原名，
+  /// 所以改名不会把源筛丢，也不会影响脚本重新导入。
+  Map<String, String> _groupAlias = {};
 
   int get columns => _columns;
   bool get showDesc => _showDesc;
@@ -53,6 +64,41 @@ class HikerPrefs extends ChangeNotifier {
 
   List<String> get searchHistory => List.unmodifiable(_history);
 
+  /// 分类胶囊的显示名（用户改过就用改的，否则原名）
+  String groupLabel(String raw) {
+    final a = _groupAlias[raw];
+    return (a == null || a.isEmpty) ? raw : a;
+  }
+
+  /// 是否改过这个分类的名字（用于菜单里显示「恢复默认」）
+  bool hasGroupAlias(String raw) => _groupAlias.containsKey(raw);
+
+  Map<String, String> get groupAliases => Map.unmodifiable(_groupAlias);
+
+  /// 设置分类显示名。传空串或与原名相同 = 恢复默认。
+  Future<void> setGroupAlias(String raw, String alias) async {
+    final k = raw.trim();
+    if (k.isEmpty) return;
+    final v = alias.trim();
+    if (v.isEmpty || v == k) {
+      if (_groupAlias.remove(k) == null) return;
+    } else {
+      if (_groupAlias[k] == v) return;
+      _groupAlias[k] = v;
+    }
+    await _saveGroupAlias();
+    notifyListeners();
+  }
+
+  Future<void> _saveGroupAlias() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setString(_kGroupAlias, jsonEncode(_groupAlias));
+    } catch (e) {
+      AppLog.instance.w('[Hiker] 保存分类别名失败: $e');
+    }
+  }
+
   bool _loaded = false;
   bool get loaded => _loaded;
 
@@ -70,6 +116,17 @@ class HikerPrefs extends ChangeNotifier {
       _showRawUrl = p.getBool(_kShowRaw) ?? false;
       _sortBy = p.getString(_kSortBy) ?? 'default';
       _history = p.getStringList(_kHistory) ?? [];
+      final aliasRaw = p.getString(_kGroupAlias);
+      if (aliasRaw != null && aliasRaw.isNotEmpty) {
+        final d = jsonDecode(aliasRaw);
+        if (d is Map) {
+          _groupAlias = {
+            for (final e in d.entries)
+              if (e.value is String && (e.value as String).isNotEmpty)
+                e.key.toString(): e.value as String,
+          };
+        }
+      }
     } catch (e) {
       AppLog.instance.log('[Hiker] 设置加载失败: $e');
     }

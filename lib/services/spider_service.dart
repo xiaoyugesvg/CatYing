@@ -116,11 +116,14 @@ class SpiderService {
               // 某些 Spider 响应可能返回数组，包装为对象
               return {'list': decoded};
             }
+            _lastPostFailure =
+                '返回的不是 JSON 对象（${decoded.runtimeType}）';
             AppLog.instance.log(
               '[SpiderService] 响应不是JSON对象: $url, body类型=${decoded.runtimeType}',
             );
             return null;
           } catch (e) {
+            _lastPostFailure = '返回内容无法按 JSON 解析（${responseBody.length} 字节）';
             AppLog.instance.log(
               '[SpiderService] JSON解析失败: $url, 错误=$e, body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}',
             );
@@ -128,6 +131,7 @@ class SpiderService {
           }
         } else {
           lastHttpStatus = statusCode;
+          _lastPostFailure = 'HTTP $statusCode';
           AppLog.instance.log(
             '[SpiderService] HTTP错误 $statusCode: $url, body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}',
           );
@@ -159,11 +163,15 @@ class SpiderService {
         final code = e.response?.statusCode ?? 0;
         lastHttpStatus = code;
         final respBody = e.response?.data?.toString() ?? '';
+        _lastPostFailure = '${e.type}'
+            '${code > 0 ? ' HTTP $code' : ''}'
+            '${e.message == null ? '' : '（${e.message}）'}';
         AppLog.instance.log(
           '[SpiderService] POST $url 失败: code=$code, type=${e.type}, message=${e.message}, body=${respBody.length > 500 ? respBody.substring(0, 500) : respBody}',
         );
         return null;
       } catch (e) {
+        _lastPostFailure = '$e';
         AppLog.instance.log('[SpiderService] POST $url 未知错误: $e');
         return null;
       }
@@ -311,6 +319,22 @@ class SpiderService {
   /// 最近一次 `_postJSON` 的 HTTP 状态码（0 = 连接层错误）。
   /// 用来判定"404 = 路由不存在 = key 不对"，从而触发换 key 重试。
   int? lastHttpStatus;
+
+  /// 最近一次 `_postJSON` 失败的**具体原因**（HTTP 码 / 非 JSON / 连接异常）。
+  ///
+  /// 为什么单独记：单候选路径（本地源 / 私有协议 / 主源刷新）失败时
+  /// `_postSpiderWithKeyFallback` 原来**不设 lastError** 就直接 return null，
+  /// 上层只能抛笼统的「该源没有返回任何内容」—— 用户看到这句话时，
+  /// 根本分不清是端口打错（连接被拒）、路由 404、脚本 500，还是返回了 HTML。
+  /// 记下现场后由 [_describeSpiderFailure] 拼成可读文案。
+  String? _lastPostFailure;
+
+  /// 把最近一次失败拼成一句用户能看懂的话。
+  String _describeSpiderFailure(String action) {
+    final detail = _lastPostFailure;
+    if (detail == null || detail.isEmpty) return '引擎没有响应（原因未知）';
+    return '引擎请求失败：$detail（动作 $action）';
+  }
 
   /// Node 槽位里当前驻留的脚本是不是 [url]。
   ///
@@ -666,6 +690,7 @@ class SpiderService {
         return null;
       }
       lastHttpStatus = null;
+      _lastPostFailure = null;
       final url = _buildSpiderUrl(k, t, _nodeBase(api), action);
       AppLog.instance.log('[SpiderService] $action: $url');
       final r = await _postJSON(url, body);
@@ -677,7 +702,10 @@ class SpiderService {
         return r;
       }
       // 非 404（超时 / 500 / 连接错误）= 真故障：不换 key/type，避免掩盖
-      if (lastHttpStatus != 404) return null;
+      if (lastHttpStatus != 404) {
+        lastError ??= _describeSpiderFailure(action);
+        return null;
+      }
       final next = i + 1 < attempts.length ? attempts[i + 1] : null;
       if (next == null) break;
       AppLog.instance.log(
@@ -688,9 +716,16 @@ class SpiderService {
                   '换下一个候选 key=${next.key}',
       );
     }
-    // 单候选且只试过一次（没换过）⇒ 维持原行为：错误文案由 _postJSON 给，
-    // 不动缓存（下次进来还能复用，避免把一次偶发 404 放大成"整源作废"）
-    if (!mayVary) return null;
+    // 单候选且只试过一次（没换过）⇒ 维持原行为：不动缓存
+    // （下次进来还能复用，避免把一次偶发 404 放大成"整源作废"）。
+    // ⚠️ 但**必须把失败原因带上**：这条路径覆盖了本地 JS/PY 源、OmniBox 私有协议、
+    //    主源刷新 —— 都是最常用的一批源。原来 lastError 为 null 就 return，
+    //    上层只能抛「该源没有返回任何内容」，把"端口打错 / 404 / 500 / 非 JSON"
+    //    全糊成一句，完全没法定位（2026-10-30 用户报「官方聚合用不了」即此）。
+    if (!mayVary) {
+      lastError ??= _describeSpiderFailure(action);
+      return null;
+    }
     // 换过 key / 校正过 type 仍全 404 ⇒ 缓存不可信，作废，下次重新问
     _loadedScriptKey = '';
     _loadedScriptCandidates = [];

@@ -383,7 +383,16 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
     if (v != null) await PlayerPrefs.instance.setVideoFillMode(v);
   }
 
-  /// 数值步进行（− 值 ＋），对应参考图的默认倍速/快进秒数/长按倍速
+  /// 数值步进行（− 值 ＋），对应参考图的默认倍速/快进秒数/长按倍速。
+  ///
+  /// ⚠️ 2026-10-30 改用 [SettingsRow] 承载。原来这里自己画 Row：
+  /// 图标 32×32 / 圆角 9 / 无描边 / 水平内边距 `spacingXS`(4)，
+  /// 而同一张卡片里的开关行（`unifiedSwitchRow`）是
+  /// 36×36 / 圆角 10 / 0.5 描边 / 内边距 `spacingMD`(16) ⇒
+  ///   · 图标列错开 12px（截图里"默认倍速"的图标明显比下面的偏左偏小）
+  ///   · 行高 44 vs 64，卡片被撑得一段紧一段松
+  ///   · 右侧 ± 按钮离边 4px、开关离边 16px，不在同一条竖线上
+  /// 现在图标 / 内边距 / 行高全部由 SettingsRow 统一，± 控件走 `trailing` 槽。
   Widget _stepperRow({
     required IconData icon,
     required String title,
@@ -396,44 +405,30 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
   }) {
     final canMinus = value > min + 1e-6;
     final canPlus = value < max - 1e-6;
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppTheme.spacingXS, vertical: 6),
-      child: Row(
+    return SettingsRow(
+      icon: icon,
+      title: title,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 32,
-            height: 32,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: AppTheme.accentColor.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(9),
-            ),
-            child: Icon(icon, size: 17, color: AppTheme.accentColor),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(title,
-                style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: AppTheme.fontSubhead + 0.5,
-                    fontWeight: FontWeight.w500)),
-          ),
-          _stepButton(Icons.remove, canMinus, () {
-            final v = (value - step);
+          _stepButton(Icons.remove_rounded, canMinus, () {
+            final v = value - step;
             onChanged(v < min ? min : v);
           }),
           SizedBox(
-            width: 54,
-            child: Text(text,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: AppTheme.fontSubhead + 0.5,
-                    fontWeight: FontWeight.w600)),
+            width: 46,
+            child: Text(
+              text,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: AppTheme.fontSubhead + 0.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
-          _stepButton(Icons.add, canPlus, () {
-            final v = (value + step);
+          _stepButton(Icons.add_rounded, canPlus, () {
+            final v = value + step;
             onChanged(v > max ? max : v);
           }),
         ],
@@ -442,6 +437,9 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
   }
 
   Widget _stepButton(IconData icon, bool enabled, VoidCallback onTap) {
+    // 用 accentOnSurface 而不是 accentColor：后者是调色板 primary，
+    // 默认「水墨书香」是墨灰 #3A3A3A —— 深色下这圈淡底和图标几乎看不见。
+    final accent = AppTheme.accentOnSurface;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: enabled ? onTap : null,
@@ -450,14 +448,13 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
         height: 28,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: AppTheme.accentColor
-              .withValues(alpha: enabled ? 0.18 : 0.06),
+          color: accent.withValues(alpha: enabled ? 0.16 : 0.06),
           shape: BoxShape.circle,
         ),
         child: Icon(icon,
             size: 16,
             color: enabled
-                ? AppTheme.accentColor
+                ? accent
                 : AppTheme.textTertiary.withValues(alpha: 0.5)),
       ),
     );

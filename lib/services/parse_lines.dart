@@ -141,8 +141,16 @@ class ParseLineStore extends ChangeNotifier {
 
   /// TVBox `parses` → 线路
   ///
-  /// 跳过 `type=web`（"用内置浏览器打开网页"，不是解析接口）
-  /// 和 `type=0/1`（聚合类型，按"GET 模板找媒体地址"处理不了）。
+  /// 只跳过 `type=web`（"用内置浏览器打开网页"，不是解析接口，走 GET 模板
+  /// 拿不到媒体地址）。
+  ///
+  /// ⚠️ 2026-10-30 修：原来连 `type=0` / `type=1` 一起跳过，导致大量订阅
+  /// 的解析线路**全被吃掉**、页面显示「订阅线路」整组不出现（用户：
+  /// 「解析线路没有导入订阅里面的解析线路吗？」）。
+  /// 各 TVBox 分支对 0/1/2/3/4 的定义并不统一（同一份配置在不同分支里
+  /// 0 和 1 经常是"普通解析 / json 解析"互换），而本 App 的
+  /// `MediaResolver._fromParseLine` 只做「拼模板 → GET → 从响应里取 url」，
+  /// **根本不看 type**，所以没有理由按 type 过滤。只保留 `web` 这一条硬排除。
   static List<ParseLine> _fromParses(List<Map<String, dynamic>> parses) {
     final out = <ParseLine>[];
     for (var i = 0; i < parses.length; i++) {
@@ -150,7 +158,7 @@ class ParseLineStore extends ChangeNotifier {
       final url = (p['url'] ?? '').toString().trim();
       if (url.isEmpty || !url.startsWith('http')) continue;
       final type = (p['type'] ?? '').toString().trim().toLowerCase();
-      if (type == 'web' || type == '0' || type == '1') continue;
+      if (type == 'web') continue;
       final name = (p['name'] ?? '').toString().trim();
       out.add(
         ParseLine(
