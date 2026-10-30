@@ -106,8 +106,15 @@ class ParseLineStore extends ChangeNotifier {
   String _selectedId = '';
   bool _loaded = false;
 
-  /// 本次进程是否已经跟订阅同步过（[ensureSyncedFromConfig] 的去重标记）
+  /// 本次进程是否**真的**从订阅拿到过线路（[ensureSyncedFromConfig] 的去重标记）。
+  ///
+  /// ⚠️ 只在"拿到了非空结果"时才置位。配置还没加载完时 `readParses()` 会
+  /// 返回空列表，如果那也算同步过，之后就永远不会再试 —— 表现就是用户看到的
+  /// 「当前：自动（暂无线路）」一直不变（2026-10-30 截图）。
   bool _syncedFromConfig = false;
+
+  /// 上次尝试同步的时间（节流用，避免页面反复重建时连续打网络）
+  DateTime _lastSyncAttempt = DateTime.fromMillisecondsSinceEpoch(0);
 
   /// 上一次同步失败的原因（空 = 没失败）。设置页用它如实告诉用户
   /// "为什么一条线路都没有"，而不是干巴巴显示 0 条。
@@ -176,15 +183,23 @@ class ParseLineStore extends ChangeNotifier {
   /// 现在改成**懒同步**：任何要展示线路的地方先调一次这里。
   Future<void> ensureSyncedFromConfig() async {
     if (_syncedFromConfig) return;
-    _syncedFromConfig = true;
+    // 10 秒节流：没拿到线路时允许重试（配置可能还在下载），但不能每次
+    // 重建都打一次网络。
+    if (DateTime.now().difference(_lastSyncAttempt) <
+        const Duration(seconds: 10)) {
+      return;
+    }
     await refreshFromConfig();
   }
 
   /// 强制重新读一次订阅 `parses`（设置页的"刷新"、切源后都要用）。
   Future<void> refreshFromConfig() async {
+    _lastSyncAttempt = DateTime.now();
     try {
       final parses = await ApiConfig.instance.readParses();
       _syncError = '';
+      // 空结果也照实覆盖（订阅里确实没有 parses 时要显示 0 条），
+      // 但**不置 `_syncedFromConfig`**，这样下次进页面还会再试一次。
       syncFromParses(parses);
     } catch (e) {
       _syncError = '$e';
@@ -195,7 +210,7 @@ class ParseLineStore extends ChangeNotifier {
 
   /// 用订阅配置里的 `parses` 覆盖订阅线路（配置一换就整体替换）
   void syncFromParses(List<Map<String, dynamic>> parses) {
-    _syncedFromConfig = true;
+    _syncedFromConfig = parses.isNotEmpty;
     _subscription = _fromParses(parses);
     if (_selectedId.isNotEmpty && selected == null) {
       _selectedId = '';

@@ -12,6 +12,7 @@ import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:tvbox/pages/settings/controller.dart';
 import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 import 'package:tvbox/pages/settings/sub/parse_lines_page.dart';
+import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/parse_lines.dart';
 
 /// 设置 → 播放设置
@@ -35,6 +36,9 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
   int _skipIntro = 0;
   int _skipOutro = 0;
 
+  /// 监听配置地址变化（配置是启动后异步下载的）
+  Worker? _cfgWorker;
+
   @override
   void initState() {
     super.initState();
@@ -43,6 +47,22 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
     // 的说明）：不在这里主动拉一次，本页「共 N 条」会一直显示 0 ——
     // 而订阅里其实有几十条，用户看到的就是"解析线路没导入"。
     ParseLineStore.instance.ensureSyncedFromConfig();
+    // ⚠️ 光在 initState 拉一次还不够：配置地址是启动后**异步**落地的，
+    //    进页面时可能还没值 ⇒ readParses 返回空 ⇒「当前：自动（暂无线路）」
+    //    就一直挂着（用户 2026-10-30 截图）。这里等地址一落地再补一次。
+    try {
+      _cfgWorker = ever<String>(ApiConfig.instance.configUrl, (_) {
+        ParseLineStore.instance.ensureSyncedFromConfig();
+      });
+    } catch (_) {
+      // 单测环境没有 Get 容器，忽略
+    }
+  }
+
+  @override
+  void dispose() {
+    _cfgWorker?.dispose();
+    super.dispose();
   }
 
   Future<void> _loadSkipDefaults() async {

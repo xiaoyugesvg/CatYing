@@ -147,26 +147,73 @@ class MediaResolver {
     return found;
   }
 
-  /// ① 抓页面本身（含一跳 iframe / `?url=` 跟踪）
+  /// ① 抓页面本身（递归跟 iframe / `?url=` / 返回的网页地址）
   Future<String?> _fromPage(
     Dio dio,
     String pageUrl,
     Map<String, String> headers,
     DateTime deadline,
-  ) async {
-    final html = await _get(dio, pageUrl, headers, deadline);
-    if (html == null) return null;
+  ) =>
+      _digUrl(dio, pageUrl, headers, deadline, 0);
 
-    // 页面里直接有媒体地址（绝大多数 CMS 播放页 / 解析页的 HTML 内嵌 JSON）
-    final direct = _pickBest(MediaSniffer.extractFromText(html));
+  /// 链路最大跳数。
+  ///
+  /// 真实链路经常是三层：`解析接口 → ckplayer 壳页 → iframe 播放器 → m3u8`。
+  /// 只跟一跳会停在壳页上，把**网页地址**当播放地址交给播放器 —— 用户看到的
+  /// 就是「这个地址是网页而不是视频直链」（2026-10-30 截图里的
+  /// `www.ckplayer.vip/jiexi/` 正是这一层）。给到 3 跳够用，再多就是死循环了。
+  static const int _maxChainDepth = 3;
+
+  /// 抓 [url] 并从中挖媒体直链（递归）。
+  Future<String?> _digUrl(
+    Dio dio,
+    String url,
+    Map<String, String> headers,
+    DateTime deadline,
+    int depth,
+  ) async {
+    if (depth > _maxChainDepth) return null;
+    final body = await _get(dio, url, headers, deadline);
+    if (body == null) return null;
+    return _digBody(dio, body, url, headers, deadline, depth);
+  }
+
+  /// 从一段响应正文里挖媒体直链（递归）。
+  ///
+  /// 顺序（每一层都一样）：
+  ///   ① JSON 里的 `url` / `data.url` / `playUrl` —— **必须真的是媒体地址**，
+  ///      不是就当成"下一页"继续挖；
+  ///   ② 正文里直接出现的 m3u8/mp4；
+  ///   ③ iframe 的 src / `?url=` 参数指向的下一页。
+  Future<String?> _digBody(
+    Dio dio,
+    String body,
+    String baseUrl,
+    Map<String, String> headers,
+    DateTime deadline,
+    int depth,
+  ) async {
+    // ① 解析接口绝大多数返回 JSON：`{"url": "https://..."}` / `{"data":{"url":...}}`
+    final fromJson = _mediaFromJson(body);
+    if (fromJson != null) {
+      if (MediaSniffer.isMediaUrl(fromJson)) return fromJson;
+      // 返回的是**另一个网页**（壳页）→ 继续往下挖，别把它当播放地址
+      if (depth < _maxChainDepth) {
+        final deeper =
+            await _digUrl(dio, fromJson, headers, deadline, depth + 1);
+        if (deeper != null) return deeper;
+      }
+    }
+
+    // ② 正文里直接有媒体地址（绝大多数 CMS 播放页 / 解析页的 HTML 内嵌 JSON）
+    final direct = _pickBest(MediaSniffer.extractFromText(body));
     if (direct != null) return direct;
 
-    // 壳页面：跟一跳 iframe 或 `?url=` 参数
-    final nested = _nestedTarget(html);
-    if (nested == null || nested == pageUrl) return null;
-    final inner = await _get(dio, nested, headers, deadline);
-    if (inner == null) return null;
-    return _pickBest(MediaSniffer.extractFromText(inner));
+    // ③ 壳页面：跟 iframe / `?url=`
+    if (depth >= _maxChainDepth) return null;
+    final nested = _nestedTarget(body);
+    if (nested == null || nested == baseUrl) return null;
+    return _digUrl(dio, nested, headers, deadline, depth + 1);
   }
 
   /// ③ 走一条解析线路
@@ -196,23 +243,17 @@ class MediaResolver {
     return _fromOneUrl(dio, encoded, merged, deadline);
   }
 
-  /// 请求一个已拼好的解析地址，并从响应里取媒体直链。
+  /// 请求一个已拼好的解析地址，并从响应里挖出媒体直链。
+  ///
+  /// 走 [_digUrl] 而不是只取一次 `url` 字段：解析接口返回的往往还是
+  /// **网页**（ckplayer / jiexi 这类壳），只取一次就会把网页当播放地址。
   Future<String?> _fromOneUrl(
     Dio dio,
     String target,
     Map<String, String> headers,
     DateTime deadline,
-  ) async {
-    final body = await _get(dio, target, headers, deadline);
-    if (body == null) return null;
-
-    // 解析接口绝大多数返回 JSON：`{"url": "https://..."}` / `{"data":{"url":...}}`
-    final fromJson = _mediaFromJson(body);
-    if (fromJson != null) return fromJson;
-
-    // 少数直接返回一段 HTML / JS
-    return _pickBest(MediaSniffer.extractFromText(body));
-  }
+  ) =>
+      _digUrl(dio, target, headers, deadline, 0);
 
   /// 从 JSON 响应里取 `url` / `data.url` / `playUrl`
   String? _mediaFromJson(String body) {
