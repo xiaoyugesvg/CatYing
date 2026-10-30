@@ -229,111 +229,52 @@ class _NavAppearancePageState extends State<NavAppearancePage> {
   Widget _stylePreview(FloatingNavStyle style) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final pal = AppTheme.palette;
-    BoxDecoration deco;
-    Color dot = Colors.white;
-    switch (style) {
-      case FloatingNavStyle.ink:
-        deco = BoxDecoration(color: FloatingNavSpec.barColor(isDark, pal));
-        dot = pal.primary;
-        break;
-      case FloatingNavStyle.frost:
-        // 磨砂：半透玻璃 + 顶部高光细边
-        deco = BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: isDark
-                ? [
-                    Colors.white.withValues(alpha: 0.16),
-                    Colors.white.withValues(alpha: 0.06),
-                  ]
-                : [
-                    Colors.white.withValues(alpha: 0.74),
-                    Colors.white.withValues(alpha: 0.52),
-                  ],
-          ),
-          border: Border.all(
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.14)
-                : Colors.white.withValues(alpha: 0.85),
-            width: 0.8,
-          ),
-        );
-        dot = pal.primary;
-        break;
-      case FloatingNavStyle.aurora:
-        deco = const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: FloatingNavSpec.auroraColors,
-          ),
-        );
-        dot = Colors.white;
-        break;
-      case FloatingNavStyle.neon:
-        deco = BoxDecoration(
-          color: const Color(0xFF101116),
-          border: Border.all(
-            color: FloatingNavSpec.neonColor.withValues(alpha: 0.9),
-          ),
-        );
-        dot = FloatingNavSpec.neonColor;
-        break;
-      case FloatingNavStyle.reverse:
-        // 反色：与界面明暗相反
-        deco = BoxDecoration(
-          color: isDark
-              ? const Color(0xFFF3F3F5).withValues(alpha: 0.96)
-              : const Color(0xFF1E2024).withValues(alpha: 0.94),
-          border: Border.all(
-            color: isDark
-                ? Colors.black.withValues(alpha: 0.06)
-                : Colors.white.withValues(alpha: 0.10),
-            width: 0.6,
-          ),
-        );
-        dot = isDark ? Colors.black : Colors.white;
-        break;
-      case FloatingNavStyle.solid:
-        // 实心：实底 + 主题色实心选中块
-        deco = BoxDecoration(
-          color: isDark
-              ? const Color(0xFF17171A)
-              : const Color(0xFFFDFDFE),
-          border: Border.all(
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.06)
-                : Colors.black.withValues(alpha: 0.05),
-            width: 0.6,
-          ),
-        );
-        dot = FloatingNavSpec.styleIndicatorColor(
-          FloatingNavStyle.solid,
+    // 2026-10-30 重构：配色/阴影**只在 FloatingNavSpec 里写一份**。
+    // 这里原来又抄了一整套 switch，改真底栏时忘了改预览卡，
+    // 就会出现"预览是磨砂、实际却是另一回事"。
+    final deco = FloatingNavSpec.barDecoration(
+      style: style,
+      isDark: isDark,
+      palette: pal,
+      opacity: SettingsService().navBarOpacity,
+    );
+    // 选中指示器的颜色按风格取（和真底栏同一套）
+    final dot = style == FloatingNavStyle.neon
+        ? FloatingNavSpec.neonColor
+        : FloatingNavSpec.styleIndicatorColor(
+            style,
+            isDark: isDark,
+            palette: pal,
+          );
+    // 形态也要在预览里体现，否则六个风格看着只差颜色
+    final ind = FloatingNavSpec.styleIndicator(style);
+    final radius = FloatingNavSpec.styleRadius(style);
+    return Container(
+      margin: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(radius > 20 ? 20 : radius),
+        boxShadow: FloatingNavSpec.barShadows(
+          style: style,
           isDark: isDark,
           palette: pal,
-        );
-        break;
-    }
-    // 预览也跟随不透明度滑杆
-    final preview = FloatingNavSpec.applyOpacity(
-      deco,
-      SettingsService().navBarOpacity,
-    );
-    // 选中指示器的**形态**也要在预览里体现，否则六个风格看着只差颜色
-    final ind = FloatingNavSpec.styleIndicator(style);
-    return Container(
-      decoration: preview,
-      child: Center(
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _previewItem(dot, ind, active: true),
-            const SizedBox(width: 8),
-            _previewItem(dot, ind),
-            const SizedBox(width: 8),
-            _previewItem(dot, ind),
-          ],
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(radius > 20 ? 20 : radius),
+        child: Container(
+          decoration: deco,
+          child: Center(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _previewItem(dot, ind, active: true),
+                const SizedBox(width: 8),
+                _previewItem(dot, ind),
+                const SizedBox(width: 8),
+                _previewItem(dot, ind),
+              ],
+            ),
+          ),
         ),
       ),
     );

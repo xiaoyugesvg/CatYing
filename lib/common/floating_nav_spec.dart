@@ -203,7 +203,11 @@ class FloatingNavSpec {
   }) {
     switch (style) {
       case FloatingNavStyle.aurora:
-        return Colors.white.withValues(alpha: selected ? 1 : 0.76);
+        // 炫彩底现在锚定在主题色上（见 `auroraColorsFor`），锚点可能很亮
+        //（「蕉红」「碧青」），也可能很暗（「水墨」墨灰）——
+        // 写死白字会在亮渐变上糊掉，所以按锚点亮度取黑/白。
+        final onAurora = _onAurora(palette, isDark: isDark);
+        return onAurora.withValues(alpha: selected ? 1 : 0.78);
       case FloatingNavStyle.neon:
         return selected ? Colors.white : Colors.white.withValues(alpha: 0.58);
       case FloatingNavStyle.reverse:
@@ -243,12 +247,10 @@ class FloatingNavSpec {
     return p;
   }
 
-  /// 炫彩风格的固定渐变色（不跟主题走：主题默认是墨灰，混出来不"炫"）
-  static const List<Color> auroraColors = [
-    Color(0xFF7C4DFF),
-    Color(0xFFFF4D8D),
-    Color(0xFF22D3EE),
-  ];
+  // 2026-10-30：这里原来有个写死的 `auroraColors`（紫/粉/青）。
+  // 重构炫彩风格时发现它正是"底栏跟主题打架"的根源 ——
+  // 用户换成「蕉红」「碧青」后页面全红，底栏还是紫的。
+  // 现在改用 [auroraColorsFor]（以主题强调色为锚点），常量已删除。
 
   /// 霓虹风格的固定主色（描边 / 光晕 / 选中指示器）
   static const Color neonColor = Color(0xFF22D3EE);
@@ -261,7 +263,7 @@ class FloatingNavSpec {
   }) {
     switch (style) {
       case FloatingNavStyle.aurora:
-        return Colors.white.withValues(alpha: 0.26);
+        return _onAurora(palette, isDark: isDark).withValues(alpha: 0.30);
       case FloatingNavStyle.neon:
         return neonColor.withValues(alpha: 0.30);
       case FloatingNavStyle.solid:
@@ -369,5 +371,234 @@ class FloatingNavSpec {
       color: deco.color == null ? null : fade(deco.color!),
       gradient: gradient,
     );
+  }
+
+  // ============================================================
+  // 六种风格的**唯一**配色出口（2026-10-30 重构）
+  // ============================================================
+  //
+  // 用户：「那个菜单栏的主题给我除了第一个外，其余 5 个重构」。
+  //
+  // 重构前的三个毛病：
+  //   ① 配色散在两处 —— `jelly_nav_bar._barDecoration`（真底栏）和
+  //      `nav_appearance_page._styleCard`（设置里的预览卡）各写一份。
+  //      改一边忘另一边，就会"预览跟实际不一样"。
+  //   ② 炫彩写死紫/粉/青、霓虹写死青色、实心写死 #17171A。
+  //      用户换成「碧青」「蕉红」这类配色时，底栏还是那套紫，跟壁纸打架。
+  //   ③ 磨砂/反色/实心的区别只有"底色深浅"，形态上看不出是三种东西。
+  //
+  // 现在：一个函数出装饰、一个函数出阴影，颜色**全部从 palette 推**，
+  // 形态差异（圆角 + 指示器）由 styleRadius / styleIndicator 决定。
+
+  /// 炫彩渐变：以主题强调色为锚点，向紫 / 青各偏一点。
+  ///
+  /// 不用固定的 `auroraColors` 三色：那套在「蕉红」「碧青」主题下会跟
+  /// 整屏颜色打架（底栏紫、页面红）。以 accent 为锚点后，
+  /// 无论换哪套配色，底栏都是"这个主题的彩色版"。
+  static List<Color> auroraColorsFor(
+    JellyPalette palette, {
+    required bool isDark,
+  }) {
+    final base = palette.primary;
+    // 深色底要提亮、浅色底要压深，否则渐变两头会糊在一起没有层次
+    final anchor = isDark
+        ? Color.lerp(base, Colors.white, 0.14)!
+        : Color.lerp(base, Colors.black, 0.10)!;
+    return [
+      Color.lerp(anchor, const Color(0xFF7C4DFF), 0.34)!,
+      anchor,
+      Color.lerp(anchor, const Color(0xFF22D3EE), 0.30)!,
+    ];
+  }
+
+  /// 炫彩渐变上"最清楚"的前景色。
+  ///
+  /// 渐变锚点（中间那色）是主题色的提亮/压深版，亮度跨度很大：
+  /// 「水墨」是深墨灰、「蕉红」是亮红。白字在亮红上只有 2:1 左右，
+  /// 所以按锚点亮度二选一，而不是一律白字。
+  static Color _onAurora(JellyPalette palette, {required bool isDark}) {
+    final anchor = auroraColorsFor(palette, isDark: isDark)[1];
+    return anchor.computeLuminance() > 0.52 ? Colors.black : Colors.white;
+  }
+
+  /// 底栏装饰（六种风格）。
+  ///
+  /// [opacity] 传底栏不透明度（设置里的滑杆）；不传就用默认值。
+  static BoxDecoration barDecoration({
+    required FloatingNavStyle style,
+    required bool isDark,
+    required JellyPalette palette,
+    double? opacity,
+  }) {
+    final radius = BorderRadius.circular(styleRadius(style));
+    final BoxDecoration deco;
+    switch (style) {
+      case FloatingNavStyle.ink:
+        // 水墨：**保持原样**（用户只说"除第一个外"）。
+        deco = BoxDecoration(
+          color: barColor(isDark, palette).withValues(alpha: barAlpha),
+          borderRadius: radius,
+        );
+        break;
+
+      case FloatingNavStyle.frost:
+        // 磨砂 = 液态玻璃：
+        //   · 上亮下暗的玻璃渐变（光源在上方，这是玻璃感的来源）
+        //   · 1px 亮边（不是白色纯描边，深色下会像贴纸）
+        //   · 顶部再压一道更亮的高光带，模拟玻璃边缘的反光
+        deco = BoxDecoration(
+          borderRadius: radius,
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: isDark
+                ? [
+                    Colors.white.withValues(alpha: 0.26),
+                    Colors.white.withValues(alpha: 0.12),
+                    Colors.white.withValues(alpha: 0.06),
+                  ]
+                : [
+                    Colors.white.withValues(alpha: 0.90),
+                    Colors.white.withValues(alpha: 0.70),
+                    Colors.white.withValues(alpha: 0.56),
+                  ],
+            stops: const [0.0, 0.34, 1.0],
+          ),
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.22)
+                : Colors.white.withValues(alpha: 0.95),
+            width: 0.9,
+          ),
+        );
+        break;
+
+      case FloatingNavStyle.aurora:
+        // 炫彩：主题色三色渐变 + 白描边（描边让渐变有"边框"，不然边缘发虚）
+        deco = BoxDecoration(
+          borderRadius: radius,
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: auroraColorsFor(palette, isDark: isDark),
+          ),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.32)),
+        );
+        break;
+
+      case FloatingNavStyle.neon:
+        // 霓虹：深管 + 双层描边（外圈霓虹色、内圈极淡白），像一根发光灯管
+        deco = BoxDecoration(
+          color: const Color(0xFF0C0D12),
+          borderRadius: radius,
+          border: Border.all(
+            color: neonColor.withValues(alpha: 0.92),
+            width: 1.3,
+          ),
+        );
+        break;
+
+      case FloatingNavStyle.reverse:
+        // 反色：底色与界面明暗**相反**，但用调色板的卡片色做反色基准
+        //（写死 #F3F3F5 / #1E2024 的话，暖色主题下底栏会偏冷，像贴上去的）
+        deco = BoxDecoration(
+          borderRadius: radius,
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: isDark
+                ? [
+                    Color.lerp(palette.cardLight, Colors.white, 0.55)!,
+                    Color.lerp(palette.cardLight, Colors.white, 0.30)!,
+                  ]
+                : [
+                    Color.lerp(palette.cardDark, Colors.black, 0.18)!,
+                    palette.cardDark,
+                  ],
+          ),
+          border: Border.all(
+            color: isDark
+                ? Colors.black.withValues(alpha: 0.07)
+                : Colors.white.withValues(alpha: 0.12),
+            width: 0.7,
+          ),
+        );
+        break;
+
+      case FloatingNavStyle.solid:
+        // 实心：用调色板的卡片色做**实底**（不是写死的近白色）
+        deco = BoxDecoration(
+          color: (isDark ? palette.cardDark : palette.cardLight)
+              .withValues(alpha: 0.99),
+          borderRadius: radius,
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.07)
+                : Colors.black.withValues(alpha: 0.06),
+            width: 0.7,
+          ),
+        );
+        break;
+    }
+    return applyOpacity(deco, opacity ?? defaultOpacity);
+  }
+
+  /// 底栏外阴影（炫彩/霓虹带同色光晕，其余是中性投影）。
+  static List<BoxShadow> barShadows({
+    required FloatingNavStyle style,
+    required bool isDark,
+    required JellyPalette palette,
+  }) {
+    switch (style) {
+      case FloatingNavStyle.aurora:
+        return [
+          BoxShadow(
+            color: auroraColorsFor(palette, isDark: isDark)[1]
+                .withValues(alpha: 0.40),
+            blurRadius: 22,
+            offset: const Offset(0, 7),
+          ),
+        ];
+      case FloatingNavStyle.neon:
+        return [
+          BoxShadow(
+            color: neonColor.withValues(alpha: 0.42),
+            blurRadius: 20,
+            spreadRadius: 1,
+          ),
+        ];
+      case FloatingNavStyle.frost:
+        return [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.36 : 0.10),
+            blurRadius: 26,
+            offset: const Offset(0, 8),
+          ),
+        ];
+      case FloatingNavStyle.reverse:
+        return [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.26 : 0.16),
+            blurRadius: 20,
+            offset: const Offset(0, 6),
+          ),
+        ];
+      case FloatingNavStyle.solid:
+        return [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.40 : 0.12),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ];
+      case FloatingNavStyle.ink:
+        return [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: shadowAlpha),
+            blurRadius: shadowBlur,
+            offset: shadowOffset,
+          ),
+        ];
+    }
   }
 }
