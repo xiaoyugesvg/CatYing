@@ -31,25 +31,29 @@ import 'package:tvbox/reading/theme/jelly_palette.dart';
 /// 只用 id 持久化（`nav_style`）；新增风格时在 [fromId] 的 fallback 之外
 /// 直接加一个枚举项即可。
 enum FloatingNavStyle {
-  /// 当前默认：跟随主题色的浅色胶囊
+  /// 当前默认：跟随主题色的浅色胶囊（**用户明确要求保留这个不动**）
   ink('ink', '水墨'),
 
-  /// 磨砂：半透玻璃底 + 顶部高光细边（2026-10-24 重做，取代「液态玻璃」）
-  frost('frost', '磨砂'),
+  // ── 下面 5 个是「照着各家系统抄作业」（用户 2026-10-30：
+  //    「六种底栏风格的，你找网上 mac、鸿蒙、小米等等风格呢」）──
+  //
+  // ⚠️ 枚举的 **id 不改**：它是持久化键（`nav_style`），改了老用户的选择会丢。
+  //    变的是 label 和实际画法 —— id 只是键名，别按字面理解（`neon` 现在画的是 iOS）。
 
-  /// 炫彩：主题色渐变，图标纯白
-  aurora('aurora', '炫彩'),
+  /// macOS 玻璃：Dock 式液态玻璃（大圆角 + 上亮下暗玻璃 + 白色高光边）
+  frost('frost', 'macOS 玻璃'),
 
-  /// 霓虹：深色底 + 发光描边
-  neon('neon', '霓虹'),
+  /// 鸿蒙卡片：HarmonyOS 那种大圆角彩色卡片（主题色浅底 + 同色描边 + 胶囊选中块）
+  aurora('aurora', '鸿蒙卡片'),
 
-  /// 反色：底色与界面明暗**相反**（浅色主题下是深胶囊，深色主题下是浅胶囊），
-  /// 一眼就能和「水墨」区分开（2026-10-24 新增，取代「描边」）
-  reverse('reverse', '反色'),
+  /// iOS 液态玻璃：胶囊 + 近白半透 + 发丝线，选中只变色不加块
+  neon('neon', 'iOS 液态'),
 
-  /// 实心：几乎不透明的实底 + 主题色实心选中块，最"实"、最不挡字
-  ///（2026-10-24 新增，取代「果冻」；用户嫌底栏太透明）
-  solid('solid', '实心');
+  /// 澎湃：小米 HyperOS 的实色圆角卡片（干净、边界清楚、几乎不透明）
+  reverse('reverse', '澎湃'),
+
+  /// 云母：Windows 11 Mica（淡雅底色 + 顶部 1px 亮线 + 底部指示条）
+  solid('solid', '云母 Mica');
 
   const FloatingNavStyle(this.id, this.label);
 
@@ -58,6 +62,9 @@ enum FloatingNavStyle {
 
   /// 旧 id 迁移：改版把「液态玻璃 / 描边 / 果冻」换掉了，
   /// 老用户存的是旧 id，直接回落到最接近的新风格，不要跳回水墨。
+  ///
+  /// 2026-10-30 换成各家系统风格时**没有再改 id**，所以这里不需要新增映射 ——
+  /// 老用户的 frost/aurora/… 会自动变成对应系统风格（同一个 id，新画法）。
   static const Map<String, FloatingNavStyle> _legacy = {
     'liquid': FloatingNavStyle.frost,
     'outline': FloatingNavStyle.reverse,
@@ -76,16 +83,16 @@ enum FloatingNavStyle {
 
 /// 选中指示器的**形态**（不只是颜色，形状也按风格变）。
 enum NavIndicator {
-  /// 圆形色块（水墨 / 炫彩）
+  /// 圆形色块（水墨 / macOS 玻璃）
   blob,
 
-  /// 圆角矩形块（磨砂 / 反色，像 iOS 分段控件）
+  /// 圆角矩形块（鸿蒙 / iOS 液态 / 澎湃，像 iOS 分段控件）
   pill,
 
-  /// 只有选中项下方一个小圆点（实心，最极简）
+  /// 只有选中项下方一个小圆点（最极简，当前无风格使用）
   dot,
 
-  /// 选中项下方一条短横线（霓虹）
+  /// 选中项下方一条短横线（云母 Mica）
   underline,
 }
 
@@ -190,9 +197,16 @@ class FloatingNavSpec {
 
   // ── 风格取色（2026-10-18 新增）────────────────────────────────
   //
-  // 悬浮栏 6 种风格：水墨 / 磨砂 / 炫彩 / 霓虹 / 反色 / 实心。
+  // 悬浮栏 6 种风格（2026-10-30 换成各家系统）：
+  //   水墨 / macOS 玻璃 / 鸿蒙卡片 / iOS 液态 / 澎湃 / 云母 Mica。
   // 图标文字色与选中指示器底色都从这里取，底栏与侧栏共用同一套，
   // 避免"自定义了风格但某一处仍是旧配色"。
+
+  /// 压在 [fill] 上最清楚的文字色（黑或白）。
+  ///
+  /// 强调色跨度很大（墨灰很暗、柠檬黄很亮），写死白字在亮底上只有 2:1。
+  static Color _onFill(Color fill) =>
+      fill.computeLuminance() > 0.55 ? Colors.black : Colors.white;
 
   /// 图标/文字颜色
   static Color styleContentColor(
@@ -203,28 +217,30 @@ class FloatingNavSpec {
   }) {
     switch (style) {
       case FloatingNavStyle.aurora:
-        // 炫彩底现在锚定在主题色上（见 `auroraColorsFor`），锚点可能很亮
-        //（「蕉红」「碧青」），也可能很暗（「水墨」墨灰）——
-        // 写死白字会在亮渐变上糊掉，所以按锚点亮度取黑/白。
-        final onAurora = _onAurora(palette, isDark: isDark);
-        return onAurora.withValues(alpha: selected ? 1 : 0.78);
-      case FloatingNavStyle.neon:
-        return selected ? Colors.white : Colors.white.withValues(alpha: 0.58);
-      case FloatingNavStyle.reverse:
-        // 底是"反色"的：深色主题里胶囊是浅色 ⇒ 字要黑；
-        // 浅色主题里胶囊是深色 ⇒ 字要白。
-        if (isDark) {
-          return selected
-              ? Colors.black
-              : Colors.black.withValues(alpha: 0.55);
-        }
-        return selected ? Colors.white : Colors.white.withValues(alpha: 0.64);
-      case FloatingNavStyle.solid:
-        // 实心：选中块是主题色 ⇒ 白字；未选中压在实底上，对比度足够
+        // 鸿蒙卡片：选中压在**实心主题色胶囊**上，未选中压在淡彩卡片上
         return selected
-            ? Colors.white
+            ? _onFill(palette.primary)
+            : (isDark ? Colors.white.withValues(alpha: 0.72) : palette.navUnselected);
+      case FloatingNavStyle.neon:
+        // iOS：选中只是"变成 tint 色"，没有色块 ⇒ 用主题色本身
+        return selected
+            ? _legibleAccent(isDark, palette)
             : (isDark
-                ? Colors.white.withValues(alpha: 0.62)
+                ? Colors.white.withValues(alpha: 0.56)
+                : palette.navUnselected);
+      case FloatingNavStyle.reverse:
+        // 澎湃：选中压在实心主题色胶囊上
+        return selected
+            ? _onFill(palette.primary)
+            : (isDark
+                ? Colors.white.withValues(alpha: 0.64)
+                : palette.navUnselected);
+      case FloatingNavStyle.solid:
+        // 云母：选中变成主题色（下面是细指示条，不是色块）
+        return selected
+            ? _legibleAccent(isDark, palette)
+            : (isDark
+                ? Colors.white.withValues(alpha: 0.58)
                 : palette.navUnselected);
       case FloatingNavStyle.frost:
       case FloatingNavStyle.ink:
@@ -236,8 +252,7 @@ class FloatingNavSpec {
 
   /// 压在**当前底色**上仍看得清的主题色。
   ///
-  /// 描边/果冻两种风格都把主题色本身当前景：墨灰 (#3A3A3A) 压深色底
-  /// 会糊掉、亮黄压浅底也会糊 ⇒ 亮度不够就往白/黑偏一档。
+  /// 墨灰压深色底会糊掉、亮黄压浅底也会糊 ⇒ 亮度不够就往白/黑偏一档。
   static Color _legibleAccent(bool isDark, JellyPalette palette) {
     final p = palette.primary;
     final l = p.computeLuminance();
@@ -247,14 +262,6 @@ class FloatingNavSpec {
     return p;
   }
 
-  // 2026-10-30：这里原来有个写死的 `auroraColors`（紫/粉/青）。
-  // 重构炫彩风格时发现它正是"底栏跟主题打架"的根源 ——
-  // 用户换成「蕉红」「碧青」后页面全红，底栏还是紫的。
-  // 现在改用 [auroraColorsFor]（以主题强调色为锚点），常量已删除。
-
-  /// 霓虹风格的固定主色（描边 / 光晕 / 选中指示器）
-  static const Color neonColor = Color(0xFF22D3EE);
-
   /// 选中指示器底色
   static Color styleIndicatorColor(
     FloatingNavStyle style, {
@@ -262,23 +269,21 @@ class FloatingNavSpec {
     required JellyPalette palette,
   }) {
     switch (style) {
-      case FloatingNavStyle.aurora:
-        return _onAurora(palette, isDark: isDark).withValues(alpha: 0.30);
-      case FloatingNavStyle.neon:
-        return neonColor.withValues(alpha: 0.30);
-      case FloatingNavStyle.solid:
-        // 实心：选中项直接是实心主题色块
-        return _legibleAccent(isDark, palette);
-      case FloatingNavStyle.reverse:
-        // 反色底上用"底色的反方向"做高亮：深胶囊里提亮、浅胶囊里压暗
-        return isDark
-            ? Colors.black.withValues(alpha: 0.10)
-            : Colors.white.withValues(alpha: 0.20);
       case FloatingNavStyle.frost:
-        // 磨砂：中性高亮，不染主题色，玻璃感更纯
-        return isDark
-            ? Colors.white.withValues(alpha: 0.16)
-            : Colors.black.withValues(alpha: 0.06);
+        // macOS：选中项是一块**更亮的玻璃**（浅色下更白、深色下提亮）
+        return Colors.white.withValues(alpha: isDark ? 0.16 : 0.72);
+      case FloatingNavStyle.aurora:
+        // 鸿蒙：实心主题色胶囊
+        return palette.primary.withValues(alpha: 0.92);
+      case FloatingNavStyle.neon:
+        // iOS：极淡的主题色胶囊（液态玻璃里的那一层）
+        return palette.primary.withValues(alpha: isDark ? 0.26 : 0.14);
+      case FloatingNavStyle.reverse:
+        // 澎湃：实心主题色胶囊
+        return palette.primary.withValues(alpha: 0.94);
+      case FloatingNavStyle.solid:
+        // 云母：底部细指示条，用主题色
+        return _legibleAccent(isDark, palette);
       case FloatingNavStyle.ink:
         return isDark ? palette.navSelectedFg : palette.navSelectedBg;
     }
@@ -293,28 +298,28 @@ class FloatingNavSpec {
 
   static double clampOpacity(double v) => v.clamp(minOpacity, maxOpacity);
 
-  // ── 形态（2026-10-24：用户「你就是换个颜色吗？」）──────────────
+  // ── 形态：照着各家系统来（2026-10-30 重构）──────────────────
   //
-  // 六种风格必须在**形状**上也能一眼区分，不能只有底色不同：
-  //   ink    水墨：标准胶囊 32 + 圆形指示块
-  //   frost  磨砂：更方的 22 + 圆角矩形指示块（iOS 分段感）
-  //   aurora 炫彩：胶囊 32 + 圆形指示块
-  //   neon   霓虹：小圆角 14 + 底部短横线
-  //   reverse反色：满胶囊 999 + 圆角矩形指示块
-  //   solid  实心：方润 16 + 底部小圆点
+  //   ink     水墨     ：胶囊 32 + 圆形指示块（保持原样）
+  //   frost   macOS    ：Dock 圆角 26 + 更亮的玻璃块
+  //   aurora  鸿蒙     ：卡片圆角 20 + 实心主题色胶囊
+  //   neon    iOS      ：完全胶囊 999 + 极淡主题色胶囊
+  //   reverse 澎湃     ：圆角 24 + 实心主题色胶囊
+  //   solid   云母Mica ：小圆角 16 + 底部指示条
 
   /// 该风格的胶囊圆角
   static double styleRadius(FloatingNavStyle style) {
     switch (style) {
       case FloatingNavStyle.ink:
-      case FloatingNavStyle.aurora:
         return radius; // 32
       case FloatingNavStyle.frost:
-        return 22;
+        return 26;
+      case FloatingNavStyle.aurora:
+        return 20;
       case FloatingNavStyle.neon:
-        return 14;
+        return 999; // iOS 完全胶囊
       case FloatingNavStyle.reverse:
-        return 999; // 完全胶囊
+        return 24;
       case FloatingNavStyle.solid:
         return 16;
     }
@@ -324,22 +329,28 @@ class FloatingNavSpec {
   static NavIndicator styleIndicator(FloatingNavStyle style) {
     switch (style) {
       case FloatingNavStyle.ink:
-      case FloatingNavStyle.aurora:
-        return NavIndicator.blob;
       case FloatingNavStyle.frost:
+        return NavIndicator.blob;
+      case FloatingNavStyle.aurora:
+      case FloatingNavStyle.neon:
       case FloatingNavStyle.reverse:
         return NavIndicator.pill;
-      case FloatingNavStyle.neon:
-        return NavIndicator.underline;
       case FloatingNavStyle.solid:
-        return NavIndicator.dot;
+        return NavIndicator.underline;
     }
   }
+
+  /// 该风格要不要给底栏加背景模糊（BackdropFilter）。
+  ///
+  /// 玻璃/云母类都要模糊才有质感；澎湃是实色卡片，模糊纯属白烧一次
+  /// 全屏高斯（macOS runner 上尤其明显）。
+  static bool usesBlur(FloatingNavStyle style) =>
+      style != FloatingNavStyle.reverse;
 
   /// 把整条底栏的底色/渐变按 [opacity] 整体压暗透明度。
   ///
   /// 只在**出口处**统一乘一次 —— 六种风格各自的配色分支不用关心透明度，
-  /// 也就不会出现"调了滑杆只有水墨变了、炫彩没反应"。
+  /// 也就不会出现"调了滑杆只有水墨变了、别的没反应"。
   /// 描边、阴影、图标颜色不参与：描边变淡会让胶囊边缘消失。
   static BoxDecoration applyOpacity(BoxDecoration deco, double opacity) {
     final o = clampOpacity(opacity);
@@ -374,52 +385,21 @@ class FloatingNavSpec {
   }
 
   // ============================================================
-  // 六种风格的**唯一**配色出口（2026-10-30 重构）
+  // 六种风格的**唯一**配色出口
   // ============================================================
   //
-  // 用户：「那个菜单栏的主题给我除了第一个外，其余 5 个重构」。
+  // 2026-10-30 用户两轮要求：
+  //   ①「除第一个外，其余 5 个重构」  ②「找网上 mac、鸿蒙、小米等等风格」
   //
-  // 重构前的三个毛病：
-  //   ① 配色散在两处 —— `jelly_nav_bar._barDecoration`（真底栏）和
-  //      `nav_appearance_page._styleCard`（设置里的预览卡）各写一份。
-  //      改一边忘另一边，就会"预览跟实际不一样"。
-  //   ② 炫彩写死紫/粉/青、霓虹写死青色、实心写死 #17171A。
-  //      用户换成「碧青」「蕉红」这类配色时，底栏还是那套紫，跟壁纸打架。
-  //   ③ 磨砂/反色/实心的区别只有"底色深浅"，形态上看不出是三种东西。
+  // 重构前三个毛病：
+  //   · 配色写在两处（真底栏 + 设置页预览卡），改一边忘另一边就会
+  //     「预览是磨砂、实际却是另一回事」；
+  //   · 炫彩写死紫/粉/青、实心写死 #17171A —— 用户换「蕉红」后
+  //     页面全红、底栏还是紫的；
+  //   · 磨砂/反色/实心看着只差个底色深浅，形态上分不出来。
   //
   // 现在：一个函数出装饰、一个函数出阴影，颜色**全部从 palette 推**，
   // 形态差异（圆角 + 指示器）由 styleRadius / styleIndicator 决定。
-
-  /// 炫彩渐变：以主题强调色为锚点，向紫 / 青各偏一点。
-  ///
-  /// 不用固定的 `auroraColors` 三色：那套在「蕉红」「碧青」主题下会跟
-  /// 整屏颜色打架（底栏紫、页面红）。以 accent 为锚点后，
-  /// 无论换哪套配色，底栏都是"这个主题的彩色版"。
-  static List<Color> auroraColorsFor(
-    JellyPalette palette, {
-    required bool isDark,
-  }) {
-    final base = palette.primary;
-    // 深色底要提亮、浅色底要压深，否则渐变两头会糊在一起没有层次
-    final anchor = isDark
-        ? Color.lerp(base, Colors.white, 0.14)!
-        : Color.lerp(base, Colors.black, 0.10)!;
-    return [
-      Color.lerp(anchor, const Color(0xFF7C4DFF), 0.34)!,
-      anchor,
-      Color.lerp(anchor, const Color(0xFF22D3EE), 0.30)!,
-    ];
-  }
-
-  /// 炫彩渐变上"最清楚"的前景色。
-  ///
-  /// 渐变锚点（中间那色）是主题色的提亮/压深版，亮度跨度很大：
-  /// 「水墨」是深墨灰、「蕉红」是亮红。白字在亮红上只有 2:1 左右，
-  /// 所以按锚点亮度二选一，而不是一律白字。
-  static Color _onAurora(JellyPalette palette, {required bool isDark}) {
-    final anchor = auroraColorsFor(palette, isDark: isDark)[1];
-    return anchor.computeLuminance() > 0.52 ? Colors.black : Colors.white;
-  }
 
   /// 底栏装饰（六种风格）。
   ///
@@ -442,10 +422,9 @@ class FloatingNavSpec {
         break;
 
       case FloatingNavStyle.frost:
-        // 磨砂 = 液态玻璃：
-        //   · 上亮下暗的玻璃渐变（光源在上方，这是玻璃感的来源）
-        //   · 1px 亮边（不是白色纯描边，深色下会像贴纸）
-        //   · 顶部再压一道更亮的高光带，模拟玻璃边缘的反光
+        // ── macOS 玻璃（Dock / Liquid Glass）────────────────────
+        // 关键在**上亮下暗的三段渐变**：光源在上方，这是玻璃感的来源。
+        // 再加一道亮边，边缘才不会糊进壁纸里。
         deco = BoxDecoration(
           borderRadius: radius,
           gradient: LinearGradient(
@@ -453,89 +432,101 @@ class FloatingNavSpec {
             end: Alignment.bottomCenter,
             colors: isDark
                 ? [
-                    Colors.white.withValues(alpha: 0.26),
-                    Colors.white.withValues(alpha: 0.12),
+                    Colors.white.withValues(alpha: 0.20),
+                    Colors.white.withValues(alpha: 0.11),
                     Colors.white.withValues(alpha: 0.06),
                   ]
                 : [
-                    Colors.white.withValues(alpha: 0.90),
-                    Colors.white.withValues(alpha: 0.70),
-                    Colors.white.withValues(alpha: 0.56),
+                    Colors.white.withValues(alpha: 0.66),
+                    Colors.white.withValues(alpha: 0.46),
+                    Colors.white.withValues(alpha: 0.34),
                   ],
-            stops: const [0.0, 0.34, 1.0],
+            stops: const [0.0, 0.45, 1.0],
           ),
           border: Border.all(
             color: isDark
                 ? Colors.white.withValues(alpha: 0.22)
                 : Colors.white.withValues(alpha: 0.95),
-            width: 0.9,
+            width: 1.0,
           ),
         );
         break;
 
       case FloatingNavStyle.aurora:
-        // 炫彩：主题色三色渐变 + 白描边（描边让渐变有"边框"，不然边缘发虚）
+        // ── 鸿蒙卡片（HarmonyOS）────────────────────────────────
+        // 大圆角 + 淡彩卡片：卡片底里掺主题色，配同色描边。
+        // 不是"渐变炫彩"——那是 iOS 时代的做法，鸿蒙的卡片是**安静**的。
+        final card = isDark ? palette.cardDark : palette.cardLight;
         deco = BoxDecoration(
           borderRadius: radius,
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: auroraColorsFor(palette, isDark: isDark),
+            colors: [
+              Color.lerp(card, palette.primary, isDark ? 0.24 : 0.16)!,
+              Color.lerp(card, palette.primary, isDark ? 0.10 : 0.06)!,
+            ],
           ),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.32)),
+          border: Border.all(
+            color: palette.primary.withValues(alpha: isDark ? 0.42 : 0.34),
+            width: 1.0,
+          ),
         );
         break;
 
       case FloatingNavStyle.neon:
-        // 霓虹：深管 + 双层描边（外圈霓虹色、内圈极淡白），像一根发光灯管
+        // ── iOS 液态玻璃（Liquid Glass Tab Bar）──────────────────
+        // 近乎纯白/纯黑的半透材质 + 一道发丝边，选中只变色不加色块。
         deco = BoxDecoration(
-          color: const Color(0xFF0C0D12),
           borderRadius: radius,
+          color: isDark
+              ? const Color(0xFF1C1C1E).withValues(alpha: 0.74)
+              : Colors.white.withValues(alpha: 0.84),
           border: Border.all(
-            color: neonColor.withValues(alpha: 0.92),
-            width: 1.3,
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.12)
+                : Colors.white.withValues(alpha: 0.55),
+            width: 0.8,
           ),
         );
         break;
 
       case FloatingNavStyle.reverse:
-        // 反色：底色与界面明暗**相反**，但用调色板的卡片色做反色基准
-        //（写死 #F3F3F5 / #1E2024 的话，暖色主题下底栏会偏冷，像贴上去的）
+        // ── 澎湃（小米 HyperOS）──────────────────────────────────
+        // 实色圆角卡片：干净、边界清楚、几乎不透明（小米就是"不要玻璃"）。
         deco = BoxDecoration(
           borderRadius: radius,
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: isDark
-                ? [
-                    Color.lerp(palette.cardLight, Colors.white, 0.55)!,
-                    Color.lerp(palette.cardLight, Colors.white, 0.30)!,
-                  ]
-                : [
-                    Color.lerp(palette.cardDark, Colors.black, 0.18)!,
-                    palette.cardDark,
-                  ],
-          ),
+          color: (isDark ? palette.cardDark : palette.cardLight)
+              .withValues(alpha: isDark ? 0.96 : 0.98),
           border: Border.all(
             color: isDark
-                ? Colors.black.withValues(alpha: 0.07)
-                : Colors.white.withValues(alpha: 0.12),
-            width: 0.7,
+                ? Colors.white.withValues(alpha: 0.08)
+                : Colors.black.withValues(alpha: 0.06),
+            width: 0.8,
           ),
         );
         break;
 
       case FloatingNavStyle.solid:
-        // 实心：用调色板的卡片色做**实底**（不是写死的近白色）
+        // ── 云母（Windows 11 Mica）──────────────────────────────
+        // 底色里掺一点点主题色（Mica 就是把壁纸"磨"进材质），
+        // 顶部 1px 亮线是 Windows 的标志性细节。
+        final card = isDark ? palette.cardDark : palette.cardLight;
         deco = BoxDecoration(
-          color: (isDark ? palette.cardDark : palette.cardLight)
-              .withValues(alpha: 0.99),
           borderRadius: radius,
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color.lerp(card, Colors.white, isDark ? 0.06 : 0.45)!,
+              Color.lerp(card, palette.primary, isDark ? 0.10 : 0.04)!,
+            ],
+          ),
           border: Border.all(
             color: isDark
-                ? Colors.white.withValues(alpha: 0.07)
-                : Colors.black.withValues(alpha: 0.06),
-            width: 0.7,
+                ? Colors.white.withValues(alpha: 0.12)
+                : Colors.white.withValues(alpha: 0.70),
+            width: 0.8,
           ),
         );
         break;
@@ -543,52 +534,56 @@ class FloatingNavSpec {
     return applyOpacity(deco, opacity ?? defaultOpacity);
   }
 
-  /// 底栏外阴影（炫彩/霓虹带同色光晕，其余是中性投影）。
+  /// 底栏外阴影（玻璃/卡片用大柔光，澎湃/云母用轻投影）。
   static List<BoxShadow> barShadows({
     required FloatingNavStyle style,
     required bool isDark,
     required JellyPalette palette,
   }) {
     switch (style) {
-      case FloatingNavStyle.aurora:
+      case FloatingNavStyle.frost:
+        // macOS：Dock 那种"浮在桌面上"的大柔光
         return [
           BoxShadow(
-            color: auroraColorsFor(palette, isDark: isDark)[1]
-                .withValues(alpha: 0.40),
-            blurRadius: 22,
+            color: Colors.black.withValues(alpha: isDark ? 0.38 : 0.13),
+            blurRadius: 28,
+            offset: const Offset(0, 9),
+          ),
+        ];
+      case FloatingNavStyle.aurora:
+        // 鸿蒙：同色柔光（卡片自身的颜色透出来一点）
+        return [
+          BoxShadow(
+            color: palette.primary.withValues(alpha: isDark ? 0.28 : 0.18),
+            blurRadius: 20,
             offset: const Offset(0, 7),
           ),
         ];
       case FloatingNavStyle.neon:
+        // iOS：极轻的投影，液态玻璃靠材质而不是阴影
         return [
           BoxShadow(
-            color: neonColor.withValues(alpha: 0.42),
+            color: Colors.black.withValues(alpha: isDark ? 0.26 : 0.08),
             blurRadius: 20,
-            spreadRadius: 1,
-          ),
-        ];
-      case FloatingNavStyle.frost:
-        return [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.36 : 0.10),
-            blurRadius: 26,
-            offset: const Offset(0, 8),
+            offset: const Offset(0, 6),
           ),
         ];
       case FloatingNavStyle.reverse:
+        // 澎湃：轻投影，卡片感
         return [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.26 : 0.16),
-            blurRadius: 20,
-            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: isDark ? 0.30 : 0.10),
+            blurRadius: 16,
+            offset: const Offset(0, 5),
           ),
         ];
       case FloatingNavStyle.solid:
+        // 云母：浅而散的投影
         return [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.40 : 0.12),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: isDark ? 0.24 : 0.08),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
           ),
         ];
       case FloatingNavStyle.ink:

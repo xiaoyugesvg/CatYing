@@ -107,17 +107,37 @@ void main() {
       }
     });
 
-    test('炫彩跟着主题色走（不再写死紫/粉/青）', () {
-      final a = FloatingNavSpec.auroraColorsFor(
-        const JellyPalette.ink(),
-        isDark: true,
-      );
-      final b = FloatingNavSpec.auroraColorsFor(
-        const JellyPalette.bananaRed(),
-        isDark: true,
-      );
-      expect(a, isNot(equals(b)),
-          reason: '换主题色后炫彩渐变没变 ⇒ 还是写死的那套');
+    test('鸿蒙卡片 / 云母都跟着主题色走（不再写死色值）', () {
+      List<Color> grad(FloatingNavStyle style, JellyPalette p) {
+        final deco = FloatingNavSpec.barDecoration(
+          style: style,
+          isDark: true,
+          palette: p,
+          opacity: 1.0,
+        );
+        return (deco.gradient! as LinearGradient).colors;
+      }
+
+      for (final style in [
+        FloatingNavStyle.aurora,
+        FloatingNavStyle.solid,
+      ]) {
+        expect(
+          grad(style, const JellyPalette.ink()),
+          isNot(equals(grad(style, const JellyPalette.bananaRed()))),
+          reason: '${style.label} 换主题色后渐变没变 ⇒ 还是写死的那套',
+        );
+      }
+    });
+
+    test('六种风格都是各家系统的名字（不再是"磨砂/炫彩/霓虹"）', () {
+      final labels = FloatingNavStyle.values.map((e) => e.label).toList();
+      expect(labels.first, '水墨', reason: '用户要求第一个保持不变');
+      expect(labels, contains('macOS 玻璃'));
+      expect(labels, contains('鸿蒙卡片'));
+      expect(labels, contains('iOS 液态'));
+      expect(labels, contains('澎湃'));
+      expect(labels, contains('云母 Mica'));
     });
 
     test('除水墨外的 5 个风格互相不同（不是只换了个颜色）', () {

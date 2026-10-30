@@ -98,7 +98,8 @@ class _JellyNavBarState extends State<JellyNavBar>
   /// 当前栏的取色调色板（可被 widget.palette 覆盖）
   JellyPalette get _pal => widget.palette ?? JellyTheme.palette;
 
-  /// 当前悬浮栏风格（设置页可切换：水墨 / 磨砂 / 炫彩 / 霓虹 / 反色 / 实心）
+  /// 当前悬浮栏风格（设置页可切换：
+  /// 水墨 / macOS 玻璃 / 鸿蒙卡片 / iOS 液态 / 澎湃 / 云母 Mica）
   FloatingNavStyle get _style =>
       FloatingNavStyle.fromId(SettingsService().navStyle);
 
@@ -126,7 +127,7 @@ class _JellyNavBarState extends State<JellyNavBar>
   // 选中指示器为圆形（宽=高），宽度由 itemWidth 与 bandHeight 反算，无固定内边距常量
 
   // 悬浮模式尺寸（高度/边距在 Widget 类中公开定义，供外部避让使用）
-  /// 悬浮胶囊圆角（按风格变：磨砂更方、反色满胶囊、实心方润）
+  /// 悬浮胶囊圆角（按风格变：macOS 26 / 鸿蒙 20 / iOS 满胶囊 / 澎湃 24 / 云母 16）
   double get _floatingRadius => FloatingNavSpec.styleRadius(_style);
   static const _floatingTopPad = FloatingNavSpec.innerPadV; // 悬浮时上下内边距
   static const _floatingIconSize = FloatingNavSpec.iconSize; // 与影视/音乐统一
@@ -339,13 +340,10 @@ class _JellyNavBarState extends State<JellyNavBar>
                     ),
             ),
           );
-          // 炫彩/霓虹/实心是近乎不透明的底，模糊背景没有意义（白耗一次全屏高斯）。
-          // 磨砂/反色/水墨是**半透明**底 —— 不加模糊的话下方正文会原样透出，
-          // 和栏内文字叠在一起看不清，所以它们要走 BackdropFilter。
-          final useBlur = !bgAnim &&
-              _style != FloatingNavStyle.aurora &&
-              _style != FloatingNavStyle.neon &&
-              _style != FloatingNavStyle.solid;
+          // 要不要背景模糊由 FloatingNavSpec.usesBlur 决定：
+          // 玻璃类（macOS/iOS/云母）必须模糊才有质感；澎湃是实色卡片，
+          // 模糊纯属白烧一次全屏高斯。规则只写在那边一处。
+          final useBlur = !bgAnim && FloatingNavSpec.usesBlur(_style);
           return Padding(
             padding: EdgeInsets.fromLTRB(
               horizontalMargin + sidePad,
@@ -479,6 +477,13 @@ class _JellyNavBarState extends State<JellyNavBar>
       NavIndicator.underline => 2.0,
     };
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    // 指示器颜色只取一次：下面的发光阴影必须跟它同色，
+    // 原来这里写死 `neonColor`（青色），换成云母/鸿蒙后光晕颜色就错了。
+    final indColor = FloatingNavSpec.styleIndicatorColor(
+      _style,
+      isDark: isDark,
+      palette: _pal,
+    );
     return Positioned(
       top: indAtBottom ? null : (bandHeight - indHeight) / 2,
       bottom: indAtBottom ? indBottom : null,
@@ -492,18 +497,13 @@ class _JellyNavBarState extends State<JellyNavBar>
           scale: scale,
           child: Container(
             decoration: BoxDecoration(
-              color: FloatingNavSpec.styleIndicatorColor(
-                _style,
-                isDark: isDark,
-                palette: _pal,
-              ),
+              color: indColor,
               borderRadius: BorderRadius.circular(indRadius),
-              // 霓虹的底部短线带一点发光，和"纯色条"区分开
+              // 底部指示条带一点同色发光，和"纯色条"区分开
               boxShadow: ind == NavIndicator.underline
                   ? [
                       BoxShadow(
-                        color: FloatingNavSpec.neonColor
-                            .withValues(alpha: 0.65),
+                        color: indColor.withValues(alpha: 0.65),
                         blurRadius: 8,
                       ),
                     ]

@@ -13,8 +13,11 @@ import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 /// 设置 → 主页页面 → 底栏风格与图标。
 ///
 /// 用户 2026-10-18：
-///   · 悬浮底栏要能换风格（液态玻璃 / 炫彩 / 霓虹…）；
+///   · 悬浮底栏要能换风格；
 ///   · 每个 tab 的图标要能上传图片替换。
+///
+/// 2026-10-30 六种风格改成照着各家系统做：
+///   水墨 / macOS 玻璃 / 鸿蒙卡片 / iOS 液态 / 澎湃 / 云母 Mica。
 ///
 /// 风格与图标都存 [SettingsService]，底栏（JellyNavBar / JellyNavRail）
 /// 读取同一份配置 ⇒ 改完立刻生效。
@@ -238,14 +241,26 @@ class _NavAppearancePageState extends State<NavAppearancePage> {
       palette: pal,
       opacity: SettingsService().navBarOpacity,
     );
-    // 选中指示器的颜色按风格取（和真底栏同一套）
-    final dot = style == FloatingNavStyle.neon
-        ? FloatingNavSpec.neonColor
-        : FloatingNavSpec.styleIndicatorColor(
-            style,
-            isDark: isDark,
-            palette: pal,
-          );
+    // 选中指示器 / 图标文字色都按风格取（和真底栏同一套）。
+    // 指示器色里已经带好了 alpha（鸿蒙 0.92 实心、iOS 0.14 极淡），
+    // 预览里**不能再叠一次 alpha**，否则实心胶囊会被压成一层淡雾。
+    final indColor = FloatingNavSpec.styleIndicatorColor(
+      style,
+      isDark: isDark,
+      palette: pal,
+    );
+    final onColor = FloatingNavSpec.styleContentColor(
+      style,
+      selected: true,
+      isDark: isDark,
+      palette: pal,
+    );
+    final offColor = FloatingNavSpec.styleContentColor(
+      style,
+      selected: false,
+      isDark: isDark,
+      palette: pal,
+    );
     // 形态也要在预览里体现，否则六个风格看着只差颜色
     final ind = FloatingNavSpec.styleIndicator(style);
     final radius = FloatingNavSpec.styleRadius(style);
@@ -267,11 +282,11 @@ class _NavAppearancePageState extends State<NavAppearancePage> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _previewItem(dot, ind, active: true),
+                _previewItem(indColor, onColor, ind, active: true),
                 const SizedBox(width: 8),
-                _previewItem(dot, ind),
+                _previewItem(indColor, offColor, ind),
                 const SizedBox(width: 8),
-                _previewItem(dot, ind),
+                _previewItem(indColor, offColor, ind),
               ],
             ),
           ),
@@ -280,8 +295,15 @@ class _NavAppearancePageState extends State<NavAppearancePage> {
     );
   }
 
-  /// 预览里的一个"导航项"：圆点 + 该风格的选中指示器形态
-  Widget _previewItem(Color c, NavIndicator ind, {bool active = false}) {
+  /// 预览里的一个"导航项"：图标代表点 + 该风格的选中指示器形态
+  ///
+  /// [indicator] 指示块颜色（已含 alpha，直接用）；[content] 图标代表点颜色。
+  Widget _previewItem(
+    Color indicator,
+    Color content,
+    NavIndicator ind, {
+    bool active = false,
+  }) {
     final isPill = ind == NavIndicator.pill;
     final w = isPill ? 24.0 : 16.0;
     return SizedBox(
@@ -296,7 +318,7 @@ class _NavAppearancePageState extends State<NavAppearancePage> {
               width: w,
               height: isPill ? 13 : 16,
               decoration: BoxDecoration(
-                color: c.withValues(alpha: 0.30),
+                color: indicator,
                 borderRadius:
                     BorderRadius.circular(isPill ? 4.5 : 999),
               ),
@@ -309,7 +331,7 @@ class _NavAppearancePageState extends State<NavAppearancePage> {
                 width: 12,
                 height: 2.5,
                 decoration: BoxDecoration(
-                  color: c,
+                  color: indicator,
                   borderRadius: BorderRadius.circular(1.5),
                 ),
               ),
@@ -321,13 +343,16 @@ class _NavAppearancePageState extends State<NavAppearancePage> {
               child: Container(
                 width: 4,
                 height: 4,
-                decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+                decoration: BoxDecoration(
+                  color: indicator,
+                  shape: BoxShape.circle,
+                ),
               ),
             ),
           Container(
             width: 7,
             height: 7,
-            decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+            decoration: BoxDecoration(color: content, shape: BoxShape.circle),
           ),
         ],
       ),

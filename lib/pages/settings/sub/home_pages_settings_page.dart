@@ -191,7 +191,8 @@ class HomePagesSettingsPage extends StatelessWidget {
             return SettingsGroup(
               title: '悬浮导航栏',
               children: [
-                // 底栏风格（水墨/液态玻璃/炫彩/霓虹）+ 每个 tab 的自定义图标
+                // 底栏风格（水墨 / macOS 玻璃 / 鸿蒙卡片 / iOS 液态 / 澎湃 / 云母 Mica）
+                // + 每个 tab 的自定义图标
                 GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: () => Navigator.push(
@@ -224,7 +225,7 @@ class HomePagesSettingsPage extends StatelessWidget {
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                '液态玻璃 / 炫彩 / 霓虹，支持上传图片替换图标',
+                                'macOS 玻璃 / 鸿蒙卡片 / iOS 液态 / 澎湃 / 云母 Mica，支持上传图片替换图标',
                                 style: TextStyle(
                                   color: AppTheme.textTertiary,
                                   fontSize: AppTheme.fontCaption,
