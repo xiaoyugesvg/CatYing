@@ -6,6 +6,7 @@ import 'package:get/get.dart';
 import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/pages/settings/sub/data_source_settings_page.dart';
 import 'package:tvbox/services/app_state.dart';
+import 'package:tvbox/widgets/app_splash_backdrop.dart';
 import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/widgets/circular_logo_progress.dart';
 
@@ -64,19 +65,10 @@ class _AppLoadingViewState extends State<AppLoadingView> {
   Widget build(BuildContext context) {
     final appState = Get.find<AppState>();
 
-    return Container(
-      // 启动页跟随外观（原来写死深色径向渐变，浅色模式下是一片黑）
-      decoration: BoxDecoration(
-        gradient: RadialGradient(
-          center: const Alignment(0, -0.35),
-          radius: 1.3,
-          colors: [
-            AppTheme.backgroundTertiary,
-            AppTheme.backgroundSecondary,
-            AppTheme.backgroundPrimary,
-          ],
-        ),
-      ),
+    // 背景必须与「启动首帧」(`_BootSplash`) **完全同源**，否则从启动页切到
+    // 本页时整块底色会跳一下（用户读作"先黑屏再出加载页"）。
+    // 唯一实现见 `AppSplashBackdrop`。
+    return AppSplashBackdrop(
       child: SafeArea(
         child: Center(
           child: Obx(() {

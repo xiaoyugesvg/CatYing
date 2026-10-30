@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/material.dart';
@@ -64,6 +65,91 @@ class ThemeModeStore {
     AppBrightness.isLight.value = light;
   }
 
+  // ── 首帧同步预读（2026-10-30）────────────────────────────────────
+  //
+  // 问题：`AppBrightness.isLight` 的初始值是 `false`（深色），而真正的外观
+  //   要等 [load] —— 那是在 `_initAppServices()` 里，离首帧还有几十个 await。
+  //   于是**启动首帧**用的是深色：深色底 + 深色启动页 ⇒ 用户看到的就是
+  //   「一打开是一片黑，过一会儿才变成他选的浅色」。
+  //
+  // 修法：把"用户选的是哪个模式"**同步**读出来（只读一个几字节的小文件），
+  //   在 `runApp` **之前**就把 [notifier] / `AppBrightness` 定好。
+  //   读不到（首次安装 / 文件缺失 / 非 iOS）就保持「跟随系统」——
+  //   与改动前完全一致，不会更糟。
+  //
+  // 为什么不用 SharedPreferences：它的 `getInstance()` 只能异步，
+  //   而这里必须赶在首帧之前 —— 一个 `await` 就等于把黑屏还回去。
+  // 为什么不去读 `prefs_mirror.json`：那是全量快照（几十 KB、还要 jsonDecode），
+  //   为取一个字段去解析它，比专门落一个几字节的小文件贵得多。
+
+  /// 首帧预读文件名（与 `PrefsMirror` 无关，刻意独立）。
+  static const String appearanceFileName = 'appearance.txt';
+
+  /// 测试用：覆盖预读文件路径（默认 `<Documents>/appearance.txt`）。
+  ///
+  /// 单测里绝不能让它写到真实 `~/Documents`（macOS 上跑测试会污染用户目录），
+  /// 所以给一个显式可替换的入口。
+  @visibleForTesting
+  static String? debugAppearancePathOverride;
+
+  static String? _appearancePath() {
+    final override = debugAppearancePathOverride;
+    if (override != null) return override;
+    // iOS / macOS 的沙盒里 `HOME/Documents` 就是应用文档目录，
+    // 可以**同步**拿到（`path_provider` 只能异步，用不了）。
+    if (!Platform.isIOS && !Platform.isMacOS) return null;
+    try {
+      final home = Platform.environment['HOME'];
+      if (home == null || home.isEmpty) return null;
+      final d = Directory('$home/Documents');
+      if (!d.existsSync()) return null;
+      return '${d.path}/$appearanceFileName';
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String modeToText(ThemeMode m) => switch (m) {
+        ThemeMode.light => 'light',
+        ThemeMode.system => 'system',
+        _ => 'dark',
+      };
+
+  static ThemeMode textToMode(String raw) => switch (raw.trim().toLowerCase()) {
+        'light' => ThemeMode.light,
+        'dark' => ThemeMode.dark,
+        _ => ThemeMode.system,
+      };
+
+  /// 同步落盘（几字节）。失败只影响"下次首帧的底色"，不影响任何功能。
+  static void _writeAppearanceSync(ThemeMode m) {
+    try {
+      final p = _appearancePath();
+      if (p == null) return;
+      File(p).writeAsStringSync(modeToText(m), flush: true);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  /// 启动**最早期**调用（必须早于 `runApp`）：同步定好明暗，首帧就用对颜色。
+  ///
+  /// 放在 `WidgetsFlutterBinding.ensureInitialized()` 之后、`runApp` 之前。
+  static void preloadSync() {
+    var m = ThemeMode.system;
+    try {
+      final p = _appearancePath();
+      if (p != null) {
+        final f = File(p);
+        if (f.existsSync()) m = textToMode(f.readAsStringSync());
+      }
+    } catch (_) {
+      /* 读不到 → 跟随系统 */
+    }
+    notifier.value = m;
+    _syncBrightness(m);
+  }
+
   static Future<void> load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -77,6 +163,8 @@ class ThemeModeStore {
         _ => ThemeMode.dark,
       };
       _syncBrightness(notifier.value);
+      // 顺手把首帧预读文件对齐一次：文件缺失 / 落后于 prefs 时自愈。
+      _writeAppearanceSync(notifier.value);
     } catch (e) {
       /* ignore */
     }
@@ -86,16 +174,11 @@ class ThemeModeStore {
     if (notifier.value == m) return;
     notifier.value = m;
     _syncBrightness(m);
+    // 首帧预读文件：**同步**写（几字节），下次冷启动第一帧就能用对明暗。
+    _writeAppearanceSync(m);
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-        'theme_mode',
-        switch (m) {
-          ThemeMode.light => 'light',
-          ThemeMode.system => 'system',
-          _ => 'dark',
-        },
-      );
+      await prefs.setString('theme_mode', modeToText(m));
       // 与其它设置项一致：改完立刻落盘 + 写镜像快照。原来漏挂这个钩子 ⇒
       // 「改完明暗马上划掉 App」时改动不在镜像里，重启可能被旧值回退。
       PrefsMirror.snapshotSoon();

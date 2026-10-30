@@ -62,6 +62,8 @@ import 'package:tvbox/services/tmdb_service.dart';
 import 'package:tvbox/pages/search/controller.dart';
 import 'package:tvbox/music/services/library_store.dart';
 import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/app_splash_backdrop.dart';
+import 'package:tvbox/widgets/circular_logo_progress.dart';
 import 'package:tvbox/widgets/video_player_pip.dart';
 import 'package:tvbox/webhome/webhtv_playback_sync_service.dart';
 import 'package:tvbox/rfw_theme/rfw_theme_store.dart';
@@ -70,6 +72,17 @@ import 'package:tvbox/services/parse_lines.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // ── 首帧明暗：**同步**预读（2026-10-30）──────────────────────────
+  //
+  // `AppBrightness.isLight` 的初始值是 `false`（深色），真正的外观要等
+  // `ThemeModeStore.load()` —— 那是在 `_initAppServices()` 里，离首帧还有
+  // 几十个 await。于是首帧永远按深色画 ⇒ 浅色用户一打开就是**一片黑**。
+  //
+  // 这里只读一个几字节的小文件（`<Documents>/appearance.txt`，由
+  // `ThemeModeStore.set/load` 同步维护），零 await，赶在 `runApp` 之前把
+  // 明暗定好。读不到就保持「跟随系统」，与改动前一致。
+  ThemeModeStore.preloadSync();
 
   // 初始化 AppLog — 必须早于 runApp, 否则 handleSceneActive 等
   // 关键事件写不进 <Documents>/nodejs-project/runtime/app.log
@@ -566,43 +579,59 @@ class _BootGate extends StatelessWidget {
   }
 }
 
-/// 首帧启动页 —— **完全自包含**：不碰 GetX、不碰 AppTheme、不读任何服务。
+/// 首帧启动页 —— 与正式加载页（`AppLoadingView`）**画同一个画面**。
 ///
-/// 因为这一帧的目的就是"在任何服务初始化之前先画点东西"，
-/// 一旦它依赖了还没注册的服务（`Get.find` 会直接抛），就等于把黑屏换成闪退。
-/// 所以这里的**颜色全部写死**，一个字都不从设置里读。
+/// ── 演进史（两次都是同一个坑：两帧画得不一样）────────────────────
+/// ① 最早这里画了一个**写死金色**的 logo（#D4A574），而 `AppLoadingView`
+///    走 `AppTheme`（水墨书香下强调色是墨灰）⇒ 用户看到「金色圆环闪一下变
+///    灰色圆环」，问「为啥有两个这种」。
+/// ② 于是把这里的 logo 删了，只铺一块写死的纯色（深色 #1C1C1E）。
+///    结果深色模式下这块纯色就是**一片黑**，而加载页是渐变 + logo ⇒
+///    用户又说「一打开就是黑屏，然后才出加载页」。
 ///
-/// 底色取原生启动屏的同一组颜色（`LaunchBackground`：浅 #F7F5F1 / 深 #1C1C1E），
-/// 并按**系统明暗**选（原生启动屏也是按系统明暗显示的）—— 从启动屏切到这一帧
-/// 时颜色不跳。
+/// 现在（2026-10-30）的正确解法：**两帧共用同一套组件、同一套取色**——
+///   · 背景：`AppSplashBackdrop`（启动页与加载页的唯一实现）
+///   · 前景：`CircularLogoProgress`（不确定态转圈，无文案）
+///   · 明暗：`ThemeModeStore.preloadSync()` 已在 `runApp` **之前**同步定好
+/// 所以从这一帧切到加载页时，底色、logo、圆环颜色全都不变 —— 既不是黑屏，
+/// 也不会出现"两个 logo"（本来就是同一个）。
 ///
-/// ── 为什么这里**不画 Logo**（2026-10-30）────────────────────────
-/// 用户发了两张截图问「为啥有两个这种」：先是金色圆环 + 猫影，闪一下
-/// 又变成灰色圆环 + 猫影。
-///
-/// 原因是这一帧和 `AppLoadingView` **各画了一个 logo**：
-///   · 这里颜色写死（金色 #D4A574），因为它不能读主题；
-///   · `AppLoadingView` 走 `AppTheme`（浅色主题下强调色是灰的）。
-/// 两个 logo 形状一样、颜色不一样 ⇒ 看起来就是"闪了两次、换了个人"。
-///
-/// 现在这一帧只铺底色：原生启动屏（纯色）→ 这里（同色）→ 正式加载页
-/// （唯一的 logo，且用的是用户自己的配色）。全程只出现一次 logo，
-/// 也不会出现"金色跳灰色"。
+/// ⚠️ 仍然**不碰 GetX**：这一帧要早于任何服务注册，`Get.find` 会直接抛。
+///   用到的 `AppTheme` 全是**纯静态 getter**（读 `AppBrightness` / 调色板），
+///   不依赖任何已注册的实例。
 class _BootSplash extends StatelessWidget {
   const _BootSplash();
 
-  /// = `ios/Runner/Assets.xcassets/LaunchBackground.colorset` 的两个色值
-  static const Color _bgLight = Color(0xFFF7F5F1);
-  static const Color _bgDark = Color(0xFF1C1C1E);
-
   @override
   Widget build(BuildContext context) {
-    final isLight =
-        MediaQuery.platformBrightnessOf(context) == Brightness.light;
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(fontFamily: 'MiSans'),
-      home: ColoredBox(color: isLight ? _bgLight : _bgDark),
+    // 初始化链里 `applyModuleThemes()`（换调色板）、`ThemeModeStore.load()`
+    // （换明暗）、`AppTheme.loadFontScale()`（换字号）都可能在**这一帧还挂着**
+    // 的时候把颜色改掉。这里全部监听，改了就跟着重画 ——
+    // 否则会出现"启动页是默认墨色 → 正式界面是用户配色"的跳色。
+    return AnimatedBuilder(
+      animation: Listenable.merge([
+        AppBrightness.isLight,
+        AppTheme.paletteRevision,
+        AppTheme.fontScale,
+      ]),
+      builder: (context, _) {
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(fontFamily: 'MiSans'),
+          home: const AppSplashBackdrop(
+            child: SafeArea(
+              child: Center(
+                child: CircularLogoProgress(
+                  progress: null,
+                  percentText: '',
+                  caption: '',
+                  indeterminate: true,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
