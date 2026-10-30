@@ -147,8 +147,9 @@ class SpiderService {
     if (p <= 0) return;
     if (p == _lastKnownPort) return;
     _lastKnownPort = p;
-    resetScriptCache();
-    AppLog.instance.log('[SpiderService] 引擎端口 ⇒ $p，作废脚本/端口记忆');
+    // 端口变了 = 换了一个引擎实例 ⇒ 连 `/config` 注册表一起作废（见
+    // resetScriptCache 的说明：换源只清脚本槽位，重启才清注册表）。
+    resetEngineMemory();
   }
 
   static Dio _buildDio() {
@@ -413,7 +414,41 @@ class SpiderService {
   ///
   /// 换源是用户主动动作，此时唯一正确的假设是"我不知道槽位里是什么"，
   /// 下次请求老老实实按新源重新判断 + 重新载入。
+  ///
+  /// ── 2026-10-30 再修：**只清"载入了谁"，不清"引擎里有什么"** ────────
+  /// 用户发来的 `app_2026-10-30.log` 里同一秒内出现：
+  ///   21:53:37.088  setCurrentSpider(localjs_…) + 「换源 ⇒ 作废脚本记忆」
+  ///   21:53:37.364  setCurrentSpider(omnibox_短剧聚合)      ← 短剧页并发改全局源
+  ///   21:53:37.380  「引擎端口 ⇒ 52697，作废脚本/端口记忆」  ← 换源把引擎重启了
+  ///   21:53:37.361  POST /spider/omnibox_短剧聚合/3/category → 打旧端口 52448 失败
+  /// 三个页面（影视首页 / 短剧 / 详情）**共用一份单槽位记忆**，任何一方换源都把
+  /// 别人的记忆清掉 ⇒ 各自重新载入 ⇒ 抢同一个引擎槽位 ⇒ 谁最后载入谁的内容
+  /// 就显示在所有人页面上，这就是用户说的「串」；重启后只剩一个页面在跑，所以正常。
+  ///
+  /// 所以这里按"作废的是什么"拆开：
+  ///   · [resetScriptCache]（换源）：引擎**没换**，只清"载入了哪个脚本"。
+  ///     `_engineSiteTypes` 是引擎自己的注册表，换源后照样有效 —— 清掉它会让
+  ///     key/type 校正直接退化，本来能通的路由被判 404。
+  ///   · [resetEngineMemory]（端口变了 / 引擎重启）：连注册表一起清。
+  ///
+  /// 两者都**不清** `_scriptLoadInFlight` / `_drpyLoadInFlight`：那是"正在飞的
+  /// 载入"，清掉会让下一次请求再起一次 `loadSource`，两边同时往同一个
+  /// `index.js` 写 ⇒ 文件被交替写坏（见 [_scriptLoadInFlight] 的注释）。
+  /// 作废"记忆"和"取消在飞的载入"是两件事。
   void resetScriptCache() {
+    _clearScriptSlot();
+    AppLog.instance.log('[SpiderService] 换源 ⇒ 作废脚本记忆（端口不动，引擎还在跑），下次请求重新载入');
+  }
+
+  /// 引擎换了实例（重启换端口）：槽位和注册表都不可信了。
+  void resetEngineMemory() {
+    _clearScriptSlot();
+    _engineSiteTypes.clear();
+    AppLog.instance.log('[SpiderService] 引擎端口 ⇒ $_spiderPort，作废脚本/端口记忆');
+  }
+
+  /// 只清"上一次载入了什么"，不碰引擎侧状态、不碰在飞的载入。
+  void _clearScriptSlot() {
     _loadedScriptUrl = '';
     _loadedScriptKey = '';
     _loadedScriptCandidates = [];
@@ -421,10 +456,6 @@ class SpiderService {
     _mainDrpyApi = '';
     _mainDrpyExt = '';
     mainScriptUrl = '';
-    _engineSiteTypes.clear();
-    _scriptLoadInFlight.clear();
-    _drpyLoadInFlight.clear();
-    AppLog.instance.log('[SpiderService] 换源 ⇒ 作废脚本记忆（端口不动，引擎还在跑），下次请求重新载入');
   }
 
   /// 当前已载入 Node 引擎的脚本地址 + 该脚本在引擎里的真实站点 key
