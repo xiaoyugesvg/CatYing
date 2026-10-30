@@ -604,8 +604,9 @@ class RexService {
       final key = await RexKeys.master();
       if (key.isEmpty) {
         throw RexException(
-          '这是加密模块（${env.label}），需要先在右上角「密钥」里填 ${env.masterKeyId} '
-          '的主密钥。文件已保存，填好后再导入同一个文件即可。',
+          '这是加密模块（${env.label}），需要先在右上角「密钥」里填 '
+          '${env.masterKeyId} 的主密钥。文件已保存，填好密钥后会自动启用，'
+          '不用重新导入。',
         );
       }
     }
@@ -628,8 +629,56 @@ class RexService {
     return fresh;
   }
 
+  /// 填完主密钥后：把本地目录里**还没注册成功**的加密模块再试一遍。
+  ///
+  /// 加密模块（REXENC）在没填密钥时是导入不进来的 —— [_importLocalCode]
+  /// 会把文件留下但抛错。用户随后去填了密钥，如果还要一个个重新选文件，
+  /// 那体验就是「填了也没用」。这里直接扫目录补注册，返回救回来的个数。
+  ///
+  /// 只处理 `REXENC` 文件：明文模块失败通常是代码本身有问题，不该在这里
+  /// 反复重试（会拖慢每次保存密钥）。
+  Future<int> retryEncryptedModules() async {
+    var ok = 0;
+    try {
+      final dir = await _localDir();
+      if (!await dir.exists()) return 0;
+      final known = modules.map((e) => e.url).toSet();
+      final files = <File>[];
+      await for (final e in dir.list()) {
+        if (e is File) files.add(e);
+      }
+      // 目录顺序不保证，排一下让「救回来」的结果稳定（也便于排查）
+      files.sort((a, b) => a.path.compareTo(b.path));
+      for (final f in files) {
+        final name = f.path.split(RegExp(r'[\\/]')).last;
+        if (!name.toLowerCase().endsWith('.js')) continue;
+        final url = '$localScheme$name';
+        if (known.contains(url)) continue;
+        final code = await readLocalCode(url);
+        if (code == null || !RexEnvelope.isEncrypted(code)) continue;
+        try {
+          await _call({'action': 'clearCache', 'url': url}, checkOk: false);
+          final fresh = await loadModule(
+            url,
+            fallbackTitle: name.replaceAll(RegExp(r'\.(js|mjs)$'), ''),
+          );
+          modules.add(fresh);
+          ok++;
+        } catch (_) {
+          // 密钥还是不对 / 这个模块文件坏了 —— 静默跳过，别打断其他模块
+        }
+      }
+      if (ok > 0) {
+        await _persist();
+        revision.value++;
+      }
+    } catch (_) {}
+    return ok;
+  }
+
   /// 一次性导入多个本地文件；返回成功与失败明细
   Future<RexImportResult> importLocalFiles(List<String> paths) async {
+
     final imported = <RexModule>[];
     final errors = <String>[];
     for (final p in paths) {

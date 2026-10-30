@@ -195,23 +195,46 @@ function buildStorage(ns) {
   };
 }
 
-// ── REXENC 加密容器 ────────────────────────────────────────────
+// ── 加密容器（REXENC / FWENC）──────────────────────────────────
 // 社区里有一部分模块不是明文 JS，而是这样一段：
 //
-//   REXENC
+//   REXENC            ← 也有 FWENC1 / FWENC2（ForwardWidget 官方加密）
 //   {"v":2,"mkv":"rex-1","alg":"A256GCM","iv":"<12B>","kb":"<60B>"}
 //   <base64 密文>
 //
+// 两种魔数**布局完全一致**（2026-10-31 实测：都 `iv` 12 字节、`kb` 60 字节，
+// 头部字段同名），差别只在 `mkv`（主密钥标识）：
+//   · REXENC 用 `rex-1`（Rex 客户端自带）
+//   · FWENC2 用 `1`     （ForwardWidget 官方，https://widgetencrypt.inchmade.ai）
+//
 // `kb` = 12 字节 nonce + AES-256-GCM 封好的 32 字节**内容密钥**，
-// 用名叫 `rex-1` 的 32 字节主密钥解开；再用内容密钥 + `iv` 解正文。
-// 主密钥在 Rex 客户端里，宿主这边只能让用户自己填（见 RexKeys）。
-const REXENC_MAGIC = 'REXENC';
-const REXENC_NEED_KEY =
-  '这是 REXENC 加密模块，需要先在「REX 订阅」页右上角填主密钥';
-const REXENC_BAD_KEY = 'REXENC 主密钥不对，解不开这个模块';
+// 用 `mkv` 对应的 32 字节主密钥解开；再用内容密钥 + `iv` 解正文。
+// 主密钥不在文件里，也**不能从文件推出来**（公开常量派生、kb 内自包含
+// 等猜想全部实测排除），只能由用户填（见 RexKeys）。
+const ENC_MAGICS = ['REXENC', 'FWENC2', 'FWENC1', 'FWENC'];
+const ENC_NEED_KEY =
+  '这是加密模块，需要先在「REX 订阅」页右上角填主密钥';
+const ENC_BAD_KEY = '主密钥不对，解不开这个模块';
+
+/** 去掉 UTF-8 BOM（编辑器另存很常见） */
+function stripBom(code) {
+  return typeof code === 'string' && code.startsWith('\uFEFF')
+    ? code.slice(1)
+    : code;
+}
+
+/** 命中的魔数；明文模块返回空串 */
+function encMagicOf(code) {
+  const s = stripBom(code);
+  if (typeof s !== 'string') return '';
+  for (const m of ENC_MAGICS) {
+    if (s.startsWith(m)) return m;
+  }
+  return '';
+}
 
 function isRexEnc(code) {
-  return typeof code === 'string' && code.startsWith(REXENC_MAGIC);
+  return encMagicOf(code) !== '';
 }
 
 function b64buf(s) {
@@ -241,50 +264,51 @@ function normalizeMasterKey(raw) {
 
 /** 只解析头部（Dart 侧的 RexEnvelope 与这里保持同一套规则） */
 function parseRexEncHeader(code) {
-  const nl1 = code.indexOf('\n');
-  const nl2 = nl1 < 0 ? -1 : code.indexOf('\n', nl1 + 1);
-  if (nl1 < 0 || nl2 < 0) throw new Error('REXENC 容器损坏：缺少头部');
+  const src = stripBom(code);
+  const nl1 = src.indexOf('\n');
+  const nl2 = nl1 < 0 ? -1 : src.indexOf('\n', nl1 + 1);
+  if (nl1 < 0 || nl2 < 0) throw new Error('加密容器损坏：缺少头部');
   let hdr;
   try {
-    hdr = JSON.parse(code.slice(nl1 + 1, nl2));
+    hdr = JSON.parse(src.slice(nl1 + 1, nl2));
   } catch (_) {
-    throw new Error('REXENC 容器损坏：头部不是合法 JSON');
+    throw new Error('加密容器损坏：头部不是合法 JSON');
   }
   if (!hdr || typeof hdr !== 'object') {
-    throw new Error('REXENC 容器损坏：头部不是对象');
+    throw new Error('加密容器损坏：头部不是对象');
   }
-  return { hdr, bodyStart: nl2 + 1 };
+  return { src, hdr, bodyStart: nl2 + 1 };
 }
 
 function decodeRexEnc(code, masterKeyRaw) {
-  const { hdr, bodyStart } = parseRexEncHeader(code);
+  const { src, hdr, bodyStart } = parseRexEncHeader(code);
   const v = Number(hdr.v) || 0;
-  if (v !== 2) throw new Error(`不支持的 REXENC 版本（v${v}）`);
+  if (v !== 2) throw new Error(`不支持的加密容器版本（v${v}）`);
   const alg = String(hdr.alg || '').toUpperCase();
   if (alg !== 'A256GCM') {
-    throw new Error(`不支持的 REXENC 算法（${alg || '未标注'}）`);
+    throw new Error(`不支持的加密算法（${alg || '未标注'}）`);
   }
   const mk = normalizeMasterKey(masterKeyRaw);
-  if (!mk) throw new Error(REXENC_NEED_KEY);
+  if (!mk) throw new Error(ENC_NEED_KEY);
 
   const kb = b64buf(hdr.kb);
-  if (kb.length < 44) throw new Error('REXENC 容器损坏：密钥块太短');
+  if (kb.length < 44) throw new Error('加密容器损坏：密钥块太短');
   let contentKey;
   try {
     contentKey = openGcm(mk, kb.subarray(0, 12), kb.subarray(12));
   } catch (_) {
-    throw new Error(REXENC_BAD_KEY);
+    throw new Error(ENC_BAD_KEY);
   }
-  if (contentKey.length !== 32) throw new Error(REXENC_BAD_KEY);
+  if (contentKey.length !== 32) throw new Error(ENC_BAD_KEY);
 
   const iv = b64buf(hdr.iv);
-  if (iv.length !== 12) throw new Error('REXENC 容器损坏：IV 长度不对');
-  const body = b64buf(code.slice(bodyStart));
-  if (!body.length) throw new Error('REXENC 容器损坏：正文为空');
+  if (iv.length !== 12) throw new Error('加密容器损坏：IV 长度不对');
+  const body = b64buf(src.slice(bodyStart));
+  if (!body.length) throw new Error('加密容器损坏：正文为空');
 
   // AAD 未在头部标注：先按「无 AAD」解，不行再拿头部原文当 AAD 试一次。
   // GCM 的 tag 校验保证了解错会失败而不是给出乱码，所以多试一次是安全的。
-  const aadCandidates = [null, Buffer.from(code.slice(0, bodyStart), 'utf8')];
+  const aadCandidates = [null, Buffer.from(src.slice(0, bodyStart), 'utf8')];
   for (const aad of aadCandidates) {
     try {
       const plain = openGcm(contentKey, iv, body, aad);
@@ -293,7 +317,79 @@ function decodeRexEnc(code, masterKeyRaw) {
       /* 换下一个 AAD 猜想 */
     }
   }
-  throw new Error('REXENC 内容解密失败：模块文件可能被改动过');
+  throw new Error('加密内容解密失败：模块文件可能被改动过');
+}
+
+/** 跨模块共享缓存（`Widget.sharedCache`）—— 按 namespace 分文件 */
+function buildSharedCache() {
+  const storeOf = (ns) => storeFor(`shared:${String(ns || '')}`);
+  return {
+    get: (ns, key) => {
+      const v = storeOf(ns).data[String(key)];
+      return v === undefined ? null : v;
+    },
+    set: (ns, key, value) => {
+      const s = storeOf(ns);
+      s.data[String(key)] = value === undefined ? null : value;
+      flushStore(s);
+      return true;
+    },
+    remove: (ns, key) => {
+      const s = storeOf(ns);
+      delete s.data[String(key)];
+      flushStore(s);
+      return true;
+    },
+  };
+}
+
+/** `Widget.dom`：官方文档里的 parse / select 写法（底层就是 cheerio） */
+function buildDom() {
+  let last = null;
+
+  const wrap = ($, el) => {
+    const $el = $(el);
+    return {
+      text: () => $el.text(),
+      html: () => $el.html() ?? '',
+      attr: (name) => $el.attr(name),
+      find: (sel) => $el.find(sel).toArray().map((e) => wrap($, e)),
+      children: (sel) =>
+        (sel ? $el.children(sel) : $el.children())
+          .toArray()
+          .map((e) => wrap($, e)),
+    };
+  };
+
+  const resolve = (doc) => {
+    // parse 的返回值就是 cheerio 根（一个函数）；也兼容传最近一次文档
+    if (typeof doc === 'function') return doc;
+    if (doc && typeof doc === 'object' && doc._root) return doc;
+    return last;
+  };
+
+  return {
+    parse: (html) => {
+      const $ = cheerio.load(String(html ?? ''));
+      last = $;
+      return $;
+    },
+    select: (doc, selector) => {
+      let $ = resolve(doc);
+      let sel = selector;
+      // 单参数写法：select('a') —— 用最近一次 parse 的文档
+      if (typeof doc === 'string' && selector === undefined) {
+        $ = last;
+        sel = doc;
+      }
+      if (!$ || sel === undefined) return [];
+      try {
+        return $(sel).toArray().map((el) => wrap($, el));
+      } catch (_) {
+        return [];
+      }
+    },
+  };
 }
 
 /** 模块能用的 `Widget` 对象 */
@@ -343,9 +439,17 @@ function buildWidget(storageNs) {
       load: (html) => cheerio.load(String(html ?? '')),
       parse: (html) => cheerio.load(String(html ?? '')),
     },
+    // 官方文档里 HTML 还有一套 `Widget.dom.parse/select` 的写法（见
+    // ForwardWidgets README 的「DOM 操作 API」）。模块写成
+    // `const docId = Widget.dom.parse(html); Widget.dom.select(docId, "a")`
+    // 时，缺这个入口会直接 `Cannot read properties of undefined`。
+    // 这里让 parse 返回 cheerio 根对象，select 既收这个对象也收选择器字符串。
+    dom: buildDom(),
     get: (url, opts) => request('get', url, opts),
     post: (url, data, opts) => request('post', url, { ...(opts || {}), data }),
     storage: buildStorage(storageNs),
+    // 跨模块共享缓存（官方 API）：必须带 namespace，值可以是对象/数组
+    sharedCache: buildSharedCache(),
   };
   return widget;
 }

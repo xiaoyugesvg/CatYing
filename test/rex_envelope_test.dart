@@ -33,6 +33,21 @@ void main() {
       expect(RexEnvelope.isEncrypted(_enc()), isTrue);
     });
 
+    test('官方 FWENC2 也算（同一套布局，只有 mkv 不同）', () {
+      // 2026-10-31 用官方公开加密 API（widgetencrypt.inchmade.ai）
+      // 加密一段最小模块拿到的真实头部
+      const fw = 'FWENC2\n{"v":2,"mkv":"1","alg":"A256GCM",'
+          '"iv":"UfL0fxejv9pVeNNL",'
+          '"kb":"nXOBBtmqAxh9prf4OuFtw2fHjeWY+4KpunzHQ/0d5yy0u1Go8caetSQuwY8PBRzXgQhUdIihHmJv54oo"}\n'
+          'X+lxcSRG7YuJNlfa90epxvRsZLe6Giuj2AULsT5Hh451drboThYuKhyNwM0teg5rq8IgZ8KEEJmURZnXaVGAX9QBXW7tFELouPMbsbzCdRX2ev+r1B2Ii+dmLMeIUxEiL2aW/bG+ict38+O93yQ';
+      expect(RexEnvelope.isEncrypted(fw), isTrue);
+      final e = RexEnvelope.tryParse(fw);
+      expect(e, isNotNull);
+      expect(e!.magic, 'FWENC2');
+      expect(e.masterKeyId, '1');
+      expect(e.supported, isTrue);
+    });
+
     test('带 UTF-8 BOM 也认（编辑器另存常见）', () {
       expect(RexEnvelope.isEncrypted('\uFEFF${_enc()}'), isTrue);
     });
@@ -42,7 +57,8 @@ void main() {
     test('真实头部：版本 / 算法 / 主密钥标识都对', () {
       final e = RexEnvelope.tryParse(_enc());
       expect(e, isNotNull);
-      expect(e!.version, 2);
+      expect(e!.magic, 'REXENC');
+      expect(e.version, 2);
       expect(e.algorithm, 'A256GCM');
       expect(e.masterKeyId, 'rex-1');
       expect(e.supported, isTrue);

@@ -1070,12 +1070,18 @@ class _RexManagePageState extends State<RexManagePage> {
         await _service.clearCache(m);
       } catch (_) {}
     }
+    // 之前因为没密钥而导入失败的加密模块，现在直接补注册 ——
+    // 不用再让用户去文件管理器里把同一个文件重选一遍
+    final revived = raw.isEmpty ? 0 : await _service.retryEncryptedModules();
     if (!mounted) return;
     final now = await RexKeys.master();
-    AppToast.show(
-      now.isEmpty ? '主密钥已清除' : '主密钥已保存',
-      now.isEmpty ? '' : '加密模块重新导入一次即可',
-    );
+    if (now.isEmpty) {
+      AppToast.show('主密钥已清除', '');
+    } else if (revived > 0) {
+      AppToast.show('主密钥已保存', '已启用 $revived 个加密模块');
+    } else {
+      AppToast.show('主密钥已保存', '加密模块重新导入一次即可');
+    }
     setState(() {});
   }
 

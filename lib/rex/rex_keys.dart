@@ -87,42 +87,62 @@ class RexKeys {
   }
 }
 
-/// `REXENC` 容器的**只读**解析（不解密）。
+/// 加密容器的**只读**解析（不解密）。
 ///
 /// 放在 Dart 侧是为了「导入前就能说清楚这是什么」：用户拖进来一个加密模块
 /// 而没填主密钥时，直接告诉他去填，而不是等 Node 编译失败后回一句
 /// 「模块代码无法解析：Unexpected token」。
 ///
+/// 两种魔数布局**完全一致**（2026-10-31 实测：`iv` 12 字节、`kb` 60 字节，
+/// 头部字段同名），只有 `mkv`（主密钥标识）不同：
+///   · `REXENC` → `rex-1`（Rex 客户端自带）
+///   · `FWENC2` → `1`（ForwardWidget 官方，widgetencrypt.inchmade.ai）
+///
 /// 拆封规则与 `assets/nodejs-project/src/rex_engine.js` 的
 /// `parseRexEncHeader` / `decodeRexEnc` 保持完全一致。
 class RexEnvelope {
   const RexEnvelope({
+    required this.magic,
     required this.version,
     required this.masterKeyId,
     required this.algorithm,
   });
 
+  /// 命中的魔数（`REXENC` / `FWENC2` / `FWENC1`）
+  final String magic;
+
   /// 容器版本（当前只有 2）
   final int version;
 
-  /// 主密钥标识（`rex-1`）
+  /// 主密钥标识（`rex-1` / `1`）
   final String masterKeyId;
 
   /// 算法（`A256GCM`）
   final String algorithm;
 
-  static const magic = 'REXENC';
+  /// 认得的魔数，**长串在前**（`FWENC` 是 `FWENC2` 的前缀）
+  static const magics = ['REXENC', 'FWENC2', 'FWENC1', 'FWENC'];
 
-  /// 这段源码是不是 `REXENC` 加密容器（容忍 UTF-8 BOM）
+  static String _stripBom(String code) =>
+      code.startsWith('\uFEFF') ? code.substring(1) : code;
+
+  /// 这段源码是不是加密容器（容忍 UTF-8 BOM）
   static bool isEncrypted(String code) {
-    final s = code.startsWith('\uFEFF') ? code.substring(1) : code;
-    return s.startsWith(magic);
+    final s = _stripBom(code);
+    return magics.any(s.startsWith);
   }
 
   /// 解析头部；不是加密容器 / 头部坏了都返回 null
   static RexEnvelope? tryParse(String code) {
-    final src = code.startsWith('\uFEFF') ? code.substring(1) : code;
-    if (!src.startsWith(magic)) return null;
+    final src = _stripBom(code);
+    String? magic;
+    for (final m in magics) {
+      if (src.startsWith(m)) {
+        magic = m;
+        break;
+      }
+    }
+    if (magic == null) return null;
     final nl1 = src.indexOf('\n');
     if (nl1 < 0) return null;
     final nl2 = src.indexOf('\n', nl1 + 1);
@@ -132,6 +152,7 @@ class RexEnvelope {
       final j = jsonDecode(raw);
       if (j is! Map) return null;
       return RexEnvelope(
+        magic: magic,
         version: _asInt(j['v']),
         masterKeyId: '${j['mkv'] ?? ''}',
         algorithm: '${j['alg'] ?? ''}',
@@ -148,7 +169,7 @@ class RexEnvelope {
   String get label {
     final alg = algorithm.isEmpty ? '未知算法' : algorithm;
     final id = masterKeyId.isEmpty ? '未知主密钥' : masterKeyId;
-    return 'REXENC v$version · $alg · $id';
+    return '$magic v$version · $alg · $id';
   }
 }
 
