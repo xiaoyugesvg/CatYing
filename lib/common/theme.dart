@@ -127,14 +127,50 @@ class AppTheme {
   /// ⚠️ 2026-10-23：新增「碧青 / 蕉红 / 皇家紫…」这些**鲜艳**主题后，
   ///   不能再"暗色一律用近白色" —— 那等于把这些主题的颜色全抹成灰白。
   ///   改成**按对比度决定**：
-  ///     · 与当前底色的对比度 ≥ 3 → 直接用主题色（鲜艳色本来就够亮）
+  ///     · 与当前底色（页面底 / 卡片底取较差者）的对比度 ≥ 3 → 直接用主题色
   ///     · 不够（墨灰这类）→ 暗色向白提亮、浅色向黑压暗
   static Color get accentOnSurface {
     final p = _palette.primary;
-    if (_contrastRatio(p, backgroundPrimary) >= 3.0) return p;
-    return _light
-        ? Color.lerp(p, Colors.black, 0.45)!
-        : Color.lerp(p, Colors.white, 0.55)!;
+    if (_worstContrast(p) >= 3.0) return p;
+    // 浅色：向黑压暗 45%（白底上"越深越清楚"，且 24 套实测都在 3.3 以上，
+    // 保持原有观感不动）
+    if (_light) return Color.lerp(p, Colors.black, 0.45)!;
+    return _liftUntilVisible(p);
+  }
+
+  /// 把 [c] 提亮到「在深色底上看得清」为止。
+  ///
+  /// ── 为什么不是一次 `lerp(...,0.55)` ────────────────────────────
+  /// 固定 55% 会把**刚过界**的鲜艳主题漂成粉彩：春节红 #BE2F2A 在卡片上
+  /// 只有 2.66，一次提 55% 变成 #E2A19F —— 成了淡粉，"红"这个主题就不见了。
+  /// 而墨灰 #3A3A3A（对比仅 1.34）确实需要 55% 才够（提完 = #A6A6A6，
+  /// 这是用户已经认可的水墨夜间观感，不能动）。
+  ///
+  /// 所以首步按**缺口大小**给：缺得越多提得越狠（0.15 ~ 0.55），
+  /// 之后每次补 6%，够 3.0 立刻停 —— 既保住水墨那套观感，
+  /// 又不会把鲜艳主题洗白。实测：墨灰仍落在 #A6A6A6，
+  /// 春节红落在 #C84E4A（3.6:1，还是红的）。
+  static Color _liftUntilVisible(Color c) {
+    var out = c;
+    final gap = ((3.0 - _worstContrast(c)) / 3.0).clamp(0.15, 0.55);
+    for (var i = 0; i < 14; i++) {
+      if (_worstContrast(out) >= 3.0) return out;
+      out = Color.lerp(out, Colors.white, i == 0 ? gap : 0.06)!;
+    }
+    return out;
+  }
+
+  /// [c] 在「页面底」与「卡片底」上**较差**的那个对比度。
+  ///
+  /// 为什么不只看 [backgroundPrimary]：这个颜色的 150+ 处引用里，
+  /// 绝大多数是**压在卡片上**的文字/图标/描边（`selectedItemColor`、
+  /// 设置页分组竖条、`chip` 文字…），卡片底比页面底更亮 ⇒ 对比更低。
+  /// 只看页面底会漏判：春节红 #BE2F2A 在页面底上 3.4 过关，
+  /// 压到卡片上只剩 **2.66**，选中文字发闷（2026-10 新增 8 套鲜艳主题时暴露）。
+  static double _worstContrast(Color c) {
+    final a = _contrastRatio(c, backgroundPrimary);
+    final b = _contrastRatio(c, backgroundSecondary);
+    return a < b ? a : b;
   }
 
   /// WCAG 对比度（1~21），用于判断某个颜色压在底色上是否看得清

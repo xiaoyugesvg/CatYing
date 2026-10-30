@@ -84,7 +84,10 @@ class _PluginSubscriptionPageState extends State<PluginSubscriptionPage> {
             child: Text('取消', style: TextStyle(color: MusicTheme.secondary)),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: MusicTheme.tint),
+            style: FilledButton.styleFrom(
+              backgroundColor: MusicTheme.accentFill,
+              foregroundColor: MusicTheme.onAccentFill,
+            ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('添加'),
           ),

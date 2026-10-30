@@ -775,7 +775,6 @@ mixin _ReaderPart06 on _BookSourceReaderPageState {
     setState(() {});
   }
 
-@override
   /// 朗读面板里「朗读引擎」那一行的副标题 —— 显示**真实**在用的引擎。
   ///
   /// 读 `TtsService.activeEngineLabel`（它按"有没有网络源 + 有没有降级"算），

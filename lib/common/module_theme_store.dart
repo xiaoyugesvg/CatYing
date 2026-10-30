@@ -23,7 +23,7 @@ import 'package:tvbox/services/prefs_mirror.dart';
 ///
 /// ── 取值 ─────────────────────────────────────────────────────
 /// * `presetId` 对应 `JellyPalette.fromPreset()` 认的 id
-///   （ink/jelly/pink/green/ocean/sunset/sky）。
+///   （内置预设共 24 套，见 `themePresets`；含 ink/jelly/节日/「公认最美」系列）。
 /// * `""`（空串）= 「跟随阅读」：直接用阅读当前的主题，
 ///   这样用户只调一处，全 App 统一。
 class ModuleThemeStore {
@@ -97,10 +97,33 @@ class ModuleThemeStore {
   /// 返回 null 表示"不是自定义主题"，继续走内置预设。
   JellyPalette? Function(String id)? customPaletteResolver;
 
+  /// 自定义主题 id → 展示名（由 main.dart 注入）。
+  ///
+  /// 同理：`custom_1730000000000_0` 这种 id **绝对不能**直接显示给用户。
+  /// 返回 null 表示"不是自定义主题 / 已删除"。
+  String? Function(String id)? customNameResolver;
+
   /// 该模块当前生效的调色板
-  JellyPalette paletteFor(String module) {
-    final id = effectivePreset(module);
-    return customPaletteResolver?.call(id) ?? JellyPalette.fromPreset(id);
+  JellyPalette paletteFor(String module) => paletteOf(effectivePreset(module));
+
+  /// 任意 presetId 的调色板（先查自定义主题，再回退内置预设）。
+  ///
+  /// 设置页画「三色点」时用的就是它 —— 不能直接
+  /// `JellyPalette.fromPreset(id)`，否则自定义主题会显示成紫色色点。
+  JellyPalette paletteOf(String id) =>
+      customPaletteResolver?.call(id) ?? JellyPalette.fromPreset(id);
+
+  /// 任意 presetId 的展示名（内置名 → 自定义名 → 兜底）。
+  ///
+  /// 空串 = 「跟随阅读」；未知 id 原样返回（除 `custom_*` 显示为「自定义主题」）。
+  String displayNameOf(String id) {
+    if (id.isEmpty) return '跟随阅读';
+    for (final p in themePresets) {
+      if (p.id == id) return p.name;
+    }
+    final custom = customNameResolver?.call(id);
+    if (custom != null && custom.isNotEmpty) return custom;
+    return id.startsWith('custom_') ? '自定义主题' : id;
   }
 
   Future<void> setPreset(String module, String presetId) async {

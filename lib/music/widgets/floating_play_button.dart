@@ -436,7 +436,7 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
           height: _size,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: MusicTheme.tint,
+            color: MusicTheme.accentFill,
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.22),
@@ -500,7 +500,7 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
             : (player.isPlaying.value
                 ? Icons.pause_rounded
                 : Icons.play_arrow_rounded),
-        color: Colors.white,
+        color: MusicTheme.onAccentFill,
         size: 26,
       );
 }

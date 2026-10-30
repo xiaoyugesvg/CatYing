@@ -196,13 +196,13 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 20, vertical: 9),
                                   decoration: BoxDecoration(
-                                    color: MusicTheme.tint,
+                                    color: MusicTheme.accentFill,
                                     borderRadius: BorderRadius.circular(999),
                                   ),
-                                  child: const Text(
+                                  child: Text(
                                     '重新加载',
                                     style: TextStyle(
-                                      color: Colors.white,
+                                      color: MusicTheme.onAccentFill,
                                       fontSize: AppTheme.fontSubhead,
                                       fontWeight: FontWeight.w600,
                                     ),

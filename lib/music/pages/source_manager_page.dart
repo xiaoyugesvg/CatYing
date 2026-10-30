@@ -1134,8 +1134,8 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                   Expanded(
                     child: FilledButton(
                       style: FilledButton.styleFrom(
-                        backgroundColor: MusicTheme.tint,
-                        foregroundColor: Colors.white,
+                        backgroundColor: MusicTheme.accentFill,
+                        foregroundColor: MusicTheme.onAccentFill,
                       ),
                       onPressed: () {
                         final name = nameCtrl.text.trim();

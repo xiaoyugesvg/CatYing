@@ -7,7 +7,6 @@ import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/common/theme_mode_store.dart';
 import 'package:tvbox/services/background_service.dart';
 import 'package:tvbox/reading/services/settings_service.dart';
-import 'package:tvbox/reading/theme/jelly_palette.dart';
 import 'package:tvbox/pages/settings/wallpaper_page.dart';
 import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 import 'package:tvbox/widgets/app_toast.dart';
@@ -20,7 +19,7 @@ import 'package:tvbox/widgets/theme_preset_row.dart';
 /// 原来"外观"分散在三处、彼此不知道对方存在：
 ///   · 影视：设置 → 外观（只有浅色/深色/跟随系统，**没有配色方案**）
 ///   · 音乐：音乐模块 → 我的（自己的 10 种强调色）
-///   · 阅读：阅读 → 我的 → 主题风格（7 套完整主题 + 自定义颜色）
+///   · 阅读：阅读 → 我的 → 主题风格（24 套完整主题 + 自定义颜色）
 /// 用户想"三块风格统一"时得在三处来回翻，而且**改不了一致**。
 /// 现在汇总到这里，但仍**分区独立可调**（用户明确要求"能分开调整"）。
 ///
@@ -468,14 +467,12 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
 
   /// 三色点：主色 / 强调色 / 浅底（与阅读面板上的色点同一取法）
   List<Color> _dotsOf(String presetId) {
-    final p = _presetOf(presetId);
-    return [p.palette.primary, p.palette.accent, p.palette.backgroundLight];
+    // ⚠️ 必须走 store 的解析（先查自定义主题）：阅读用的是
+    // `custom_<时间戳>_<序号>` 这种 id，`JellyPalette.fromPreset` 不认识它 →
+    // 回退「魅力紫」，于是"阅读用自定义主题"时这里三个色点显示的是紫色。
+    final p = store.paletteOf(presetId);
+    return [p.primary, p.accent, p.backgroundLight];
   }
-
-  ThemePresetInfo _presetOf(String id) => readingThemePresets.firstWhere(
-        (p) => p.id == id,
-        orElse: () => readingThemePresets.first,
-      );
 
   /// 打开**与阅读同款**的底部面板选主题（用户 2026-10-16 要求）。
   ///
@@ -529,7 +526,7 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
   }
 
   // ============================================================
-  // 阅读：和影视/音乐一样直接选 7 套主题 + "更多设置"入口
+  // 阅读：和影视/音乐一样直接选全部预设主题 + "更多设置"入口
   // ============================================================
 
   Widget _readingSection() {
@@ -573,7 +570,9 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
             ),
             const SizedBox(height: 4),
             Text(
-              '以阅读的 7 套主题为基准；影视、音乐默认跟随阅读',
+              // 数量**不要写死**：预设从 7 套扩到 24 套后，原来那句
+              // "以阅读的 7 套主题为基准"就成了假话。这里直接用列表长度。
+              '以阅读的 ${readingThemePresets.length} 套主题为基准；影视、音乐默认跟随阅读',
               style: TextStyle(
                 fontSize: AppTheme.fontFootnote,
                 color: AppTheme.textTertiary,
@@ -656,12 +655,7 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
   // 小工具
   // ============================================================
 
-  String _presetName(String id) {
-    for (final p in readingThemePresets) {
-      if (p.id == id) return p.name;
-    }
-    return id.isEmpty ? '跟随阅读' : id;
-  }
+  String _presetName(String id) => store.displayNameOf(id);
 
   /// 一排胶囊（复用阅读的选中样式：实底 + 反白字）
   Widget _chips({
@@ -727,8 +721,9 @@ class _ReadingThemeHintPage extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           child: Text(
             '请通过底部导航进入「阅读」模块，再点「我的 → 主题风格」调整。\n\n'
-            '那里提供 7 套预设主题（水墨书香 / 魅力紫色 / 粉色少女 / 清新护眼 / '
-            '蓝色海洋 / 落日余晖 / 蓝色天空）、自定义颜色编辑器，'
+            '那里提供 ${readingThemePresets.length} 套预设主题'
+            '（水墨书香 / 魅力紫色 / 粉色少女 / 清新护眼 / 蓝色海洋 / 落日余晖 / '
+            '蓝色天空 / 节日与「公认最美」系列…）、自定义颜色编辑器，'
             '以及纯色 / 内置动画 / 自定义图片三种背景。',
             style: TextStyle(
               fontSize: AppTheme.fontSubhead,

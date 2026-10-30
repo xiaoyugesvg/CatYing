@@ -94,7 +94,7 @@ class MusicTheme {
   /// 当前生效的调色板（水墨书香 / 或用户在「主题与外观」里给音乐选的方案）。
   ///
   /// 为什么不直接 `JellyPalette.ink()` 写死：
-  /// 统一主题设置页允许给音乐单独选 7 套预设之一，
+  /// 统一主题设置页允许给音乐单独选一套预设之一，
   /// 那套选择经 `ModuleThemeStore` 落地 —— 这里读的就是那个结果，
   /// 保证悬浮栏、卡片等用的颜色与用户选的方案一致。
   ///
@@ -154,7 +154,7 @@ class MusicTheme {
   // ── 基础色（全部从 JellyPalette 派生，与阅读/影视同一套主题）──────────
   //
   // 以前这里是硬编码的水墨书香色值（只适配了 ink 一套），
-  // 现在全部从 palette（JellyPalette）取，换 7 套主题时音乐同步变色。
+  // 现在全部从 palette（JellyPalette）取，换主题时音乐同步变色。
   // API 命名保持不变（background/card/label/secondary/tint...），
   // 避免全项目几百处引用一起改。
 
@@ -200,11 +200,69 @@ class MusicTheme {
   ///     （`MusicAccent.tintDark => gradientStart` 早就是这个约定）。
   ///  2. 浅色模式原写法是 `_shade(c, +0.15)`（**变亮**），与上方注释
   ///     "压暗一点，白底上才够对比"正好相反。
+  ///  3. 深色下只换"亮端"还不够：墨灰主题的亮端 `primaryLight` 是
+  ///     `#6E6E73`，压在卡片 `#2A2A2C` 上只有 **2.82:1**，皇家紫 `#9A3D8F`
+  ///     更低到 **2.68:1** ⇒ 选中歌名/当前页签/进度点全是"灰糊糊一片"。
+  ///     这两个恰好一个是**默认主题**、一个是新增鲜艳主题，必须兜底：
+  ///     用 [_ensureContrast] 逐步推到看得清为止。
+  ///
+  /// ⚠️ 因为要兜底，[tint] 在深色下可能被提亮到浅色 —— 它**只能当文字/图标/
+  /// 描边用**；要"实底 + 白字"的按钮请用 [accentFill]。
   static Color get tint {
-    if (_isDark) return palette.primaryLight;
+    if (_isDark) {
+      // 深色：强调色当"图标/选中态"用，3.0 是小面积点缀的下限
+      return _ensureContrast(palette.primaryLight, palette.cardDark, 3.0,
+          towardWhite: true);
+    }
     final c = _customAccent;
-    if (c == null) return palette.primaryDark;
-    return _shade(c, -0.15);
+    final base = c == null ? palette.primaryDark : _shade(c, -0.15);
+    // 浅色：同一个颜色大量被当**正文色**用（选中歌名 / 重试 / 榜单名次），
+    // 所以按 AA 的 4.5 兜底（沙丘褐 3.70、星蓝 4.19、莓粉 4.48 会被压深一档）
+    return _ensureContrast(base, palette.cardLight, 4.5, towardWhite: false);
+  }
+
+  /// 「实底 + 白字」按钮的填充色。
+  ///
+  /// 与 [tint] 分开的原因：tint 为了可读性会被提亮（墨灰 → ≈#B6B6B9），
+  /// 白字压上去只剩 1.9:1；这个 getter 保持"较深的一端"，保证白字可读。
+  static Color get accentFill {
+    if (_isDark) return palette.primaryLight;
+    return _shade(_customAccent ?? palette.primary, -0.15);
+  }
+
+  /// [accentFill] 上应该用的前景色。
+  ///
+  /// 不能一律 `Colors.white`：鲜艳主题的亮端（果冻紫 `#9AA0DC`、柠檬黄
+  /// `#FACA2E`）亮度很高，白字只有 2.4:1 —— 按钮上的"保存/安装"会糊掉。
+  ///
+  /// 取**纯黑**而不是"近黑"是算出来的：白/黑对比度的交叉点在亮度 0.179，
+  /// 此处两端都能给到 4.58:1；若用 `#17171A`（亮度 0.0087），交叉点挪到
+  /// 0.198，最差只剩 4.2:1，莓粉浅色下会掉到 **3.99** —— 就是"看着能看、
+  /// 实际不达标"。所以这里用纯黑，换 0.5 的观感差异换稳过 AA。
+  static Color get onAccentFill =>
+      accentFill.computeLuminance() > 0.179 ? Colors.black : Colors.white;
+
+  /// 把 [c] 朝白/黑推，直到在 [bg] 上达到 [target] 对比度为止。
+  ///
+  /// 为什么是"逐步推"而不是一次 `lerp(...,0.55)`：一次大幅提亮/压暗会把
+  /// 主题色改得面目全非（皇家紫变成淡粉、沙丘褐变成咖啡）。这里每步 12%，
+  /// 够用就停 —— 实测只有 3 套浅色 / 2 套深色需要挪动，且只挪 1~3 步。
+  static Color _ensureContrast(
+    Color c,
+    Color bg,
+    double target, {
+    required bool towardWhite,
+  }) {
+    var out = c;
+    for (var i = 0; i < 8; i++) {
+      final la = out.computeLuminance();
+      final lb = bg.computeLuminance();
+      final hi = la > lb ? la : lb;
+      final lo = la > lb ? lb : la;
+      if ((hi + 0.05) / (lo + 0.05) >= target) return out;
+      out = Color.lerp(out, towardWhite ? Colors.white : Colors.black, 0.12)!;
+    }
+    return out;
   }
 
   /// 高亮色（亮的那端，深色模式下更醒目）

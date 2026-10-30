@@ -350,6 +350,14 @@ Future<void> _initAppServices() async {
   // 否则「影视/音乐跟随阅读」会把自定义主题解析成默认的「魅力紫」。
   ModuleThemeStore.instance.customPaletteResolver =
       SettingsService().customPaletteOrNull;
+  // 自定义主题的**名字**同理：设置页要显示「自定义主题」的真名，
+  // 不能把 `custom_1730000000000_0` 这种内部 id 甩给用户。
+  ModuleThemeStore.instance.customNameResolver = (id) {
+    for (final t in SettingsService().customThemes) {
+      if (t.id == id) return t.name;
+    }
+    return null;
+  };
   // 音乐模块的强调色由统一主题驱动：注册桥接（写在音乐侧，避免反向依赖）
   MusicThemeBridge.register((primary) {
     MusicTheme.setCustomAccent(primary);

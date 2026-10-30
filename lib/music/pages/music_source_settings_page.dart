@@ -129,8 +129,8 @@ class _MusicSourceSettingsPageState extends State<MusicSourceSettingsPage> {
                   width: double.infinity,
                   child: FilledButton(
                     style: FilledButton.styleFrom(
-                      backgroundColor: MusicTheme.tint,
-                      foregroundColor: Colors.white,
+                      backgroundColor: MusicTheme.accentFill,
+                      foregroundColor: MusicTheme.onAccentFill,
                     ),
                     onPressed: () => Navigator.pop(ctx, true),
                     child: const Text('保存',

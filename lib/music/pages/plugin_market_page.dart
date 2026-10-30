@@ -523,7 +523,8 @@ class _PluginMarketPageState extends State<PluginMarketPage> {
                     Expanded(
                       child: FilledButton(
                         style: FilledButton.styleFrom(
-                          backgroundColor: MusicTheme.tint,
+                          backgroundColor: MusicTheme.accentFill,
+                          foregroundColor: MusicTheme.onAccentFill,
                           visualDensity: VisualDensity.compact,
                           padding: EdgeInsets.zero,
                           minimumSize: const Size(0, 28),

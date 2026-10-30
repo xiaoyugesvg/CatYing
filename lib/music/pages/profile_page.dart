@@ -722,17 +722,15 @@ class _AccentPicker extends StatelessWidget {
     );
   }
 
-  String _presetName(String id) {
-    for (final p in themePresets) {
-      if (p.id == id) return p.name;
-    }
-    return '跟随阅读';
-  }
+  String _presetName(String id) => ModuleThemeStore.instance.displayNameOf(id);
 
   /// 三色点：主色 / 强调色 / 浅底（与阅读面板上的色点同一取法）。
   /// 「跟随阅读」时直接显示阅读当前那套，用户一眼能看出跟随的是什么。
+  ///
+  /// ⚠️ 走 `paletteOf` 而不是 `JellyPalette.fromPreset`：阅读用**自定义主题**
+  /// 时 id 是 `custom_*`，直接 fromPreset 会回退「魅力紫」，色点就错了。
   List<Color> _dotsOf(String id, ModuleThemeStore store) {
-    final palette = JellyPalette.fromPreset(
+    final palette = store.paletteOf(
         id == ModuleThemeStore.followReading ? store.readingPreset : id);
     return [palette.primary, palette.accent, palette.backgroundLight];
   }
