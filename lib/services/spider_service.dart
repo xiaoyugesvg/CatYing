@@ -15,6 +15,100 @@ import 'package:tvbox/services/local_python_sources.dart';
 import 'package:tvbox/services/python_manager.dart';
 import 'package:tvbox/services/python_script_sources.dart';
 
+/// 把**回环** URL 的端口换成 [port]（其它主机 / 非法 URL 原样返回）。
+///
+/// 单独提出来是为了可测：这是"引擎重启换了端口，重试要打到新端口"的核心
+/// 判断，写成私有方法就只能靠人肉验证（用户 2026-10-30 报的
+/// `connectionError ... port: 61083` 正是这里没换端口导致的）。
+@visibleForTesting
+String rewriteLoopbackPort(String url, int port) {
+  if (port <= 0) return url;
+  final uri = Uri.tryParse(url);
+  if (uri == null) return url;
+  if (uri.host != '127.0.0.1' && uri.host != 'localhost') return url;
+  if (uri.port == port) return url;
+  return uri.replace(port: port).toString();
+}
+
+/// `api` 里**自带的路径基址**（OmniBox 私有协议那种），其余一律空串。
+///
+/// ── 这里曾经把「本地 JS 源」整条链路打断（用户 2026-10-30：
+///    「本地JS还是没有内容」「订阅里全是那个本地JS的内容」）──────────
+/// 原实现只有两条规则：`csp_` 开头 → 空；`http` 开头 → 空；**其余原样返回**。
+/// 而本地 JS 源的 api 是 `ljs_xxxx.js` —— 既不 http 也不 csp_ ⇒ 被当成路径基址
+/// ⇒ 拼出来的请求是：
+///     `POST http://127.0.0.1:<port>/ljs_xxxx.js/home`
+/// 而引擎的真实路由是 `/spider/<key>/<type>/<action>` ⇒ **必然 404**
+/// ⇒ 本地 JS 永远"没有内容"。
+/// 更糟的是：404 会触发 `_dispatchScript` 的「强制重载」自愈，而重载的
+/// 还是那个本地脚本 ⇒ 引擎槽位**反复被本地 JS 占着**，于是订阅线路
+/// （api 为空 / csp_ 占位）也全都落到它身上 ⇒「订阅里全是本地 JS 的内容」。
+///
+/// 所以：**脚本地址不是路径基址**。`.js` / `.js.md5` / 本地文件路径一律返回空串，
+/// 退化成标准 `/spider/<key>/<type>/<action>`。
+@visibleForTesting
+String spiderApiBase(String api) {
+  // ⚠️ 必须先归一化：配置里的 api 可能被反引号包住（`` `https://…` ``），
+  //    不归一化就会 `startsWith('http') == false` → 被当成路径基址 →
+  //    拼出 `` `https://…`/play `` 这种非法 URL。
+  final a = SpiderService._normalizeScriptUrl(api);
+  if (a.isEmpty) return '';
+  // csp_ 占位不是路径基址：拼进 URL 会产出 `csp_xxx/play` 这种非法路径，
+  // 必须退化为标准 /{key}/{type}/{action} 形态。
+  if (a.toLowerCase().startsWith('csp_')) return '';
+  if (a.startsWith('http')) return '';
+  final path = a.toLowerCase().split('?').first;
+  // 本地 JS 源 / 用户导入的 .js / file:// / Windows 绝对路径 —— 都是**脚本地址**
+  if (path.endsWith('.js') || path.endsWith('.js.md5')) return '';
+  if (a.startsWith('file://')) return '';
+  if (RegExp(r'^[a-zA-Z]:[\\/]').hasMatch(a)) return '';
+  // 剩下的才是 OmniBox 那种真正的路径基址（`/spider/<key>/<type>`）
+  return a;
+}
+
+/// 拼出 `/spider/<key>/<type>/<action>` 形态的路径（`apiBase` 非空时以它打头）。
+@visibleForTesting
+String composeSpiderPath(
+  String key,
+  int type,
+  String apiBase,
+  String action,
+) {
+  if (apiBase.isNotEmpty) {
+    // api 自带路径基址（如 OmniBox 的 `/spider/<key>/<type>`）→ 直接拼 action
+    return '$apiBase/$action';
+  }
+  // ⚠️ 2026-10-14 修（猫源整包 spider 的线路全 404）：这里原来返回
+  //   `/$key/$type/$action`，两处都不对 ——
+  //   · 引擎的站点路由在 **`/spider`** 下，根路径下没有它；
+  //   · key 带 `nodejs_` 前缀时也不认（那是客户端的显示前缀）。
+  //   实测（用户 2026-10-14 日志）：
+  //     404 → `POST /nodejs_omnibox_Makka聚合/3/init`
+  //     200 → `POST /spider/omnibox_Makka聚合/3/init`
+  final k = key.toLowerCase().startsWith('nodejs_')
+      ? key.substring('nodejs_'.length)
+      : key;
+  return '/spider/$k/$type/$action';
+}
+
+/// 本地 JS 源脚本（`ljs_xxx.js`）在引擎里的**站点 key 兜底**。
+///
+/// 引擎侧 `spider_compat` 的 key 取 `meta.key || meta.name || config.key ||
+/// config.name || 目录名`。本地源是我们自己写进缓存目录的，
+/// `_loadLocalJsFile` 会把 `key` 写进 `index.config.js`（= 文件名去 `.js`），
+/// 所以正常情况下引擎 key 就是 `ljs_xxx`。
+/// 但 `/config` 不一定把这个站点列出来（单文件脚本常常没有 /config），
+/// 那时 Dart 侧只能靠猜 —— 猜「文件名」比猜「UI 里的 sourceKey
+/// （`localjs_ljs_xxx`）」准得多。
+///
+/// 返回 null 表示不是本地 JS 脚本标识。
+@visibleForTesting
+String? localScriptKeyOf(String script) {
+  final s = script.trim();
+  final m = RegExp(r'^(ljs_[A-Za-z0-9]+)\.js$').firstMatch(s);
+  return m?.group(1);
+}
+
 /// Spider 服务 - 对应 Swift SpiderService
 /// 与本地 Node.js Spider 服务通信
 ///
@@ -30,6 +124,30 @@ class SpiderService {
 
   SpiderService._internal() {
     _dio = _buildDio();
+    // 引擎重启会换端口 ⇒ 槽位里的脚本/key 全没了，必须作废记忆。
+    // （只在**端口真的变了**时清，避免引擎启动过程中反复清空）
+    try {
+      NodeJSManager.instance.spiderPortListenable.addListener(
+        _onEnginePortChanged,
+      );
+    } catch (e) {
+      // 纯 Dart 单测里没有 platform channel（NodeJSManager 构造会碰
+      // MethodChannel）—— 端口监听只是自愈优化，注册不上不影响功能。
+      AppLog.instance.log('[SpiderService] 端口监听注册失败（可忽略）: $e');
+    }
+  }
+
+  /// 上次已知的引擎端口（用来判断"这次通知是不是真换了端口"）。
+  int _lastKnownPort = 0;
+
+  void _onEnginePortChanged() {
+    final p = _spiderPort;
+    // 0 = 引擎正在停/重启，等新端口回来再说（此时清也没意义）
+    if (p <= 0) return;
+    if (p == _lastKnownPort) return;
+    _lastKnownPort = p;
+    resetScriptCache();
+    AppLog.instance.log('[SpiderService] 引擎端口 ⇒ $p，作废脚本/端口记忆');
   }
 
   static Dio _buildDio() {
@@ -54,23 +172,12 @@ class SpiderService {
   /// 构建 Spider 请求路径
   /// · apiBase 非空（api 自带路径，如 OmniBox 的 `/spider/<key>/<type>`）→ `{apiBase}/{action}`
   /// · apiBase 为空 → `/spider/{key去掉 nodejs_ 前缀}/{type}/{action}`
-  String _buildSpiderPath(String key, int type, String apiBase, String action) {
-    if (apiBase.isNotEmpty) {
-      // api 自带路径基址（如 OmniBox 的 `/spider/<key>/<type>`）→ 直接拼 action
-      return '$apiBase/$action';
-    }
-    // ⚠️ 2026-10-14 修（猫源整包 spider 的线路全 404）：这里原来返回
-    //   `/$key/$type/$action`，两处都不对 ——
-    //   · 引擎的站点路由在 **`/spider`** 下，根路径下没有它；
-    //   · key 带 `nodejs_` 前缀时也不认（那是客户端的显示前缀）。
-    //   实测（用户 2026-10-14 日志）：
-    //     404 → `POST /nodejs_omnibox_Makka聚合/3/init`
-    //     200 → `POST /spider/omnibox_Makka聚合/3/init`
-    final k = key.toLowerCase().startsWith('nodejs_')
-        ? key.substring('nodejs_'.length)
-        : key;
-    return '/spider/$k/$type/$action';
-  }
+  String _buildSpiderPath(
+    String key,
+    int type,
+    String apiBase,
+    String action,
+  ) => composeSpiderPath(key, type, apiBase, action);
 
   /// 构建完整的 Spider URL
   String _buildSpiderUrl(String key, int type, String apiBase, String action) {
@@ -83,23 +190,46 @@ class SpiderService {
 
   /// 发送 POST 请求到 Spider 服务 - 对应 Swift postJSON
   /// 使用 ResponseType.plain 手动解析 JSON，接受 200-299 状态码
-  /// 关键：iOS 后台/锁屏切回前台时，dio 的 socket 可能处于半死状态（OS
-  /// 已标记断开但 dio 还没收到 RST），第一次请求会失败；加 1 次重试可恢复
   static const int _maxPostRetries = 1;
   static const Duration _postRetryDelay = Duration(milliseconds: 300);
+
+  /// 把回环 URL 里的端口换成**当前**的 spider 端口。
+  ///
+  /// ── 为什么需要（用户 2026-10-30：切「官方聚合」首页报
+  /// 「引擎请求失败：DioExceptionType.unknown（动作 home）」，
+  /// 紧接着一条 `connectionError ... port: 61083`）────────────────
+  /// 引擎**重启会换端口**（Node 侧通过 `/onCatPawOpenPort` 回传新端口），
+  /// 而 URL 是在发请求**之前**用 `_spiderPort` 拼死的字符串。
+  /// 于是"引擎刚好在这一次请求前后重启"时：
+  ///   · 请求打到**已经关掉的旧端口** ⇒ `connectionError`；
+  ///   · 重试仍然用那个**旧的 URL 字符串** ⇒ 再失败一次 ⇒ 整页报错；
+  ///   · 而此刻新端口早就回来了，用户点一下「重试」就好了 ——
+  ///     这正是"必须手动重试才出内容"的来源。
+  /// 重试前调这里，端口变了就换成新的重发。
+  String _withCurrentPort(String url) => rewriteLoopbackPort(url, _spiderPort);
 
   Future<Map<String, dynamic>?> _postJSON(
     String url,
     Map<String, dynamic> body,
   ) async {
+    var target = url;
     for (var attempt = 0; attempt <= _maxPostRetries; attempt++) {
       try {
         final response = await _dio.post<String>(
-          url,
+          target,
           data: jsonEncode(body),
           options: Options(
             contentType: Headers.jsonContentType,
             responseType: ResponseType.plain,
+            // ── 🔴 本地引擎请求**不复用连接**（2026-10-30）──────────────
+            // 原来复用 keep-alive：iOS 从后台切回来时，复用的那条 socket
+            // 已经被系统单方面关掉（半死：没收到 RST），第一次请求必然失败。
+            // 当时的"解法"是失败后 `_dio.close(force: true)` 重建客户端 ——
+            // 但那是**全进程共享的 dio**，关闭会**连带取消所有正在飞的请求**
+            // （dio 的报错原文就是 `Connection attempt cancelled`，用户截图里
+            //  那条 `connectionError` 正是被别的请求重试时误杀的）。
+            // 本地回环建连只要亚毫秒，不复用连接既没成本又彻底断掉这个坑。
+            persistentConnection: false,
           ),
         );
 
@@ -116,16 +246,15 @@ class SpiderService {
               // 某些 Spider 响应可能返回数组，包装为对象
               return {'list': decoded};
             }
-            _lastPostFailure =
-                '返回的不是 JSON 对象（${decoded.runtimeType}）';
+            _lastPostFailure = '返回的不是 JSON 对象（${decoded.runtimeType}）';
             AppLog.instance.log(
-              '[SpiderService] 响应不是JSON对象: $url, body类型=${decoded.runtimeType}',
+              '[SpiderService] 响应不是JSON对象: $target, body类型=${decoded.runtimeType}',
             );
             return null;
           } catch (e) {
             _lastPostFailure = '返回内容无法按 JSON 解析（${responseBody.length} 字节）';
             AppLog.instance.log(
-              '[SpiderService] JSON解析失败: $url, 错误=$e, body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}',
+              '[SpiderService] JSON解析失败: $target, 错误=$e, body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}',
             );
             return null;
           }
@@ -133,13 +262,11 @@ class SpiderService {
           lastHttpStatus = statusCode;
           _lastPostFailure = 'HTTP $statusCode';
           AppLog.instance.log(
-            '[SpiderService] HTTP错误 $statusCode: $url, body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}',
+            '[SpiderService] HTTP错误 $statusCode: $target, body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}',
           );
           return null;
         }
       } on DioException catch (e) {
-        // iOS 后台/锁屏切回前台时，dio 的 socket 可能半死（OS 标记断开但
-        // 没收到 RST），重试一次通常能恢复
         final isRetriable =
             e.type == DioExceptionType.connectionError ||
             e.type == DioExceptionType.connectionTimeout ||
@@ -147,32 +274,37 @@ class SpiderService {
             e.type == DioExceptionType.receiveTimeout ||
             e.type == DioExceptionType.unknown;
         if (attempt < _maxPostRetries && isRetriable) {
+          // ① 端口变了（引擎重启）→ 直接换新端口，不必等
+          final fresh = _withCurrentPort(target);
+          if (fresh != target) {
+            AppLog.instance.log(
+              '[SpiderService] 引擎端口已变，改用新端口重试：$target ⇒ $fresh',
+            );
+            target = fresh;
+            continue;
+          }
+          // ② 端口没变（半死 socket / 引擎忙）→ 稍等再发一次。
+          //    ⚠️ **不 close dio**：它是共享实例，关掉会连带取消其它在飞的请求。
           AppLog.instance.log(
-            '[SpiderService] POST $url 第 ${attempt + 1} 次失败，${_postRetryDelay.inMilliseconds}ms 后重试: ${e.type}/${e.message}',
+            '[SpiderService] POST $target 第 ${attempt + 1} 次失败，${_postRetryDelay.inMilliseconds}ms 后重试: ${e.type}/${e.message}',
           );
           await Future.delayed(_postRetryDelay);
-          // 重试前重建 dio（确保新 socket）
-          try {
-            _dio.close(force: true);
-          } catch (e) {
-            /* ignore */
-          }
-          _dio = _buildDio();
           continue;
         }
         final code = e.response?.statusCode ?? 0;
         lastHttpStatus = code;
         final respBody = e.response?.data?.toString() ?? '';
-        _lastPostFailure = '${e.type}'
+        _lastPostFailure =
+            '${e.type}'
             '${code > 0 ? ' HTTP $code' : ''}'
             '${e.message == null ? '' : '（${e.message}）'}';
         AppLog.instance.log(
-          '[SpiderService] POST $url 失败: code=$code, type=${e.type}, message=${e.message}, body=${respBody.length > 500 ? respBody.substring(0, 500) : respBody}',
+          '[SpiderService] POST $target 失败: code=$code, type=${e.type}, message=${e.message}, body=${respBody.length > 500 ? respBody.substring(0, 500) : respBody}',
         );
         return null;
       } catch (e) {
         _lastPostFailure = '$e';
-        AppLog.instance.log('[SpiderService] POST $url 未知错误: $e');
+        AppLog.instance.log('[SpiderService] POST $target 未知错误: $e');
         return null;
       }
     }
@@ -255,17 +387,7 @@ class SpiderService {
       script.toLowerCase().split('?').first.endsWith('.py');
 
   /// Node 侧路径基址：api 是 http URL 时退化为 /{key}/{type}/{action}
-  static String _nodeBase(String api) {
-    // ⚠️ 必须先归一化：配置里的 api 可能被反引号包住（`` `https://…` ``），
-    //    不归一化就会 `startsWith('http') == false` → 被当成路径基址 →
-    //    拼出 `` `https://…`/play `` 这种非法 URL。
-    final a = _normalizeScriptUrl(api);
-    // csp_ 占位不是路径基址：拼进 URL 会产出 `csp_xxx/play` 这种非法路径，
-    // 必须退化为标准 /{key}/{type}/{action} 形态。
-    if (a.toLowerCase().startsWith('csp_')) return '';
-    if (a.startsWith('http')) return '';
-    return a;
-  }
+  static String _nodeBase(String api) => spiderApiBase(api);
 
   /// 「主源脚本」地址（整包就是一个 js spider 的配置）：由 AppState 在加载主源时
   /// 登记。用于「打开过程序脚本源后回到主源」时把主源脚本重新载入引擎。
@@ -453,6 +575,9 @@ class SpiderService {
         // 后续所有"api 为空"的订阅线路请求都会命中它 ⇒
         // 订阅页面**整页都是本地 JS 的内容**（用户 2026-10-30 报的就是这个）。
         if (s.isLocalJsSource) continue;
+        // 同理：api 是 `ljs_xxx.js` / 本地绝对路径的线路（用户自己在源管理里
+        // 加的本地脚本）也不是订阅主源脚本。
+        if (s.isLocalScriptApi) continue;
         final u = s.scriptUrl.trim();
         if (u.isEmpty) continue;
         final lower = u.toLowerCase();
@@ -1159,6 +1284,21 @@ class SpiderService {
       }
       engineKey = k;
       candidates = List<String>.of(_loadedScriptCandidates);
+      // ── 本地 JS 源的 key 兜底（2026-10-30）─────────────────────
+      // 单文件脚本常常没有 /config ⇒ `_loadedScriptCandidates` 为空，
+      // 于是退回 `key`（= UI 里的 `localjs_ljs_xxx`）—— 那个前缀引擎根本不认，
+      // 必然 404 ⇒「本地JS还是没有内容」。
+      // 引擎真实 key 是脚本文件名去 `.js`（见 `_loadLocalJsFile` 写的
+      // index.config.js），这里补上：候选为空时**直接用它**，否则排到最后兜底。
+      final localKey = localScriptKeyOf(script);
+      if (localKey != null) {
+        if (candidates.isEmpty) {
+          engineKey = localKey;
+          candidates = [localKey];
+        } else if (!candidates.contains(localKey)) {
+          candidates = [...candidates, localKey];
+        }
+      }
     } else if (_needMainScriptRefresh) {
       // 主源（单 js spider 配置）：api 由 /config 下发、通常为空或 csp_ 占位。
       // 若期间被程序脚本源顶替过，这里把主源脚本重新载入。
@@ -1191,8 +1331,7 @@ class SpiderService {
                 fallback: key,
                 type: type,
               )
-            : await _ensureNodeScript(mainScriptUrl,
-                fallback: key, type: type);
+            : await _ensureNodeScript(mainScriptUrl, fallback: key, type: type);
         if (k != null) engineKey = k;
         candidates = List<String>.of(_loadedScriptCandidates);
       } else if (mainScriptUrl.isEmpty) {

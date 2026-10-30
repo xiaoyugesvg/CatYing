@@ -46,8 +46,9 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
   /// - 在 Swift 端 [NodeJSBridge] 注册同名 channel
   /// - Method: startNodeJS, stopNodeJS, getStatus
   /// - Swift → Dart callback: onNodeExit, onNodeReady
-  static const MethodChannel _channel =
-      MethodChannel('com.tvbox/flutter/nodejs');
+  static const MethodChannel _channel = MethodChannel(
+    'com.tvbox/flutter/nodejs',
+  );
 
   // 状态（Dart 端自己维护，HTTP server 收通知时更新）
   bool _isRunning = false;
@@ -59,13 +60,15 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
   int _managementPort = 0;
   int _spiderPort = 0;
 
-  final Dio _dio = Dio(BaseOptions(
-    // 2026-10-18：15s → 20s / 60s。用户日志里 `Spider 源加载失败:
-    // receiveTimeout 15s` 后 spiderPort 一直是 0，整个 Node 源都加载不出来。
-    // 源包常有几 MB，弱网 15s 明显不够；连接给 20s、接收给 60s。
-    connectTimeout: const Duration(seconds: 20),
-    receiveTimeout: const Duration(seconds: 60),
-  ));
+  final Dio _dio = Dio(
+    BaseOptions(
+      // 2026-10-18：15s → 20s / 60s。用户日志里 `Spider 源加载失败:
+      // receiveTimeout 15s` 后 spiderPort 一直是 0，整个 Node 源都加载不出来。
+      // 源包常有几 MB，弱网 15s 明显不够；连接给 20s、接收给 60s。
+      connectTimeout: const Duration(seconds: 20),
+      receiveTimeout: const Duration(seconds: 60),
+    ),
+  );
 
   // ============================================================
   // 带凭据的源地址（HTTP Basic）支持
@@ -131,7 +134,10 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
   }
 
   /// 取字节；失败/非 200 返回 null（index.config.js 缺失有默认兜底）。
-  Future<List<int>?> _tryGetBytes(String url, Map<String, String> headers) async {
+  Future<List<int>?> _tryGetBytes(
+    String url,
+    Map<String, String> headers,
+  ) async {
     try {
       final r = await _dio.get<List<int>>(
         url,
@@ -166,7 +172,9 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
           case 'onNodeExit':
             final code = call.arguments is int
                 ? call.arguments as int
-                : (call.arguments is Map ? call.arguments['code'] as int? : null);
+                : (call.arguments is Map
+                      ? call.arguments['code'] as int?
+                      : null);
             AppLog.instance.log('[IOSNodeJS] Swift 通知: Node.js 退出，code=$code');
             // **关键**：iOS 后台/锁屏过久 embed library 会被系统回收,
             // 此时必须清掉旧端口, 否则 AppState.handleSceneActive 拿旧
@@ -193,7 +201,9 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
             AppLog.instance.log('[IOSNodeJS] Swift 错误: $msg');
             return null;
           default:
-            AppLog.instance.log('[IOSNodeJS] 未知 method call from Swift: ${call.method}');
+            AppLog.instance.log(
+              '[IOSNodeJS] 未知 method call from Swift: ${call.method}',
+            );
             return null;
         }
       } catch (e, st) {
@@ -212,8 +222,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
     // iOS 端: <Documents>/nodejs-project/src/source
     // 与 tvbox-Swift-main 保持一致
     final docs = await getApplicationDocumentsDirectory();
-    final sourcePath =
-        '${docs.path}/nodejs-project/src/source';
+    final sourcePath = '${docs.path}/nodejs-project/src/source';
     final dir = Directory(sourcePath);
     if (!await dir.exists()) {
       await dir.create(recursive: true);
@@ -236,7 +245,10 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
   /// 切换订阅也不会重复下载。
   Future<String> _cacheDirFor(String url) async {
     final base = await getDocumentsSourcePath();
-    final key = md5.convert(utf8.encode(url.trim())).toString().substring(0, 20);
+    final key = md5
+        .convert(utf8.encode(url.trim()))
+        .toString()
+        .substring(0, 20);
     final dir = Directory('$base/cache_$key');
     if (!await dir.exists()) await dir.create(recursive: true);
     return dir.path;
@@ -262,9 +274,12 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
     final nativePort = _nativeServerPort;
 
     AppLog.instance.log(
-        'IOSNodeJS 调 Swift 启动 Node.js, nativePort=$nativePort, sourcePath=$sourcePath');
-    AppLog.instance.log('[IOSNodeJS] 调 Swift 启动 Node.js, nativePort=$nativePort, '
-        'sourcePath=$sourcePath');
+      'IOSNodeJS 调 Swift 启动 Node.js, nativePort=$nativePort, sourcePath=$sourcePath',
+    );
+    AppLog.instance.log(
+      '[IOSNodeJS] 调 Swift 启动 Node.js, nativePort=$nativePort, '
+      'sourcePath=$sourcePath',
+    );
 
     try {
       // 调 Swift 端启动
@@ -298,8 +313,12 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       AppLog.instance.log('IOSNodeJS Swift 启动失败');
       return false;
     } on PlatformException catch (e) {
-      AppLog.instance.log('[IOSNodeJS] startNodeJS PlatformException: ${e.code}/${e.message}');
-      AppLog.instance.log('IOSNodeJS startNodeJS PlatformException: ${e.code}/${e.message}');
+      AppLog.instance.log(
+        '[IOSNodeJS] startNodeJS PlatformException: ${e.code}/${e.message}',
+      );
+      AppLog.instance.log(
+        'IOSNodeJS startNodeJS PlatformException: ${e.code}/${e.message}',
+      );
       return false;
     } catch (e, st) {
       AppLog.instance.log('[IOSNodeJS] startNodeJS 异常: $e');
@@ -325,8 +344,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       return null;
     });
     // 诚实日志：Swift 只清标志位，NodeMobile 无 node_exit，进程可能仍在
-    AppLog.instance.log(
-        '[IOSNodeJS] 已解绑 Node.js 状态（embed 进程未必退出，仅本端认为不可用）');
+    AppLog.instance.log('[IOSNodeJS] 已解绑 Node.js 状态（embed 进程未必退出，仅本端认为不可用）');
   }
 
   @override
@@ -355,7 +373,9 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       onManagementPortChanged.value = port;
       // **iOS SIGKILL 修复**: 同步 mgmt port 给 Swift,
       // Swift 在 app 回前台时主动 ping /check 确认 Node.js 是否被 SIGKILL
-      _channel.invokeMethod('setManagementPort', {'port': port}).catchError((e) {
+      _channel.invokeMethod('setManagementPort', {'port': port}).catchError((
+        e,
+      ) {
         AppLog.instance.log('[IOSNodeJS] setManagementPort 异常: $e');
         return null;
       });
@@ -411,8 +431,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
   // ============================================================
 
   @override
-  Future<(bool success, String? message)> loadSource(
-      String urlString) async {
+  Future<(bool success, String? message)> loadSource(String urlString) async {
     if (urlString.isEmpty) return (false, 'URL 为空');
 
     var normalizedUrl = urlString;
@@ -463,15 +482,18 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       localJSExists = len >= _minValidSourceBytes;
       if (!localJSExists) {
         AppLog.instance.log(
-            '[IOSNodeJS] 本地源文件无效（$len 字节 < $_minValidSourceBytes），强制重新下载');
+          '[IOSNodeJS] 本地源文件无效（$len 字节 < $_minValidSourceBytes），强制重新下载',
+        );
         try {
           await File(indexJSPath).delete();
         } catch (_) {}
       }
     }
     final localMd5Exists = await File(indexMd5Path).exists();
-    AppLog.instance.log('[IOSNodeJS] 缓存检查: index.js 有效=$localJSExists, '
-        'index.js.md5 存在=$localMd5Exists');
+    AppLog.instance.log(
+      '[IOSNodeJS] 缓存检查: index.js 有效=$localJSExists, '
+      'index.js.md5 存在=$localMd5Exists',
+    );
 
     if (localJSExists) {
       // **本地缓存优先 (2026-09-27)**：源文件已存在就直接使用, 不等远程 MD5
@@ -486,7 +508,8 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       // 凭据订阅源：把 URL 里的 user:pass@ 转成 Basic 头（HttpClient 会丢弃 userinfo）
       final jsAuth = _authSplit(normalizedUrl);
       final configAuth = _authSplit(
-          normalizedUrl.replaceAll('/index.js', '/index.config.js'));
+        normalizedUrl.replaceAll('/index.js', '/index.config.js'),
+      );
 
       // 🔴 2026-10-14（用户：「接口配置下载源文件好慢」）：三个请求**并发**。
       //   主脚本是长杆（几百 KB ~ 几 MB），而 `.md5` 与 `index.config.js`
@@ -532,8 +555,9 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
         if (configData != null) {
           await File(configJSPath).writeAsBytes(configData);
         } else {
-          await File(configJSPath)
-              .writeAsString('module.exports = { color: [] };');
+          await File(
+            configJSPath,
+          ).writeAsString('module.exports = { color: [] };');
         }
 
         return await _sendLoadCommandToNodeJS(sourcePath);
@@ -624,10 +648,23 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       final indexJSPath = '$sourcePath/index.js';
       final configJSPath = '$sourcePath/index.config.js';
       await File(indexJSPath).writeAsBytes(bytes, flush: true);
-      // 兜底配置：本地源通常自带 /config；缺失时 Node 需要一个最小可用的文件
-      if (!await File(configJSPath).exists()) {
-        await File(configJSPath).writeAsString('module.exports = { color: [] };');
-      }
+      // 兜底配置：本地源通常自带 /config；缺失时 Node 需要一个最小可用的文件。
+      //
+      // 🔴 必须把 `key` 写进去（2026-10-30）：
+      // 引擎侧 `spider_compat` 的站点 key 取
+      //   `meta.key || meta.name || config.key || config.name || path.basename(dir)`
+      // 而缓存目录名是 `cache_<md5>` 这种哈希 —— Dart 侧根本猜不到，
+      // 于是「本地 JS 载入成功、请求却 404 / 没有内容」。
+      // 写成脚本文件名（`ljs_xxx`）后，key 就变成确定值，
+      // `SpiderService` 用 `localScriptKeyOf(script)` 就能对上。
+      final baseName = path
+          .split(Platform.pathSeparator)
+          .last
+          .replaceAll(RegExp(r'\.js$', caseSensitive: false), '');
+      await File(configJSPath).writeAsString(
+        'module.exports = { key: ${jsonEncode(baseName)}, '
+        'name: ${jsonEncode(baseName)}, color: [] };\n',
+      );
       AppLog.instance.log('[IOSNodeJS] 载入本地 JS 源: $path → $sourcePath');
       return await _sendLoadCommandToNodeJS(sourcePath);
     } catch (e) {
@@ -636,7 +673,8 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
   }
 
   Future<(bool success, String? message)> _sendLoadCommandToNodeJS(
-      String path) async {
+    String path,
+  ) async {
     if (_managementPort <= 0) {
       return (false, 'Management 端口未就绪，请先启动 Node.js');
     }
@@ -671,8 +709,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
             detail = '$detail（路径: ${data['resolved']}）';
           }
         }
-        AppLog.instance
-            .log('[IOSNodeJS] /source/loadPath 失败: $code $detail');
+        AppLog.instance.log('[IOSNodeJS] /source/loadPath 失败: $code $detail');
         return (false, '源加载被拒绝: $detail');
       }
 
@@ -699,12 +736,10 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       //
       // Node 现在在 200 响应里回传真实端口，这里直接对齐，不依赖回调时序。
       final data = response.data;
-      final newPort =
-          data is Map ? (data['port'] as num?)?.toInt() ?? 0 : 0;
+      final newPort = data is Map ? (data['port'] as num?)?.toInt() ?? 0 : 0;
       if (newPort > 0) {
         if (newPort != _spiderPort) {
-          AppLog.instance.log(
-              '[IOSNodeJS] 换源后端口对齐: $_spiderPort → $newPort');
+          AppLog.instance.log('[IOSNodeJS] 换源后端口对齐: $_spiderPort → $newPort');
         }
         _spiderPort = newPort;
         onSpiderPortChanged.value = newPort;
@@ -757,7 +792,10 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
   }
 
   Future<void> _refreshSourceAsync(
-      String normalizedUrl, String sourcePath, int gen) async {
+    String normalizedUrl,
+    String sourcePath,
+    int gen,
+  ) async {
     try {
       final indexJSPath = '$sourcePath/index.js';
       final indexMd5Path = '$sourcePath/index.js.md5';
@@ -819,13 +857,13 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       await File(indexMd5Path).writeAsString(remoteMd5);
       try {
         final configAuth = _authSplit(
-            normalizedUrl.replaceAll('/index.js', '/index.config.js'));
+          normalizedUrl.replaceAll('/index.js', '/index.config.js'),
+        );
         final configResponse = await _dio.get<List<int>>(
           configAuth.url,
           options: _opts(configAuth.headers, type: ResponseType.bytes),
         );
-        if (configResponse.statusCode == 200 &&
-            configResponse.data != null) {
+        if (configResponse.statusCode == 200 && configResponse.data != null) {
           await File(configJSPath).writeAsBytes(configResponse.data!);
         }
       } on DioException catch (e) {

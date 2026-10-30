@@ -5,6 +5,7 @@ import 'package:tvbox/models/cache_ttl.dart';
 import 'package:tvbox/models/movie.dart';
 import 'package:tvbox/models/movie_sort.dart';
 import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/services/nodejs_manager.dart';
 import 'package:tvbox/services/source_service.dart';
 import 'package:tvbox/reading/services/settings_service.dart';
 import 'package:tvbox/webhome/webhtv_site_health_page.dart';
@@ -46,6 +47,30 @@ class HomeController extends GetxController {
 
     // 首次加载
     loadSorts();
+
+    // 引擎重启换了端口 ⇒ 上一次的失败几乎一定是"打到了已经关掉的旧端口"。
+    // 端口一变就自动重来一次，用户不用手动点「重试」。
+    NodeJSManager.instance.spiderPortListenable.addListener(
+      _onEnginePortChanged,
+    );
+  }
+
+  /// 引擎端口变了（重启）→ 若当前正停在错误态，自动重新加载一次。
+  ///
+  /// 为什么只在"有错误"时重来：正常有内容时重来会闪一下列表；
+  /// 而端口变化本身是**离散事件**（一次重启只触发一次），不会形成循环。
+  void _onEnginePortChanged() {
+    if (errorMessage.value == null) return;
+    AppLog.instance.log('[home] 引擎端口变化 ⇒ 自动重试首页');
+    loadSorts();
+  }
+
+  @override
+  void onClose() {
+    NodeJSManager.instance.spiderPortListenable.removeListener(
+      _onEnginePortChanged,
+    );
+    super.onClose();
   }
 
   Future<void> loadSorts() async {
@@ -58,7 +83,10 @@ class HomeController extends GetxController {
     final cacheKey = 'home_videos:${source.key}';
     var hasHomeCache = false;
     try {
-      final cached = CacheStore.instance.getJsonListCache(cacheKey, ttl: CacheTtl.homeVideos);
+      final cached = CacheStore.instance.getJsonListCache(
+        cacheKey,
+        ttl: CacheTtl.homeVideos,
+      );
       if (cached != null && cached.isNotEmpty) {
         homeVideos.value = cached
             .whereType<Map>()
@@ -67,8 +95,8 @@ class HomeController extends GetxController {
         hasHomeCache = true;
       }
     } catch (e) {
-        AppLog.instance.log('[controller] swallowed: $e');
-      }
+      AppLog.instance.log('[controller] swallowed: $e');
+    }
 
     // 已有内容/缓存时后台刷新，不闪 Loading
     if (!hasHomeCache || videos.isEmpty) {
@@ -161,7 +189,10 @@ class HomeController extends GetxController {
 
   /// 缓存 key 必须带上筛选条件，否则会塞回错误列表
   String _catCacheKey(
-      String sourceKey, String sortId, Map<String, String>? filters) {
+    String sourceKey,
+    String sortId,
+    Map<String, String>? filters,
+  ) {
     if (filters == null || filters.isEmpty) {
       return 'cat_videos:$sourceKey:$sortId';
     }
@@ -348,8 +379,7 @@ class HomeController extends GetxController {
         );
       }
 
-      final sort = (keepSort != null &&
-              sorts.any((s) => s.id == keepSort.id))
+      final sort = (keepSort != null && sorts.any((s) => s.id == keepSort.id))
           ? keepSort
           : (sorts.isNotEmpty ? sorts.first : null);
       if (sort == null) {
@@ -376,16 +406,24 @@ class HomeController extends GetxController {
   }
 
   String _friendlyErrorMessage(Object error) {
-    final msg = error.toString();
+    var msg = error.toString();
+    // `throw Exception('...')` 的 toString 会带一个 `Exception: ` 前缀，
+    // 直接显示出来就是「Exception: 引擎请求失败：…」—— 用户看的不是代码。
+    const prefix = 'Exception: ';
+    if (msg.startsWith(prefix)) msg = msg.substring(prefix.length);
 
     // DioException / 网络相关
-    if (msg.contains('Connection refused') || msg.contains('connection refused')) {
+    if (msg.contains('Connection refused') ||
+        msg.contains('connection refused')) {
       return '无法连接到本地服务，请稍后重试';
     }
-    if (msg.contains('timed out') || msg.contains('TimedOut') || msg.contains('timeout')) {
+    if (msg.contains('timed out') ||
+        msg.contains('TimedOut') ||
+        msg.contains('timeout')) {
       return '请求超时，请检查网络';
     }
-    if (msg.contains('not connected') || msg.contains('No address associated')) {
+    if (msg.contains('not connected') ||
+        msg.contains('No address associated')) {
       return '网络未连接，请检查网络设置';
     }
     if (msg.contains('Connection reset') || msg.contains('connection lost')) {
@@ -398,6 +436,26 @@ class HomeController extends GetxController {
       return '网络连接异常，请稍后重试';
     }
 
-    return msg;
+    return _humanizeEngineError(msg);
+  }
+
+  /// 把引擎报错里的**英文枚举**翻译成人话。
+  ///
+  /// 用户 2026-10-30 截图里就是这一串：
+  /// 「Exception: 引擎请求失败：DioExceptionType.unknown（动作 home）」
+  /// —— 这是排查日志用的，不该原样怼到用户脸上。
+  static String _humanizeEngineError(String msg) {
+    const map = {
+      'DioExceptionType.connectionError': '连不上本地引擎',
+      'DioExceptionType.connectionTimeout': '连接本地引擎超时',
+      'DioExceptionType.sendTimeout': '发送请求超时',
+      'DioExceptionType.receiveTimeout': '等待引擎响应超时',
+      'DioExceptionType.badResponse': '引擎返回异常响应',
+      'DioExceptionType.cancel': '请求已取消',
+      'DioExceptionType.unknown': '与本地引擎的连接中断',
+    };
+    var s = msg;
+    map.forEach((k, v) => s = s.replaceAll(k, v));
+    return s;
   }
 }

@@ -566,7 +566,12 @@ class AppState extends GetxController {
       (s) =>
           s.isSpiderSource &&
           !s.key.startsWith('app_') &&
-          !s.isPythonScriptSource,
+          !s.isPythonScriptSource &&
+          // 🔴 本地 JS 源（api = `ljs_xxx.js`）**不能**当订阅主源脚本。
+          // 它一旦被登记成 mainScriptUrl，所有 api 为空 / `csp_` 占位的订阅
+          // 线路都会请求到那个本地脚本上 ⇒「订阅里全是本地 JS 的内容」。
+          !s.isLocalJsSource &&
+          !s.isLocalScriptApi,
     );
     if (spiderSource == null || spiderSource.api.isEmpty) return;
 

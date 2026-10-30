@@ -2,24 +2,34 @@
 class SourceBean {
   /// 源唯一键
   final String key;
+
   /// 源显示名
   final String name;
+
   /// 源接口地址
   final String api;
+
   /// 搜索开关：0 关闭，1 开启
   final int searchable;
+
   /// 是否允许出现在首页分类：0 不可选，1 可选
   final int filterable;
+
   /// 快速搜索开关：0 关闭，1 开启
   final int quickSearch;
+
   /// 源声明的播放器类型
   final int playerType;
+
   /// 源协议类型：0 XML，1 JSON，3 JAR，4 Remote
   final int type;
+
   /// 扩展参数（remote 源常用）
   final String? ext;
+
   /// JAR 包 URL（Spider 源常用）
   final String? jar;
+
   /// 索引标记：1 表示索引服务（如豆瓣），点击视频应跳转搜索
   final int indexs;
 
@@ -41,7 +51,8 @@ class SourceBean {
   bool get isFilterable => filterable == 1;
   bool get isQuickSearchEnabled => quickSearch == 1;
 
-  bool get isSupportedInSwift => type == 0 || type == 1 || type == 3 || type == 4;
+  bool get isSupportedInSwift =>
+      type == 0 || type == 1 || type == 3 || type == 4;
 
   bool get isSpiderSource => type == 3;
 
@@ -168,6 +179,25 @@ class SourceBean {
 
   /// 本地 JSON 源（离线）
   bool get isLocalSource => api.startsWith('file://');
+
+  /// api 是不是**本地脚本标识**（`ljs_xxx.js` / 绝对路径 .js / `file://`）。
+  ///
+  /// ── 为什么必须单独判断（用户 2026-10-30）────────────────────────
+  /// 「主源脚本」只能是一个**能下载进 Node 槽位的远端脚本**。
+  /// 而用户导入的本地 JS 源（api = `ljs_xxx.js`）同样是 type=3 的 spider 线路，
+  /// 一旦它被 `AppState._loadSpiderSource` 当成"订阅主源脚本"登记，
+  /// 之后所有 api 为空 / `csp_` 占位的订阅线路都会请求到**那个本地脚本**上
+  /// ⇒ 用户看到「订阅里面全是本地 JS 的内容」。
+  /// 所以选主源时要显式跳过这一类。
+  bool get isLocalScriptApi {
+    final a = api.trim().toLowerCase();
+    if (a.isEmpty) return false;
+    if (a.startsWith('http://') || a.startsWith('https://')) return false;
+    if (a.startsWith('file://')) return true;
+    final path = a.split('?').first;
+    if (path.endsWith('.js') || path.endsWith('.js.md5')) return true;
+    return RegExp(r'^[a-z]:[\\/]').hasMatch(path);
+  }
 
   factory SourceBean.fromJson(Map<String, dynamic> json) {
     return SourceBean(

@@ -66,7 +66,9 @@ class _HomePageState extends State<HomePage> {
       valueListenable: rfwThemeModeNotifier,
       builder: (context, rfwOn, _) {
         final rfwBg = rfwOn
-            ? RfwThemePalette.of(effectiveRfwThemeId(rfwThemeIdNotifier.value)).bg
+            ? RfwThemePalette.of(
+                effectiveRfwThemeId(rfwThemeIdNotifier.value),
+              ).bg
             : null;
         return Scaffold(
           // 透明背景,让 app.dart ContentView 里的 BackgroundService 全局背景层透出
@@ -1075,6 +1077,23 @@ class _HomePageState extends State<HomePage> {
     required String? selectedSortId,
     required String sourceName,
   }) {
+    // ── RFW 主题没有"错误态" ──────────────────────────────────────
+    // 三个 .rfwtxt 的 empty 槽只有「加载中… / 暂无内容」两种文案，
+    // 引擎请求失败（用户 2026-10-30：「切官方聚合首页报引擎请求失败」）时
+    // 用户看到的要么是一句"暂无内容"、要么干脆一片空白 —— 既不知道原因，
+    // 也没有重试入口。这里用宿主的错误页兜住：皮肤再花哨也不该盖住
+    // "为什么没内容"。
+    if (!isLoading &&
+        videos.isEmpty &&
+        errorMsg != null &&
+        errorMsg.isNotEmpty) {
+      return Center(
+        child: AppError(
+          message: errorMsg,
+          onRetry: () => _controller.refresh(),
+        ),
+      );
+    }
     final media = MediaQuery.of(context);
     return RfwHomeTheme(
       data: buildRfwHomeData(
@@ -1288,215 +1307,214 @@ class _HomePageState extends State<HomePage> {
     required SourceBean? source,
     required bool isPySource,
   }) {
+    if (isLoading && videos.isEmpty) {
+      return const AppLoading();
+    }
 
-      if (isLoading && videos.isEmpty) {
-        return const AppLoading();
-      }
+    // 源配置失败（线路清单没拿到）时 homeSourceBean 为 null，控制器会直接 return
+    // 什么都不加载 → 原来这里只显示转圈/空白。优先暴露这个错误，让用户知道
+    // 该去改源地址或换源，而不是对着空白页猜。
+    final sourceConfigError = ApiConfig.instance.apiConfigError.value;
+    if (sourceConfigError != null && videos.isEmpty) {
+      return Center(
+        child: AppError(
+          message: sourceConfigError,
+          onRetry: () => _controller.refresh(),
+        ),
+      );
+    }
 
-      // 源配置失败（线路清单没拿到）时 homeSourceBean 为 null，控制器会直接 return
-      // 什么都不加载 → 原来这里只显示转圈/空白。优先暴露这个错误，让用户知道
-      // 该去改源地址或换源，而不是对着空白页猜。
-      final sourceConfigError = ApiConfig.instance.apiConfigError.value;
-      if (sourceConfigError != null && videos.isEmpty) {
-        return Center(
-          child: AppError(
-            message: sourceConfigError,
-            onRetry: () => _controller.refresh(),
-          ),
-        );
-      }
-
-      if (errorMsg != null && videos.isEmpty) {
-        return Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (source != null && source.isIndexSite)
-                const AppError(message: '该线路为索引服务，请点击影视跳转搜索')
-              else
-                AppError(
-                  message: errorMsg,
-                  onRetry: () => _controller.refresh(),
-                ),
-              if (source != null && !source.isSupportedInSwift)
-                Padding(
-                  padding: const EdgeInsets.only(top: AppTheme.spacingSM),
-                  child: Text(
-                    '当前源类型: ${source.typeDescription}',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: AppTheme.fontCaption,
-                    ),
+    if (errorMsg != null && videos.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (source != null && source.isIndexSite)
+              const AppError(message: '该线路为索引服务，请点击影视跳转搜索')
+            else
+              AppError(
+                message: errorMsg,
+                onRetry: () => _controller.refresh(),
+              ),
+            if (source != null && !source.isSupportedInSwift)
+              Padding(
+                padding: const EdgeInsets.only(top: AppTheme.spacingSM),
+                child: Text(
+                  '当前源类型: ${source.typeDescription}',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: AppTheme.fontCaption,
                   ),
                 ),
-            ],
-          ),
-        );
-      }
+              ),
+          ],
+        ),
+      );
+    }
 
-      return RefreshIndicator(
-        color: AppTheme.accentColor,
-        backgroundColor: AppTheme.backgroundSecondary,
-        onRefresh: () => _controller.refresh(),
-        // ⚠️ Obx 必须包住 LayoutBuilder：
-        // 原来 gridColumns 只在 LayoutBuilder 内部读，改列数后这个 builder
-        // 不会重建 → 网格列数不更新，看起来像"布局切换没生效"。
-        child: Obx(() {
-          final userCols = PlayerPrefs.instance.gridColumns.value;
-          final crossAxisCount = userCols.clamp(2, 4);
-          return LayoutBuilder(
-            builder: (context, constraints) {
-              final cardWidth =
-                  (constraints.maxWidth -
-                      AppTheme.cardSpacing * (crossAxisCount - 1)) /
-                  crossAxisCount;
+    return RefreshIndicator(
+      color: AppTheme.accentColor,
+      backgroundColor: AppTheme.backgroundSecondary,
+      onRefresh: () => _controller.refresh(),
+      // ⚠️ Obx 必须包住 LayoutBuilder：
+      // 原来 gridColumns 只在 LayoutBuilder 内部读，改列数后这个 builder
+      // 不会重建 → 网格列数不更新，看起来像"布局切换没生效"。
+      child: Obx(() {
+        final userCols = PlayerPrefs.instance.gridColumns.value;
+        final crossAxisCount = userCols.clamp(2, 4);
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final cardWidth =
+                (constraints.maxWidth -
+                    AppTheme.cardSpacing * (crossAxisCount - 1)) /
+                crossAxisCount;
 
-              // 卡片真实高度 = 海报高（宽 × posterHeightRatio）+ 文字区。
-              //
-              // 海报比例 1.44 = 0.72 × 2：按要求把首页卡片高度做成原来的**两倍**。
-              // ⚠️ 必须与下面 VodCard 的 posterHeightRatio 保持一致，
-              //    否则网格分给卡片的高度与卡片实际需要的高度对不上 → 底部留白。
-              const posterRatio = 1.44;
-              const textArea = 30.0; // 标题行 + 上下内边距
-              final cardHeight = cardWidth * posterRatio + textArea;
-              final ratio = cardWidth / cardHeight;
+            // 卡片真实高度 = 海报高（宽 × posterHeightRatio）+ 文字区。
+            //
+            // 海报比例 1.44 = 0.72 × 2：按要求把首页卡片高度做成原来的**两倍**。
+            // ⚠️ 必须与下面 VodCard 的 posterHeightRatio 保持一致，
+            //    否则网格分给卡片的高度与卡片实际需要的高度对不上 → 底部留白。
+            const posterRatio = 1.44;
+            const textArea = 30.0; // 标题行 + 上下内边距
+            final cardHeight = cardWidth * posterRatio + textArea;
+            final ratio = cardWidth / cardHeight;
 
-              return CustomScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                slivers: [
+            return CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.only(
+                      top: AppTheme.spacingXS,
+                      bottom: 8,
+                    ),
+                    child: homeVideos.isEmpty
+                        // 幻灯片兜底策略见 HomeController._fillBannerFromCategory：
+                        //   · 还在加载 → 占位块（避免顶部高度跳一下）
+                        //   · 加载完仍为空（源连分类列表都没有）→ **整块隐藏**，
+                        //     不再留一块空白占位
+                        ? (isLoading
+                              ? const _BannerPlaceholder()
+                              : const SizedBox.shrink())
+                        : ListenableBuilder(
+                            // 样式变化（设置里切换）时立即重建；
+                            // key 带上 style → 换样式时 State/PageController 一起重建
+                            // （viewportFraction 只能在构造时给，复用旧 controller 会错位）
+                            listenable: SettingsService(),
+                            builder: (context, _) {
+                              final st = SettingsService().homeBannerStyle;
+                              // 取几个**由样式决定**（6~9，见 homeBannerItemCount）：
+                              // 一页 1 张的取 9、标签页取 6、主次三栏取 8 …
+                              final n = homeBannerItemCount(st);
+                              return _RecommendBanner(
+                                // key 用 **name**（不是 index）：index 会随枚举增删漂移
+                                key: ValueKey('banner-${st.name}'),
+                                style: st,
+                                videos: homeVideos.length > n
+                                    ? homeVideos.sublist(0, n)
+                                    : List<Video>.from(homeVideos),
+                              );
+                            },
+                          ),
+                  ),
+                ),
+                if (sorts.isNotEmpty)
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.only(
-                        top: AppTheme.spacingXS,
-                        bottom: 8,
-                      ),
-                      child: homeVideos.isEmpty
-                          // 幻灯片兜底策略见 HomeController._fillBannerFromCategory：
-                          //   · 还在加载 → 占位块（避免顶部高度跳一下）
-                          //   · 加载完仍为空（源连分类列表都没有）→ **整块隐藏**，
-                          //     不再留一块空白占位
-                          ? (isLoading
-                                ? const _BannerPlaceholder()
-                                : const SizedBox.shrink())
-                          : ListenableBuilder(
-                              // 样式变化（设置里切换）时立即重建；
-                              // key 带上 style → 换样式时 State/PageController 一起重建
-                              // （viewportFraction 只能在构造时给，复用旧 controller 会错位）
-                              listenable: SettingsService(),
-                              builder: (context, _) {
-                                final st = SettingsService().homeBannerStyle;
-                                // 取几个**由样式决定**（6~9，见 homeBannerItemCount）：
-                                // 一页 1 张的取 9、标签页取 6、主次三栏取 8 …
-                                final n = homeBannerItemCount(st);
-                                return _RecommendBanner(
-                                  // key 用 **name**（不是 index）：index 会随枚举增删漂移
-                                  key: ValueKey('banner-${st.name}'),
-                                  style: st,
-                                  videos: homeVideos.length > n
-                                      ? homeVideos.sublist(0, n)
-                                      : List<Video>.from(homeVideos),
-                                );
-                              },
-                            ),
-                    ),
-                  ),
-                  if (sorts.isNotEmpty)
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          AppTheme.spacingLG,
-                          AppTheme.spacingXS,
-                          AppTheme.spacingLG,
-                          AppTheme.spacingXS,
-                        ),
-                        child: _buildCategoryTabBar(),
-                      ),
-                    ),
-                  // 内联筛选芯片行（截图样式）：「筛选 → 隐藏筛选」可关掉它
-                  SliverToBoxAdapter(
-                    child: Obx(() {
-                      if (PlayerPrefs.instance.hideFilters.value) {
-                        return const SizedBox.shrink();
-                      }
-                      return _buildInlineFilters();
-                    }),
-                  ),
-                  // Python 源 home/category 返回空 list 时原来是一片纯白。
-                  // 空列表既不抛异常也没有 errorMessage，用户只会以为 App 坏了；
-                  // 这里明确说明"暂无内容 + 常见原因"并给重试。
-                  if (isPySource &&
-                      !isLoading &&
-                      videos.isEmpty &&
-                      errorMsg == null)
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.only(top: 40),
-                        child: AppError(
-                          message: '该源暂无内容（站点不可达 / 反爬或已改版）',
-                          onRetry: () => _controller.refresh(),
-                        ),
-                      ),
-                    )
-                  else
-                    SliverPadding(
-                      // 底部 padding 改为 0：内容区下探到底，一屏显示更多卡片
-                      //（用户要求对齐参考图"内容贴底"；原本 80 是给悬浮导航让位，现按用户指示取消）
                       padding: const EdgeInsets.fromLTRB(
-                        AppTheme.spacingXL,
-                        AppTheme.spacingMD,
-                        AppTheme.spacingXL,
-                        0,
+                        AppTheme.spacingLG,
+                        AppTheme.spacingXS,
+                        AppTheme.spacingLG,
+                        AppTheme.spacingXS,
                       ),
-                      sliver: SliverGrid(
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: crossAxisCount,
-                          childAspectRatio: ratio,
-                          crossAxisSpacing: AppTheme.cardSpacing,
-                          mainAxisSpacing: AppTheme.cardSpacing,
-                        ),
-                        delegate: SliverChildBuilderDelegate(
-                          (context, index) {
-                            if (index >= videos.length) {
-                              if (hasMore && selectedSortId != null) {
-                                WidgetsBinding.instance.addPostFrameCallback((_) {
-                                  _controller.loadMore();
-                                });
-                                return Center(
-                                  child: Padding(
-                                    padding: EdgeInsets.all(8.0),
-                                    child: SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: AppTheme.accentColor,
-                                      ),
+                      child: _buildCategoryTabBar(),
+                    ),
+                  ),
+                // 内联筛选芯片行（截图样式）：「筛选 → 隐藏筛选」可关掉它
+                SliverToBoxAdapter(
+                  child: Obx(() {
+                    if (PlayerPrefs.instance.hideFilters.value) {
+                      return const SizedBox.shrink();
+                    }
+                    return _buildInlineFilters();
+                  }),
+                ),
+                // Python 源 home/category 返回空 list 时原来是一片纯白。
+                // 空列表既不抛异常也没有 errorMessage，用户只会以为 App 坏了；
+                // 这里明确说明"暂无内容 + 常见原因"并给重试。
+                if (isPySource &&
+                    !isLoading &&
+                    videos.isEmpty &&
+                    errorMsg == null)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 40),
+                      child: AppError(
+                        message: '该源暂无内容（站点不可达 / 反爬或已改版）',
+                        onRetry: () => _controller.refresh(),
+                      ),
+                    ),
+                  )
+                else
+                  SliverPadding(
+                    // 底部 padding 改为 0：内容区下探到底，一屏显示更多卡片
+                    //（用户要求对齐参考图"内容贴底"；原本 80 是给悬浮导航让位，现按用户指示取消）
+                    padding: const EdgeInsets.fromLTRB(
+                      AppTheme.spacingXL,
+                      AppTheme.spacingMD,
+                      AppTheme.spacingXL,
+                      0,
+                    ),
+                    sliver: SliverGrid(
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: crossAxisCount,
+                        childAspectRatio: ratio,
+                        crossAxisSpacing: AppTheme.cardSpacing,
+                        mainAxisSpacing: AppTheme.cardSpacing,
+                      ),
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          if (index >= videos.length) {
+                            if (hasMore && selectedSortId != null) {
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                _controller.loadMore();
+                              });
+                              return Center(
+                                child: Padding(
+                                  padding: EdgeInsets.all(8.0),
+                                  child: SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: AppTheme.accentColor,
                                     ),
                                   ),
-                                );
-                              }
-                              return const SizedBox.shrink();
+                                ),
+                              );
                             }
-                            final vid = videos[index];
-                            return VodCard(
-                              video: vid,
-                              // 与上面的 posterRatio 配套（首页卡片高度 ×2）
-                              posterHeightRatio: 1.44,
-                              onTap: () => Get.toNamed('/detail', arguments: vid),
-                            );
-                          },
-                          childCount:
-                              videos.length +
-                              ((hasMore && selectedSortId != null) ? 1 : 0),
-                        ),
+                            return const SizedBox.shrink();
+                          }
+                          final vid = videos[index];
+                          return VodCard(
+                            video: vid,
+                            // 与上面的 posterRatio 配套（首页卡片高度 ×2）
+                            posterHeightRatio: 1.44,
+                            onTap: () => Get.toNamed('/detail', arguments: vid),
+                          );
+                        },
+                        childCount:
+                            videos.length +
+                            ((hasMore && selectedSortId != null) ? 1 : 0),
                       ),
                     ),
-                ],
-              );
-            },
-          );
-        }),
-      );
+                  ),
+              ],
+            );
+          },
+        );
+      }),
+    );
   }
 
   // ignore: unused_element

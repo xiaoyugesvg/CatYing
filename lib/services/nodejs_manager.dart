@@ -27,7 +27,7 @@ import 'dart:io';
 import 'dart:typed_data' show BytesBuilder;
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart' show ValueNotifier;
+import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
 
 import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/nodejs_platform.dart';
@@ -50,22 +50,26 @@ class NodeJSManager {
   /// 本地回环通知鉴权 token（Node 启动时通过 argv 传入，请求需携带）
   final String _localAuthToken =
       DateTime.now().microsecondsSinceEpoch.toRadixString(36) +
-          (1000 + DateTime.now().millisecond).toRadixString(36);
+      (1000 + DateTime.now().millisecond).toRadixString(36);
   String get localAuthToken => _localAuthToken;
 
   late final Dio _localHttpDio = () {
-    final d = Dio(BaseOptions(
-      connectTimeout: const Duration(seconds: 2),
-      sendTimeout: const Duration(seconds: 2),
-      receiveTimeout: const Duration(seconds: 2),
-    ));
+    final d = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 2),
+        sendTimeout: const Duration(seconds: 2),
+        receiveTimeout: const Duration(seconds: 2),
+      ),
+    );
     // 管理端口校验 x-auth-token（与 main.js mgmtServer 一致）
-    d.interceptors.add(InterceptorsWrapper(
-      onRequest: (options, handler) {
-        options.headers['x-auth-token'] = _localAuthToken;
-        handler.next(options);
-      },
-    ));
+    d.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          options.headers['x-auth-token'] = _localAuthToken;
+          handler.next(options);
+        },
+      ),
+    );
     return d;
   }();
   int get nativeServerPort => _nativeServerPort;
@@ -78,7 +82,8 @@ class NodeJSManager {
   static Future<Map<String, dynamic>> Function(
     String url,
     Map<String, dynamic> req,
-  )? webViewFetcher;
+  )?
+  webViewFetcher;
 
   // HTTP server 层 → 平台实现的桥接
   final ValueNotifier<bool> _nodeReadyBridge = ValueNotifier(false);
@@ -88,8 +93,10 @@ class NodeJSManager {
   NodeJSManager._internal() {
     if (!Platform.isIOS) {
       // 非 iOS：不支持嵌入 Node，延迟报错到 startNodeJS，构造不崩溃
-      AppLog.instance.nodejs('unsupported_platform',
-          fields: {'os': Platform.operatingSystem});
+      AppLog.instance.nodejs(
+        'unsupported_platform',
+        fields: {'os': Platform.operatingSystem},
+      );
     }
     final ios = IOSNodeJSPlatform(
       onNodeReadyChanged: _nodeReadyBridge,
@@ -110,6 +117,16 @@ class NodeJSManager {
   int get managementPort => _platform.managementPort;
   int get spiderPort => _platform.spiderPort;
 
+  /// spider 端口变化通知（`0` = 引擎已停 / 还没起来）。
+  ///
+  /// ── 为什么必须暴露（用户 2026-10-30「切官方聚合首页报引擎请求失败」）──
+  /// 引擎**重启会换端口**（Node 侧通过 `/onCatPawOpenPort` 回传）。
+  /// 而 `SpiderService` 记着"槽位里已经载入了哪个脚本、站点 key 是多少"，
+  /// 这份记忆在引擎重启后**全部作废**（新进程里什么都没有）。
+  /// 不在这里通知，重启后的第一次请求就会拿旧 key 去打新引擎 ⇒ 404，
+  /// 或者干脆打到旧端口 ⇒ 连接被拒。
+  ValueListenable<int> get spiderPortListenable => _spiderPortBridge;
+
   /// 启动 Node.js
   ///
   /// 1. 启动 Dart 端 HTTP server（收 Node.js 通知）
@@ -122,9 +139,12 @@ class NodeJSManager {
     //   被 iOS 实现的 `catch` 兜成 false。结果虽然也是 false ✓，但日志里全是
     //   "startNodeJS 异常"，排查时极具误导性 ✗。这里显式返回并说明原因 ✓
     if (!Platform.isIOS) {
-      AppLog.instance.nodejs('start_skipped_unsupported_platform', fields: {
-        'os': Platform.operatingSystem,
-      });
+      AppLog.instance.nodejs(
+        'start_skipped_unsupported_platform',
+        fields: {
+          'os': Platform.operatingSystem,
+        },
+      );
       return false;
     }
     // 1. 起 HTTP server
@@ -146,11 +166,14 @@ class NodeJSManager {
   void stopNodeJS() {
     final spider = _platform.spiderPort;
     final mgmt = _platform.managementPort;
-    AppLog.instance.nodejs('stopNodeJS_detach', fields: {
-      'spiderPort': spider,
-      'managementPort': mgmt,
-      'note': 'iOS NodeMobile cannot be killed; detach only',
-    });
+    AppLog.instance.nodejs(
+      'stopNodeJS_detach',
+      fields: {
+        'spiderPort': spider,
+        'managementPort': mgmt,
+        'note': 'iOS NodeMobile cannot be killed; detach only',
+      },
+    );
     _platform.stopNodeJS();
     _stopHttpServer();
   }
@@ -174,18 +197,24 @@ class NodeJSManager {
     //
     // HTTP server 必须一直跑, Node.js 任何时候启动都能通知到.
     // 之前 79177e1 行为就是只清状态不停 server, 才是对的.
-    AppLog.instance.nodejs('forceReset', fields: {
-      'beforeSpiderPort': _platform.spiderPort,
-      'beforeMgmtPort': _platform.managementPort,
-      'beforeIsRunning': _platform.isRunning,
-      'reason': '保留 HTTP server, 只清状态',
-    });
+    AppLog.instance.nodejs(
+      'forceReset',
+      fields: {
+        'beforeSpiderPort': _platform.spiderPort,
+        'beforeMgmtPort': _platform.managementPort,
+        'beforeIsRunning': _platform.isRunning,
+        'reason': '保留 HTTP server, 只清状态',
+      },
+    );
     _platform.forceResetRunningState();
-    AppLog.instance.nodejs('forceReset_done', fields: {
-      'afterSpiderPort': _platform.spiderPort,
-      'afterMgmtPort': _platform.managementPort,
-      'afterIsRunning': _platform.isRunning,
-    });
+    AppLog.instance.nodejs(
+      'forceReset_done',
+      fields: {
+        'afterSpiderPort': _platform.spiderPort,
+        'afterMgmtPort': _platform.managementPort,
+        'afterIsRunning': _platform.isRunning,
+      },
+    );
   }
 
   Future<bool> waitForNodeReady() => _platform.waitForNodeReady();
@@ -287,14 +316,22 @@ class NodeJSManager {
   /// 2s 超时避免锁屏切回时长时间卡住。
   Future<bool> verifySourceLoaded(int managementPort) async {
     if (managementPort <= 0) {
-      AppLog.instance.verify('skip', port: managementPort, ok: false,
-          error: 'managementPort <= 0');
+      AppLog.instance.verify(
+        'skip',
+        port: managementPort,
+        ok: false,
+        error: 'managementPort <= 0',
+      );
       return false;
     }
     final startAt = DateTime.now();
     final url = 'http://127.0.0.1:$managementPort/source/status';
-    AppLog.instance.http('GET', url, port: managementPort,
-        caller: 'verifySourceLoaded');
+    AppLog.instance.http(
+      'GET',
+      url,
+      port: managementPort,
+      caller: 'verifySourceLoaded',
+    );
     final dio = _localHttpDio;
     try {
       final resp = await dio.get<String>(
@@ -303,12 +340,23 @@ class NodeJSManager {
       );
       final elapsed = DateTime.now().difference(startAt).inMilliseconds;
       if (resp.statusCode != 200) {
-        AppLog.instance.http('GET', url, port: managementPort,
-            statusCode: resp.statusCode, elapsedMs: elapsed, ok: false,
-            caller: 'verifySourceLoaded');
-        AppLog.instance.verify('http_non_200', port: managementPort,
-            statusCode: resp.statusCode, elapsedMs: elapsed, ok: false,
-            error: 'HTTP ${resp.statusCode}');
+        AppLog.instance.http(
+          'GET',
+          url,
+          port: managementPort,
+          statusCode: resp.statusCode,
+          elapsedMs: elapsed,
+          ok: false,
+          caller: 'verifySourceLoaded',
+        );
+        AppLog.instance.verify(
+          'http_non_200',
+          port: managementPort,
+          statusCode: resp.statusCode,
+          elapsedMs: elapsed,
+          ok: false,
+          error: 'HTTP ${resp.statusCode}',
+        );
         return false;
       }
       final body = resp.data ?? '';
@@ -321,22 +369,43 @@ class NodeJSManager {
         // 兼容异常格式，失败则视为未加载
         loaded = false;
       }
-      AppLog.instance.http('GET', url, port: managementPort,
-          statusCode: resp.statusCode, elapsedMs: elapsed, ok: true,
-          caller: 'verifySourceLoaded');
-      AppLog.instance.verify('parse', port: managementPort,
-          statusCode: resp.statusCode, elapsedMs: elapsed,
-          ok: loaded, body: body,
-          fields: {'sourceLoaded': loaded});
+      AppLog.instance.http(
+        'GET',
+        url,
+        port: managementPort,
+        statusCode: resp.statusCode,
+        elapsedMs: elapsed,
+        ok: true,
+        caller: 'verifySourceLoaded',
+      );
+      AppLog.instance.verify(
+        'parse',
+        port: managementPort,
+        statusCode: resp.statusCode,
+        elapsedMs: elapsed,
+        ok: loaded,
+        body: body,
+        fields: {'sourceLoaded': loaded},
+      );
       return loaded;
     } catch (e) {
       final elapsed = DateTime.now().difference(startAt).inMilliseconds;
-      AppLog.instance.http('GET', url, port: managementPort,
-          elapsedMs: elapsed, ok: false,
-          error: e.toString(),
-          caller: 'verifySourceLoaded');
-      AppLog.instance.verify('exception', port: managementPort,
-          elapsedMs: elapsed, ok: false, error: e.toString());
+      AppLog.instance.http(
+        'GET',
+        url,
+        port: managementPort,
+        elapsedMs: elapsed,
+        ok: false,
+        error: e.toString(),
+        caller: 'verifySourceLoaded',
+      );
+      AppLog.instance.verify(
+        'exception',
+        port: managementPort,
+        elapsedMs: elapsed,
+        ok: false,
+        error: e.toString(),
+      );
       return false;
     }
   }
@@ -349,14 +418,17 @@ class NodeJSManager {
   /// 必须发真实 HTTP 请求到 mgmtServer 的 /check 端点.
   Future<bool> verifyManagementPort(int port) async {
     if (port <= 0) {
-      AppLog.instance.verify('skip', port: port, ok: false,
-          error: 'port <= 0');
+      AppLog.instance.verify('skip', port: port, ok: false, error: 'port <= 0');
       return false;
     }
     final startAt = DateTime.now();
     final url = 'http://127.0.0.1:$port/check';
-    AppLog.instance.http('GET', url, port: port,
-        caller: 'verifyManagementPort');
+    AppLog.instance.http(
+      'GET',
+      url,
+      port: port,
+      caller: 'verifyManagementPort',
+    );
     final dio = _localHttpDio;
     try {
       final resp = await dio.get<String>(
@@ -365,42 +437,74 @@ class NodeJSManager {
       );
       final elapsed = DateTime.now().difference(startAt).inMilliseconds;
       if (resp.statusCode != 200) {
-        AppLog.instance.http('GET', url, port: port,
-            statusCode: resp.statusCode, elapsedMs: elapsed, ok: false,
-            caller: 'verifyManagementPort');
-        AppLog.instance.verify('http_non_200', port: port,
-            statusCode: resp.statusCode, elapsedMs: elapsed, ok: false,
-            error: 'HTTP ${resp.statusCode}');
+        AppLog.instance.http(
+          'GET',
+          url,
+          port: port,
+          statusCode: resp.statusCode,
+          elapsedMs: elapsed,
+          ok: false,
+          caller: 'verifyManagementPort',
+        );
+        AppLog.instance.verify(
+          'http_non_200',
+          port: port,
+          statusCode: resp.statusCode,
+          elapsedMs: elapsed,
+          ok: false,
+          error: 'HTTP ${resp.statusCode}',
+        );
         return false;
       }
       final body = resp.data ?? '';
       // main.js /check 返回 { run: true, ready: isReady }
       // ready=true 表示 mgmtServer listen 完
-      final ready = body.contains('"ready":true') ||
-          body.contains('"ready": true');
-      AppLog.instance.http('GET', url, port: port,
-          statusCode: resp.statusCode, elapsedMs: elapsed, ok: true,
-          caller: 'verifyManagementPort');
-      AppLog.instance.verify('parse', port: port,
-          statusCode: resp.statusCode, elapsedMs: elapsed,
-          ok: ready, body: body, fields: {'ready': ready});
+      final ready =
+          body.contains('"ready":true') || body.contains('"ready": true');
+      AppLog.instance.http(
+        'GET',
+        url,
+        port: port,
+        statusCode: resp.statusCode,
+        elapsedMs: elapsed,
+        ok: true,
+        caller: 'verifyManagementPort',
+      );
+      AppLog.instance.verify(
+        'parse',
+        port: port,
+        statusCode: resp.statusCode,
+        elapsedMs: elapsed,
+        ok: ready,
+        body: body,
+        fields: {'ready': ready},
+      );
       return ready;
     } catch (e) {
       final elapsed = DateTime.now().difference(startAt).inMilliseconds;
-      AppLog.instance.http('GET', url, port: port,
-          elapsedMs: elapsed, ok: false,
-          error: e.toString(),
-          caller: 'verifyManagementPort');
-      AppLog.instance.verify('exception', port: port,
-          elapsedMs: elapsed, ok: false, error: e.toString());
+      AppLog.instance.http(
+        'GET',
+        url,
+        port: port,
+        elapsedMs: elapsed,
+        ok: false,
+        error: e.toString(),
+        caller: 'verifyManagementPort',
+      );
+      AppLog.instance.verify(
+        'exception',
+        port: port,
+        elapsedMs: elapsed,
+        ok: false,
+        error: e.toString(),
+      );
       return false;
     }
   }
 
   Future<bool> reloadSourceViaManagementPort(int port) async {
     if (port <= 0) {
-      AppLog.instance.reload('skip', port: port, ok: false,
-          error: 'port <= 0');
+      AppLog.instance.reload('skip', port: port, ok: false, error: 'port <= 0');
       return false;
     }
     final startAt = DateTime.now();
@@ -408,9 +512,12 @@ class NodeJSManager {
     try {
       final sourcePath =
           await _platform.getLastSourceCachePath() ??
-              await getDocumentsSourcePath();
-      AppLog.instance.reload('start', port: port,
-          fields: {'sourcePath': sourcePath, 'url': url});
+          await getDocumentsSourcePath();
+      AppLog.instance.reload(
+        'start',
+        port: port,
+        fields: {'sourcePath': sourcePath, 'url': url},
+      );
       final dio = _localHttpDio;
       final resp = await dio.post(
         url,
@@ -438,21 +545,42 @@ class NodeJSManager {
         AppLog.instance.w('[NodeJS] /source/loadPath 失败($code): $detail');
       }
       final elapsed = DateTime.now().difference(startAt).inMilliseconds;
-      AppLog.instance.http('POST', url, port: port,
-          statusCode: code, elapsedMs: elapsed, ok: ok,
-          caller: 'reloadSourceViaManagementPort');
-      AppLog.instance.reload(ok ? 'ok' : 'fail', port: port,
-          statusCode: code, elapsedMs: elapsed, ok: ok,
-          error: ok ? null : detail);
+      AppLog.instance.http(
+        'POST',
+        url,
+        port: port,
+        statusCode: code,
+        elapsedMs: elapsed,
+        ok: ok,
+        caller: 'reloadSourceViaManagementPort',
+      );
+      AppLog.instance.reload(
+        ok ? 'ok' : 'fail',
+        port: port,
+        statusCode: code,
+        elapsedMs: elapsed,
+        ok: ok,
+        error: ok ? null : detail,
+      );
       return ok;
     } catch (e) {
       final elapsed = DateTime.now().difference(startAt).inMilliseconds;
-      AppLog.instance.http('POST', url, port: port,
-          elapsedMs: elapsed, ok: false,
-          error: e.toString(),
-          caller: 'reloadSourceViaManagementPort');
-      AppLog.instance.reload('exception', port: port,
-          elapsedMs: elapsed, ok: false, error: e.toString());
+      AppLog.instance.http(
+        'POST',
+        url,
+        port: port,
+        elapsedMs: elapsed,
+        ok: false,
+        error: e.toString(),
+        caller: 'reloadSourceViaManagementPort',
+      );
+      AppLog.instance.reload(
+        'exception',
+        port: port,
+        elapsedMs: elapsed,
+        ok: false,
+        error: e.toString(),
+      );
       return false;
     }
   }
@@ -521,10 +649,13 @@ class NodeJSManager {
     try {
       _httpServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       _nativeServerPort = _httpServer!.port;
-      AppLog.instance.nodejs('http_server_ok', elapsedMs:
-          DateTime.now().difference(startAt).inMilliseconds, fields: {
-        'port': _nativeServerPort,
-      });
+      AppLog.instance.nodejs(
+        'http_server_ok',
+        elapsedMs: DateTime.now().difference(startAt).inMilliseconds,
+        fields: {
+          'port': _nativeServerPort,
+        },
+      );
       AppLog.instance.nodejs('see_details');
 
       _httpServer!.listen((HttpRequest request) {
@@ -532,9 +663,12 @@ class NodeJSManager {
       });
       return true;
     } catch (e) {
-      AppLog.instance.nodejs('http_server_fail',
-          elapsedMs: DateTime.now().difference(startAt).inMilliseconds,
-          ok: false, error: e.toString());
+      AppLog.instance.nodejs(
+        'http_server_fail',
+        elapsedMs: DateTime.now().difference(startAt).inMilliseconds,
+        ok: false,
+        error: e.toString(),
+      );
       AppLog.instance.nodejs('see_details');
       return false;
     }
@@ -542,13 +676,18 @@ class NodeJSManager {
 
   void _stopHttpServer() {
     if (_httpServer == null && _nativeServerPort == 0) {
-      AppLog.instance.nodejs('http_server_stop_skip',
-          fields: {'reason': 'already stopped'});
+      AppLog.instance.nodejs(
+        'http_server_stop_skip',
+        fields: {'reason': 'already stopped'},
+      );
       return;
     }
-    AppLog.instance.nodejs('http_server_stop', fields: {
-      'beforePort': _nativeServerPort,
-    });
+    AppLog.instance.nodejs(
+      'http_server_stop',
+      fields: {
+        'beforePort': _nativeServerPort,
+      },
+    );
     _httpServer?.close(force: true);
     _httpServer = null;
     _nativeServerPort = 0;
@@ -559,14 +698,16 @@ class NodeJSManager {
     final path = request.uri.path;
     final query = request.uri.queryParameters;
     // 本地回环鉴权：优先 header，query 兼容旧版（勿把 token 打进日志）
-    final token = request.headers.value('x-auth-token') ??
-        query['token'] ??
-        '';
+    final token = request.headers.value('x-auth-token') ?? query['token'] ?? '';
     if (token != _localAuthToken) {
-      AppLog.instance.ports('http_request_rejected', ok: false, fields: {
-        'path': path,
-        'reason': 'bad_token',
-      });
+      AppLog.instance.ports(
+        'http_request_rejected',
+        ok: false,
+        fields: {
+          'path': path,
+          'reason': 'bad_token',
+        },
+      );
       request.response
         ..statusCode = HttpStatus.forbidden
         ..close();
@@ -576,13 +717,16 @@ class NodeJSManager {
     final receivedAt = DateTime.now();
     final safeQuery = Map<String, String>.from(query)..remove('token');
 
-    AppLog.instance.ports('http_request_in', fields: {
-      'method': request.method,
-      'path': path,
-      'query': safeQuery.toString(),
-      'remotePort': remotePort,
-      'remoteAddress': request.connectionInfo?.remoteAddress.address,
-    });
+    AppLog.instance.ports(
+      'http_request_in',
+      fields: {
+        'method': request.method,
+        'path': path,
+        'query': safeQuery.toString(),
+        'remotePort': remotePort,
+        'remoteAddress': request.connectionInfo?.remoteAddress.address,
+      },
+    );
 
     if (path == '/onCatPawOpenPort' && request.method == 'GET') {
       final portStr = query['port'];
@@ -591,29 +735,38 @@ class NodeJSManager {
         final newPort = int.tryParse(portStr) ?? 0;
         final oldSpider = _platform.spiderPort;
         final oldMgmt = _platform.managementPort;
-        AppLog.instance.ports('onCatPawOpenPort_in', fields: {
-          'newPort': newPort,
-          'type': typeStr,
-          'oldSpider': oldSpider,
-          'oldMgmt': oldMgmt,
-        });
+        AppLog.instance.ports(
+          'onCatPawOpenPort_in',
+          fields: {
+            'newPort': newPort,
+            'type': typeStr,
+            'oldSpider': oldSpider,
+            'oldMgmt': oldMgmt,
+          },
+        );
         _platform.onPortReceived(newPort, typeStr);
-        AppLog.instance.ports('onCatPawOpenPort_done', fields: {
-          'newPort': newPort,
-          'type': typeStr,
-          'afterSpider': _platform.spiderPort,
-          'afterMgmt': _platform.managementPort,
-          'elapsedMs': DateTime.now().difference(receivedAt).inMilliseconds,
-        });
+        AppLog.instance.ports(
+          'onCatPawOpenPort_done',
+          fields: {
+            'newPort': newPort,
+            'type': typeStr,
+            'afterSpider': _platform.spiderPort,
+            'afterMgmt': _platform.managementPort,
+            'elapsedMs': DateTime.now().difference(receivedAt).inMilliseconds,
+          },
+        );
       }
       request.response
         ..write('OK')
         ..close();
     } else if (path == '/onMessage' && request.method == 'POST') {
       final contentLength = request.contentLength;
-      AppLog.instance.ports('onMessage_in', fields: {
-        'contentLength': contentLength,
-      });
+      AppLog.instance.ports(
+        'onMessage_in',
+        fields: {
+          'contentLength': contentLength,
+        },
+      );
       if (contentLength > 0 && contentLength <= 1024 * 1024) {
         final builder = BytesBuilder();
         request.listen(
@@ -623,16 +776,24 @@ class NodeJSManager {
               final body = utf8.decode(builder.toBytes());
               final json = jsonDecode(body) as Map<String, dynamic>;
               final message = json['message'] as String?;
-              AppLog.instance.ports('onMessage_done', fields: {
-                'message': message,
-                'elapsedMs': DateTime.now().difference(receivedAt).inMilliseconds,
-              });
+              AppLog.instance.ports(
+                'onMessage_done',
+                fields: {
+                  'message': message,
+                  'elapsedMs': DateTime.now()
+                      .difference(receivedAt)
+                      .inMilliseconds,
+                },
+              );
               if (message != null) {
                 _platform.onMessage(message);
               }
             } catch (e) {
-              AppLog.instance.ports('onMessage_parse_fail',
-                  ok: false, error: e.toString());
+              AppLog.instance.ports(
+                'onMessage_parse_fail',
+                ok: false,
+                error: e.toString(),
+              );
               AppLog.instance.nodejs('see_details');
             }
             request.response
@@ -640,8 +801,11 @@ class NodeJSManager {
               ..close();
           },
           onError: (e) {
-            AppLog.instance.ports('onMessage_read_fail',
-                ok: false, error: e.toString());
+            AppLog.instance.ports(
+              'onMessage_read_fail',
+              ok: false,
+              error: e.toString(),
+            );
             AppLog.instance.nodejs('see_details');
             request.response
               ..statusCode = HttpStatus.badRequest
@@ -649,8 +813,10 @@ class NodeJSManager {
           },
         );
       } else {
-        AppLog.instance.ports('onMessage_skip',
-            fields: {'reason': 'contentLength=$contentLength 不在范围'});
+        AppLog.instance.ports(
+          'onMessage_skip',
+          fields: {'reason': 'contentLength=$contentLength 不在范围'},
+        );
         request.response
           ..write('OK')
           ..close();
@@ -677,19 +843,26 @@ class NodeJSManager {
       request.listen(
         (data) => builder.add(data),
         onDone: () async {
-          Future<void> reply(Map<String, dynamic> body,
-              {int code = HttpStatus.ok}) async {
+          Future<void> reply(
+            Map<String, dynamic> body, {
+            int code = HttpStatus.ok,
+          }) async {
             request.response
               ..statusCode = code
-              ..headers.contentType =
-                  ContentType('application', 'json', charset: 'utf-8')
+              ..headers.contentType = ContentType(
+                'application',
+                'json',
+                charset: 'utf-8',
+              )
               ..write(jsonEncode(body))
               ..close();
           }
 
           if (fetcher == null) {
-            await reply({'ok': false, 'error': '海阔模块未就绪（WebView 桥未注册）'},
-                code: HttpStatus.notImplemented);
+            await reply({
+              'ok': false,
+              'error': '海阔模块未就绪（WebView 桥未注册）',
+            }, code: HttpStatus.notImplemented);
             return;
           }
           try {
@@ -699,15 +872,19 @@ class NodeJSManager {
                 : Map<String, dynamic>.from(jsonDecode(raw) as Map);
             final url = (req['url'] ?? '').toString();
             if (url.isEmpty) {
-              await reply({'ok': false, 'error': '缺少 url'},
-                  code: HttpStatus.badRequest);
+              await reply({
+                'ok': false,
+                'error': '缺少 url',
+              }, code: HttpStatus.badRequest);
               return;
             }
             final r = await fetcher(url, req);
             await reply(r);
           } catch (e) {
-            await reply({'ok': false, 'error': e.toString()},
-                code: HttpStatus.internalServerError);
+            await reply({
+              'ok': false,
+              'error': e.toString(),
+            }, code: HttpStatus.internalServerError);
           }
         },
         onError: (e) {
@@ -717,10 +894,13 @@ class NodeJSManager {
         },
       );
     } else {
-      AppLog.instance.ports('http_request_unknown', fields: {
-        'method': request.method,
-        'path': path,
-      });
+      AppLog.instance.ports(
+        'http_request_unknown',
+        fields: {
+          'method': request.method,
+          'path': path,
+        },
+      );
       request.response
         ..statusCode = HttpStatus.notFound
         ..close();
