@@ -20,6 +20,10 @@
 //   { action: 'search'   , url, keyword, page? }
 import vm from 'node:vm';
 import axios from 'axios';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import * as cheerioNs from 'cheerio';
 
 const cheerio = cheerioNs.default ?? cheerioNs;
@@ -105,8 +109,195 @@ async function fetchText(url, headers) {
   return typeof res.data === 'string' ? res.data : String(res.data ?? '');
 }
 
+// ── Widget.storage ──────────────────────────────────────────────
+// REX 规范里模块可以读写一份**同步**的键值存储（原 App 用 UserDefaults）。
+// 我们以前完全没提供 ⇒ 用到它的模块要么每次重取游客 token，要么中文标题
+// 缓存永远命中不了（用户 2026-10-31 拿 ONE一个 / SupJav 试出来的）。
+//
+// ⚠️ 必须是**同步**的：ONE一个 里写的是 `var raw = Widget.storage.get(k)`，
+//    不 await；返回 Promise 的话 `typeof raw === 'string'` 永远为假。
+//    所以这里用「内存对象 + 异步防抖落盘」，get/set 都是同步返回。
+const STORE_ROOT = (() => {
+  try {
+    const base = process.env['NODE_PATH'] || os.tmpdir() || '.';
+    const dir = path.join(base, 'rex_store');
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  } catch (_) {
+    return '';
+  }
+})();
+
+const storeCache = new Map(); // ns → { ns, data, timer }
+
+function storeFile(ns) {
+  if (!STORE_ROOT) return '';
+  const h = crypto.createHash('sha1').update(ns).digest('hex').slice(0, 16);
+  return path.join(STORE_ROOT, `${h}.json`);
+}
+
+function storeFor(ns) {
+  const key = ns || 'default';
+  const hit = storeCache.get(key);
+  if (hit) return hit;
+  let data = {};
+  try {
+    const f = storeFile(key);
+    if (f && fs.existsSync(f)) {
+      const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+      if (j && typeof j === 'object' && !Array.isArray(j)) data = j;
+    }
+  } catch (_) {
+    /* 读不出来就当空存储，模块自己会重建 */
+  }
+  const s = { ns: key, data, timer: null };
+  storeCache.set(key, s);
+  return s;
+}
+
+function flushStore(s) {
+  if (s.timer) return;
+  s.timer = setTimeout(() => {
+    s.timer = null;
+    try {
+      const f = storeFile(s.ns);
+      if (f) fs.writeFileSync(f, JSON.stringify(s.data));
+    } catch (_) {
+      /* 落盘失败不影响本次会话 */
+    }
+  }, 400);
+  // 别让这个定时器拖住进程退出
+  if (s.timer && typeof s.timer.unref === 'function') s.timer.unref();
+}
+
+function buildStorage(ns) {
+  const s = storeFor(ns);
+  return {
+    get: (k) => {
+      const v = s.data[String(k)];
+      return v === undefined ? null : v;
+    },
+    set: (k, v) => {
+      s.data[String(k)] = v === undefined ? null : v;
+      flushStore(s);
+      return true;
+    },
+    remove: (k) => {
+      delete s.data[String(k)];
+      flushStore(s);
+      return true;
+    },
+    clear: () => {
+      s.data = {};
+      flushStore(s);
+      return true;
+    },
+  };
+}
+
+// ── REXENC 加密容器 ────────────────────────────────────────────
+// 社区里有一部分模块不是明文 JS，而是这样一段：
+//
+//   REXENC
+//   {"v":2,"mkv":"rex-1","alg":"A256GCM","iv":"<12B>","kb":"<60B>"}
+//   <base64 密文>
+//
+// `kb` = 12 字节 nonce + AES-256-GCM 封好的 32 字节**内容密钥**，
+// 用名叫 `rex-1` 的 32 字节主密钥解开；再用内容密钥 + `iv` 解正文。
+// 主密钥在 Rex 客户端里，宿主这边只能让用户自己填（见 RexKeys）。
+const REXENC_MAGIC = 'REXENC';
+const REXENC_NEED_KEY =
+  '这是 REXENC 加密模块，需要先在「REX 订阅」页右上角填主密钥';
+const REXENC_BAD_KEY = 'REXENC 主密钥不对，解不开这个模块';
+
+function isRexEnc(code) {
+  return typeof code === 'string' && code.startsWith(REXENC_MAGIC);
+}
+
+function b64buf(s) {
+  return Buffer.from(String(s || '').replace(/\s+/g, ''), 'base64');
+}
+
+/** AES-256-GCM 拆封；`blob` 末 16 字节是 tag */
+function openGcm(key, iv, blob, aad) {
+  if (!blob || blob.length <= 16) throw new Error('密文太短');
+  const ct = blob.subarray(0, blob.length - 16);
+  const tag = blob.subarray(blob.length - 16);
+  const d = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  if (aad) d.setAAD(aad);
+  d.setAuthTag(tag);
+  return Buffer.concat([d.update(ct), d.final()]);
+}
+
+/** 主密钥接受三种写法：64 位 hex / 44 位 base64 / 32 字节原文 */
+function normalizeMasterKey(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  if (/^[0-9a-fA-F]{64}$/.test(s)) return Buffer.from(s, 'hex');
+  if (s.length === 32) return Buffer.from(s, 'utf8');
+  const b = b64buf(s);
+  return b.length === 32 ? b : null;
+}
+
+/** 只解析头部（Dart 侧的 RexEnvelope 与这里保持同一套规则） */
+function parseRexEncHeader(code) {
+  const nl1 = code.indexOf('\n');
+  const nl2 = nl1 < 0 ? -1 : code.indexOf('\n', nl1 + 1);
+  if (nl1 < 0 || nl2 < 0) throw new Error('REXENC 容器损坏：缺少头部');
+  let hdr;
+  try {
+    hdr = JSON.parse(code.slice(nl1 + 1, nl2));
+  } catch (_) {
+    throw new Error('REXENC 容器损坏：头部不是合法 JSON');
+  }
+  if (!hdr || typeof hdr !== 'object') {
+    throw new Error('REXENC 容器损坏：头部不是对象');
+  }
+  return { hdr, bodyStart: nl2 + 1 };
+}
+
+function decodeRexEnc(code, masterKeyRaw) {
+  const { hdr, bodyStart } = parseRexEncHeader(code);
+  const v = Number(hdr.v) || 0;
+  if (v !== 2) throw new Error(`不支持的 REXENC 版本（v${v}）`);
+  const alg = String(hdr.alg || '').toUpperCase();
+  if (alg !== 'A256GCM') {
+    throw new Error(`不支持的 REXENC 算法（${alg || '未标注'}）`);
+  }
+  const mk = normalizeMasterKey(masterKeyRaw);
+  if (!mk) throw new Error(REXENC_NEED_KEY);
+
+  const kb = b64buf(hdr.kb);
+  if (kb.length < 44) throw new Error('REXENC 容器损坏：密钥块太短');
+  let contentKey;
+  try {
+    contentKey = openGcm(mk, kb.subarray(0, 12), kb.subarray(12));
+  } catch (_) {
+    throw new Error(REXENC_BAD_KEY);
+  }
+  if (contentKey.length !== 32) throw new Error(REXENC_BAD_KEY);
+
+  const iv = b64buf(hdr.iv);
+  if (iv.length !== 12) throw new Error('REXENC 容器损坏：IV 长度不对');
+  const body = b64buf(code.slice(bodyStart));
+  if (!body.length) throw new Error('REXENC 容器损坏：正文为空');
+
+  // AAD 未在头部标注：先按「无 AAD」解，不行再拿头部原文当 AAD 试一次。
+  // GCM 的 tag 校验保证了解错会失败而不是给出乱码，所以多试一次是安全的。
+  const aadCandidates = [null, Buffer.from(code.slice(0, bodyStart), 'utf8')];
+  for (const aad of aadCandidates) {
+    try {
+      const plain = openGcm(contentKey, iv, body, aad);
+      return plain.toString('utf8');
+    } catch (_) {
+      /* 换下一个 AAD 猜想 */
+    }
+  }
+  throw new Error('REXENC 内容解密失败：模块文件可能被改动过');
+}
+
 /** 模块能用的 `Widget` 对象 */
-function buildWidget() {
+function buildWidget(storageNs) {
   const request = async (method, url, opts = {}) => {
     const o = opts || {};
     const timeout = clampInt(o.timeout, 1000, 60000, FETCH_TIMEOUT_MS);
@@ -141,7 +332,7 @@ function buildWidget() {
     return { data, status: res.status, headers: res.headers };
   };
 
-  return {
+  const widget = {
     http: {
       get: (url, opts) => request('get', url, opts),
       post: (url, data, opts) => request('post', url, { ...(opts || {}), data }),
@@ -154,12 +345,15 @@ function buildWidget() {
     },
     get: (url, opts) => request('get', url, opts),
     post: (url, data, opts) => request('post', url, { ...(opts || {}), data }),
+    storage: buildStorage(storageNs),
   };
+  return widget;
 }
 
 function compileModule(url, code) {
+  const widget = buildWidget(url);
   const sandbox = {
-    Widget: buildWidget(),
+    Widget: widget,
     console: {
       log: (...a) => console.log('[REX]', ...a),
       warn: (...a) => console.warn('[REX]', ...a),
@@ -178,7 +372,7 @@ function compileModule(url, code) {
     TextDecoder,
     atob: (s) => Buffer.from(String(s), 'base64').toString('binary'),
     btoa: (s) => Buffer.from(String(s), 'binary').toString('base64'),
-    fetch: (u, o) => buildWidget().http.request({ ...(o || {}), url: u }),
+    fetch: (u, o) => widget.http.request({ ...(o || {}), url: u }),
   };
   sandbox.globalThis = sandbox;
   sandbox.self = sandbox;
@@ -261,8 +455,10 @@ function extractModule(url, ctx) {
  * [inlineCode] 非空时直接用这段源码 —— 这是「本地 JS 文件」通道：
  * Dart 侧把文件内容随请求一并送来（沙箱里没有 fs，不能自己读盘），
  * `url`（`local://xxx.js`）只作为缓存 key。
+ *
+ * [masterKey] 只对 `REXENC` 加密模块有用（用户自己填的主密钥）。
  */
-async function getModule(url, inlineCode) {
+async function getModule(url, inlineCode, masterKey) {
   const cached = moduleCache.get(url);
   if (cached) return cached;
   let code;
@@ -277,6 +473,11 @@ async function getModule(url, inlineCode) {
     }
   }
   if (!code.trim()) throw new Error('模块内容为空');
+
+  // 加密模块先拆封再编译。拆封失败（没填密钥 / 密钥不对 / 文件被改）
+  // 直接抛人话，不能落到下面那句「模块代码无法解析：Unexpected token」。
+  if (isRexEnc(code)) code = decodeRexEnc(code, masterKey);
+
   let ctx;
   try {
     ctx = compileModule(url, code);
@@ -394,13 +595,17 @@ export async function handleRexApi(body) {
   }
   if (!url) throw new Error('缺少模块地址');
   const inlineCode = typeof data.code === 'string' ? data.code : '';
+  const masterKey =
+    typeof data.rexKey === 'string' && data.rexKey.trim()
+      ? data.rexKey
+      : String(process.env.REX_MASTER_KEY || '');
 
   if (action === 'load') {
-    const mod = await getModule(url, inlineCode);
+    const mod = await getModule(url, inlineCode, masterKey);
     return { ok: true, meta: mod.meta };
   }
 
-  const mod = await getModule(url, inlineCode);
+  const mod = await getModule(url, inlineCode, masterKey);
 
   if (action === 'list') {
     let fn = String(data.functionName || '');

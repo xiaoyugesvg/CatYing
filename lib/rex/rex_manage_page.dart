@@ -9,6 +9,7 @@ import 'package:tvbox/rex/rex_layout_sheet.dart';
 import 'package:tvbox/rex/rex_market_page.dart';
 import 'package:tvbox/rex/rex_models.dart';
 import 'package:tvbox/rex/rex_service.dart';
+import 'package:tvbox/rex/rex_keys.dart';
 
 /// REX 订阅管理：市场入口 + 启用/停用 + 刷新 + 排序 + 改地址 + 删除。
 ///
@@ -253,6 +254,8 @@ class _RexManagePageState extends State<RexManagePage> {
                       _busy ? null : _openLayout),
                   _topIcon(Icons.storefront_rounded, '市场',
                       _busy ? null : _openMarket),
+                  _topIcon(Icons.key_rounded, '密钥',
+                      _busy ? null : _openKeys),
                   _topIcon(
                     Icons.sync_rounded,
                     '刷新',
@@ -977,6 +980,103 @@ class _RexManagePageState extends State<RexManagePage> {
   Future<void> _clearCache(RexModule m) async {
     await _service.clearCache(m);
     if (mounted) AppToast.show('已清空「${m.title}」的编译缓存', '');
+  }
+
+  /// 「密钥」：加密模块（REXENC）的主密钥。
+  ///
+  /// 社区里有一批模块不是明文 JS，而是 `REXENC` 容器（AES-256-GCM），
+  /// 要用发布方的主密钥才能拆开。App 不内置也不猜，用户自己填一次即可，
+  /// 之后所有加密模块共用同一把（`rex-1`）。
+  ///
+  /// 填完会清掉所有本地模块的编译缓存 —— 否则之前拆封失败留下的状态
+  /// 会让人以为「填了也没用」。
+  Future<void> _openKeys() async {
+    final cur = await RexKeys.master();
+    final ctrl = TextEditingController();
+    if (!mounted) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('加密模块密钥'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'REXENC 加密模块（AES-256-GCM）需要发布方的主密钥才能解开。'
+              '填一次，所有加密模块共用。',
+              style: TextStyle(color: _sub, fontSize: AppTheme.fontCaption,
+                  height: 1.6),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              cur.isEmpty ? '当前：未填写' : '当前：${RexKeys.mask(cur)}',
+              style: TextStyle(
+                  color: cur.isEmpty ? _sub : _fg,
+                  fontSize: AppTheme.fontSubhead),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              obscureText: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              maxLines: 2,
+              minLines: 1,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+              decoration: InputDecoration(
+                labelText: '主密钥',
+                hintText: '64 位 hex / 44 位 base64 / 32 字节原文',
+                hintStyle: TextStyle(color: _sub, fontSize: 12),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '留空保存 = 清除。填错会提示「主密钥不对」，不会损坏已有模块。',
+              style: TextStyle(color: _sub, fontSize: AppTheme.fontCaption),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          TextButton(
+            onPressed: () {
+              ctrl.text = '';
+              Navigator.pop(ctx, true);
+            },
+            child: const Text('清除'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    final raw = ctrl.text.trim();
+    if (raw.isNotEmpty && RexKeys.normalize(raw) == null) {
+      AppToast.show('这个写法认不出来', '支持 64 位 hex / 44 位 base64 / 32 字节原文');
+      return;
+    }
+    await RexKeys.save(raw);
+    // 拆封失败的模块不会进缓存，但成功的那批要丢掉，避免「换了密钥还在跑旧的」
+    for (final m in List<RexModule>.of(_service.modules)) {
+      try {
+        await _service.clearCache(m);
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    final now = await RexKeys.master();
+    AppToast.show(
+      now.isEmpty ? '主密钥已清除' : '主密钥已保存',
+      now.isEmpty ? '' : '加密模块重新导入一次即可',
+    );
+    setState(() {});
   }
 
   /// 重命名模块：只改显示名（首页源切换、管理页都用这个名字），

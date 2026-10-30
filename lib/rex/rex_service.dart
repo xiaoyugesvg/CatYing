@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:tvbox/services/nodejs_manager.dart';
 import 'package:tvbox/rex/rex_models.dart';
+import 'package:tvbox/rex/rex_keys.dart';
 
 /// REX / ForwardWidget 模块的 Dart 侧服务。
 ///
@@ -593,6 +594,22 @@ class RexService {
     }
     await File('${dir.path}/$name').writeAsString(code);
 
+    // 加密模块（REXENC）：先把「到底缺什么」说清楚，别让用户看到
+    // 「模块代码无法解析：Unexpected token」那种一屏天书。
+    final env = RexEnvelope.tryParse(code);
+    if (env != null) {
+      if (!env.supported) {
+        throw RexException('这个加密模块的容器版本不支持（${env.label}）');
+      }
+      final key = await RexKeys.master();
+      if (key.isEmpty) {
+        throw RexException(
+          '这是加密模块（${env.label}），需要先在右上角「密钥」里填 ${env.masterKeyId} '
+          '的主密钥。文件已保存，填好后再导入同一个文件即可。',
+        );
+      }
+    }
+
     final url = '$localScheme$name';
     // 同名文件重新导入时要丢掉旧编译缓存，否则 Node 还在跑上一版代码
     try {
@@ -820,6 +837,9 @@ class RexService {
       }
       payload['code'] = code;
     }
+    // 加密模块（REXENC）要主密钥才能拆封；没填就不带，Node 会给一句人话
+    final rexKey = await RexKeys.master();
+    if (rexKey.isNotEmpty) payload['rexKey'] = rexKey;
     try {
       final res = await _dio.post(
         'http://127.0.0.1:$port/rex/api',
