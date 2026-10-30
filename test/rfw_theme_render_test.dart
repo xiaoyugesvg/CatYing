@@ -215,4 +215,54 @@ void main() {
       expect(expanded - collapsed, closeTo(144.0, 0.01));
     });
   });
+
+  /// 2026-10-30：用户「RWF 主题的内容加载页面不好看」。
+  ///
+  /// 加载态以前是正中间一行灰字「加载中…」，整块内容区空着。现在铺骨架卡
+  /// （与海报卡同尺寸的圆角灰块）。这里真的把它渲染出来 ——
+  /// `empty:` 槽只在**列表为空**时才会被实例化，上面那些用例（都有 6 条数据）
+  /// **根本走不到**，DSL 写错了也测不出来。
+  group('加载态是骨架屏，不是一行灰字', () {
+    for (final entry in builtinRfwThemes) {
+      testWidgets('${entry.name}：加载时铺骨架卡且不崩', (tester) async {
+        tester.view.physicalSize = const Size(1170, 2532);
+        tester.view.devicePixelRatio = 3.0;
+        addTearDown(tester.view.reset);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: RfwThemeHost(
+                themeText: File(entry.asset!).readAsStringSync(),
+                homeData: buildRfwHomeData(
+                  RfwHomeDataInput(
+                    categories: const [SortData(id: '1', name: '电影')],
+                    category: '1',
+                    items: const [],
+                    recommend: const [],
+                    filters: const [],
+                    selectedFilters: const {},
+                    loading: true,
+                    sourceName: '测试源',
+                    themeId: entry.id,
+                  ),
+                ),
+                onAction: (_) {},
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        expect(tester.takeException(), isNull,
+            reason: '${entry.name} 的加载态渲染崩了（多半是 Container 同时给了 '
+                'color 和 decoration —— RFW 解码成 AnimatedContainer 会断言）');
+        expect(find.text('正在加载…'), findsOneWidget,
+            reason: '${entry.name} 的加载态没渲染出来');
+        // 旧写法的那行灰字必须消失（否则说明 empty 槽还是老实现）
+        expect(find.text('加载中…'), findsNothing,
+            reason: '${entry.name} 还在用旧的"加载中…"纯文字占位');
+      });
+    }
+  });
 }
