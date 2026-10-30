@@ -47,12 +47,21 @@ class CoverImage extends StatefulWidget {
     this.size = 46,
     this.cornerRadius = 10,
     this.circle = false,
+    this.fill = false,
   });
 
   final String? url;
   final double size;
   final double cornerRadius;
   final bool circle;
+
+  /// 铺满父级（幻灯片大图用）。
+  ///
+  /// 默认是按 [size] 画一个正方形 —— 但幻灯片/头图要的是"铺满整块"，
+  /// 而 `size` 传 0 或 infinity 都会出事（0 = 看不见，
+  /// infinity 会让占位图标的字号也算成 infinity）。
+  /// 所以给一个显式开关，内部改用 `SizedBox.expand`。
+  final bool fill;
 
   @override
   State<CoverImage> createState() => _CoverImageState();
@@ -152,13 +161,15 @@ class _CoverImageState extends State<CoverImage> {
     }
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
-      child: SizedBox(width: widget.size, height: widget.size, child: child),
+      child: widget.fill
+          ? SizedBox.expand(child: child)
+          : SizedBox(width: widget.size, height: widget.size, child: child),
     );
   }
 
   Widget _placeholder(double radius) => Container(
-    width: widget.size,
-    height: widget.size,
+    width: widget.fill ? null : widget.size,
+    height: widget.fill ? null : widget.size,
     decoration: BoxDecoration(
       gradient: LinearGradient(
         begin: Alignment.topLeft,
@@ -172,7 +183,7 @@ class _CoverImageState extends State<CoverImage> {
     alignment: Alignment.center,
     child: Icon(
       Icons.music_note_rounded,
-      size: widget.size * 0.45,
+      size: widget.fill ? 28 : widget.size * 0.45,
       color: Colors.white.withValues(alpha: 0.9),
     ),
   );

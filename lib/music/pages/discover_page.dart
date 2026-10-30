@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:tvbox/music/widgets/music_sheet.dart';
 
@@ -71,6 +73,19 @@ class _DiscoverPageState extends State<DiscoverPage>
   List<Playlist> _square = const [];
   List<String> _cats = const ['全部'];
   String _cat = '全部';
+
+  /// 二级分类（**平台页里真实的分类**）当前选中项。
+  ///
+  /// 用户 2026-10-30：「不管是推荐还是其余的分类切换里面，他么下面还有对应
+  /// 有个 tab 栏，是每个分类那个网页里面的真实分类」。
+  ///
+  /// 取值约定：网易/酷狗存分类名，QQ 存数字 categoryId 的字符串。
+  /// 空串 = 还没选过，按平台默认（[MusicApi.playlistCatlist] 的第一个 / QQ 的
+  /// `_qqCatId`）高亮。
+  String _subCat = '';
+
+  /// 幻灯片当前页（只用于底部指示点）
+  int _bannerPage = 0;
 
   /// 发现页视觉预设（aurora / paper / midnight）。
   ///
@@ -158,6 +173,17 @@ class _DiscoverPageState extends State<DiscoverPage>
     // 视觉预设：读上次选的（默认 aurora）
     _preset = SettingsStore.instance.discoverPreset;
     _loadAll();
+  }
+
+  // ── 幻灯片 ────────────────────────────────────────────────────
+  final PageController _bannerCtrl = PageController();
+  Timer? _bannerTimer;
+
+  @override
+  void dispose() {
+    _bannerTimer?.cancel();
+    _bannerCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _switchSource(SongSource s) async {
@@ -600,6 +626,12 @@ class _DiscoverPageState extends State<DiscoverPage>
               slivers: [
                 SliverToBoxAdapter(child: _header(style)),
                 SliverToBoxAdapter(child: _sourceTabs(style)),
+                // ── 二级：平台自己的真实分类 ─────────────────────
+                SliverToBoxAdapter(child: _subTabs(style)),
+                // ── 幻灯片 ───────────────────────────────────────
+                SliverToBoxAdapter(child: _banner(style)),
+                // ── 当前分类的歌单 ────────────────────────────────
+                SliverToBoxAdapter(child: _catContent(style)),
                 // Beans 主页顶部是**两张并排大卡**（每日推荐 / 私人漫游）。
                 // 这里映射到**真实可用**的功能，不做假入口：
                 //   · 每日推荐 → 直接播当天「新歌速递」
@@ -1237,6 +1269,299 @@ class _DiscoverPageState extends State<DiscoverPage>
   // 版块
   // ============================================================
 
+  // ============================================================
+  // 二级分类（平台真实分类）+ 幻灯片 + 分类内容
+  // ============================================================
+  //
+  // ── 为什么加这三块（2026-10-30 用户要求）──────────────────────
+  // 「不管是推荐还是其余的那个分类切换里面，他么下面还有对应有个 tab 栏，
+  //   是每个分类那个网页里面的真实分类，并且再下面就是幻灯片，
+  //   下面的布置参考各个网页的手机页面那种」
+  //
+  // 之前一级 tab（网易/QQ/酷狗…）下面直接就是「每日推荐 / 榜单 / 歌单广场」，
+  // 分类只藏在「歌单广场」标题右边一个文字按钮里（点开还是弹层）。
+  // 现在把**平台自己的分类**提成常驻的二级 tab，幻灯片放在它下面，
+  // 再下面是该分类的歌单 —— 就是各家音乐网站手机版的排法。
+
+  /// 平台页里的**真实**分类。
+  ///
+  ///   · 网易云 / 酷狗：`playlistCatlist` 返回分类名（`cat` 参数就是名字）
+  ///   · QQ：返回 `{id, name}`，而 `playlistSquare(cat:)` 要的是**数字 id**
+  ///   · 喜雅 / 博看 / 一五：没有统一的歌单分类接口，返回空 ⇒ 不显示二级 tab
+  ///     （它们各有自己的分类入口，见各自的分区实现）
+  List<({String key, String label})> get _subCats {
+    if (_source == SongSource.qq) {
+      return [for (final c in _qqCats) (key: '${c.id}', label: c.name)];
+    }
+    if (_cats.length > 1) {
+      return [for (final c in _cats) (key: c, label: c)];
+    }
+    return const [];
+  }
+
+  /// 当前高亮的二级分类 key（没选过就按平台默认）
+  String get _activeSubCat {
+    final subs = _subCats;
+    if (subs.isEmpty) return '';
+    for (final s in subs) {
+      if (s.key == _subCat) return s.key;
+    }
+    if (_source == SongSource.qq) {
+      for (final s in subs) {
+        if (s.key == '$_qqCatId') return s.key;
+      }
+    }
+    for (final s in subs) {
+      if (s.key == _cat) return s.key;
+    }
+    return subs.first.key;
+  }
+
+  Future<void> _pickSubCat(String key) async {
+    if (key == _activeSubCat) return;
+    setState(() => _subCat = key);
+    if (_source == SongSource.qq) {
+      final id = int.tryParse(key);
+      if (id != null) await _selectQqCat(id);
+    } else {
+      await _switchCat(key);
+    }
+  }
+
+  /// 二级分类横滑条（样式与一级 tab 一致，但更紧凑）
+  Widget _subTabs(DiscoverStyle style) {
+    final subs = _subCats;
+    if (subs.isEmpty) return const SizedBox.shrink();
+    final active = _activeSubCat;
+    return SizedBox(
+      height: 42,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
+        itemCount: subs.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (c, i) {
+          final t = subs[i];
+          final on = t.key == active;
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _pickSubCat(t.key),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              curve: Curves.easeOut,
+              alignment: Alignment.center,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              decoration: BoxDecoration(
+                color: on ? style.accent : MusicTheme.fill,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: on ? style.accent : MusicTheme.divider,
+                  width: 1,
+                ),
+                boxShadow: on
+                    ? [
+                        BoxShadow(
+                          color: style.accent.withValues(alpha: 0.30),
+                          blurRadius: 10,
+                          offset: const Offset(0, 3),
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Text(
+                t.label,
+                style: TextStyle(
+                  color: on ? Colors.white : MusicTheme.secondary,
+                  fontSize: AppTheme.fontCaption,
+                  fontWeight: on ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// 幻灯片用的歌单：优先「推荐歌单」，没有就用当前平台的歌单广场。
+  List<Playlist> get _bannerItems {
+    final src = _source == SongSource.qq ? _qqSquare : _square;
+    final list = _recommend.isNotEmpty ? _recommend : src;
+    return list.take(6).toList();
+  }
+
+  /// 幻灯片（大图轮播 + 指示点 + 自动播放）
+  Widget _banner(DiscoverStyle style) {
+    final items = _bannerItems;
+    if (items.isEmpty) return const SizedBox.shrink();
+    _ensureBannerTimer();
+    final page = _bannerPage.clamp(0, items.length - 1);
+    return SizedBox(
+      height: 168,
+      child: Stack(
+        children: [
+          PageView.builder(
+            controller: _bannerCtrl,
+            itemCount: items.length,
+            onPageChanged: (i) => setState(() => _bannerPage = i),
+            itemBuilder: (c, i) => _bannerCard(items[i], style),
+          ),
+          if (items.length > 1)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 14,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  for (var i = 0; i < items.length; i++)
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      width: i == page ? 16 : 6,
+                      height: 6,
+                      margin: const EdgeInsets.symmetric(horizontal: 3),
+                      decoration: BoxDecoration(
+                        color: i == page ? Colors.white : Colors.white54,
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _bannerCard(Playlist p, DiscoverStyle style) {
+    final subtitle = p.trackCount > 0
+        ? '${p.trackCount} 首 · ${_source.displayName}'
+        : _source.displayName;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => openPlaylist(
+          context,
+          p.id,
+          p.name,
+          source: _source,
+          coverUrl: p.coverUrl,
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(18),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              CoverImage(url: p.coverUrl, fill: true, cornerRadius: 0),
+              // 底部压暗，保证白字可读（和 RWF 主题里 hero 蒙层同一思路）
+              const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0x00000000), Color(0x0A000000), Color(0xCC000000)],
+                    stops: [0.35, 0.6, 1.0],
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 14,
+                right: 14,
+                bottom: 16,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      p.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // 播放圆钮
+              Positioned(
+                right: 14,
+                bottom: 16,
+                child: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.92),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.play_arrow_rounded,
+                      size: 22, color: style.accent),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _ensureBannerTimer() {
+    if (_bannerTimer != null) return;
+    _bannerTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!mounted || !_bannerCtrl.hasClients) return;
+      // 每帧都重新取长度：切平台/切分类后幻灯片会换成另一批歌单，
+      // 用创建定时器时捕获的旧长度会越界。
+      final count = _bannerItems.length;
+      if (count < 2) return;
+      final next = (_bannerPage + 1) % count;
+      _bannerCtrl.animateToPage(
+        next,
+        duration: const Duration(milliseconds: 420),
+        curve: Curves.easeInOut,
+      );
+    });
+  }
+
+  /// 当前二级分类的歌单（2 列网格，和「乐库」「榜单」同一套卡片观感）
+  Widget _catContent(DiscoverStyle style) {
+    final items = _source == SongSource.qq ? _qqSquare : _square;
+    if (items.isEmpty) return const SizedBox.shrink();
+    final label = _subCats
+        .where((s) => s.key == _activeSubCat)
+        .map((s) => s.label)
+        .join();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SectionTitle(title: label.isEmpty ? '歌单广场' : label),
+        PlaylistGrid(
+          style: style,
+          items: items,
+          onTap: (p) => openPlaylist(
+            context,
+            p.id,
+            p.name,
+            source: _source,
+            coverUrl: p.coverUrl,
+          ),
+        ),
+      ],
+    );
+  }
+
   List<Widget> _buildSections(DiscoverStyle style) {
     if (_source == SongSource.ximalaya) {
       return _buildXimalayaSections();
@@ -1581,109 +1906,6 @@ class _DiscoverPageState extends State<DiscoverPage>
       ));
     }
 
-    // ── QQ 歌单广场（**免登录可拿**，实测 20 个歌单）────────────
-    if (_qqSquare.isNotEmpty) {
-      out.add(const SliverToBoxAdapter(
-          child: SectionTitle(title: 'QQ歌单广场')));
-
-      // ── 分类横滑：**真的切分类**（2026-10-13 修）──────────────────
-      //
-      // 以前这里是"点名字 → 拿名字去搜索"的退路：那时拿不到 QQ 的数字
-      // categoryId（Dart 只取了名字）⇒ 点「华语」经常搜不出东西，看起来像坏了
-      //（用户：「音乐模块里面 QQ 分类的歌单分类怎么没有内容」）。
-      // 现在 `playlistCatlistQq()` 把 id 一起拿回来了 → 点分类就是
-      // `playlistSquare(cat: id)`，下面那排歌单会**真的换成该分类**。
-      if (_qqCats.isNotEmpty) {
-        // ── 分类 UI（用户 2026-10-14：「这个 QQ 分类的 UI 做好看点」）──
-        //   · 选中：主题色实底 + 白字 + **✓** + 一层同色柔光投影（"选中的感觉"）
-        //   · 未选中：低调填充 + **细描边**（原来没描边，浅色底上几乎看不出边界）
-        //   · 切换用 `AnimatedContainer`，点下去有个 160ms 的过渡，不是硬跳
-        out.add(SliverToBoxAdapter(
-          child: SizedBox(
-            height: 40,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.fromLTRB(16, 3, 16, 6),
-              itemCount: _qqCats.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (c, i) {
-                final tag = _qqCats[i];
-                final active = tag.id == _qqCatId;
-                return GestureDetector(
-                  onTap: _qqCatLoading ? null : () => _selectQqCat(tag.id),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 160),
-                    curve: Curves.easeOut,
-                    alignment: Alignment.center,
-                    padding: const EdgeInsets.symmetric(horizontal: 13),
-                    decoration: BoxDecoration(
-                      color: active ? MusicTheme.tint : MusicTheme.fill,
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(
-                        color: active
-                            ? MusicTheme.tint
-                            : MusicTheme.divider,
-                        width: 1,
-                      ),
-                      boxShadow: active
-                          ? [
-                              BoxShadow(
-                                color: MusicTheme.tint.withValues(alpha: 0.32),
-                                blurRadius: 10,
-                                offset: const Offset(0, 3),
-                              ),
-                            ]
-                          : null,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (active) ...[
-                          const Icon(Icons.check_rounded,
-                              size: 13, color: Colors.white),
-                          const SizedBox(width: 4),
-                        ],
-                        Text(
-                          tag.name,
-                          style: TextStyle(
-                            color:
-                                active ? Colors.white : MusicTheme.secondary,
-                            fontSize: AppTheme.fontCaption,
-                            fontWeight:
-                                active ? FontWeight.w600 : FontWeight.w400,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ));
-      }
-
-      // ── 同一套横滑卡（与排行榜/每日推荐一致，用户要求卡片式）────
-      out.add(SliverToBoxAdapter(
-        child: HorizontalCards(
-          itemCount: _qqSquare.length,
-          height: 212,
-          itemWidth: 152,
-          itemBuilder: (c, i) {
-            final p = _qqSquare[i];
-            return CoverCard(
-              coverUrl: p.coverUrl,
-              title: p.name,
-              subtitle: p.trackCount > 0 ? '${p.trackCount} 首' : null,
-              width: 152,
-              onTap: () => openPlaylist(context, p.id, p.name,
-                  source: SongSource.qq, coverUrl: p.coverUrl),
-            );
-          },
-        ),
-      ));
-    }
-
     // 2026-10-21 用户要求：去掉页尾那段「QQ 可以搜、可以看，但不能直接播」
     // 的长说明（播不了时播放器自己会弹源选择，不需要在发现页常驻大段文字）。
 
@@ -1820,25 +2042,6 @@ class _DiscoverPageState extends State<DiscoverPage>
             isTopList: true,
             coverUrl: t.coverUrl,
           ),
-        ),
-      ));
-    }
-
-    // ── 歌单广场（Beans 规格：**固定 2 列网格**，144 封面，收起 6/展开）──
-    if (_square.isNotEmpty) {
-      out.add(SliverToBoxAdapter(
-        child: SectionTitle(
-          title: '歌单广场',
-          action: '$_cat',
-          onAction: _pickCat,
-        ),
-      ));
-      out.add(SliverToBoxAdapter(
-        child: PlaylistGrid(
-          style: style,
-          items: _square,
-          onTap: (p) => openPlaylist(context, p.id, p.name,
-              source: _source, coverUrl: p.coverUrl),
         ),
       ));
     }
@@ -2210,32 +2413,6 @@ class _DiscoverPageState extends State<DiscoverPage>
     return out;
   }
 
-  Future<void> _pickCat() async {
-    final picked = await showMusicSheet<String>(
-      context: context,
-      backgroundColor: MusicTheme.card,
-      builder: (ctx) => SafeArea(
-        top: false,
-        child: ListView(
-          shrinkWrap: true,
-          children: _cats
-              .map((c) => ListTile(
-                    title: Text(c,
-                        style: TextStyle(
-                            color: c == _cat
-                                ? MusicTheme.tint
-                                : MusicTheme.label)),
-                    trailing: c == _cat
-                        ? Icon(Icons.check, color: MusicTheme.tint, size: 18)
-                        : null,
-                    onTap: () => Navigator.pop(ctx, c),
-                  ))
-              .toList(),
-        ),
-      ),
-    );
-    if (picked != null && picked != _cat) await _switchCat(picked);
-  }
 }
 
 class _SourceTab {
