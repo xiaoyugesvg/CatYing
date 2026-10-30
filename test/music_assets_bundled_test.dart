@@ -97,4 +97,56 @@ void main() {
         reason: '这些洛雪源不在 asset bundle 里：${missing.join(", ")}。'
             '检查 pubspec 的 `- assets/music/lx/`。');
   });
+
+  test('🔴 2026-10-30 新内置的 16 个音源也必须在包里', () async {
+    // 用户给的「音源_v261030更新」包，24 个里实测 20 个能出真直链，
+    // 其中 16 个是全新的（另外 4 个是已有源的更新版，覆盖同名文件）。
+    //
+    // ⚠️ 这条测试的意义：`_lxCandidates` 加了 path 但忘了放文件时，
+    //    `rootBundle.loadString` 会抛异常、`_loadLxSources` 里
+    //    `catch { debugPrint }` 静默跳过 ⇒ **那个源凭空消失且不报错**。
+    const added = [
+      'xigua.js', // 西瓜聚合
+      'feichangdao.js', // 非常刀
+      'molan.js', // 墨澜
+      'huibi.js', // 回避聚合
+      'xinghai.js', // 星海
+      'kulao.js', // 裤佬SVIP
+      'fishmusic.js', // 639K，撞过 512K 上限
+      'heimusic.js',
+      'yuningxi.js',
+      'yuxi.js',
+      'suyin.js',
+      'nianxin.js',
+      'tongyi.js',
+      'anni.js',
+      'helloworld.js',
+      'gdstudio.js',
+    ];
+    final missing = <String>[];
+    for (final f in added) {
+      try {
+        final s = await rootBundle.loadString('assets/music/lx/$f');
+        if (s.trim().isEmpty) missing.add('$f（内容为空）');
+      } catch (_) {
+        missing.add(f);
+      }
+    }
+    expect(missing, isEmpty,
+        reason: '这些新内置音源不在 asset bundle 里：${missing.join(", ")}。'
+            '要么把文件放进 `assets/music/lx/`，'
+            '要么从 `_lxCandidates` 里删掉对应条目。');
+  });
+
+  test('🔴 fishmusic 体积超过旧的 512K 上限（否则会被引擎判为过大）', () async {
+    // 这个源 639,507 字符。`lx_engine.js` 的 MAX_SCRIPT_CHARS 曾经是
+    // 512K ⇒ 它导入后永远加载失败。现在提到 2MB。
+    // 这条测试钉住"它确实比 512K 大"这个事实，防止有人把上限又调回去
+    // 而不知道会误伤谁。
+    final s = await rootBundle.loadString('assets/music/lx/fishmusic.js');
+    expect(s.length, greaterThan(512 * 1024),
+        reason: 'fishmusic 变小了？那 lx_engine 的上限可以重新评估。');
+    expect(s.length, lessThan(2 * 1024 * 1024),
+        reason: 'fishmusic 涨过 2MB 了，需要再提 lx_engine.MAX_SCRIPT_CHARS。');
+  });
 }

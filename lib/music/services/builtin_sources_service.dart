@@ -92,6 +92,9 @@ class BuiltinSourcesService {
     // ✅ 2026-10-19：把**实测失效**的内置源关掉。
     //   init 只补"缺失"的、从不改"已存在"的 ⇒ 老设备里那些死源仍是启用状态，
     //   每次播放都先撞一次死源（试播超时 + 最后失败）。这里显式关一遍 ✓
+    // ✅ 2026-10-30：先把"换过新版、现在能跑"的源重新打开（它们之前被
+    //   自动禁用过，不重开会一直躺在禁用区里）
+    await _reenableUpgradedLxSources();
     await _disableDeadBuiltinSources(force: force);
   }
 
@@ -154,12 +157,43 @@ class BuiltinSourcesService {
     //   tx/wy/kg/kw/mg 五家竞速取链，Node 沙箱实测 tx/wy/kw/mg 均能出真直链。
     //   放在**第一位**：它是纯取链源，试播时优先命中。
     (path: 'five', name: '五源合一'),
+
+    // ── 用户 2026-10-30 提供的「音源_v261030更新」包 ──────────────
+    //
+    // 24 个 .js 逐个用**真引擎**跑过（`loadScript` + `runAction('request')`，
+    // 喂网易云真实歌曲「晴天 - 周杰伦」，看能不能吐出可播放地址）：
+    // **20 个能出真直链**，4 个是源自己挂了（`api.cenguigui.cn` 521 /
+    // `api.injahow.cn/meting` 404 / `api.music.lerd.dpdns.org` DNS 不存在 /
+    // 「独家音源-v7」的混淆壳在沙箱里注册不上 handler）—— 那 4 个没内置。
+    //
+    // ⚠️ 这 16 个**没有远端上游**（不在 pdone 仓库），见 [_noUpstreamLxPaths]。
+    //    排在 five 之后：它们是这批里更新、平台覆盖更全的聚合源，
+    //    放前面能让试播第一轮就命中，不必先陪老源跑完超时。
+    (path: 'xigua', name: '西瓜聚合'), // 聚合 10+ 后端，wy/tx/kw/kg/mg
+    (path: 'feichangdao', name: '非常刀'), // 6 平台 + 歌词/搜索
+    (path: 'molan', name: '墨澜'), // 6 平台 + 汽水，带缓存/限流
+    (path: 'huibi', name: '回避聚合'), // 5 平台
+    (path: 'xinghai', name: '星海'), // 6 平台 + 歌词/封面
+    (path: 'kulao', name: '裤佬SVIP'), // 5 平台 + 歌词/封面/搜索
+    (path: 'hywmusic', name: 'HYWMusic'), // 9 平台（含 bili/ytb/xm）
+    (path: 'fishmusic', name: 'FishMusic'), // 639K 超大聚合，5 平台
+    (path: 'heimusic', name: 'HeiMusic'),
+    (path: 'yuningxi', name: '玉宁熙'),
+    (path: 'yuxi', name: '屿溪'),
+    (path: 'suyin', name: '溯音'),
+    (path: 'nianxin', name: '念心'),
+    (path: 'tongyi', name: '统一音乐源'),
+    (path: 'anni', name: '安妮独家'),
+    (path: 'helloworld', name: 'HelloWorld'),
+    (path: 'gdstudio', name: 'GDStudio'), // 仅网易
+    (path: 'huanyin', name: '幻音'), // 2026-10-30 更新版（旧版后端已停）
+
+    // ── 下面这些是早先内置的（保持原顺序）────────────────────────
     (path: 'sixyin', name: 'SixYin'),
     (path: 'huibq', name: 'Huibq'),
     (path: 'flower', name: 'Flower'),
     (path: 'lx', name: 'LX'),
     (path: 'changqing', name: 'ChangQing'),
-    (path: 'huanyin', name: 'HuanYin'),
     (path: 'ikun', name: 'ikun'),
     (path: 'grass', name: 'Grass'),
     (path: 'juhe', name: 'JuheApi'),
@@ -168,15 +202,25 @@ class BuiltinSourcesService {
     //   两者都用 `globalThis.lx.EVENT_NAMES`（Node 求值实测确认是 lx 格式，
     //   不是 MusicFree 插件）⇒ 走本列表而非 MusicFree 索引 ✓
     (path: 'dujia', name: '独家音源'),
-    (path: 'quandouyao', name: '全豆要聚合'),
+    (path: 'quandouyao', name: '全豆要聚合'), // 2026-10-30 更新版 V4.1
     // ✅ 2026-10-11 Node 沙箱实测验真（真实 HTTP + Range 首包 magic bytes 判定）：
-    //   stellarwave 聚合源 tx 通道连续返回 QQ 官方 CDN 真 MP3（206/audio/mpeg）；
-    //   HYWMusic 经自建 API 跳念心链路可出真 MP3（206，响应偶发偏慢，置后作备选）。
-    //   同批送测的长青"修复版"(haitangw 全 404)、非常刀 v5(多平台全后端失败)、
-    //   墨澜(返回 .mgg 加密格式普通播放器解不了) 均不可用，未内置。
+    //   stellarwave 聚合源 tx 通道连续返回 QQ 官方 CDN 真 MP3（206/audio/mpeg）。
+    //   2026-10-30 换 v4.0.0：旧版唯一后端 ffapi.cn 早已关服，新版实测 4/4 出链。
     (path: 'stellarwave', name: 'StellarWave星澜'),
-    (path: 'hywmusic', name: 'HYWMusic'),
   ];
+
+  /// **没有远端上游**的洛雪源 —— 不做「检查更新」。
+  ///
+  /// 这批是用户 2026-10-30 给的一次性音源包（作者们各自分发，不在 pdone
+  /// 仓库里）。如果照常去拼 `<path>/latest.js`，每个源要白等 6 个镜像
+  /// × 8s 的 404 —— 16 个源就是十几分钟的无效网络请求，还会把启动日志刷满。
+  ///
+  /// 这些源的脚本随包固定，要更新只能等下个版本重新内置。
+  static const Set<String> _noUpstreamLxPaths = {
+    'xigua', 'feichangdao', 'molan', 'huibi', 'xinghai', 'kulao',
+    'fishmusic', 'heimusic', 'yuningxi', 'yuxi', 'suyin', 'nianxin',
+    'tongyi', 'anni', 'helloworld', 'gdstudio',
+  };
 
   /// 个别洛雪源不在 pdone 仓库里（没有 `<path>/latest.js`），更新地址单独给。
   /// 这些只走原始地址（镜像拼不出来），失败就保留内置版本。
@@ -185,14 +229,24 @@ class BuiltinSourcesService {
   };
 
   /// 一次更新要尝试的地址序列（按优先级）；override 源只有一个地址。
+  ///
+  /// 返回**空列表** = 这个源没有上游（见 [_noUpstreamLxPaths]），调用方跳过。
   static List<String> _lxUpdateCandidates(String path) {
+    if (_noUpstreamLxPaths.contains(path)) return const [];
     final o = _lxOverrideUrls[path];
     if (o != null) return [o];
     return [for (final m in _ghRawMirrors) '$m/$path/latest.js'];
   }
 
   /// 写进 `ThirdPartySource.updateUrl` 的那一条（= 首选镜像）
-  static String _lxUpdateUrl(String path) => _lxUpdateCandidates(path).first;
+  /// 写进 `ThirdPartySource.updateUrl` 的那一条（= 首选镜像）。
+  ///
+  /// ⚠️ 无上游的源返回**空串** —— 不能 `.first`（空列表会抛
+  /// `Bad state: No element`，整个 `init()` 跟着挂）。
+  static String _lxUpdateUrl(String path) {
+    final list = _lxUpdateCandidates(path);
+    return list.isEmpty ? '' : list.first;
+  }
 
   /// **失效源名单**（洛雪源 path）：后端已停服 ⇒ 注册时**默认禁用**，
   /// 避免用户误选、也避免每次试播先撞一次死源。
@@ -215,10 +269,22 @@ class BuiltinSourcesService {
   ///     下载最新版本！」—— 这句是脚本自己写的强制升级提示，说明作者已停止
   ///     对外分发；换版本解决不了，只能按失效源处理（默认禁用，文件保留，
   ///     用户想手动开仍然可以）。
+  ///
+  /// 2026-10-30 **移出** `stellarwave` / `huanyin`：它们早就换过新版本，
+  /// 旧版后端（`ffapi.cn` 关服 / `music-dl.sayqz.com` TLS 失败）是**旧脚本**
+  /// 的问题，新版实测 4/4 都能出真直链（见 [_lxCandidates] 处的说明）。
+  /// 继续留在死源名单里，用户就永远用不上这两个能跑的源。
+  ///
+  /// 2026-10-30 **新增** `lx`：这个内置文件其实是「独家音源 v6」（混淆壳 +
+  /// `SERVER_SCRIPT_CONFIG` 私有签名），`loadScript` 返回 `actions=[]`
+  /// —— 它连 `lx.on('request')` 都没注册成功，**从来没有用过**。
+  /// 用户同批给的 v7 也一样（我用 Proxy 记下它对 `lx` 的每一次属性访问，
+  /// EVENT_NAMES/request/on/send/utils/env/version/currentScriptInfo 全都有，
+  /// 换成 `env:'mobile'` 也没用）⇒ 它要的是自家服务器的设备/脚本指纹校验，
+  /// 不是我们沙箱能补的东西。文件保留，默认禁用。
   static const Set<String> _deadLxPaths = {
-    'stellarwave',
-    'huanyin',
     'ikun',
+    'lx',
     'huibq',
     'sixyin',
   };
@@ -261,8 +327,10 @@ class BuiltinSourcesService {
   Future<void> _updateLxSources() async {
     for (final c in _lxCandidates) {
       if (_isDeadLx(c.path)) continue; // A：不再为死源浪费网络时间
+      final urls = _lxUpdateCandidates(c.path);
+      if (urls.isEmpty) continue; // 无上游（随包固定），跳过
       try {
-        final script = await _fetchLxScript(_lxUpdateCandidates(c.path));
+        final script = await _fetchLxScript(urls);
         if (script == null) continue;
         final store = ThirdPartySourceStore.instance;
         final cur = store.byId('builtin_lx_${c.path}');
@@ -287,7 +355,9 @@ class BuiltinSourcesService {
           ),
         );
         final script = resp.data ?? '';
-        if (script.trim().isEmpty || script.length > 512 * 1024) continue;
+        // 与 Node 侧 `lx_engine.MAX_SCRIPT_CHARS`（2MB）对齐：
+        // 「fish-music1.9.0」已经涨到 639K，512K 会把正常的大源判成"无效"。
+        if (script.trim().isEmpty || script.length > 2 * 1024 * 1024) continue;
         return script;
       } catch (e) {
         debugPrint('[BuiltinSources] 镜像不可用，换下一个：$u（$e）');
@@ -575,6 +645,46 @@ class BuiltinSourcesService {
     }
   }
 
+  /// 把"换过新版、现在实测能跑"的内置源**重新打开**（只做一次）。
+  ///
+  /// ── 为什么需要 ────────────────────────────────────────────────
+  /// `stellarwave` / `huanyin` 的**旧脚本**确实全后端挂掉，之前被
+  /// [_disableDeadBuiltinSources] 自动关成了 `enabled: false`。
+  /// 2026-10-30 换成新版（实测 4/4 出真直链）后，如果不管它们：
+  /// `init` 只补"缺失"的、从不改"已存在"的 ⇒ 老设备上它们**永远是关的**，
+  /// 用户看到"我明明内置了 30 个源，怎么这两个是灰的" ✗
+  ///
+  /// ⚠️ 只做一次（旗标）：用户之后手动关掉它们是用户的选择，不该被反复打开。
+  static const _reenabledFlagKey = 'music.builtinReenabled.v1';
+
+  /// 换过新版的洛雪源（path → 为什么现在能跑）
+  static const Set<String> _upgradedLxPaths = {
+    'stellarwave', // v4.0.0：旧版唯一后端 ffapi.cn 已关服，新版多后端
+    'huanyin', // v3：旧版 music-dl.sayqz.com TLS 失败，新版改走 sayqz 备用链
+  };
+
+  Future<void> _reenableUpgradedLxSources() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool(_reenabledFlagKey) == true) return;
+      final store = ThirdPartySourceStore.instance;
+      var n = 0;
+      for (final path in _upgradedLxPaths) {
+        final id = 'builtin_lx_$path';
+        final cur = store.byId(id);
+        if (cur == null || cur.enabled) continue;
+        await store.setEnabled(id, true);
+        n++;
+      }
+      await prefs.setBool(_reenabledFlagKey, true);
+      if (n > 0) {
+        debugPrint('[BuiltinSources] 已重新启用换新版的源 $n 个');
+      }
+    } catch (e) {
+      debugPrint('[BuiltinSources] 重新启用换新版源失败: $e');
+    }
+  }
+
   /// 把已安装设备上遗留的**失效内置源**关掉（只关一次）。
   ///
   /// 为什么需要：`init` 只补"缺失"的源、**从不改"已存在"的** ⇒
@@ -585,7 +695,10 @@ class BuiltinSourcesService {
   ///    （比如想再试一次源作者有没有修好），下次启动**不会**又被关掉 ✓
   ///
   /// [force] = true（"恢复默认"）时忽略旗标，关完再把旗标写回 true。
-  static const _deadDisabledFlagKey = 'music.builtinDeadDisabled.v1';
+  ///
+  /// 2026-10-30 旗标 **v1 → v2**：这次新增了 `lx`（跑不起来的混淆壳），
+  /// 而老设备上 v1 已经是 true ⇒ 直接加进名单不会生效，得让它们再跑一次。
+  static const _deadDisabledFlagKey = 'music.builtinDeadDisabled.v2';
 
   Future<void> _disableDeadBuiltinSources({bool force = false}) async {
     try {

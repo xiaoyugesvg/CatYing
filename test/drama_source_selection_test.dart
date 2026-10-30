@@ -6,6 +6,8 @@
 //   3. 列表扫描 / 搜索用哪些源：DramaSettings.resolveTargets
 // 以及它们的持久化读写。
 
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tvbox/models/source_bean.dart';
@@ -279,6 +281,49 @@ void main() {
 
     test('保存空集合 → 读回仍为空（清空勾选）', () async {
       await DramaSettings.saveSourceKeys({'a'});
+      await DramaSettings.saveSourceKeys(<String>{});
+      expect(await DramaSettings.sourceKeys(), isEmpty);
+    });
+
+    // ── 2026-10-30：白名单改成**按订阅分组** ──────────────────────
+    //
+    // 用户：「短剧如果我在这个订阅选了几个，切换订阅后再选的话就是增加了，
+    //        能不能都有有呢。」
+    //
+    // 原来是一份全局 StringList ⇒ 切订阅后勾选会**累加**，白名单越来越脏。
+    test('🔴 白名单按订阅分组存进 v2，不再写全局 v1', () async {
+      await DramaSettings.saveSourceKeys({'a', 'b'});
+      final sp = await SharedPreferences.getInstance();
+
+      final raw = sp.getString('drama_source_keys_v2');
+      expect(raw, isNotNull, reason: '应该写进按订阅分组的 v2 键');
+      final map = jsonDecode(raw!) as Map;
+      // 测试环境里没有 Get.put(ApiConfig) ⇒ scope 退化成 'local'
+      expect(map['local'], ['a', 'b']);
+
+      expect(sp.getStringList('drama_source_keys_v1'), isNull,
+          reason: 'v1 那份全局表只用于迁移，不该再被写入');
+    });
+
+    test('🔴 老设备的全局白名单会迁移给当前订阅（不丢数据）', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'drama_source_keys_v1': <String>['x', 'y'],
+      });
+
+      expect(await DramaSettings.sourceKeys(), {'x', 'y'},
+          reason: '升级后第一次读，应该拿到老数据');
+
+      final sp = await SharedPreferences.getInstance();
+      final map = jsonDecode(sp.getString('drama_source_keys_v2')!) as Map;
+      expect(map['local'], ['x', 'y'], reason: '迁移后要落到 v2 里');
+    });
+
+    test('🔴 清空后不会把旧数据"迁移回来"', () async {
+      // 迁移只发生在"v2 里没有该订阅的条目"时。用户主动清空会写一条
+      // **空列表**，之后再读必须还是空，不能又去捞 v1。
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'drama_source_keys_v1': <String>['x', 'y'],
+      });
       await DramaSettings.saveSourceKeys(<String>{});
       expect(await DramaSettings.sourceKeys(), isEmpty);
     });

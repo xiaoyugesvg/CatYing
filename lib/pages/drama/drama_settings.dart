@@ -17,7 +17,13 @@ class DramaSettings {
   DramaSettings._();
 
   static const _kKeywords = 'drama_keywords_v1';
+
+  /// 旧的**全局**白名单（v1）。2026-10-30 起只用于**迁移**，不再写入。
   static const _kSources = 'drama_source_keys_v1';
+
+  /// 按订阅分组的白名单：`{订阅URL: [源key...]}`（v2）
+  static const _kSourcesMap = 'drama_source_keys_v2';
+
   static const _kGroups = 'drama_groups_v1';
   static const _kListCache = 'drama_list_cache_v1';
 
@@ -118,10 +124,43 @@ class DramaSettings {
   }
 
   /// 参与聚合的源 key；空集合 = 只聚合当前源
+  ///
+  /// ── 2026-10-30：改成**按订阅分开存** ─────────────────────────
+  /// 用户原话：「短剧如果我在这个订阅选了几个，切换订阅后再选的话就是
+  /// 增加了，能不能都有有呢。」
+  ///
+  /// 原来白名单是**一份全局 StringList**（`drama_source_keys_v1`），
+  /// 于是切订阅后勾选会**累加**：
+  ///   · 订阅 A 勾 {源1, 源2} → 存 {源1, 源2}
+  ///   · 切订阅 B（B 里没有这两个 key），弹层里一个都没勾
+  ///   · 用户勾 {源3} → 存成 {源1, 源2, 源3} ✗ 白名单里躺着 A 的残留
+  ///
+  /// 显示上因为 [filterBySelection] 会按当前源的列表过滤，看着"碰巧是对的"，
+  /// 但存的那份越来越脏；而且用户切回 A 再打开弹层时，初始状态是
+  /// "全没勾"（因为 initial 传的是全局表，A 的 key 在里面但 B 的也在），
+  /// 一保存就把 B 的选择带进 A 了。
+  ///
+  /// 现在按**订阅 URL**（`ApiConfig.configUrl`）分组：每个订阅记自己那份，
+  /// 切来切去互不影响、切回原订阅勾选还在（用户要的"都有"）。
+  ///
+  /// 兼容：老数据（`drama_source_keys_v1` 那份全局表）在首次读到时
+  /// **迁移给当前订阅**，之后不再读写它（保留不删，方便回退版本）。
   static Future<Set<String>> sourceKeys() async {
     try {
       final sp = await SharedPreferences.getInstance();
-      return (sp.getStringList(_kSources) ?? const []).toSet();
+      final scope = _scopeKey();
+      final map = _readScopeMap(sp);
+      final hit = map[scope];
+      if (hit != null) return hit.toSet();
+
+      // 迁移旧全局表（只做一次：迁移完就把该 scope 写进 map）
+      final legacy = sp.getStringList(_kSources);
+      if (legacy != null && legacy.isNotEmpty) {
+        map[scope] = legacy;
+        await _writeScopeMap(sp, map);
+        return legacy.toSet();
+      }
+      return <String>{};
     } catch (_) {
       return <String>{};
     }
@@ -130,7 +169,57 @@ class DramaSettings {
   static Future<void> saveSourceKeys(Set<String> keys) async {
     try {
       final sp = await SharedPreferences.getInstance();
-      await sp.setStringList(_kSources, keys.toList());
+      final map = _readScopeMap(sp);
+      // 空集合也要**显式写一条空列表**：否则下次读到 null 会去迁移旧数据，
+      // 把用户刚清空的选择又"复活"回来。
+      map[_scopeKey()] = keys.toList();
+      await _writeScopeMap(sp, map);
+    } catch (_) {}
+  }
+
+  /// 当前订阅标识：订阅 URL；没配订阅（纯本地源）时用 `local`
+  ///
+  /// ⚠️ `ApiConfig.instance` 是 `Get.find<ApiConfig>()` —— 单元测试里没有
+  /// `Get.put`，直接读会抛 `"ApiConfig" not found`。这里必须兜住：
+  /// 拿不到就退化成 `local`（也就等于"不分订阅"），
+  /// 否则 `saveSourceKeys` 的 try/catch 会把**整次写入**吞掉，
+  /// 测试与"启动早期就写设置"的场景都会静默丢数据。
+  static String _scopeKey() {
+    try {
+      final u = ApiConfig.instance.configUrl.value.trim();
+      return u.isEmpty ? 'local' : u;
+    } catch (_) {
+      return 'local';
+    }
+  }
+
+  static Map<String, List<String>> _readScopeMap(SharedPreferences sp) {
+    final raw = sp.getString(_kSourcesMap);
+    if (raw == null || raw.isEmpty) return <String, List<String>>{};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return <String, List<String>>{};
+      final out = <String, List<String>>{};
+      decoded.forEach((k, v) {
+        if (v is List) {
+          out[k.toString()] = [
+            for (final e in v)
+              if (e != null && e.toString().isNotEmpty) e.toString(),
+          ];
+        }
+      });
+      return out;
+    } catch (_) {
+      return <String, List<String>>{};
+    }
+  }
+
+  static Future<void> _writeScopeMap(
+    SharedPreferences sp,
+    Map<String, List<String>> map,
+  ) async {
+    try {
+      await sp.setString(_kSourcesMap, jsonEncode(map));
     } catch (_) {}
   }
 
