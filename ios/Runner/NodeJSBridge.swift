@@ -41,8 +41,22 @@ import UIKit
     private let messenger: FlutterBinaryMessenger
     private var isRunning: Bool = false
     private var managementPort: Int = 0   // Dart 同步过来的 mgmt port, foreground ping 用
-    private let workQueue = DispatchQueue(label: "com.tvbox.nodejs",
-                                          qos: .userInitiated)
+
+    /// Node.js 主循环所在线程。
+    ///
+    /// 用它代替 GCD 队列的原因见 `startNodeJS` 里"4. 异步启动 Node.js"那段注释：
+    /// GCD 的 worker 栈只有 ~512KB，海阔小程序脚本的深递归会把栈打穿（SIGBUS）。
+    /// 自建线程才能指定 `stackSize`。
+    private var nodeThread: Thread?
+
+    /// Node 线程栈大小：8MB。
+    ///
+    /// 依据（Runner-2026-10-30-194433.ips）：崩溃时 JS 栈已经 ~250 层
+    /// （日志 511 帧 ×2），折合每个解释器帧约 2KB ⇒ 512KB 只够 250 层。
+    /// 8MB 能撑到 ~4000 层，正常脚本远远够；真超了也是 V8 的 RangeError
+    /// （可捕获、能报给用户），不再是进程级 SIGBUS。
+    static let nodeThreadStackSize = 8 * 1024 * 1024
+
     private var argv: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
     private var argcCopy: Int = 0
 
@@ -296,10 +310,25 @@ import UIKit
         }
 
         // 4. 异步启动 Node.js
-        workQueue.async { [weak self] in
+        //
+        // 🔴 为什么**不用 GCD**、改成自己造线程（2026-10-30 崩溃
+        //    Runner-2026-10-30-194433.ips）：
+        //
+        //    GCD 的 worker 线程栈大小由系统决定，iOS 上次级队列只有 **512KB**。
+        //    海阔「小程序脚本」里几百层 JS 递归很常见（V8 解释器帧本身就不小：
+        //    日志里 511 帧 `Builtins_InterpreterEntryTrampoline`），最后在
+        //    `v8::internal::JsonStringify` 那一步撞穿栈保护页 ⇒ **SIGBUS
+        //    （STACK GUARD）**，整个进程被带走，App 直接闪退 —— 这种崩溃
+        //    连 catch 的机会都没有。
+        //
+        //    换成 8MB 栈的专用线程后：同样的递归要么正常跑完，要么被 V8 抛成
+        //    **可捕获的** `RangeError: Maximum call stack size exceeded`
+        //    （hiker_engine.js 的 describeError 会把它翻成人话返回给界面），
+        //    不会再拖死整个 App。
+        let thread = Thread { [weak self] in
             guard let self = self else { return }
 
-            print("[NodeJSBridge] node_start(\(argc) args)")
+            print("[NodeJSBridge] node_start(\(argc) args) stack=8MB")
             node_start(argc, argv)
 
             print("[NodeJSBridge] node_start 返回 (Node.js 退出)")
@@ -318,6 +347,12 @@ import UIKit
                 self.notifyDart(method: "onNodeExit", arguments: 0)
             }
         }
+        thread.name = "com.tvbox.nodejs"
+        thread.qualityOfService = .userInitiated
+        // 必须在 start() 之前设；内核会按页对齐（8MB 足够 ~4000 层解释器帧）
+        thread.stackSize = NodeJSBridge.nodeThreadStackSize
+        nodeThread = thread
+        thread.start()
 
         return true
     }

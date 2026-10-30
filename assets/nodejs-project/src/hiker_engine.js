@@ -137,7 +137,19 @@ function resolveUa(raw) {
 function describeError(e) {
   if (e == null) return '(空错误)';
   if (typeof e === 'string') return e;
-  if (e instanceof Error) return e.message || String(e);
+  if (e instanceof Error) {
+    const msg = e.message || String(e);
+    // 递归打穿 JS 栈（海阔小程序脚本里常见：几百层嵌套调用 + 里面还套
+    // JSON.stringify）。iOS 上原来的线程栈只有 ~512KB，这一步是**直接
+    // SIGBUS 闪退**；换成 8MB 栈的专用线程（NodeJSBridge.swift）后才会
+    // 变成这个可捕获的 RangeError —— 所以这里必须翻成人话，不能把
+    // "Maximum call stack size exceeded" 原样甩给用户。
+    if (/Maximum call stack size exceeded/i.test(msg)) {
+      return '规则递归太深，把 JS 调用栈撑爆了'
+        + '（多半是源里的重试/遍历没有退出条件）。已中止本次执行，App 不会崩。';
+    }
+    return msg;
+  }
   if (typeof e === 'object') {
     if (typeof e.message === 'string' && e.message) return e.message;
     try {
@@ -869,6 +881,64 @@ function moduleCandidates(raw) {
     if (base !== k) out.push(k.replace(/\.js$/i, ''));
   }
   return [...new Set(out.filter((x) => x.length > 0))];
+}
+
+/**
+ * 海阔**官方内置页**的名字（App 自带、源里通常没有）。
+ *
+ * 只用于一个判断：`$.require(名字)` 找不到时**不要**退回主模块 ——
+ * 这些名字找不到就是"缺内置页"，退回主模块会拿到形状不对的对象，
+ * 把一句清楚的「缺 lazy」换成莫名其妙的 TypeError。
+ */
+const HIKER_BUILTIN_PAGE_NAMES = [
+  'lazy', 'aes', 'des', 'rsa', 'md5', 'base64', 'crypto',
+  'home', 'tools', 'explore', 'search', 'detail', 'player', 'webview',
+  'collect', 'collection', 'history', 'download', 'bookmark', 'localmedia',
+  'push', 'share', 'settings', 'setting', 'about', 'help', 'danmaku',
+];
+
+/**
+ * 源**主模块**的名字 —— 从各条规则里 `$.require('x')` 反推出现最多的那个。
+ *
+ * 用途见 [requireModule] 的"名字兜底"：实测「红果短剧」这种小程序包，
+ * `find_rule` 是 `$.require("hg").home()`，可 `detail_find_rule` 却写成
+ * `$.require("rbo").detail()` —— **包里根本没有叫 rbo 的模块**
+ *（pages 只有 hg引擎 / UILib / TVBox推送 / 签名），于是详情/搜索直接报
+ * "找不到对应的 pages 模块"，整条源等于废了。这类是作者打包时的笔误，
+ * 官方 Hiker 里多半靠"同一个引擎对象"侥幸跑通。
+ *
+ * 所以名字找不到时退回**主模块**（规则里引用最多的那个）—— 总比让整条源报废好。
+ */
+function primaryModuleName(source) {
+  const texts = [
+    source && source.find_rule,
+    source && source.findRule,
+    source && source.detail_find_rule,
+    source && source.detailFind,
+    source && source.searchFind,
+    source && source.search_find,
+    source && source.preRule,
+    source && source.prerule,
+  ];
+  const count = new Map();
+  const re = /\.require\s*\(\s*['"]([^'"]+)['"]/g;
+  for (const t of texts) {
+    if (!t) continue;
+    const s = String(t);
+    let m;
+    while ((m = re.exec(s)) !== null) {
+      const k = normalizeModuleName(m[1]);
+      if (!k) continue;
+      count.set(k, (count.get(k) || 0) + 1);
+    }
+  }
+  if (!count.size) return '';
+  let best = '';
+  let bestN = -1;
+  for (const [k, n] of count) {
+    if (n > bestN) { best = k; bestN = n; }
+  }
+  return best;
 }
 
 /**
@@ -2891,6 +2961,10 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
     /// 少了它源会走到"请输入关键词"分支，搜索永远出不了结果）
     KEY: ctx.action === 'search' ? String(ctx.keyword || '') : '',
     KEYWORD: ctx.action === 'search' ? String(ctx.keyword || '') : '',
+    /// `MY_KEYWORD` —— 实测「红果短剧」的 searchFind 第一句就是
+    /// `putMyVar('keyword', MY_KEYWORD||getParam('kw'))`，缺了它整条搜索规则
+    /// 在加载期就 ReferenceError（`MY_KEYWORD is not defined`），搜索永远出不来。
+    MY_KEYWORD: ctx.action === 'search' ? String(ctx.keyword || '') : '',
 
     /// 源配置（海阔里用户可填的 `config`）—— 规则里 `config.host` 读的就是它。
     /// 没有配置时给个空对象，让 `config.x` 得到 undefined 而不是
@@ -3571,6 +3645,35 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
             mod = only[1];
             key = only[0];
             nameFallback = true;
+          }
+        }
+        // 兜底 ②：名字对不上，但源有**主模块**（规则里 `$.require(...)` 引用最多的
+        // 那个）⇒ 用它。实测「红果短剧」：`detail_find_rule` 写的是
+        // `$.require("rbo").detail()`，包里却只有 hg引擎/UILib/TVBox推送/签名，
+        // 没有 rbo ⇒ 详情、搜索全线"找不到模块"。这类是作者打包笔误，
+        // 退回主模块（hg 引擎本身就导出 detail()）能正常跑。
+        // ⚠️ 但**海阔官方内置页名**不能兜底：`$.require('lazy')` 找不到就是
+        //    "缺内置页"，退回主模块只会让源拿到一个形状不对的对象，
+        //    把一句清楚的"缺 lazy"换成莫名其妙的 TypeError。
+        const looksBuiltin = HIKER_BUILTIN_PAGE_NAMES.includes(
+          String(cands[0] || '').replace(/\.js$/i, '').toLowerCase(),
+        );
+        if (!mod && !looksBuiltin) {
+          const primary = primaryModuleName(source);
+          if (primary) {
+            for (const c of moduleCandidates(primary)) {
+              const m2 = modules.get(c);
+              if (m2) {
+                mod = m2;
+                key = c;
+                nameFallback = true;
+                warnOnce(
+                  `$.require('${String(name || '')}') 在源里找不到，已退回主模块「${c}」`
+                  + '（该源规则里引用的模块名与 pages 对不上，多半是打包笔误）',
+                );
+                break;
+              }
+            }
           }
         }
         if (!mod) {
