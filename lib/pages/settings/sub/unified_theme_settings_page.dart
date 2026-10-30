@@ -8,7 +8,9 @@ import 'package:tvbox/common/theme_mode_store.dart';
 import 'package:tvbox/services/background_service.dart';
 import 'package:tvbox/reading/services/settings_service.dart';
 import 'package:tvbox/pages/settings/wallpaper_page.dart';
+import 'package:tvbox/pages/settings/sub/rfw_theme_section.dart';
 import 'package:tvbox/pages/settings/sub/settings_shared.dart';
+import 'package:tvbox/rfw_theme/rfw_theme_store.dart';
 import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:tvbox/widgets/theme_preset_row.dart';
@@ -41,6 +43,22 @@ class UnifiedThemeSettingsPage extends StatefulWidget {
 class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
   final store = ModuleThemeStore.instance;
 
+  // 总览卡上的三块可以直接跳过去（页面很长，省得手划）。
+  final _modeKey = GlobalKey();
+  final _wallpaperKey = GlobalKey();
+  final _rfwKey = GlobalKey();
+
+  void _jumpTo(GlobalKey key) {
+    final ctx = key.currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(
+      ctx,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+      alignment: 0.02,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return SettingsSubPage(
@@ -67,6 +85,21 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
               '但同一屏只显示一个模块，不会打架。',
         ),
         SettingsHelpItem(
+          icon: Icons.dashboard_customize_outlined,
+          title: '首页主题（RFW）',
+          body: '一套用文本描述的影视首页皮肤，管「分类 / 筛选 / 推荐位 / 片单」'
+              '的排版。它的配色**不是**写死的，跟着这里选的配色走 —— '
+              '换配色，首页缩略图和真实首页一起变。它只影响影视首页，'
+              '播放页/详情页/音乐/阅读都不受影响。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.wallpaper_outlined,
+          title: '壁纸与首页主题的关系',
+          body: '壁纸铺在所有页面底下。但影视首页一旦启用 RFW 主题，'
+              '那块区域由主题自己画背景（多数主题是纯色/渐变），壁纸就只在'
+              '其它页面可见了 —— 想看到壁纸，把首页主题关掉即可。',
+        ),
+        SettingsHelpItem(
           icon: Icons.restart_alt_rounded,
           title: '一键还原',
           body: '把配色、分模块跟随、明暗、壁纸全部恢复默认。'
@@ -80,8 +113,25 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
         ),
       ],
       children: [
+        // ── 总览：三套外观系统的当前状态 ──────────────────────
+        //
+        // 2026-10-30 用户要求「外观主题、壁纸、RFW 主题弄在一个管理里面，
+        // 并且相互间能互溶」。三块原来是三张互不相干的卡，用户看不出
+        // 「换配色 → 首页跟着变」这条关系。总览卡把它摆到最上面：
+        // 一眼看到现在是什么配色 / 什么壁纸 / 什么首页主题，点一下跳过去。
+        _overviewCard(),
+        const SizedBox(height: AppTheme.spacingMD),
+
         // ── 全局：明暗模式（自绘三选一，与下方配色分区同一套视觉）──
-        _modeCard(),
+        KeyedSubtree(key: _modeKey, child: _modeCard()),
+        const SizedBox(height: AppTheme.spacingMD),
+
+        // ── 配色（影视·直播 / 音乐 / 阅读）─────────────────────
+        //
+        // 原来这里是**三张大卡**，每张都重复一遍"图标+标题+副标题+选择行"，
+        // 一屏装不下还看不出主次。现在合成一张卡里的三行，
+        // 「N 套预设为基准」那句也保留（回归测试盯着它）。
+        _paletteCard(),
         const SizedBox(height: AppTheme.spacingMD),
 
         // ── 壁纸与背景 ────────────────────────────────────────
@@ -91,7 +141,14 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
         // 结果壁纸功能代码全在、用户却点不到 ——
         // 表现就是"我原先的壁纸功能呢？"。
         // 统合页面时漏搬入口是典型事故，所以这里单列一张卡 + 加注释。
-        _wallpaperCard(),
+        KeyedSubtree(key: _wallpaperKey, child: _wallpaperCard()),
+        const SizedBox(height: AppTheme.spacingMD),
+
+        // ── 首页主题（RFW）────────────────────────────────────
+        //
+        // 与「设置 → 主页页面 → RFW 首页主题」**引用同一个 widget**
+        //（`RfwThemeSettingsSection`），不存在两份实现分叉的问题。
+        KeyedSubtree(key: _rfwKey, child: _rfwCard()),
         const SizedBox(height: AppTheme.spacingMD),
 
         // ── 文字 ──────────────────────────────────────────────
@@ -104,26 +161,6 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
         _textCard(),
         const SizedBox(height: AppTheme.spacingMD),
 
-        // ── 影视 · 直播 ───────────────────────────────────────
-        _moduleSection(
-          icon: Icons.movie_outlined,
-          title: '影视 · 直播',
-          subtitle: '两者共用一套配色（不会同屏显示）',
-          module: ModuleThemeStore.video,
-        ),
-
-        // ── 音乐 ─────────────────────────────────────────────
-        _moduleSection(
-          icon: Icons.music_note_outlined,
-          title: '音乐',
-          subtitle: '独立配色，可与其他模块不同',
-          module: ModuleThemeStore.music,
-        ),
-
-        // ── 阅读（只给入口，不改它的主题）──────────────────────
-        _readingSection(),
-
-        const SizedBox(height: AppTheme.spacingMD),
         _resetCard(),
         const SizedBox(height: AppTheme.spacingSM),
 
@@ -135,6 +172,200 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
         // 原来只有前者，用户改乱了之后没有"一键回出厂"的入口。
         _factoryResetCard(),
       ],
+    );
+  }
+
+  // ============================================================
+  // 总览卡
+  // ============================================================
+
+  Widget _overviewCard() {
+    final videoPreset = store.effectivePreset(ModuleThemeStore.video);
+    final palette = store.paletteOf(videoPreset);
+    final light = AppBrightness.isLight.value;
+    final rfwOn = rfwThemeModeNotifier.value;
+    final rfwName = _rfwThemeName(effectiveRfwThemeId(rfwThemeIdNotifier.value));
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 15, 16, 14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
+        border: Border.all(color: AppTheme.borderLight, width: 0.8),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppTheme.accentColor.withValues(alpha: light ? 0.16 : 0.26),
+            AppTheme.backgroundSecondary,
+          ],
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _colorDot(palette.primary),
+              const SizedBox(width: 5),
+              _colorDot(palette.accent),
+              const SizedBox(width: 5),
+              _colorDot(palette.backgroundLight),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      store.displayNameOf(videoPreset),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: AppTheme.fontHeadline,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '当前外观 · ${light ? '浅色' : '深色'}',
+                      style: TextStyle(
+                        fontSize: AppTheme.fontFootnote,
+                        color: AppTheme.textTertiary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 13),
+          Row(
+            children: [
+              Expanded(
+                child: _overviewTile(
+                  icon: light
+                      ? Icons.light_mode_outlined
+                      : Icons.dark_mode_outlined,
+                  label: '明暗',
+                  value: light ? '浅色' : '深色',
+                  onTap: () => _jumpTo(_modeKey),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _overviewTile(
+                  icon: Icons.wallpaper_outlined,
+                  label: '壁纸',
+                  value: BackgroundService.instance.wallpaperDisplayName,
+                  onTap: () => _jumpTo(_wallpaperKey),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _overviewTile(
+                  icon: Icons.dashboard_customize_outlined,
+                  label: '首页主题',
+                  value: rfwOn ? rfwName : '原生首页',
+                  onTap: () => _jumpTo(_rfwKey),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _colorDot(Color c) {
+    return Container(
+      width: 13,
+      height: 13,
+      decoration: BoxDecoration(
+        color: c,
+        shape: BoxShape.circle,
+        border: Border.all(color: AppTheme.borderLight, width: 0.8),
+      ),
+    );
+  }
+
+  Widget _overviewTile({
+    required IconData icon,
+    required String label,
+    required String value,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(9, 8, 9, 8),
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(11),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 13, color: AppTheme.accentColor),
+                const SizedBox(width: 4),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    color: AppTheme.textTertiary,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 3),
+            Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _rfwThemeName(String id) {
+    for (final e in builtinRfwThemes) {
+      if (e.id == id) return e.name;
+    }
+    if (id.startsWith('imported:')) {
+      final f = id.substring('imported:'.length);
+      return f.toLowerCase().endsWith('.rfwtxt')
+          ? f.substring(0, f.length - 7)
+          : f;
+    }
+    return '自定义主题';
+  }
+
+  // ============================================================
+  // 首页主题（RFW）—— 与独立页共用同一份实现
+  // ============================================================
+
+  Widget _rfwCard() {
+    final videoPreset = store.effectivePreset(ModuleThemeStore.video);
+    return RfwThemeSettingsSection(
+      paletteName: store.displayNameOf(videoPreset),
+      // 「换配色」直接改影视·直播那套 —— 首页主题的色板就是从这里算出来的
+      // （见 `rfw_theme_palette.dart`），改这里才是真正"互融"。
+      onPickPalette: () => _pickPreset(
+        module: ModuleThemeStore.video,
+        current: store.rawPreset(ModuleThemeStore.video),
+        title: '影视 · 直播',
+      ),
     );
   }
 
@@ -419,83 +650,155 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
   }
 
   // ============================================================
-  // 一个模块的配色分区
+  // 配色：影视·直播 / 音乐 / 阅读 三行合一
   // ============================================================
 
-  Widget _moduleSection({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required String module,
-  }) {
-    final current = store.rawPreset(module);
-    final effective = store.effectivePreset(module);
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppTheme.spacingMD),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-        decoration: BoxDecoration(
-          color: AppTheme.backgroundSecondary,
-          borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icon, size: 18, color: AppTheme.accentColor),
-                const SizedBox(width: 8),
-                Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: AppTheme.fontHeadline,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.textPrimary,
-                  ),
+  Widget _paletteCard() {
+    final readingPreset = SettingsService().themePreset;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundSecondary,
+        borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.palette_outlined,
+                  size: 18, color: AppTheme.accentColor),
+              const SizedBox(width: 8),
+              Text(
+                '配色',
+                style: TextStyle(
+                  fontSize: AppTheme.fontHeadline,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textPrimary,
                 ),
-                const Spacer(),
-                Text(
-                  _presetName(effective),
-                  style: TextStyle(
-                    fontSize: AppTheme.fontFootnote,
-                    color: AppTheme.textTertiary,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              subtitle,
-              style: TextStyle(
-                fontSize: AppTheme.fontFootnote,
-                color: AppTheme.textTertiary,
               ),
+              const Spacer(),
+              Text(
+                '${readingThemePresets.length} 套预设',
+                style: TextStyle(
+                  fontSize: AppTheme.fontFootnote,
+                  color: AppTheme.textTertiary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            // 数量**不要写死**：预设从 7 套扩到 24 套后，原来那句
+            // "以阅读的 7 套主题为基准"就成了假话。这里直接用列表长度。
+            '以阅读的 ${readingThemePresets.length} 套主题为基准；影视、音乐默认跟随阅读',
+            style: TextStyle(
+              fontSize: AppTheme.fontFootnote,
+              color: AppTheme.textTertiary,
             ),
-            const SizedBox(height: 12),
-            // 与阅读「主题风格」面板同一套：点开底部面板，里面是
-            // 「三色点 + 名称 + 右侧单选圈」的全宽圆角行（用户 2026-10-16 要求）
-            _pickRow(
-              dots: _dotsOf(effective),
-              onTap: () =>
-                  _pickPreset(module: module, current: current, title: title),
+          ),
+          const SizedBox(height: 8),
+          _paletteRow(
+            module: ModuleThemeStore.video,
+            icon: Icons.movie_outlined,
+            title: '影视 · 直播',
+            subtitle: '两者共用一套（不会同屏显示）',
+          ),
+          _paletteDivider(),
+          _paletteRow(
+            module: ModuleThemeStore.music,
+            icon: Icons.music_note_outlined,
+            title: '音乐',
+            subtitle: '独立配色，可与其他模块不同',
+          ),
+          _paletteDivider(),
+          _paletteRow(
+            module: '__reading__',
+            icon: Icons.menu_book_outlined,
+            title: '阅读',
+            subtitle: '其它模块默认跟随它',
+            readingPreset: readingPreset,
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => Get.to(() => const _ReadingThemeHintPage()),
+              icon: const Icon(Icons.tune, size: 15),
+              label: const Text('阅读高级设置（自定义颜色 / 背景动画 / 图片背景）'),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  /// 模块卡里那一行「选择主题」入口 —— 用阅读面板同款行，右侧给箭头
-  Widget _pickRow({required List<Color> dots, required VoidCallback onTap}) {
-    return ThemePresetRow(
-      name: '选择主题',
-      subtitle: '与阅读「主题风格」同一套样式',
-      dots: dots,
-      selected: false,
-      trailing: Icon(Icons.chevron_right_rounded,
-          size: 20, color: AppTheme.textTertiary),
-      onTap: onTap,
+  Widget _paletteDivider() => Divider(
+        color: AppTheme.borderLight,
+        height: 1,
+        thickness: 0.5,
+        indent: 24,
+      );
+
+  /// 一行 = 一个模块的配色入口。点开与阅读同款的底部面板。
+  Widget _paletteRow({
+    required String module,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    String? readingPreset,
+  }) {
+    final current = readingPreset ?? store.rawPreset(module);
+    final effective = readingPreset ?? store.effectivePreset(module);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () =>
+          _pickPreset(module: module, current: current, title: title),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 9),
+        child: Row(
+          children: [
+            Icon(icon, size: 15, color: AppTheme.textTertiary),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: AppTheme.fontSubhead,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.textTertiary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              _presetName(effective),
+              style: TextStyle(
+                fontSize: AppTheme.fontFootnote,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+            const SizedBox(width: 2),
+            Icon(Icons.chevron_right_rounded,
+                size: 18, color: AppTheme.textTertiary),
+          ],
+        ),
+      ),
     );
   }
 
@@ -556,86 +859,6 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
             },
           ),
       ],
-    );
-  }
-
-  // ============================================================
-  // 阅读：和影视/音乐一样直接选全部预设主题 + "更多设置"入口
-  // ============================================================
-
-  Widget _readingSection() {
-    final readingPreset = SettingsService().themePreset;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppTheme.spacingMD),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-        decoration: BoxDecoration(
-          color: AppTheme.backgroundSecondary,
-          borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.menu_book_outlined,
-                  size: 18,
-                  color: AppTheme.accentColor,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  '阅读',
-                  style: TextStyle(
-                    fontSize: AppTheme.fontHeadline,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.textPrimary,
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  _presetName(readingPreset),
-                  style: TextStyle(
-                    fontSize: AppTheme.fontFootnote,
-                    color: AppTheme.textTertiary,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              // 数量**不要写死**：预设从 7 套扩到 24 套后，原来那句
-              // "以阅读的 7 套主题为基准"就成了假话。这里直接用列表长度。
-              '以阅读的 ${readingThemePresets.length} 套主题为基准；影视、音乐默认跟随阅读',
-              style: TextStyle(
-                fontSize: AppTheme.fontFootnote,
-                color: AppTheme.textTertiary,
-              ),
-            ),
-            const SizedBox(height: 12),
-            // 与影视/音乐同款（都是阅读那套行 + 底部面板）
-            _pickRow(
-              dots: _dotsOf(readingPreset),
-              onTap: () => _pickPreset(
-                module: '__reading__',
-                current: readingPreset,
-                title: '阅读',
-              ),
-            ),
-            const SizedBox(height: 10),
-            // 阅读独有高级功能的入口
-            Row(
-              children: [
-                TextButton.icon(
-                  onPressed: () => Get.to(() => const _ReadingThemeHintPage()),
-                  icon: const Icon(Icons.tune, size: 16),
-                  label: const Text('更多设置（自定义颜色 / 背景动画 / 图片背景）'),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
     );
   }
 
