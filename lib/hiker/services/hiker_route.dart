@@ -31,6 +31,14 @@ enum HikerLinkKind {
   /// `hiker://…` 官方内部页面（二级页面 / 设置 / 搜索 / 收藏…），本模块不支持跳转
   hikerPage,
 
+  /// `hiker://page/<模块名>?参数` —— **源自己的页面模块**（小程序的多页导航）。
+  ///
+  /// 与 [hikerPage] 必须分开：前者是海阔 App 的内置页（设置 / 收藏 / 历史…），
+  /// 我们没有、也不该有；后者是**源 `pages` 里的一个模块**，打开它 = 执行那个
+  /// 模块的 `rule` 并用同一套列表渲染铺出来。海阔的「小程序脚本」正是靠它
+  /// 串起 首页 → 分类 → 详情 → 播放 这一串页面。
+  hikerPageModule,
+
   /// `hiker://search?rule=<源名>&s=<关键词>` —— 官方「在某个源里搜索」的深链。
   ///
   /// 实测「聚阅√」这类聚合源的首页搜索框 / 条目地址就是它（
@@ -220,6 +228,62 @@ List<String>? hikerPicList(String url) => play_route.parseImageListUrl(url);
   );
 }
 
+/// 拆 `hiker://page/<模块名>?参数`（**源自己的页面模块**，小程序多页导航）。
+///
+/// 海阔里一条「小程序脚本」是一套多页：源的 `pages` 里每个模块
+///（`{name, rule}`）就是一个页面，条目地址写成 `hiker://page/<名>`。
+/// 官方点开它就是**执行那个模块的 rule**，再用同一套列表渲染把结果铺出来。
+///
+/// 返回 null 表示不是页面模块链接（可能是 `hiker://setting` 这类内置页、
+/// 或 `hiker://search` 深链 —— 后者由 [parseHikerSearchUrl] 处理）。
+///
+/// 参数解析不用 `Uri`：源里常有**未编码的中文/空格/√**，Uri 会整条丢掉。
+({String module, String url, Map<String, String> args})? parseHikerPageUrl(
+  String raw,
+) {
+  final s = raw.trim();
+  const prefix = 'hiker://page/';
+  if (s.length <= prefix.length) return null;
+  if (s.substring(0, prefix.length).toLowerCase() != prefix) return null;
+
+  final rest = s.substring(prefix.length);
+  // 模块名到 `?` / `#` 为止（`#noHistory#` 这类 flag 不是名字的一部分）。
+  // ⚠️ **全角问号**也要算：实测有源写成 `hiker://page/funcTools？？rule=xxx`，
+  //    引擎侧 `normalizeModuleName` 同样按 `[#?？]` 切（两边口径必须一致）。
+  final cut = rest.indexOf(RegExp(r'[?#？]'));
+  final name = (cut < 0 ? rest : rest.substring(0, cut)).trim();
+  if (name.isEmpty) return null;
+  // 模块名里不该出现空白 / 斜杠结尾（那是路径不是模块）
+  if (name.endsWith('/')) return null;
+
+  final args = <String, String>{};
+  final qi = s.indexOf(RegExp(r'[?？]'));
+  if (qi >= 0) {
+    var q = s.substring(qi + 1);
+    final hash = q.indexOf('#');
+    if (hash >= 0) q = q.substring(0, hash);
+    for (final pair in q.split('&')) {
+      if (pair.isEmpty) continue;
+      final eq = pair.indexOf('=');
+      final k = eq < 0 ? pair : pair.substring(0, eq);
+      final v = eq < 0 ? '' : pair.substring(eq + 1);
+      final key = _hikerDecode(k).trim();
+      if (key.isEmpty) continue;
+      args[key] = _hikerDecode(v).trim();
+    }
+  }
+  return (module: name, url: s, args: args);
+}
+
+/// 宽容的百分号解码（不是合法编码就原样返回）
+String _hikerDecode(String v) {
+  try {
+    return Uri.decodeComponent(v);
+  } catch (_) {
+    return v;
+  }
+}
+
 /// 按官方 `dealWithUrl()` 的**判定顺序**给链接分类。
 ///
 /// 顺序不能乱 —— 官方就是按这个顺序短路返回的：
@@ -233,6 +297,8 @@ HikerLinkKind hikerLinkKind(String raw) {
 
   // ① 官方内部页面（搜索深链单独一支 —— 本模块能真的打开它）
   if (parseHikerSearchUrl(s) != null) return HikerLinkKind.search;
+  // ①' 源自己的**页面模块**（`hiker://page/<名>`）—— 小程序多页导航，能打开
+  if (parseHikerPageUrl(s) != null) return HikerLinkKind.hikerPageModule;
   if (lower.startsWith('hiker://')) return HikerLinkKind.hikerPage;
 
   // ② 彩蛋模式（一段 JS，官方跳浏览器执行）
@@ -460,6 +526,14 @@ HikerInlineRule? splitHikerInlineRule(String url) {
       return (kind: '脚本', detail: '需要浏览器执行这段 JS');
     case HikerLinkKind.hikerPage:
       return (kind: '海阔内部页', detail: '官方内部页面，本版不支持打开');
+    case HikerLinkKind.hikerPageModule:
+      final pm = parseHikerPageUrl(s);
+      final name = pm?.module ?? '';
+      final n = pm?.args.length ?? 0;
+      return (
+        kind: '小程序页面',
+        detail: n == 0 ? '打开页面模块「$name」' : '打开页面模块「$name」（$n 个参数）',
+      );
     case HikerLinkKind.search:
       final sp = parseHikerSearchUrl(s);
       final kw = sp?.keyword ?? '';

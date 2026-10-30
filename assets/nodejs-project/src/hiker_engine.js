@@ -871,6 +871,51 @@ function moduleCandidates(raw) {
   return [...new Set(out.filter((x) => x.length > 0))];
 }
 
+/**
+ * 在源的 `pages` 里找**页面模块**（`hiker://page/<名>` 的目标）。
+ *
+ * 与 [moduleCandidates] 同一套归一化：`hiker://page/miss` / `miss` / `miss.js`
+ * / `assets/miss` 都该指向同一个模块。名字对不上时再按 basename 模糊比一次
+ * （实测源里 `pages[{name:'home', path:'assets/home.js'}]` 混着写）。
+ *
+ * @returns {object|null} `pages` 里的那条模块对象
+ */
+function findPageModule(source, rawName) {
+  const list = (source && Array.isArray(source.pages)) ? source.pages : [];
+  if (!list.length) return null;
+  const cands = moduleCandidates(rawName);
+  const norm = (s) => String(s == null ? '' : s).trim().toLowerCase();
+  // ① 精确命中（name / path 任一）
+  for (const c of cands) {
+    const key = norm(c);
+    if (!key) continue;
+    for (const p of list) {
+      if (!p || typeof p !== 'object') continue;
+      for (const f of [p.name, p.path]) {
+        if (norm(f) === key) return p;
+      }
+    }
+  }
+  // ② basename 命中（`assets/home.js` ↔ `home`）
+  for (const c of cands) {
+    const base = norm(c.split('/').pop() || c);
+    if (!base) continue;
+    for (const p of list) {
+      if (!p || typeof p !== 'object') continue;
+      for (const f of [p.name, p.path]) {
+        const v = norm(f);
+        if (!v) continue;
+        const b = v.split('/').pop() || v;
+        if (b === base || b.replace(/\.js$/i, '') === base.replace(/\.js$/i, '')) {
+          return p;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+
 // ============================================================
 // 结果归一化
 // ============================================================
@@ -4272,6 +4317,33 @@ export async function handleHikerApi(data) {
     } else if (action === 'detail') {
       rule = String(source.detail_find_rule || source.detailFind || '');
       ctxUrl = String(params.url || '');
+    } else if (action === 'page') {
+      // ── 小程序「页面模块」：`hiker://page/<名>?参数` ──────────────────
+      // 海阔里一条**小程序**源不是"一个首页 + 一个详情"，而是一套**多页**：
+      // `pages` 里每个模块（`{name, rule}`）就是一个页面，条目地址写成
+      // `hiker://page/<名>`，点开 = 执行那个模块的 `rule` 并用**同一套列表渲染**
+      // 把结果铺出来（官方 ArticleListActivity 就是这么干的）。
+      //
+      // 我们原来只把 `pages` 当 `$.require` 的代码库，从来没"打开过"其中一页 ⇒
+      // 小程序源点进去只弹一句「海阔内部页面，本版不支持」。
+      const modName = String(params.module || params.page || '').trim();
+      const mod = findPageModule(source, modName);
+      if (!mod) {
+        throw new Error(
+          `源里没有名为「${modName}」的页面模块`
+          + '（它可能依赖海阔内置页，或这个源的 pages 里叫别的名字）',
+        );
+      }
+      rule = String(mod.rule || mod.js || '');
+      if (!rule.trim()) {
+        throw new Error(`页面模块「${modName}」里没有 rule（只有名字，没有内容）`);
+      }
+      if (!/^\s*js:/i.test(rule)) rule = `js:${rule}`;
+      // `MY_URL` 保留**原文**（`hiker://page/名?参数`）—— 页面模块常靠
+      // `MY_URL` 或 `MY_PARAMS` 取自己那次的入参。
+      ctxUrl = String(params.url || `hiker://page/${modName}`);
+      const pageArgs = params.args && typeof params.args === 'object' ? params.args : {};
+      envParams = { ...pageArgs, ...envParams };
     } else {
       // home / category：`source.url` 是首页地址；分类走传入的 class_url
       // ⚠️ `MY_URL` 必须保留**规则原文**（含 `hiker://empty##` 前缀）——
@@ -4285,6 +4357,15 @@ export async function handleHikerApi(data) {
         cate: cateRaw,
       });
       rule = String(source.find_rule || source.findRule || '');
+      // 小程序源：`find_rule` 空、但 `pages` 里有 `home` 页面模块 ⇒ 首页就是它。
+      // 官方语义里"首页"本来就可以是一个页面模块，没必要逼用户去详情页绕。
+      if (!rule.trim()) {
+        const homeMod = findPageModule(source, 'home');
+        if (homeMod && (homeMod.rule || homeMod.js)) {
+          const hr = String(homeMod.rule || homeMod.js);
+          rule = /^\s*js:/i.test(hr) ? hr : `js:${hr}`;
+        }
+      }
       if (cateRaw) {
         ctxUrl = /^(?:https?|hiker):\/\//i.test(cateRaw)
           ? cateRaw

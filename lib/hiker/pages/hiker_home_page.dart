@@ -16,10 +16,12 @@ import 'package:tvbox/hiker/services/hiker_builtin.dart';
 import 'package:tvbox/hiker/services/hiker_cache.dart';
 import 'package:tvbox/hiker/services/hiker_engine.dart';
 import 'package:tvbox/hiker/services/hiker_prefs.dart';
+import 'package:tvbox/hiker/services/hiker_route.dart';
 import 'package:tvbox/hiker/services/hiker_store.dart';
 import 'package:tvbox/hiker/widgets/hiker_blocks.dart';
 import 'package:tvbox/hiker/widgets/hiker_widgets.dart';
 import 'package:tvbox/hiker/pages/hiker_detail_page.dart';
+import 'package:tvbox/hiker/pages/hiker_page_view.dart';
 import 'package:tvbox/hiker/pages/hiker_manage_page.dart';
 import 'package:tvbox/hiker/pages/hiker_search_page.dart';
 import 'package:tvbox/hiker/pages/hiker_settings_page.dart';
@@ -193,7 +195,9 @@ class _HikerHomePageState extends State<HikerHomePage> {
     // 能不能跑交给引擎（它按 basename 归一化找模块，找不到会抛明确报错），
     // 这样界面上看到的是**真实原因**，而不是一句笼统的"该源不可用"。
     // 「不可用」标签仍保留在源列表 / 管理页里，供参考。
-    if (src.findRule.isEmpty) {
+    // 小程序源还有第二条路：`find_rule` 空、但 `pages` 里有 `home` 页面模块
+    // —— 官方就是"首页 = 那个模块"，引擎侧会兜底（见 hiker_engine.js 的 home 分支）。
+    if (src.findRule.isEmpty && !src.hasPageModule('home')) {
       setState(() {
         _items = const [];
         _hasMore = false;
@@ -313,6 +317,26 @@ class _HikerHomePageState extends State<HikerHomePage> {
 
   // ── 交互 ──────────────────────────────────────────────
 
+  /// 打开源自己的**页面模块**（小程序多页导航）
+  void _openPageModule(
+    HikerSource src,
+    ({String module, String url, Map<String, String> args}) pm,
+    String title,
+  ) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => HikerPageView(
+          source: src,
+          module: pm.module,
+          url: pm.url,
+          args: pm.args,
+          title: title,
+          lazyChain: _lazyChain,
+        ),
+      ),
+    );
+  }
+
   void _open(HikerItem it) {
     if (it.url.isEmpty) {
       AppToast.message('这个条目没有地址');
@@ -320,6 +344,13 @@ class _HikerHomePageState extends State<HikerHomePage> {
     }
     final src = _store.current;
     if (src == null) return;
+    // 小程序源：首页条目常常直接指向**源自己的页面模块**（`hiker://page/<名>`）。
+    // 那是"多页"里的一页，点开就该铺那一页，而不是先绕进详情页再弹一句不支持。
+    final pm = parseHikerPageUrl(it.url);
+    if (pm != null && src.hasPageModule(pm.module)) {
+      _openPageModule(src, pm, it.title);
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => HikerDetailPage(
@@ -412,6 +443,13 @@ class _HikerHomePageState extends State<HikerHomePage> {
     if (src == null) return;
     final u = it.url;
     if (u.isEmpty || u == 'hiker://empty') return;
+    // 小程序源的分类条 / 按钮也可能是**页面模块**（`hiker://page/<名>`）：
+    // 那是"多页"里的另一页，点开就该铺那一页，不能当分类地址去重跑 find_rule。
+    final pm = parseHikerPageUrl(u);
+    if (pm != null && src.hasPageModule(pm.module)) {
+      _openPageModule(src, pm, it.title);
+      return;
+    }
     // 海阔老写法：`真实地址 + $('').lazyRule(fn)`（lazy 标记在中间），不能只判开头
     final lazySplit = splitHikerLazyUrl(u);
     if (lazySplit == null) {

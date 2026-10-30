@@ -21,6 +21,7 @@ import 'package:tvbox/hiker/services/hiker_store.dart';
 import 'package:tvbox/hiker/widgets/hiker_blocks.dart' show hikerPlainText, hikerRichSpans;
 import 'package:tvbox/hiker/widgets/hiker_widgets.dart';
 import 'package:tvbox/hiker/pages/hiker_search_page.dart';
+import 'package:tvbox/hiker/pages/hiker_page_view.dart';
 
 /// 海阔条目详情 + 打开。
 ///
@@ -666,6 +667,12 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
         AppToast.message('这个条目跳的是海阔内部页面，当前不支持：${_short(url)}');
         return;
 
+      case HikerLinkKind.hikerPageModule:
+        // `hiker://page/<名>` —— **源自己的页面模块**（小程序的多页导航）。
+        // 官方点开它就是执行那个模块的 rule 再铺一屏，不是"打开网页"。
+        await _openPageModule(url);
+        return;
+
       case HikerLinkKind.js:
         // 官方叫"彩蛋模式"：url 本身就是一段 JS，跳浏览器执行。
         // 我们没法执行它，也不能把 `javascript:…` 丢给 WebView（会白屏）。
@@ -726,6 +733,35 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
     setState(() => _busy = false);
     // 这类规则一般只改变量 + refreshPage()，内容要带上新变量重跑一次
     await _resolve();
+  }
+
+  /// 打开**源自己的页面模块**（`hiker://page/<名>?参数`）—— 小程序的多页导航。
+  ///
+  /// 源里没有这个模块时给出明确原因：多半是它依赖海阔**内置页**
+  /// （`hiker://page/lazy` 这类 App 自带的），而不是我们漏移植。
+  Future<void> _openPageModule(String url) async {
+    final pm = parseHikerPageUrl(url);
+    if (pm == null) return;
+    final src = widget.source;
+    if (!src.hasPageModule(pm.module)) {
+      AppToast.message(
+        '「${src.title}」里没有名为 ${pm.module} 的页面模块'
+        '（这个链接指向海阔内置页，App 不自带）',
+      );
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => HikerPageView(
+          source: src,
+          module: pm.module,
+          url: pm.url,
+          args: pm.args,
+          title: widget.item.title,
+          lazyChain: widget.lazyChain,
+        ),
+      ),
+    );
   }
 
   /// 打开「海阔内置搜索」深链（`hiker://search?rule=<源名>&s=<关键词>`）。
@@ -1979,6 +2015,10 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
       HikerLinkKind.image => ('看图', Icons.photo_library_rounded),
       HikerLinkKind.novel => ('阅读', Icons.menu_book_rounded),
       HikerLinkKind.search => ('搜索', Icons.search_rounded),
+      HikerLinkKind.hikerPageModule => (
+        '打开页面',
+        Icons.open_in_new_rounded,
+      ),
       HikerLinkKind.toast ||
       HikerLinkKind.copyLink ||
       HikerLinkKind.external ||

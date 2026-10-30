@@ -8,10 +8,12 @@ import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/hiker/models/hiker_source.dart';
 import 'package:tvbox/hiker/services/hiker_engine.dart';
 import 'package:tvbox/hiker/services/hiker_prefs.dart';
+import 'package:tvbox/hiker/services/hiker_route.dart';
 import 'package:tvbox/hiker/services/hiker_store.dart';
 import 'package:tvbox/hiker/widgets/hiker_richtext.dart';
 import 'package:tvbox/hiker/widgets/hiker_widgets.dart';
 import 'package:tvbox/hiker/pages/hiker_detail_page.dart';
+import 'package:tvbox/hiker/pages/hiker_page_view.dart';
 
 /// 海阔搜索页（独立页：主页顶栏的搜索按钮进来）。
 ///
@@ -311,6 +313,22 @@ class _HikerSearchPageState extends State<HikerSearchPage> {
   void _open(HikerItem it) {
     if (it.url.isEmpty) {
       AppToast.message('这个条目没有地址');
+      return;
+    }
+    // 小程序源：搜索结果也可能直接指向**源自己的页面模块**（`hiker://page/<名>`）
+    final pm = parseHikerPageUrl(it.url);
+    if (pm != null && widget.source.hasPageModule(pm.module)) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => HikerPageView(
+            source: widget.source,
+            module: pm.module,
+            url: pm.url,
+            args: pm.args,
+            title: it.title,
+          ),
+        ),
+      );
       return;
     }
     Navigator.of(context).push(

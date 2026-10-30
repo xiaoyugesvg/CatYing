@@ -77,6 +77,25 @@ class HikerSource {
   /// 分类标签（源切换面板 / 管理页的二级 tab 用）
   String get kindLabel => isMiniAppScript ? '海阔小程序脚本' : '海阔脚本';
 
+  /// 源的 `pages` 里有没有叫这个名字的**页面模块**（`hiker://page/<名>` 的目标）。
+  ///
+  /// 归一化口径与引擎一致（见 `hiker_engine.js` 的 `findPageModule`）：
+  /// `miss` / `hiker://page/miss` / `assets/miss.js` 都算同一个模块。
+  /// 宿主据此判断"这个链接是能打开的小程序页面"还是"指向海阔内置页"。
+  bool hasPageModule(String name) {
+    final n = name.trim();
+    if (n.isEmpty) return false;
+    final names = _moduleNames;
+    if (names.contains(n)) return true;
+    final base = n.split('/').last;
+    if (base.isEmpty) return false;
+    if (names.contains(base)) return true;
+    if (base.endsWith('.js')) {
+      return names.contains(base.substring(0, base.length - 3));
+    }
+    return false;
+  }
+
   /// 是否**真的**依赖海阔内置页面模块（无源码 ⇒ 跑不了）。
   /// ⚠️ 关键纠正（实测用户那份 115 个源）：引用 `hiker://page|assets/*` 的 70 个源里，
   ///   **64 个（91%）的目标模块就在源自己的 `pages` 里** —— 那只是 hiker 的写法，
@@ -266,8 +285,8 @@ class HikerSource {
     final names = _moduleNames;
     final files = importedFiles.map(_normPath).toSet();
 
-    // ① 连首页规则都没有
-    if (findRule.isEmpty) {
+    // ① 连首页规则都没有（小程序源例外：`pages` 里的 `home` 模块就是首页）
+    if (findRule.isEmpty && !hasPageModule('home')) {
       out.add(
         const HikerSourceDiagnosis(
           '无首页规则',
@@ -478,13 +497,16 @@ class HikerSource {
     return out.toList()..sort();
   }
 
-  /// 能否用（Phase 1 判定）：有首页规则、不依赖内置模块、不依赖宿主能力
+  /// 能否用（Phase 1 判定）：有首页规则（或小程序源自带 `home` 页面模块）、
+  /// 不依赖内置模块、不依赖宿主能力
   bool get usable =>
-      findRule.isNotEmpty && !needsBuiltinModule && !needsHostApi;
+      (findRule.isNotEmpty || hasPageModule('home')) &&
+      !needsBuiltinModule &&
+      !needsHostApi;
 
   /// 不可用原因（界面直接展示）
   String get unusableReason {
-    if (findRule.isEmpty) return '没有 find_rule';
+    if (findRule.isEmpty && !hasPageModule('home')) return '没有 find_rule';
     if (needsBuiltinModule) return '依赖海阔内置模块（hiker://page/*），Phase 1 暂不支持';
     if (needsHostApi) return '依赖海阔宿主能力（pdfa 播放地址解析），暂不支持';
     return '';

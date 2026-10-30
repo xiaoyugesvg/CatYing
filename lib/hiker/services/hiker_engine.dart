@@ -373,6 +373,39 @@ class HikerEngine {
           },
           vars: vars);
 
+  /// 打开一条**小程序页面模块**：`hiker://page/<名>?参数`。
+  ///
+  /// 海阔的「小程序脚本」不是"首页 + 详情"两页，而是一套多页：源的 `pages` 里
+  /// 每个模块（`{name, rule}`）就是一个页面，条目地址写成 `hiker://page/<名>`，
+  /// 点开 = 执行那个模块的 `rule`，用**同一套列表渲染**铺出结果。
+  ///
+  /// 我们原来只把 `pages` 当 `$.require` 的代码库，从来没真正"打开过"其中一页
+  /// ⇒ 小程序源点进去只弹一句「海阔内部页面，本版不支持」。
+  ///
+  /// [module] 是模块名（`hiker://page/` 之后那段，已去掉 `?参数`）；
+  /// [url] 保留原文，页面模块里的 `MY_URL` 读它；
+  /// [args] 是 `?a=b&c=d` 解析出来的入参（页面模块里的 `MY_PARAMS` 读它）。
+  Future<HikerResult> page(
+    HikerSource source, {
+    required String module,
+    String url = '',
+    Map<String, dynamic> args = const {},
+    int page = 1,
+    Map<String, dynamic> vars = const {},
+    List<String> lazyIds = const [],
+    String lazyInput = '',
+  }) =>
+      _run(source, 'page',
+          params: {
+            'module': module,
+            if (url.isNotEmpty) 'url': url,
+            if (args.isNotEmpty) 'args': args,
+            'page': page,
+            if (lazyIds.isNotEmpty) 'lazyIds': lazyIds,
+            if (lazyInput.isNotEmpty) 'lazyInput': lazyInput,
+          },
+          vars: vars, lazyIds: lazyIds, lazyInput: lazyInput);
+
   /// 执行**页面事件回调**（`addListener(event, codes)` 登记的那批，见 [HikerResult.listeners]）。
   ///
   /// 宿主在**离开页面**时调用（fire-and-forget）：回调多半是清理逻辑
