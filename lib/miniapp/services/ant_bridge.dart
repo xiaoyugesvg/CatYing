@@ -497,16 +497,39 @@ class AntBridge {
 
   // ────────────────────────── request ──────────────────────────
 
+  /// 回环 / 内网 / 链路本地地址拦截（`ant.request` 的 SSRF 闸门）。
+  ///
+  /// 2026-10-30 修三处绕过：
+  ///   · Dart 的 `Uri.host` 对 IPv6 **不带方括号**（`http://[::1]/` → `::1`），
+  ///     原来那条 `'[::1]'` 判断是**死代码**；带括号的写法则直接放过去了。
+  ///   · **IPv4-mapped IPv6**（`::ffff:127.0.0.1`）等价于 IPv4 本身，原来完全没拦
+  ///     ⇒ `http://[::ffff:127.0.0.1]:8080/` 能打到本机任意端口。
+  ///   · IPv6 唯一本地地址是 `fc00::/7`，`fd` 开头同样是内网，原来只判了 `fc`。
   static bool _isForbiddenHost(String host) {
-    final h = host.toLowerCase();
-    if (h == 'localhost' || h == '::1' || h == '0.0.0.0' || h == '[::1]') return true;
+    var h = host.trim().toLowerCase();
+    if (h.isEmpty) return true;
+    if (h.startsWith('[') && h.endsWith(']')) {
+      h = h.substring(1, h.length - 1);
+    }
+    // IPv4-mapped IPv6 → 拆出 IPv4 部分按 IPv4 规则判（可递归，防御多层映射）
+    const mapped = '::ffff:';
+    if (h.startsWith(mapped)) {
+      final v4 = h.substring(mapped.length);
+      if (RegExp(r'^\d{1,3}(\.\d{1,3}){3}$').hasMatch(v4)) {
+        return _isForbiddenHost(v4);
+      }
+    }
+    if (h == 'localhost' || h == '::1' || h == '::' || h == '0.0.0.0') return true;
     if (RegExp(r'^127\.').hasMatch(h)) return true;
     if (RegExp(r'^10\.').hasMatch(h)) return true;
     if (RegExp(r'^192\.168\.').hasMatch(h)) return true;
     if (RegExp(r'^169\.254\.').hasMatch(h)) return true;
     if (RegExp(r'^172\.(1[6-9]|2\d|3[01])\.').hasMatch(h)) return true;
-    if (h.startsWith('fe80')) return true;
-    if (h.startsWith('fc') && h.contains(':')) return true;
+    if (RegExp(r'^0\.').hasMatch(h)) return true; // 0.0.0.0/8：部分系统会路由到本机
+    if (h.startsWith('fe80')) return true; // 链路本地 fe80::/10
+    if ((h.startsWith('fc') || h.startsWith('fd')) && h.contains(':')) {
+      return true; // 唯一本地 fc00::/7
+    }
     return false;
   }
 
@@ -659,8 +682,26 @@ class AntBridge {
 
   static Future<Object?> _storage(String method, Map<String, dynamic> args) async {
     final prefs = await SharedPreferences.getInstance();
+    final prefix = 'ant.$appId.';
+    // `clear` / `keys` 是**整分区**操作，本来就不带 key。
+    // 2026-10-30 修：原来在入口统一校验 key ⇒ 这两个方法永远抛 INVALID_KEY，
+    // 小程序里的"清空缓存""列出所有键"完全不可用。
+    switch (method) {
+      case 'storage.clear':
+        for (final k in prefs.getKeys().toList()) {
+          if (k.startsWith(prefix)) await prefs.remove(k);
+        }
+        return null;
+      case 'storage.keys':
+        return prefs
+            .getKeys()
+            .where((k) => k.startsWith(prefix))
+            .map((k) => k.substring(prefix.length))
+            .toList();
+    }
     final key = (args['key'] ?? '').toString();
-    if (key.isEmpty || key.length > 256) {
+    // 纯空白 key 等于没写，一并拒掉（原样保留 key，不做 trim，避免和已有数据错位）
+    if (key.trim().isEmpty || key.length > 256) {
       throw AntError('INVALID_KEY', 'storage key 为空或超过 256 字符');
     }
     final full = _storageKey(key);
@@ -684,19 +725,6 @@ class AntBridge {
       case 'storage.remove':
         await prefs.remove(full);
         return null;
-      case 'storage.clear':
-        final prefix = 'ant.$appId.';
-        for (final k in prefs.getKeys().toList()) {
-          if (k.startsWith(prefix)) await prefs.remove(k);
-        }
-        return null;
-      case 'storage.keys':
-        final prefix = 'ant.$appId.';
-        return prefs
-            .getKeys()
-            .where((k) => k.startsWith(prefix))
-            .map((k) => k.substring(prefix.length))
-            .toList();
       default:
         return null;
     }
@@ -837,6 +865,18 @@ class AntBridge {
         .toList();
   }
 
+  /// 宽容地把 JSON 里的值转成 int。
+  ///
+  /// 小程序常把数字写成字符串（`{page:'2'}` / `{limit:'20'}`），原来用
+  /// `(args['x'] as num?)` 直接强转 ⇒ 一个字符串参数就把整个调用炸成
+  /// INTERNAL_ERROR，页面只能看到一个"未知错误"。
+  static int? _asInt(Object? v) {
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v.trim());
+    return null;
+  }
+
   static SourceBean? _beanByKey(String siteKey) {
     if (siteKey.isEmpty) return null;
     for (final b in ApiConfig.instance.sourceBeanList) {
@@ -865,7 +905,7 @@ class AntBridge {
       throw AntError('SITE_NOT_FOUND', '找不到源 ${args['siteKey']}');
     }
     final tid = (args['tid'] ?? '').toString();
-    final page = (args['page'] as num?)?.toInt() ?? 1;
+    final page = _asInt(args['page']) ?? 1;
     final videos = await SourceService.instance.getList(
       bean,
       SortData(id: tid, name: ''),
@@ -959,7 +999,7 @@ class AntBridge {
   ///        flag?, episodeIndex?, progressSeconds?}]}`
   ///   —— 后三个字段仅在该记录**存过播放进度**时出现（可直接拿去续播）。
   static Future<Object?> _sourceRecent(Map<String, dynamic> args) async {
-    final limit = ((args['limit'] as num?)?.toInt() ?? 20).clamp(1, 100);
+    final limit = (_asInt(args['limit']) ?? 20).clamp(1, 100);
     final cs = CacheStore.instance;
     final out = <Map<String, dynamic>>[];
     for (final r in cs.records.take(limit)) {
