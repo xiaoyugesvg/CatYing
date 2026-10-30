@@ -619,7 +619,8 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
             Expanded(
               child: Text(
                 // ⚠️ 读**本卡**选中的文件名（见字段声明处的说明）
-                _pickedName[kind] ?? '点击选择本地音源文件（JSON / JS）',
+                // 提示里写明「可多选」—— 否则用户不知道能一次框选整个音源包
+                _pickedName[kind] ?? '点击选择本地音源文件（JSON / JS，可多选）',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -642,19 +643,77 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
   }
 
   /// 选本地音源文件。**[kind] 决定存到哪张卡**（见字段声明处的说明）。
+  ///
+  /// ── 2026-10-30 支持一次选多个 ────────────────────────────────
+  /// `file_picker 13` 把 `allowMultiple` 参数删了：`pickFiles()` **本身就是
+  /// 多选**（单选要用 `pickFile()`），返回值是 `List<PlatformFile>`。
+  ///
+  /// 而这里原来写的是 `final f = res.first;` —— 用户一次框选 20 个音源文件，
+  /// **只有第一个被读进来**，其余 19 个静默丢弃，界面上连个提示都没有 ✗。
+  /// 音源包（比如「音源_v261030更新」那种 24 个 .js 的）根本没法用。
+  ///
+  /// 现在的行为：
+  ///   · 选 1 个 → 还是填进预览框，用户看一眼再点「导入」（原流程不变）
+  ///   · 选多个 → 直接逐个导入，末尾汇总「成功 N / 跳过 M / 失败 K」
+  ///     （逐个失败不中断：一个源格式不对不该拖累其余 19 个）
   Future<void> _pickFile(_CardKind kind) async {
     try {
       // file_picker 13：pickFiles 是静态方法，直接返回 List<PlatformFile>
       final res = await FilePicker.pickFiles(type: FileType.any);
       if (res.isEmpty) return;
-      final f = res.first;
-      if (f.path == null) return;
-      final content = await File(f.path!).readAsString();
+
+      // ── 单个：填预览框，走原来的确认流程 ──────────────────────
+      if (res.length == 1) {
+        final f = res.first;
+        if (f.path == null) return;
+        final content = await File(f.path!).readAsString();
+        if (!mounted) return;
+        setState(() {
+          _pickedName[kind] = f.name;
+          _pickedContent[kind] = content;
+        });
+        return;
+      }
+
+      // ── 多个：批量导入 ───────────────────────────────────────
+      setState(() => _busy = true);
+      var added = 0; // 真正入库的条数（一个文件可能含多条）
+      var skipped = 0; // 已存在、未重复导入
+      final failed = <String>[]; // 读不出 / 格式不符
+
+      for (final f in res) {
+        if (f.path == null) {
+          failed.add(f.name);
+          continue;
+        }
+        try {
+          final content = await File(f.path!).readAsString();
+          final r = await SourceImportParser.importIntoStoreTyped(
+            content,
+            expectMusicFree: kind == _CardKind.musicFree,
+            fallbackName: f.name,
+          );
+          if (r.mismatch != null) {
+            failed.add(f.name);
+          } else if (r.count > 0) {
+            added += r.count;
+          } else {
+            skipped++;
+          }
+        } catch (_) {
+          failed.add(f.name);
+        }
+      }
+
       if (!mounted) return;
-      setState(() {
-        _pickedName[kind] = f.name;
-        _pickedContent[kind] = content;
-      });
+      final parts = <String>[];
+      if (added > 0) parts.add('导入 $added 个');
+      if (skipped > 0) parts.add('跳过 $skipped 个（已存在）');
+      if (failed.isNotEmpty) parts.add('${failed.length} 个无法识别');
+      _toast(
+        context,
+        parts.isEmpty ? '没有可导入的音源' : parts.join('，'),
+      );
     } catch (e) {
       // ⚠️ 这里**必须**判 mounted：上面有两次 await（选文件 + 读内容），
       //    期间用户完全可能已经退出本页 → `_toast(context, ...)` 里
@@ -662,6 +721,8 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
       //    并抛异常（成功分支 :445 一直有判，只有这个 catch 漏了）。
       if (!mounted) return;
       _toast(context, '读取文件失败：$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 

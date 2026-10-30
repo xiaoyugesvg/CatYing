@@ -56,8 +56,19 @@ const SCRIPT_TIMEOUT_MS = 8000;
  */
 const ACTION_TIMEOUT_MS = 20000;
 
-/** 脚本大小上限（字符）。超过直接拒绝，避免解析本身把内存吃爆。 */
-const MAX_SCRIPT_CHARS = 512 * 1024;
+/**
+ * 脚本大小上限（字符）。超过直接拒绝，避免解析本身把内存吃爆。
+ *
+ * ── 2026-10-30 由 512K 提到 2M ─────────────────────────────────
+ * 用户实测「fish-music1.9.0」是 **639,507 字符**（聚合了一堆后端），
+ * 卡在原来的 512K 上限上 ⇒ 导入后永远加载失败，报「脚本过大
+ * （639507 字符，上限 524288）」，但它在洛雪本体里跑得好好的 ✗。
+ *
+ * 实测 640K 的脚本在 vm 里 `loadScript` 只要 **71ms**、`musicUrl` 正常
+ * 返回播放地址 —— 512K 这个数字当初是拍的，并没有对应的内存压力。
+ * 现在与 MusicFree 的 4MB 取个中间值 2MB（再大就真的该怀疑是数据文件了）。
+ */
+const MAX_SCRIPT_CHARS = 2 * 1024 * 1024;
 
 /**
  * MusicFree 插件的上限（2026-10-21）。
@@ -65,7 +76,8 @@ const MAX_SCRIPT_CHARS = 512 * 1024;
  * 实测 `agg-source` 已涨到 **2.9 MB**（聚合十几个通道），原先的 1.43MB→2MB
  * 上限都会直接报「脚本过大」——它明明是内置源却永远加载不了 ✗。
  * 这里与 Dart 侧 `BuiltinSourcesService._mfMaxScriptBytes`（4 MB）对齐。
- * LX 脚本不受影响（仍走上面的 512K）。
+ * LX 脚本走上面的 [MAX_SCRIPT_CHARS]（2026-10-30 由 512K 提到 2MB，
+ * 因为「fish-music1.9.0」已经涨到 639K）。
  */
 const MAX_MF_SCRIPT_CHARS = 4 * 1024 * 1024;
 
