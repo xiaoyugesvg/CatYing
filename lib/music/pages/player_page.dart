@@ -1035,6 +1035,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
               MusicCoverStyle.cd => _cdCover(song, side),
               MusicCoverStyle.square => _squareCover(song, side),
               MusicCoverStyle.blur => _blurCover(song, side),
+              MusicCoverStyle.circle => _circleCover(song, side),
             };
             return Center(
               key: const ValueKey('cover'),
@@ -1347,6 +1348,64 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                   ),
                 ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── 封面形态 5：圆形封面（对齐 Mei 的播放页）──────────────────
+  //
+  // 用户 2026-10-30：「https://github.com/ljyh223/Mei 音乐模块里面网易这些
+  // 分类的页面 UI 界面用这个来，并播放器页面也融入这种风格」。
+  //
+  // Mei 的播放页（`player1.jpg`）就是**正圆封面 + 整屏模糊背景**：
+  //   · 封面是正圆，不是圆角方图，也不带唱片纹路/唱臂那些装饰
+  //   · 外面一圈极淡的白色描边（浅色封面上才看得出边界）
+  //   · 下方一层柔光，让圆形从背景里浮起来
+  //
+  // 整屏模糊背景由 `_backdrop()` 提供（所有形态共用），这里只管封面本身。
+  Widget _circleCover(Song song, double side) {
+    final d = side * 0.88;
+    return SizedBox(
+      width: side,
+      height: side,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // 柔光：比封面大一圈、颜色取自封面色调，半径大、透明度低
+          Container(
+            width: d * 1.08,
+            height: d * 1.08,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: _tint.withValues(alpha: 0.28),
+                  blurRadius: 60,
+                  spreadRadius: 6,
+                ),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  blurRadius: 30,
+                  offset: const Offset(0, 14),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            width: d,
+            height: d,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.14),
+                width: 1,
+              ),
+            ),
+            child: ClipOval(
+              child: CoverImage(url: song.coverUrl, size: d, circle: true),
             ),
           ),
         ],

@@ -146,8 +146,33 @@ import UIKit
         }
 
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        // ⚠️ 有歌在播就必须把音频会话切到「独占」模式，否则控制中心/锁屏
+        //    根本不会显示这份元数据（根因见 BackgroundAudio.exclusiveMode）
+        syncSessionMode(exclusive: true)
         if let playing = args["playing"] as? Bool {
             setPlaybackState(playing)
+        }
+    }
+
+    // MARK: - 音频会话模式
+
+    /// 让系统承认「本 App 是 Now Playing 所有者」。
+    ///
+    /// 三件事缺一不可（2026-10-30 用户报「控制中心/锁屏看不到音乐」后补）：
+    ///   ① `AVAudioSession` 切成 `.playback` **且不带** `.mixWithOthers`
+    ///      —— 混音模式下 iOS 视本 App 为次要音频源，元数据一律不显示
+    ///   ② `setActive(true)` —— 会话没激活等于没在放
+    ///   ③ `beginReceivingRemoteControlEvents()` —— 老 API，但部分系统版本
+    ///      上不调它锁屏的播放/暂停按键收不到
+    ///
+    /// 清空播放时（[clearNowPlaying]）必须切回混音：静音保活要靠混音才能
+    /// 和用户正在听的其它 App 共存。
+    private func syncSessionMode(exclusive: Bool) {
+        BackgroundAudio.shared.setExclusive(exclusive)
+        if exclusive {
+            UIApplication.shared.beginReceivingRemoteControlEvents()
+        } else {
+            UIApplication.shared.endReceivingRemoteControlEvents()
         }
     }
 
@@ -168,6 +193,8 @@ import UIKit
         if #available(iOS 13.0, *) {
             MPNowPlayingInfoCenter.default().playbackState = .stopped
         }
+        // 没歌了 → 回到混音模式，让静音保活能和外部音频共存
+        syncSessionMode(exclusive: false)
         NSLog("[MusicNowPlaying] cleared")
     }
 
@@ -314,6 +341,9 @@ import UIKit
         info[MPMediaItemPropertyMediaType] = MPMediaType.audioBook.rawValue
 
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        // 听书同音乐：不切独占会话，锁屏/控制中心不显示（同 MusicNowPlaying）
+        BackgroundAudio.shared.setExclusive(true)
+        UIApplication.shared.beginReceivingRemoteControlEvents()
         setPlaying(playing)
     }
 
@@ -333,6 +363,8 @@ import UIKit
         if #available(iOS 13.0, *) {
             MPNowPlayingInfoCenter.default().playbackState = .stopped
         }
+        BackgroundAudio.shared.setExclusive(false)
+        UIApplication.shared.endReceivingRemoteControlEvents()
     }
 
     // MARK: - 远程命令

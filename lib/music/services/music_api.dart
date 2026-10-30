@@ -1634,14 +1634,26 @@ class MusicApi {
   }
 
   /// 歌单广场
+  ///
+  /// [offset] 是「全部歌单」页加载更多用的偏移量：
+  ///   · 网易云 → 接口的 `offset`
+  ///   · QQ → 接口的 `sin/ein` 区间（`qq_source.playlistSquare` 内部换算）
+  /// 两者都**不支持**跳页拿 total，所以调用方用「本次返回条数 == limit」
+  /// 判断还有没有下一页（这是唯一可靠的信号）。
   Future<List<Playlist>> playlistSquare({
     String cat = '全部',
     String order = 'hot',
     int limit = 12,
+    int offset = 0,
     SongSource source = SongSource.netease,
   }) async {
     final r = await _call({
-      'action': 'playlistSquare', 'cat': cat, 'order': order, 'limit': limit, 'source': source.key,
+      'action': 'playlistSquare',
+      'cat': cat,
+      'order': order,
+      'limit': limit,
+      'offset': offset,
+      'source': source.key,
     });
     return _listOf(r, 'list').map(Playlist.fromJson).toList();
   }

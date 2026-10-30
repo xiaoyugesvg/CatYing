@@ -39,6 +39,10 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
   void initState() {
     super.initState();
     _loadSkipDefaults();
+    // 订阅解析线路是**懒同步**的（见 `ParseLineStore.ensureSyncedFromConfig`
+    // 的说明）：不在这里主动拉一次，本页「共 N 条」会一直显示 0 ——
+    // 而订阅里其实有几十条，用户看到的就是"解析线路没导入"。
+    ParseLineStore.instance.ensureSyncedFromConfig();
   }
 
   Future<void> _loadSkipDefaults() async {

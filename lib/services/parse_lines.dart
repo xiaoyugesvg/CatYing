@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/app_log.dart';
 
 /// 一条「解析线路」——把网页播放页 / 解析接口地址变成媒体直链的服务。
@@ -20,12 +21,20 @@ class ParseLine {
     required this.name,
     required this.url,
     this.source = ParseLineSource.subscription,
+    this.headers = const {},
   });
 
   final String id;
   final String name;
   final String url;
   final ParseLineSource source;
+
+  /// 请求头（来自订阅 `parses[].ext.header`）。
+  ///
+  /// 不少解析接口会**按 UA 决定给不给地址**（例如「盘古」那条带的是
+  /// Android Chrome 的 UA，用默认 UA 请求会直接回一个空白页）。
+  /// 原来 `_fromParses` 把 `ext` 整个丢掉了，所以这类线路"存在但永远失败"。
+  final Map<String, String> headers;
 
   bool get isCustom => source == ParseLineSource.custom;
 
@@ -36,11 +45,26 @@ class ParseLine {
     return '$url$rawUrl';
   }
 
+  /// 同上，但把原始地址**整体 URL 编码**后再拼。
+  ///
+  /// 为什么两种都要试：TVBox 各分支对 `type=0` 的约定并不统一 ——
+  /// 有的把原始地址原样拼（`?url=https://a/b?c=1&d=2`，里面的 `&`
+  /// 会被当成新参数，接口只拿到半截地址）；有的要求编码。
+  /// 解析时先试原样、失败再试编码，两种接口都能覆盖。
+  String applyEncoded(String rawUrl) {
+    final enc = Uri.encodeComponent(rawUrl);
+    if (url.contains('{url}')) {
+      return url.replaceAll('{url}', enc);
+    }
+    return '$url$enc';
+  }
+
   ParseLine copyWith({String? name, String? url}) => ParseLine(
         id: id,
         name: name ?? this.name,
         url: url ?? this.url,
         source: source,
+        headers: headers,
       );
 
   Map<String, dynamic> toJson() => {
@@ -81,6 +105,14 @@ class ParseLineStore extends ChangeNotifier {
   /// 选中线路 id：'' = 自动（按顺序全试）
   String _selectedId = '';
   bool _loaded = false;
+
+  /// 本次进程是否已经跟订阅同步过（[ensureSyncedFromConfig] 的去重标记）
+  bool _syncedFromConfig = false;
+
+  /// 上一次同步失败的原因（空 = 没失败）。设置页用它如实告诉用户
+  /// "为什么一条线路都没有"，而不是干巴巴显示 0 条。
+  String _syncError = '';
+  String get syncError => _syncError;
 
   bool get loaded => _loaded;
   String get selectedId => _selectedId;
@@ -129,8 +161,41 @@ class ParseLineStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// **确保订阅线路已经同步过一次**（进程内只做一次）。
+  ///
+  /// ── 为什么需要它（2026-10-30 修）────────────────────────────────
+  /// 用户截图：「订阅线路 0 条」，而订阅配置里实际有 **56 条** `parses`。
+  ///
+  /// 根因：`syncFromParses` 原来只有两个调用点 ——
+  ///   ① 打开「解析线路」设置页；
+  ///   ② 真的去解析一次播放地址（`detail/controller._sniffPageForMedia`）。
+  /// 而 `load()` 是在 `Get.put<ApiConfig>` **之前**跑的（见 `main.dart`），
+  /// 那时读不到配置，只能恢复"选中项 + 自定义线路"。
+  /// ⇒ 用户一进播放设置看到的就是 0 条，直到他恰好点开过解析线路页。
+  ///
+  /// 现在改成**懒同步**：任何要展示线路的地方先调一次这里。
+  Future<void> ensureSyncedFromConfig() async {
+    if (_syncedFromConfig) return;
+    _syncedFromConfig = true;
+    await refreshFromConfig();
+  }
+
+  /// 强制重新读一次订阅 `parses`（设置页的"刷新"、切源后都要用）。
+  Future<void> refreshFromConfig() async {
+    try {
+      final parses = await ApiConfig.instance.readParses();
+      _syncError = '';
+      syncFromParses(parses);
+    } catch (e) {
+      _syncError = '$e';
+      AppLog.instance.w('[ParseLines] 读取订阅解析线路失败: $e');
+      notifyListeners();
+    }
+  }
+
   /// 用订阅配置里的 `parses` 覆盖订阅线路（配置一换就整体替换）
   void syncFromParses(List<Map<String, dynamic>> parses) {
+    _syncedFromConfig = true;
     _subscription = _fromParses(parses);
     if (_selectedId.isNotEmpty && selected == null) {
       _selectedId = '';
@@ -165,9 +230,26 @@ class ParseLineStore extends ChangeNotifier {
           id: 'sub:$i',
           name: name.isEmpty ? '解析 ${i + 1}' : name,
           url: url,
+          headers: _headersOf(p['ext']),
         ),
       );
     }
+    return out;
+  }
+
+  /// 从 `parses[].ext` 里取请求头。
+  ///
+  /// TVBox 的写法是 `{"ext": {"header": {"user-agent": "..."}}}`，
+  /// 也有直接把 `ext` 写成 header map 的变体，两种都兜一下。
+  static Map<String, String> _headersOf(Object? ext) {
+    if (ext is! Map) return const {};
+    final raw = ext['header'] is Map ? ext['header'] as Map : ext;
+    final out = <String, String>{};
+    raw.forEach((k, v) {
+      final key = k.toString().trim();
+      final val = v?.toString().trim() ?? '';
+      if (key.isNotEmpty && val.isNotEmpty) out[key] = val;
+    });
     return out;
   }
 

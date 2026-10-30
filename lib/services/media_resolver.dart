@@ -170,6 +170,13 @@ class MediaResolver {
   }
 
   /// ③ 走一条解析线路
+  ///
+  /// 2026-10-30 补了两个**实战必需的**细节：
+  ///   ① 带上线路自己的请求头（`parses[].ext.header`）—— 不少接口按 UA
+  ///      决定给不给地址，用默认 UA 请求只会拿回一个空白页；
+  ///   ② 原样拼接失败后**再用编码后的地址试一次** —— TVBox 各分支对
+  ///      `type=0` 的约定不统一，有的要 `?url=<原样>`，有的要 URL 编码，
+  ///      只试一种会有一半接口用不了。
   Future<String?> _fromParseLine(
     Dio dio,
     ParseLine line,
@@ -177,7 +184,25 @@ class MediaResolver {
     Map<String, String> headers,
     DateTime deadline,
   ) async {
-    final target = line.apply(pageUrl);
+    // 线路自带的头优先（UA 之类必须覆盖，否则接口不认）
+    final merged = <String, String>{...headers, ...line.headers};
+
+    final raw = line.apply(pageUrl);
+    final first = await _fromOneUrl(dio, raw, merged, deadline);
+    if (first != null) return first;
+
+    final encoded = line.applyEncoded(pageUrl);
+    if (encoded == raw) return null;
+    return _fromOneUrl(dio, encoded, merged, deadline);
+  }
+
+  /// 请求一个已拼好的解析地址，并从响应里取媒体直链。
+  Future<String?> _fromOneUrl(
+    Dio dio,
+    String target,
+    Map<String, String> headers,
+    DateTime deadline,
+  ) async {
     final body = await _get(dio, target, headers, deadline);
     if (body == null) return null;
 

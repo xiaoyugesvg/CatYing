@@ -656,15 +656,22 @@ async function topListSongs(topId, limit = 30) {
  *
  * @param categoryId 分类 id（`10000000` = 全部）；见 [playlistCategories]
  * @param limit      数量
+ * @param sortId     排序：5 = 最热，2 = 最新（也接受 `'hot'` / `'new'` 字符串）
+ * @param offset     偏移量（「全部歌单」页的加载更多用；接口是 sin/ein 区间）
  */
-async function playlistSquare(categoryId = 10000000, limit = 20, sortId = 5) {
+async function playlistSquare(categoryId = 10000000, limit = 20, sortId = 5, offset = 0) {
     try {
-        const n = Math.min(Math.max(limit, 1), 60);
+        const n = Math.min(Math.max(Number(limit) || 20, 1), 60);
+        const off = Math.max(Number(offset) || 0, 0);
+        // 允许上游直接传 `'hot'` / `'new'`（Dart 侧统一用这两个词）
+        const sort = (sortId === 'new' || sortId === 'latest')
+            ? 2
+            : (Number(sortId) || 5);
         const url = 'https://c.y.qq.com/splcloud/fcgi-bin/fcg_get_diss_by_tag.fcg'
             + '?format=json&outCharset=utf-8&picmid=1'
             + `&categoryId=${Number(categoryId) || 10000000}`
-            + `&sortId=${Number(sortId) || 5}`
-            + `&sin=0&ein=${n - 1}`;
+            + `&sortId=${sort}`
+            + `&sin=${off}&ein=${off + n - 1}`;
         const r = await axios.get(url, {
             headers: Object.assign({}, QQ_HEADERS, { Referer: 'https://y.qq.com/' }),
             timeout: TIMEOUT_MS,

@@ -501,7 +501,10 @@ enum MusicCoverStyle {
   vinyl('黑胶唱片'),
   cd('CD 圆盘'),
   square('方形封面'),
-  blur('模糊大图');
+  blur('模糊大图'),
+  /// 圆形封面 —— 对齐 `ljyh223/Mei` 的播放页（用户 2026-10-30：
+  /// 「播放器页面也融入这种风格」）。整屏模糊背景 + 正圆封面 + 细描边。
+  circle('圆形封面');
 
   const MusicCoverStyle(this.label);
   final String label;

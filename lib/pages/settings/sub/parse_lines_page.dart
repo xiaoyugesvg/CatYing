@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import 'package:tvbox/common/theme.dart';
-import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/parse_lines.dart';
 import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/pages/settings/sub/settings_shared.dart';
@@ -39,11 +38,14 @@ class _ParseLinesPageState extends State<ParseLinesPage> {
   }
 
   /// 从当前影视配置拉一次 `parses`（失败就用已有的）
+  ///
+  /// 走 [ParseLineStore.refreshFromConfig]：它会把失败原因记进
+  /// `store.syncError`，页面底部据此显示"为什么 0 条"，
+  /// 而不是让用户对着一片空白猜。
   Future<void> _refreshFromConfig() async {
     setState(() => _loading = true);
     try {
-      final parses = await ApiConfig.instance.readParses();
-      _store.syncFromParses(parses);
+      await _store.refreshFromConfig();
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -216,7 +218,6 @@ class _ParseLinesPageState extends State<ParseLinesPage> {
         if (sub.isNotEmpty)
           SettingsGroup(
             title: '订阅线路（${sub.length}）',
-            hint: '来自影视配置的 parses，只读。',
             children: [
               for (final l in sub)
                 _row(
@@ -227,9 +228,52 @@ class _ParseLinesPageState extends State<ParseLinesPage> {
                 ),
             ],
           ),
+        // ── 订阅线路为空时**必须说清原因**（2026-10-30）──────────────
+        //
+        // 用户截图里这一组直接不出现，只剩「自动」一条 —— 看起来像
+        // "解析线路根本没导入"。真实原因是线路**懒同步**（见
+        // `ParseLineStore.ensureSyncedFromConfig`）：没同步过就是 0 条。
+        // 现在空着也把这组画出来，并给一个「重新读取」入口。
+        if (sub.isEmpty)
+          SettingsGroup(
+            title: '订阅线路（0）',
+            children: [
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _loading ? null : _refreshFromConfig,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _store.syncError.isEmpty
+                            ? Icons.cloud_sync_outlined
+                            : Icons.error_outline_rounded,
+                        size: 18,
+                        color: _store.syncError.isEmpty
+                            ? AppTheme.textSecondary
+                            : AppTheme.accentColor,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _store.syncError.isNotEmpty
+                              ? '读取订阅配置失败，点这里重试'
+                              : '当前订阅里没有 parses，点这里重新读取',
+                          style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: AppTheme.fontSubhead,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         SettingsGroup(
           title: '自定义线路（${custom.length}）',
-          hint: custom.isEmpty ? '还没有自定义线路，点右上角「+」加一条。' : '长按可修改 / 删除。',
           children: [
             for (final l in custom)
               _row(

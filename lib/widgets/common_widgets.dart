@@ -359,6 +359,13 @@ class MetadataPill extends StatelessWidget {
 ///
 /// 这一处升级会同时美化**所有**设置页 —— 之前各页自己实现 `_switchRow`，
 /// 样式不一致且难维护，现在都收敛到这里。
+/// 设置行是否显示「标题下方的灰色小字」。
+///
+/// 用户 2026-10-30 明确要求**全部关掉**（影视设置页及子页 / 音乐「我的」页
+/// 及子页 / 阅读「我的」页及子页）。所有相关页面共用 [SettingsRow]，
+/// 所以一个常量控制全局；将来若要恢复，改回 `true` 即可。
+const bool kShowSettingsRowSubtitle = false;
+
 class SettingsRow extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -407,9 +414,10 @@ class SettingsRow extends StatelessWidget {
     // （之前是 32 + 2×8 = 48，一屏塞太多行，显得很挤。）
     final child = Padding(
       // 不能是 const：vertical 依赖 subtitle 是否存在
-      padding: EdgeInsets.symmetric(
+      // 行高固定 14：副标题关闭后不再需要为两行文字压紧内边距
+      padding: const EdgeInsets.symmetric(
         horizontal: AppTheme.spacingMD,
-        vertical: subtitle == null ? 14 : 10,
+        vertical: 14,
       ),
       child: Row(
         children: [
@@ -440,7 +448,21 @@ class SettingsRow extends StatelessWidget {
                     fontWeight: FontWeight.w500,
                   ),
                 ),
-                if (subtitle != null) ...[
+                // ── 副标题（行内小字）已**全局关闭**（2026-10-30）────────
+                //
+                // 用户原话：「所有模块里面，影视模块的设置页面以及子页面、
+                // 音乐模块里面我的页面以及子页、阅读模块里面我的页面以及
+                // 子页面，不要那些小字呀呀呀呀呀呀呀呀呀呀呀呀呀呀呀。」
+                //
+                // 这些页面全部走 `SettingsRow`，所以在这里关一次就够：
+                // 行内不再出现标题下面那行灰色说明，行高也统一回 14 的
+                // 单行呼吸感（原来有副标题时会被压成 10）。
+                //
+                // ⚠️ 保留 `subtitle` 参数不删：50 多处调用点仍在传值，
+                //    删参数要改一大片且容易漏；而且这些说明文字本身是
+                //    有用的信息，将来若想做成"长按/点 ⓘ 才显示"，
+                //    数据还在。**要不要显示**只由下面这个开关决定。
+                if (subtitle != null && kShowSettingsRowSubtitle) ...[
                   const SizedBox(height: 2),
                   Text(
                     subtitle!,

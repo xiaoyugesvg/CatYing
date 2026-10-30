@@ -616,7 +616,7 @@ async function handleMusicApi(body) {
             case 'playlistSquare':
                 return qq.playlistSquare(
                     body.categoryId != null ? body.categoryId : body.cat,
-                    body.limit);
+                    body.limit, body.order, body.offset);
             case 'playlistCatlist':
                 return qq.playlistCategories();
             case 'personalized':
@@ -679,7 +679,7 @@ async function handleMusicApi(body) {
         case 'personalized':
             return personalized(body.limit);
         case 'playlistSquare':
-            return playlistSquare(body.cat, body.order, body.limit);
+            return playlistSquare(body.cat, body.order, body.limit, body.offset);
         case 'playlistCatlist':
             return playlistCatlist();
         case 'hotSearch':
@@ -810,10 +810,11 @@ async function personalized(limit = 20) {
 }
 
 /** 歌单广场（按分类） */
-async function playlistSquare(cat = '全部', order = 'hot', limit = 12) {
+async function playlistSquare(cat = '全部', order = 'hot', limit = 12, offset = 0) {
     try {
+        const off = Math.max(Number(offset) || 0, 0);
         const d = await get('https://music.163.com/api/playlist/list', {
-            cat, order, limit, offset: 0, total: true,
+            cat, order, limit, offset: off, total: true,
         });
         const list = (d.playlists || []).map((x) => ({
             id: x.id,

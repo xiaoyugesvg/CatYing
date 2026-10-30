@@ -5,7 +5,6 @@ import 'package:tvbox/music/widgets/music_sheet.dart';
 
 import 'package:tvbox/music/models/models.dart';
 import 'package:tvbox/music/models/third_party_source.dart';
-import 'package:tvbox/music/services/library_store.dart';
 import 'package:tvbox/music/services/music_api.dart';
 import 'package:tvbox/music/services/player_manager.dart';
 import 'package:tvbox/music/services/settings_store.dart';
@@ -14,6 +13,9 @@ import 'package:tvbox/music/theme/discover_preset.dart';
 import 'package:tvbox/music/widgets/music_components.dart';
 import 'package:tvbox/music/widgets/discover_sections.dart';
 import 'package:tvbox/music/pages/playlist_detail_page.dart';
+import 'package:tvbox/music/pages/discover_playlists_page.dart';
+import 'package:tvbox/music/pages/charts_page.dart';
+import 'package:tvbox/music/widgets/mei_cards.dart';
 import 'package:tvbox/music/pages/plugin_market_page.dart';
 import 'package:tvbox/music/widgets/plugin_explore_view.dart';
 import 'package:tvbox/music/widgets/plugin_source_sheet.dart';
@@ -66,26 +68,10 @@ class _DiscoverPageState extends State<DiscoverPage>
   // 音乐平台通用数据
   List<Song> _newSongs = const [];
 
-  /// 「榜单热歌」：取第一个榜单的前 N 首（网易/酷狗都能走 `topListSongs`）
-  List<Song> _chartSongs = const [];
   List<Playlist> _recommend = const [];
   List<TopList> _topLists = const [];
   List<Playlist> _square = const [];
-  List<String> _cats = const ['全部'];
   String _cat = '全部';
-
-  /// 二级分类（**平台页里真实的分类**）当前选中项。
-  ///
-  /// 用户 2026-10-30：「不管是推荐还是其余的分类切换里面，他么下面还有对应
-  /// 有个 tab 栏，是每个分类那个网页里面的真实分类」。
-  ///
-  /// 取值约定：网易/酷狗存分类名，QQ 存数字 categoryId 的字符串。
-  /// 空串 = 还没选过，按平台默认（[MusicApi.playlistCatlist] 的第一个 / QQ 的
-  /// `_qqCatId`）高亮。
-  String _subCat = '';
-
-  /// 幻灯片当前页（只用于底部指示点）
-  int _bannerPage = 0;
 
   /// 发现页视觉预设（aurora / paper / midnight）。
   ///
@@ -124,22 +110,6 @@ class _DiscoverPageState extends State<DiscoverPage>
   /// 当前选中的 QQ 歌单分类 id（10000000 = 全部，Node 侧兜底值）
   int _qqCatId = 10000000;
 
-  /// 正在切分类（拉数据中，给个反馈免得以为点了没用）
-  bool _qqCatLoading = false;
-
-  /// QQ「热门歌手」—— **带真头像**（头像模板实测可用）。
-  ///
-  /// ── 数据来源（为什么不是调歌手列表接口）──────────────────────
-  /// QQ 免登录**没有**歌手列表接口（实测 `GetSingerList` → `code=500003`，
-  /// `fcg_v8_singer_track_cp` → 404）。但：
-  ///   · 歌手**头像模板是通的** → `T001R150x150M000{mid}.jpg`
-  ///   · 歌曲里**带着 singerMid**
-  /// 所以 Node 侧 `topArtistsList` 从榜单歌曲里收集去重歌手 + 拼头像 URL。
-  ///
-  /// ⚠️ 原来这里只是 `List<String>`（歌名），界面只能画**首字圆圈**
-  ///（"王"/"G"/"K"）—— 用户对比参考图后指出"差远了"。
-  List<({String name, String avatar, String mid})> _qqArtists = const [];
-
   /// QQ「每日推荐」的歌曲 —— **新歌榜**里取（免登录可拿）。
   ///
   /// ── 为什么不是 `newSongs`（用户 2026-10-14：「内容有点少…也加个每日推荐」）
@@ -173,17 +143,6 @@ class _DiscoverPageState extends State<DiscoverPage>
     // 视觉预设：读上次选的（默认 aurora）
     _preset = SettingsStore.instance.discoverPreset;
     _loadAll();
-  }
-
-  // ── 幻灯片 ────────────────────────────────────────────────────
-  final PageController _bannerCtrl = PageController();
-  Timer? _bannerTimer;
-
-  @override
-  void dispose() {
-    _bannerTimer?.cancel();
-    _bannerCtrl.dispose();
-    super.dispose();
   }
 
   Future<void> _switchSource(SongSource s) async {
@@ -426,31 +385,8 @@ class _DiscoverPageState extends State<DiscoverPage>
       AppLog.instance.log('[Discover] QQ 每日推荐加载失败: $e');
     }
 
-    // ── 热门歌手（**带真头像**）──────────────────────────────────
-    //
-    // Node 侧从榜单歌曲里收集去重歌手 + 拼头像 URL（见字段注释）。
-    // 用热歌榜(26)当来源 —— 榜单 id 是 QQ 的固定值，不需要先拉榜单列表。
-    final artists = await api.topArtists(topId: 26, limit: 14);
-    if (!mounted) return;
-    _qqArtists = artists;
-  }
-
-  /// 切 QQ 歌单广场的分类：**按 categoryId 重新拉**（不是拿名字去搜）。
-  Future<void> _selectQqCat(int id) async {
-    if (id == _qqCatId || _qqCatLoading) return;
-    setState(() {
-      _qqCatId = id;
-      _qqCatLoading = true;
-    });
-    final list =
-        await api.playlistSquare(cat: '$id', limit: 20, source: SongSource.qq);
-    if (!mounted) return;
-    setState(() {
-      // 空列表也照实换掉：这分类确实没内容时，用户看到空比看到"上一个分类的
-      // 内容"更不容易误会（否则会以为切换没生效）。
-      _qqSquare = list;
-      _qqCatLoading = false;
-    });
+    // 「热门歌手」不再拉：Mei 的发现页没有这一块（2026-10-30 重构），
+    // 少一次 `topArtists` 请求，首屏也快一点。
   }
 
   // ── 音乐平台（网易云 / 酷狗）──────────────────────────────────────
@@ -468,8 +404,10 @@ class _DiscoverPageState extends State<DiscoverPage>
       futures.insert(1, api.personalized(limit: 12, source: src));
     }
     if (hasSquare) {
-      futures.add(api.playlistSquare(cat: _cat, limit: 9, source: src));
-      futures.add(api.playlistCatlist(source: src));
+      futures.add(api.playlistSquare(cat: _cat, limit: 12, source: src));
+      // ⚠️ 不再拉 `playlistCatlist`（2026-10-30）：那个接口只回**分组名**
+      //    （语种/风格/场景/情感/主题），拿它当分类查歌单必然是空的。
+      //    网易云的分类改用客户端内置表 `neteaseDiscoverCats()`。
     }
 
     final r = await Future.wait(futures);
@@ -487,11 +425,8 @@ class _DiscoverPageState extends State<DiscoverPage>
     if (hasSquare) {
       _square = r[idx] as List<Playlist>;
       idx++;
-      final cats = r[idx] as List<String>;
-      _cats = cats.isEmpty ? const ['全部'] : cats;
     } else {
       _square = const [];
-      _cats = const ['全部'];
     }
 
     // ── 热搜关键词 ────────────────────────────────────────────────
@@ -503,15 +438,8 @@ class _DiscoverPageState extends State<DiscoverPage>
     // 注意：必须**每个平台都重取一次** —— 否则从 QQ 切到酷狗时，
     // `_hotKeywords` 还留着 QQ 的热搜词，点下去会用酷狗去搜 QQ 的热搜 ✗
     //
-    // 「榜单热歌」和热搜并行拉，避免串行多等一个来回。
-    final chartFuture = _topLists.isEmpty
-        ? Future<({bool ok, List<Song> list, String error})>.value(
-            (ok: true, list: const <Song>[], error: ''))
-        : api.topListSongs(_topLists.first.id, limit: 12, source: src);
     final hot = await api.hotSearchResult(source: src);
     _hotKeywords = hot.ok ? hot.list : const [];
-    final chart = await chartFuture;
-    _chartSongs = chart.ok ? chart.list : const [];
     // 后台补封面（不阻塞首屏）
     _ensureHotCovers(src);
   }
@@ -548,13 +476,6 @@ class _DiscoverPageState extends State<DiscoverPage>
       }
     }));
     if (mounted) setState(() {});
-  }
-
-  Future<void> _switchCat(String cat) async {
-    setState(() => _cat = cat);
-    final list = await api.playlistSquare(cat: cat, limit: 9, source: _source);
-    if (!mounted) return;
-    setState(() => _square = list);
   }
 
   // ── 喜马拉雅 ──────────────────────────────────────────────────
@@ -626,17 +547,12 @@ class _DiscoverPageState extends State<DiscoverPage>
               slivers: [
                 SliverToBoxAdapter(child: _header(style)),
                 SliverToBoxAdapter(child: _sourceTabs(style)),
-                // ── 二级：平台自己的真实分类 ─────────────────────
-                SliverToBoxAdapter(child: _subTabs(style)),
-                // ── 幻灯片 ───────────────────────────────────────
-                SliverToBoxAdapter(child: _banner(style)),
-                // ── 当前分类的歌单 ────────────────────────────────
-                SliverToBoxAdapter(child: _catContent(style)),
-                // Beans 主页顶部是**两张并排大卡**（每日推荐 / 私人漫游）。
-                // 这里映射到**真实可用**的功能，不做假入口：
-                //   · 每日推荐 → 直接播当天「新歌速递」
-                //   · 私人漫游 → 从「我的收藏」随机漫游（没收藏就明确提示）
-                SliverToBoxAdapter(child: _bigCards(style)),
+                // ── 2026-10-30 重构：按 Mei 的发现页只留「概览区块」──
+                //
+                // 去掉的四块（幻灯片轮播 / 二级分类 tab / 分类歌单网格 /
+                // 两张并排大卡）：Mei 的发现页没有它们，而且它们让首屏被
+                // 无关内容占满 —— 分类已经改成「探索歌单」上面那行胶囊，
+                // 点进去是独立的「全部歌单」页（有排序 + 分页）。
                 if (_error.isNotEmpty)
                   SliverToBoxAdapter(child: _errorBox()),
                 ..._buildSections(style),
@@ -768,175 +684,6 @@ class _DiscoverPageState extends State<DiscoverPage>
   // 顶栏 / 平台切换
   // ============================================================
 
-  // ============================================================
-  // 顶部两张并排大卡（对齐 Beans 主页排版）
-  // ============================================================
-
-  Widget _bigCards(DiscoverStyle style) {
-    // ── 「每日推荐」的数据源按平台取（这两张卡依赖"每日歌"和"收藏"）──
-    //   · 网易云 / 酷狗 → 新歌速递（`newSongs` 免登录可用）
-    //   · QQ           → **新歌榜**的歌曲（`newSongs` 在 QQ 需要登录态，
-    //                     Node 侧明确 ok:false，见 `_qqDaily`）
-    // 以前 QQ 是**整块不显示**（怕给一个点不动的假卡）✗ ——
-    // 用户 2026-10-14：「内容有点少…也加个每日推荐、私人漫游」⇒ 现在换成
-    // 用 QQ 真实拿得到的歌填，仍然是**点得动的真入口**。
-    final List<Song> daily =
-        _source == SongSource.qq ? _qqDaily : _newSongs;
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
-      child: Row(
-        children: [
-          Expanded(
-            child: _bigCard(
-              title: '每日推荐',
-              subtitle: daily.isEmpty
-                  ? '每天更新的新歌'
-                  : '${daily.length} 首 · 每天更新',
-              icon: Icons.calendar_month_rounded,
-              // 用当天第一首的封面做底图（Beans 的「每日推荐」就是封面大图）
-              coverUrl: daily.isEmpty ? null : daily.first.coverUrl,
-              onTap: daily.isEmpty
-                  ? null
-                  : () =>
-                      MusicPlayerManager.instance.playQueue(daily, index: 0),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _bigCard(
-              title: '私人漫游',
-              subtitle: '从收藏的歌开始漫游',
-              icon: Icons.graphic_eq_rounded,
-              onTap: _roam,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _bigCard({
-    required String title,
-    required String subtitle,
-    required IconData icon,
-    required VoidCallback? onTap,
-    String? coverUrl,
-  }) {
-    final cover = (coverUrl ?? '').trim();
-    final onCover = cover.isNotEmpty;
-    // 有封面 → 图上的字用白色（靠图对比，同排行榜卡的处理）；
-    // 没封面 → 回落到主题色 + 浅色底（**不写死页面配色**）
-    final titleColor = onCover ? Colors.white : MusicTheme.label;
-    final subColor = onCover
-        ? Colors.white.withValues(alpha: 0.85)
-        : MusicTheme.secondary;
-    final iconColor = onCover ? Colors.white : MusicTheme.tint;
-
-    return GestureDetector(
-      onTap: onTap,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          // ── 🔴 高度必须**随字号**算，不能写死 108（修黄黑溢出条纹）────
-          //
-          // 用户实测：这张卡（「每日推荐」/「私人漫游」）文字下面出现
-          // **黄黑相间的溢出标记**。根因就是这里的固定高度：
-          //   内容 = 上内边距 12 + 图标 18 + 弹性间距 + 标题(19) + 3 + 副标题(12) + 下内边距 12
-          //   `Spacer` 在"内容已经超了"时会被压成 0，于是最小需求 ≈ 76 + 文字高
-          //   字号 x1.5 时需求 ≈ **119.3 > 108** → `RenderFlex overflowed by 4.0 pixels
-          //   on the bottom`（测试已复现，见 `music_bottom_overflow_test`）
-          //
-          // 现在按 `textScalerOf` 把文字那部分的增长算进去，
-          // 并保留 108 作为**基准**（字号 1.0 时高度与原来完全一致，
-          // 不会让布局跳变）。
-          //
-          // ⚠️ 与项目里其它网格一致的做法：按可用宽度/字号算尺寸，
-          //    不用固定值（`library_page` / `ximalaya_category_page` 同款注释）。
-          height: () {
-            final ts = MediaQuery.textScalerOf(context);
-            // 图标行 + 各段间距 + 上下内边距 = 76（字号 1.0 下与原来一致）
-            const base = 76.0;
-            // 文字部分（标题 19 + 间距 3 + 副标题 12）随字号增长
-            const textBase = 19.0 + 3 + 12;
-            return base + ts.scale(textBase);
-          }(),
-          color: MusicTheme.tint.withValues(alpha: 0.14),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              if (onCover)
-                LayoutBuilder(
-                  builder: (c, cons) => CoverImage(
-                    url: cover,
-                    size: cons.maxWidth,
-                    cornerRadius: 0,
-                  ),
-                ),
-              if (onCover)
-                // 压暗，保证白字可读
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.black.withValues(alpha: 0.18),
-                        Colors.black.withValues(alpha: 0.58),
-                      ],
-                    ),
-                  ),
-                ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(icon, size: 18, color: iconColor),
-                    // ⚠️ 原来是 `Spacer()` —— 它只在"还有富余空间"时撑开；
-                    //    内容一旦超出就被压成 0，**把溢出藏起来看不出原因**。
-                    //    高度已经按字号算准（见上面 `height:`），
-                    //    这里用固定间距，语义更清楚。
-                    const SizedBox(height: 6),
-                    Text(title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            color: titleColor,
-                            fontSize: 19,
-                            fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 3),
-                    Text(subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            color: subColor, fontSize: AppTheme.fontFootnote)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// 私人漫游：从「我的收藏」随机播。
-  ///
-  /// 没有收藏时**明确告知**（而不是静默无反应）—— 否则用户点了没动静，
-  /// 会以为功能坏了。
-  Future<void> _roam() async {
-    final store = MusicLibraryStore.instance;
-    await store.init();
-    final favs = List<Song>.of(store.favorites);
-    if (favs.isEmpty) {
-      AppToast.show('还没有收藏的歌', '先收藏几首，再回来漫游');
-      return;
-    }
-    favs.shuffle();
-    MusicPlayerManager.instance.playQueue(favs, index: 0);
-  }
   Widget _header(DiscoverStyle style) {
     final h = DateTime.now().hour;
     final greet = h < 6
@@ -1265,319 +1012,6 @@ class _DiscoverPageState extends State<DiscoverPage>
         ),
       );
 
-  // ============================================================
-  // 版块
-  // ============================================================
-
-  // ============================================================
-  // 二级分类（平台真实分类）+ 幻灯片 + 分类内容
-  // ============================================================
-  //
-  // ── 为什么加这三块（2026-10-30 用户要求）──────────────────────
-  // 「不管是推荐还是其余的那个分类切换里面，他么下面还有对应有个 tab 栏，
-  //   是每个分类那个网页里面的真实分类，并且再下面就是幻灯片，
-  //   下面的布置参考各个网页的手机页面那种」
-  //
-  // 之前一级 tab（网易/QQ/酷狗…）下面直接就是「每日推荐 / 榜单 / 歌单广场」，
-  // 分类只藏在「歌单广场」标题右边一个文字按钮里（点开还是弹层）。
-  // 现在把**平台自己的分类**提成常驻的二级 tab，幻灯片放在它下面，
-  // 再下面是该分类的歌单 —— 就是各家音乐网站手机版的排法。
-
-  /// 平台页里的**真实**分类。
-  ///
-  ///   · 网易云 / 酷狗：`playlistCatlist` 返回分类名（`cat` 参数就是名字）
-  ///   · QQ：返回 `{id, name}`，而 `playlistSquare(cat:)` 要的是**数字 id**
-  ///   · 喜雅 / 博看 / 一五：没有统一的歌单分类接口，返回空 ⇒ 不显示二级 tab
-  ///     （它们各有自己的分类入口，见各自的分区实现）
-  List<({String key, String label})> get _subCats {
-    if (_source == SongSource.qq) {
-      return [for (final c in _qqCats) (key: '${c.id}', label: c.name)];
-    }
-    if (_cats.length > 1) {
-      return [for (final c in _cats) (key: c, label: c)];
-    }
-    return const [];
-  }
-
-  /// 当前高亮的二级分类 key（没选过就按平台默认）
-  String get _activeSubCat {
-    final subs = _subCats;
-    if (subs.isEmpty) return '';
-    for (final s in subs) {
-      if (s.key == _subCat) return s.key;
-    }
-    if (_source == SongSource.qq) {
-      for (final s in subs) {
-        if (s.key == '$_qqCatId') return s.key;
-      }
-    }
-    for (final s in subs) {
-      if (s.key == _cat) return s.key;
-    }
-    return subs.first.key;
-  }
-
-  Future<void> _pickSubCat(String key) async {
-    if (key == _activeSubCat) return;
-    setState(() => _subCat = key);
-    if (_source == SongSource.qq) {
-      final id = int.tryParse(key);
-      if (id != null) await _selectQqCat(id);
-    } else {
-      await _switchCat(key);
-    }
-  }
-
-  /// 二级分类横滑条（样式与一级 tab 一致，但更紧凑）
-  Widget _subTabs(DiscoverStyle style) {
-    final subs = _subCats;
-    if (subs.isEmpty) return const SizedBox.shrink();
-    final active = _activeSubCat;
-    return SizedBox(
-      height: 42,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
-        itemCount: subs.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (c, i) {
-          final t = subs[i];
-          final on = t.key == active;
-          return GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => _pickSubCat(t.key),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 160),
-              curve: Curves.easeOut,
-              alignment: Alignment.center,
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              decoration: BoxDecoration(
-                color: on ? style.accent : MusicTheme.fill,
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(
-                  color: on ? style.accent : MusicTheme.divider,
-                  width: 1,
-                ),
-                boxShadow: on
-                    ? [
-                        BoxShadow(
-                          color: style.accent.withValues(alpha: 0.30),
-                          blurRadius: 10,
-                          offset: const Offset(0, 3),
-                        ),
-                      ]
-                    : null,
-              ),
-              child: Text(
-                t.label,
-                style: TextStyle(
-                  color: on ? Colors.white : MusicTheme.secondary,
-                  fontSize: AppTheme.fontCaption,
-                  fontWeight: on ? FontWeight.w600 : FontWeight.w400,
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  /// 幻灯片用的歌单：优先「推荐歌单」，没有就用当前平台的歌单广场。
-  List<Playlist> get _bannerItems {
-    final src = _source == SongSource.qq ? _qqSquare : _square;
-    final list = _recommend.isNotEmpty ? _recommend : src;
-    return list.take(6).toList();
-  }
-
-  /// 幻灯片（大图轮播 + 指示点 + 自动播放）
-  Widget _banner(DiscoverStyle style) {
-    final items = _bannerItems;
-    if (items.isEmpty) return const SizedBox.shrink();
-    _ensureBannerTimer();
-    final page = _bannerPage.clamp(0, items.length - 1);
-    return SizedBox(
-      height: 168,
-      child: Stack(
-        children: [
-          PageView.builder(
-            controller: _bannerCtrl,
-            itemCount: items.length,
-            onPageChanged: (i) => setState(() => _bannerPage = i),
-            itemBuilder: (c, i) => _bannerCard(items[i], style),
-          ),
-          if (items.length > 1)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 14,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  for (var i = 0; i < items.length; i++)
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      width: i == page ? 16 : 6,
-                      height: 6,
-                      margin: const EdgeInsets.symmetric(horizontal: 3),
-                      decoration: BoxDecoration(
-                        color: i == page ? Colors.white : Colors.white54,
-                        borderRadius: BorderRadius.circular(3),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _bannerCard(Playlist p, DiscoverStyle style) {
-    final subtitle = p.trackCount > 0
-        ? '${p.trackCount} 首 · ${_source.displayName}'
-        : _source.displayName;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => openPlaylist(
-          context,
-          p.id,
-          p.name,
-          source: _source,
-          coverUrl: p.coverUrl,
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(18),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              CoverImage(url: p.coverUrl, fill: true, cornerRadius: 0),
-              // 底部压暗，保证白字可读（和 RWF 主题里 hero 蒙层同一思路）
-              const DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0x00000000), Color(0x0A000000), Color(0xCC000000)],
-                    stops: [0.35, 0.6, 1.0],
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 14,
-                right: 14,
-                bottom: 16,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      p.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              // 播放圆钮
-              Positioned(
-                right: 14,
-                bottom: 16,
-                child: Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.92),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(Icons.play_arrow_rounded,
-                      size: 22, color: style.accent),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _ensureBannerTimer() {
-    if (_bannerTimer != null) return;
-    _bannerTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (!mounted || !_bannerCtrl.hasClients) return;
-      // 每帧都重新取长度：切平台/切分类后幻灯片会换成另一批歌单，
-      // 用创建定时器时捕获的旧长度会越界。
-      final count = _bannerItems.length;
-      if (count < 2) return;
-      final next = (_bannerPage + 1) % count;
-      _bannerCtrl.animateToPage(
-        next,
-        duration: const Duration(milliseconds: 420),
-        curve: Curves.easeInOut,
-      );
-    });
-  }
-
-  /// 当前二级分类的歌单（2 列网格，和「乐库」「榜单」同一套卡片观感）
-  Widget _catContent(DiscoverStyle style) {
-    final items = _source == SongSource.qq ? _qqSquare : _square;
-    if (items.isEmpty) return const SizedBox.shrink();
-    final label = _subCats
-        .where((s) => s.key == _activeSubCat)
-        .map((s) => s.label)
-        .join();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SectionTitle(title: label.isEmpty ? '歌单广场' : label),
-        PlaylistGrid(
-          style: style,
-          items: items,
-          onTap: (p) => openPlaylist(
-            context,
-            p.id,
-            p.name,
-            source: _source,
-            coverUrl: p.coverUrl,
-          ),
-        ),
-      ],
-    );
-  }
-
-  List<Widget> _buildSections(DiscoverStyle style) {
-    if (_source == SongSource.ximalaya) {
-      return _buildXimalayaSections();
-    }
-    if (_source == SongSource.bookan) {
-      return _buildBookanSections();
-    }
-    if (_source == SongSource.ting15) {
-      return _buildTing15Sections();
-    }
-    if (_source == SongSource.qq) {
-      return _buildQQSections(style);
-    }
-    return _buildMusicSections(style);
-  }
-
   /// 热搜关键词横滑卡（QQ 页与网易云/酷狗页**共用一套**）。
   ///
   /// 卡片视觉主体是**大号名次**（热搜词没有封面），前三名用主题色描边 +
@@ -1779,115 +1213,201 @@ class _DiscoverPageState extends State<DiscoverPage>
   ///   · 热搜关键词 —— 前三名用主题色
   ///   · 排行榜 / 歌单广场 —— 横滑大卡
   ///   · 能力说明 —— 明确告诉用户"能看不能直接播"
-  List<Widget> _buildQQSections(DiscoverStyle style) {
+  // ── Mei 规格发现页（2026-10-30 重构）─────────────────────────────
+  //
+  // 用户：「推荐、网易这些分页整个要重构，严格按照刚才这个仓库的界面来」
+  //（`ljyh223/Mei` 的 `ui/screen/main/findmusic`）。
+  //
+  // Mei 的发现页只放**概览**，完整集合是独立页面（`DiscoverPlaylistsScreen`）。
+  // 所以这里只做三件事：
+  //   ① 每个区块 = `MeiSectionHeader`（标题 + 「全部 ›」）+ 一条横向滑动货架
+  //   ② 分类不再做成二级 tab，而是「探索歌单」上面那行胶囊 —— 点任意一个
+  //      （含"全部分类"）都**进「全部歌单」页**，排序/分页都在那边
+  //   ③ 幻灯片轮播 / 二级 tab / 分类网格 / 大卡入口全部去掉 ——
+  //      Mei 的发现页没有这些，它们也正是"首屏塞满、翻不到底"的原因
+  //
+  // ⚠️ QQ 页原来有自己的一整套（`_buildQQSections`：歌手行 + 热搜 + 榜单大卡）。
+  //    现在**并入同一套**：数据用下面几个 getter 取，视觉完全一致。
+  //    「热门歌手」行按 Mei 的发现页规格去掉了（Mei 没有这一块），
+  //    歌手仍然可以从搜索进入。
+
+  bool get _isQq => _source == SongSource.qq;
+
+  /// 「探索歌单」的数据源：QQ 用自己的歌单广场，其余优先"推荐歌单"。
+  List<Playlist> get _discoverPlaylists {
+    if (_isQq) return _qqSquare;
+    if (_recommend.isNotEmpty) return _recommend;
+    return _square;
+  }
+
+  /// 当前平台的全部分类（含"全部"）。
+  ///
+  /// ⚠️ 网易云的分类是**客户端内置表**（见 `neteaseDiscoverCats` 的说明）：
+  /// 官方 catalogue 接口只回分组名，直接拿"语种/风格"当分类查歌单必然是空的。
+  List<DiscoverCat> get _discoverCats {
+    if (_isQq) {
+      return [for (final c in _qqCats) DiscoverCat('${c.id}', c.name)];
+    }
+    if (_source == SongSource.netease) return neteaseDiscoverCats();
+    return const [DiscoverCat('全部', '全部')];
+  }
+
+  /// 胶囊条上露出的热门分类（Mei 取前 8 个）。
+  List<DiscoverCat> get _discoverHotCats {
+    final all = _discoverCats;
+    if (all.length <= 1) return const [];
+    if (_source == SongSource.netease) {
+      final out = <DiscoverCat>[];
+      for (final key in neteaseHotCats) {
+        for (final c in all) {
+          if (c.key == key) out.add(c);
+        }
+      }
+      return out.take(8).toList();
+    }
+    return all.where((c) => c.key != '全部').take(8).toList();
+  }
+
+  List<TopList> get _discoverTopLists => _isQq ? _qqTopLists : _topLists;
+
+  List<Song> get _discoverNewSongs => _isQq ? _qqDaily : _newSongs;
+
+  /// 进「全部歌单」页（[cat] 不传 = 全部）
+  void _openAllPlaylists([DiscoverCat? cat]) {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => DiscoverPlaylistsPage(
+        source: _source,
+        initialCat: cat?.key ?? '全部',
+        cats: _discoverCats,
+      ),
+    ));
+  }
+
+  /// 「全部分类」胶囊：先选分类，再进集合页（对应 Mei 的 `DiscoverCategorySheet`）
+  Future<void> _pickCatThenOpen() async {
+    final cats = _discoverCats;
+    if (cats.length <= 1) {
+      _openAllPlaylists();
+      return;
+    }
+    final picked = await showDiscoverCatSheet(context, cats: cats, current: '全部');
+    if (picked != null) _openAllPlaylists(picked);
+  }
+
+  /// 横向滑动货架（Mei 的 `LazyRow`：页边距 16 + 间距 12）
+  ///
+  /// 高度固定 214 = 152 封面 + 8 间距 + 两行标题(~40) + 副标题(~16)。
+  /// 用固定高度而不是 `IntrinsicHeight`：后者在长列表里要跑一遍完整布局，
+  /// 首屏会有肉眼可见的掉帧。
+  Widget _meiShelf({required int count, required Widget Function(int) item}) {
+    return SizedBox(
+      height: 214,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: count,
+        separatorBuilder: (_, __) => const SizedBox(width: 12),
+        itemBuilder: (c, i) => item(i),
+      ),
+    );
+  }
+
+  List<Widget> _buildSections(DiscoverStyle style) {
+    // 三个"听书"源内容形态完全不同（专辑 / 章节 / 分类），保留各自的分区。
+    if (_source == SongSource.ximalaya) return _buildXimalayaSections();
+    if (_source == SongSource.bookan) return _buildBookanSections();
+    if (_source == SongSource.ting15) return _buildTing15Sections();
+    // ⚠️ QQ **不再单开一套**（2026-10-30）：原来 `_buildQQSections` 有自己的
+    //    歌手行 / 热搜 / 榜单大卡，和网易云页长得完全不一样。用户要求
+    //    "严格按照 Mei" ⇒ 所有音乐平台共用同一套 Mei 版式，
+    //    平台差异只体现在数据 getter（`_discoverPlaylists` 等）里。
+    return _buildMusicSections(style);
+  }
+
+  List<Widget> _buildMusicSections(DiscoverStyle style) {
     final out = <Widget>[];
 
-    // ── 每日推荐（横滑歌卡，与网易云页共用 `DailySongsRow`）──────────
-    //
-    // 数据 = QQ **新歌榜**的歌（免登录可拿，见 `_qqDaily` 的说明）。
-    // 原来 QQ 页**一个"歌"的行都没有**（只有卡片/歌手/关键词）⇒
-    // 用户 2026-10-14：「内容有点少…也加个每日推荐」。
-    if (_qqDaily.isNotEmpty) {
-      out.add(const SliverToBoxAdapter(child: SectionTitle(title: '每日推荐')));
+    // ── ① 探索歌单：分类胶囊 + 歌单货架 ────────────────────────────
+    final playlists = _discoverPlaylists;
+    if (playlists.isNotEmpty || _discoverCats.length > 1) {
       out.add(SliverToBoxAdapter(
-        // 必须监听 player：否则点歌后"正在播放"徽标不动（同 `_buildMusicSections`）
-        child: ListenableBuilder(
-          listenable: MusicPlayerManager.instance,
-          builder: (context, _) => DailySongsRow(
-            style: style,
-            songs: _qqDaily,
-            playingKey: MusicPlayerManager.instance.currentSong?.identityKey,
-            isPlaying: MusicPlayerManager.instance.isPlaying.value,
-            onPlay: (i) =>
-                MusicPlayerManager.instance.playQueue(_qqDaily, index: i),
+        child: MeiSectionHeader(
+          title: '探索歌单',
+          onShowAll: () => _openAllPlaylists(),
+        ),
+      ));
+      // 胶囊是**导航入口**（不是页内筛选）—— 点哪个都进集合页，与 Mei 一致
+      final hot = _discoverHotCats;
+      out.add(SliverToBoxAdapter(
+        child: SizedBox(
+          height: 48,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.only(left: 12),
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: MeiFilterPill(
+                  label: '全部分类',
+                  selected: false,
+                  onTap: _pickCatThenOpen,
+                ),
+              ),
+              for (final c in hot)
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: MeiFilterPill(
+                    label: c.label,
+                    selected: false,
+                    onTap: () => _openAllPlaylists(c),
+                  ),
+                ),
+            ],
           ),
         ),
       ));
-    }
-
-    // ── 热门歌手（圆头像行，视觉上对齐网易云的"歌手"）──────────
-    if (_qqArtists.isNotEmpty) {
-      out.add(const SliverToBoxAdapter(child: SectionTitle(title: '热门歌手')));
-      out.add(SliverToBoxAdapter(
-        child: SizedBox(
-          height: 118,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: _qqArtists.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 16),
-            itemBuilder: (c, i) {
-              final a = _qqArtists[i];
-              return GestureDetector(
-                onTap: () => showSearch<void>(
-                  context: context,
-                  delegate: _QuickSearchDelegate(
-                      source: SongSource.qq, initialQuery: a.name),
-                ),
-                child: SizedBox(
-                  width: 68,
-                  child: Column(
-                    children: [
-                      // ── 真头像（用户 2026 对比参考图后要求）─────────
-                      //
-                      // 原来是"首字圆形块"（王/G/K/盛…），理由写在旧注释里：
-                      // "QQ 搜索不返回歌手头像"。**那个理由只对了一半** ——
-                      // 搜索确实不接头像，但**头像模板本身是通的**：
-                      //   `y.gtimg.cn/music/photo_new/T001R150x150M000{mid}.jpg`
-                      // 而歌曲里带着 `singerMid` → 从榜单歌里收集歌手
-                      // 就能拿到真头像（Node 侧 `topArtistsList` 已实测可用）。
-                      //
-                      // 所以现在画真头像；`CoverImage` 自带占位与错误兜底，
-                      // 万一某张图挂了也不会是空白圆。
-                      CoverImage(
-                        url: a.avatar,
-                        size: 64,
-                        circle: true,
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        a.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                            color: MusicTheme.label,
-                            fontSize: AppTheme.fontFootnote),
-                      ),
-                    ],
-                  ),
+      if (playlists.isNotEmpty) {
+        final shown = playlists.take(12).toList();
+        out.add(SliverToBoxAdapter(
+          child: _meiShelf(
+            count: shown.length,
+            item: (i) {
+              final p = shown[i];
+              return MeiPlaylistCard(
+                playlist: p,
+                width: 152,
+                onTap: () => openPlaylist(
+                  context,
+                  p.id,
+                  p.name,
+                  source: _source,
+                  coverUrl: p.coverUrl,
                 ),
               );
             },
           ),
-        ),
-      ));
+        ));
+      }
     }
 
-    // ── 热搜关键词（横滑卡片，前三名主题色）─────────────────────
-    out.addAll(_hotKeywordSlivers('QQ音乐热搜', SongSource.qq));
-
-    // ── QQ 排行榜（**免登录可拿**，实测 30 个榜单）──────────────
-    //
-    // ⚠️ 点进去必须用 `isTopList: true` —— QQ 的 topId 不是歌单 id，
-    //    用歌单接口查会得到空列表（实测 topListSongs 5 条 / playlistDetail 0 条）。
-    //
-    // ── 为什么是**横滑大卡片**而不是竖排列（用户 2026 反馈）────────
-    // 原来用的是 `RankListCard`（单卡片内竖排行）。用户对比参考图后指出
-    //「这种卡片式的差远了」——参考图的榜单是**横滑大封面卡**，
-    // 视觉冲击力和"想点"的欲望都强得多，而竖排小行看起来像设置列表。
-    //
-    // 现在与"每日推荐"同一套横滑卡：封面 152 + 名称 + 副标题。
-    if (_qqTopLists.isNotEmpty) {
-      out.add(const SliverToBoxAdapter(child: SectionTitle(title: '排行榜')));
+    // ── ② 排行榜 ──────────────────────────────────────────────────
+    final tops = _discoverTopLists;
+    if (tops.isNotEmpty) {
       out.add(SliverToBoxAdapter(
-        child: HorizontalCards(
-          itemCount: _qqTopLists.length,
-          height: 212,
-          itemWidth: 152,
-          itemBuilder: (c, i) {
-            final t = _qqTopLists[i];
-            return CoverCard(
+        child: MeiSectionHeader(
+          title: '排行榜',
+          onShowAll: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const ChartsPage()),
+          ),
+        ),
+      ));
+      final shown = tops.take(12).toList();
+      out.add(SliverToBoxAdapter(
+        child: _meiShelf(
+          count: shown.length,
+          item: (i) {
+            final t = shown[i];
+            return MeiArtworkCard(
               coverUrl: t.coverUrl,
               title: t.name,
               subtitle: t.updateFrequency,
@@ -1896,7 +1416,9 @@ class _DiscoverPageState extends State<DiscoverPage>
                 context,
                 t.id,
                 t.name,
-                source: SongSource.qq,
+                source: _source,
+                // ⚠️ 必须 isTopList：QQ 的 topId 不是歌单 id，
+                //    用歌单接口查会得到空列表（见旧注释里的实测结论）
                 isTopList: true,
                 coverUrl: t.coverUrl,
               ),
@@ -1906,153 +1428,47 @@ class _DiscoverPageState extends State<DiscoverPage>
       ));
     }
 
-    // 2026-10-21 用户要求：去掉页尾那段「QQ 可以搜、可以看，但不能直接播」
-    // 的长说明（播不了时播放器自己会弹源选择，不需要在发现页常驻大段文字）。
-
-    return out;
-  }
-
-  List<Widget> _buildMusicSections(DiscoverStyle style) {
-    final out = <Widget>[];
-
-    // ── 每日推荐（Beans 规格：108 封面 + VIP 标 + 播放徽标 + 均衡器）──
-    //
-    // 数据源：`_newSongs`（新歌速递）。Beans 的「每日推荐」在网易云下取
-    // `dailySongs`，本项目没有那个接口，所以用"新歌速递"当每日更新内容 ——
-    // 语义一致（每天变、30 首），不是假入口。
-    if (_newSongs.isNotEmpty) {
+    // ── ③ 新歌速递 / 每日推荐 ──────────────────────────────────────
+    final songs = _discoverNewSongs;
+    if (songs.isNotEmpty) {
       out.add(SliverToBoxAdapter(
-        child: SectionTitle(
-          title: '每日推荐',
-          action: '查看全部',
-          onAction: () => _showAllNewSongs(style),
+        child: MeiSectionHeader(
+          title: _isQq ? '每日推荐' : '新歌速递',
+          showAllLabel: '查看全部',
+          onShowAll: () => _showAllNewSongs(style, songs: songs),
         ),
       ));
       out.add(SliverToBoxAdapter(
-        // ── 🔴 必须监听 player（修"点歌后徽标不动"）────────────────
-        //
-        // 原来在**外层**取快照再当参数传进来：
-        //   `final playing = MusicPlayerManager.instance.currentSong?.identityKey;`
-        //   `isPlaying: MusicPlayerManager.instance.isPlaying.value`
-        // 而 DiscoverPage `wantKeepAlive = true`、又没有任何 player 监听
-        // → 点歌之后这一行的 `playingKey` / `isPlaying` 永远是**旧值** ✗
-        //   · 不出现"正在播放"高亮
-        //   · 暂停后仍是均衡器（配合上面 `discover_sections` 的修复才对）
-        //
-        // 把取值挪进 `ListenableBuilder` 的 builder 里，播放状态一变就重建
-        //（`player_manager` 的切歌/播放/暂停都会 `notifyListeners()`）。
+        // 🔴 必须监听 player：否则点歌后"正在播放"徽标不动
+        //（`wantKeepAlive = true`，没有监听就永远拿旧值）
         child: ListenableBuilder(
           listenable: MusicPlayerManager.instance,
           builder: (context, _) => DailySongsRow(
             style: style,
-            songs: _newSongs,
-            playingKey:
-                MusicPlayerManager.instance.currentSong?.identityKey,
-            isPlaying: MusicPlayerManager.instance.isPlaying.value,
-            onPlay: (i) =>
-                MusicPlayerManager.instance.playQueue(_newSongs, index: i),
-          ),
-        ),
-      ));
-    }
-
-    // ── 榜单热歌（2026-10-21 新增卡片）──────────────────────────────
-    //
-    // 数据 = 当前平台**第一个榜单**的前 12 首（`topListSongs`）。
-    // 网易/酷狗的榜单 id 都能直接查歌（见 music_source.js 的说明），
-    // 不额外引入接口，属于"真实可用"的内容卡。
-    if (_chartSongs.isNotEmpty) {
-      out.add(SliverToBoxAdapter(
-        child: SectionTitle(
-          title: '榜单热歌',
-          action: '播放全部',
-          onAction: () =>
-              MusicPlayerManager.instance.playQueue(_chartSongs, index: 0),
-        ),
-      ));
-      out.add(SliverToBoxAdapter(
-        child: ListenableBuilder(
-          listenable: MusicPlayerManager.instance,
-          builder: (context, _) => DailySongsRow(
-            style: style,
-            songs: _chartSongs,
+            songs: songs,
             playingKey: MusicPlayerManager.instance.currentSong?.identityKey,
             isPlaying: MusicPlayerManager.instance.isPlaying.value,
             onPlay: (i) =>
-                MusicPlayerManager.instance.playQueue(_chartSongs, index: i),
+                MusicPlayerManager.instance.playQueue(songs, index: i),
           ),
         ),
       ));
     }
 
-    if (_recommend.isNotEmpty) {
-      out.add(const SliverToBoxAdapter(
-          child: SectionTitle(title: '推荐歌单')));
-      out.add(SliverToBoxAdapter(
-        child: HorizontalCards(
-          itemCount: _recommend.length,
-          height: 212,
-          itemWidth: 152,
-          itemBuilder: (c, i) {
-            final p = _recommend[i];
-            return CoverCard(
-              coverUrl: p.coverUrl,
-              title: p.name,
-              subtitle: p.trackCount > 0 ? '${p.trackCount} 首' : null,
-              width: 152,
-              onTap: () => openPlaylist(context, p.id, p.name,
-                  source: _source, coverUrl: p.coverUrl),
-            );
-          },
-        ),
-      ));
-    }
-
-    // ── 排行榜（Beans 规格：**单卡片内竖排**，前 3 名主题色，收起 3/展开 10）──
-    //
-    // ⚠️ 原来这里是 **3 列大图网格**（注释说"对齐 Beans"），但 Beans 真实
-    //    规格是**一张卡片里的竖排行**（名次 + 52 封面 + 榜名 + 更新频率）。
-    //    3 列大图在榜单只有 3~5 个时很浪费，也看不出"排名"的意味。
-    if (_topLists.isNotEmpty) {
-      out.add(const SliverToBoxAdapter(child: SectionTitle(title: '排行榜')));
-      out.add(SliverToBoxAdapter(
-        child: RankListCard(
-          style: style,
-          items: _topLists,
-          // ── 🔴 必须传 `source` + `isTopList`（修一个"点进去全空白"）──
-          //
-          // 原来写的是 `PlaylistDetailPage(id: t.id, title: t.name)` ——
-          // **没传 `source`** → 页面默认 `SongSource.netease`。
-          // 而 `_topLists` 是**按当前平台**拉的（比如用户选了酷狗）→
-          // 于是拿**酷狗的榜单 id 去查网易云**：
-          //   · 网易云恰好也有同数字 id 时 → 打开**另一个榜单**（张冠李戴）
-          //   · 没有时 → `playlistDetail` 返回 ok:false → **整页空白**、
-          //     连标题都没有（用户实测截图就是这个）✗
-          //
-          // `isTopList` 同理：QQ 的 topId **不是歌单 id**，
-          // 走歌单接口必然空列表（`PlaylistDetailPage` 的字段注释写明了）。
-          //
-          // 用 `openPlaylist` 这个统一入口，而不是自己拼 `MaterialPageRoute`
-          //（`charts_page.dart` 走的就是它，那边一直是对的）。
-          onTap: (t) => openPlaylist(
-            context,
-            t.id,
-            t.name,
-            source: _source,
-            isTopList: true,
-            coverUrl: t.coverUrl,
-          ),
-        ),
-      ));
-    }
-
-    // ── 热搜关键词（网易云 / 酷狗 都有这个接口，见 `_loadMusicPlatform`）──
+    // ── ④ 热搜关键词（真实接口，本来就是横滑卡片行）─────────────────
     out.addAll(_hotKeywordSlivers('${_source.displayName}热搜', _source));
     return out;
   }
 
   /// 「每日推荐 → 查看全部」弹窗（Beans 的 DailySongsSheet）
-  Future<void> _showAllNewSongs(DiscoverStyle style) async {
+  /// 「新歌速递 / 每日推荐」的查看全部弹窗。
+  ///
+  /// [songs] 必须由调用方传入：QQ 页的"每日推荐"是 `_qqDaily`（新歌榜），
+  /// 网易云才是 `_newSongs`。原来这里写死读 `_newSongs` ⇒ QQ 点「查看全部」
+  /// 会弹出一份**空列表**（QQ 的 newSongs 需要登录态，恒为空）。
+  Future<void> _showAllNewSongs(DiscoverStyle style,
+      {List<Song>? songs}) async {
+    final list0 = songs ?? _newSongs;
     await showMusicSheet<void>(
       context: context,
       backgroundColor: MusicTheme.card,
@@ -2084,7 +1500,7 @@ class _DiscoverPageState extends State<DiscoverPage>
                       onPressed: () {
                         Navigator.pop(ctx);
                         MusicPlayerManager.instance
-                            .playQueue(_newSongs, index: 0);
+                            .playQueue(list0, index: 0);
                       },
                       child: const Text('播放全部'),
                     ),
@@ -2098,7 +1514,7 @@ class _DiscoverPageState extends State<DiscoverPage>
                       ),
                       onPressed: () {
                         Navigator.pop(ctx);
-                        final list = List<Song>.of(_newSongs)..shuffle();
+                        final list = List<Song>.of(list0)..shuffle();
                         MusicPlayerManager.instance.playQueue(list, index: 0);
                       },
                       child: const Text('随机'),
@@ -2109,11 +1525,11 @@ class _DiscoverPageState extends State<DiscoverPage>
               Expanded(
                 child: ListView.builder(
                   padding: const EdgeInsets.only(bottom: 24),
-                  itemCount: _newSongs.length,
+                  itemCount: list0.length,
                   itemBuilder: (c, i) => SongCell(
-                    song: _newSongs[i],
+                    song: list0[i],
                     index: i,
-                    playbackContext: _newSongs,
+                    playbackContext: list0,
                   ),
                 ),
               ),

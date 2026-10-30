@@ -551,6 +551,12 @@ class _SettingsSubPageState extends State<SettingsSubPage> {
 /// 子页里的一个分组：小标题 + 卡片。
 ///
 /// 对应参考图那种「数据 / 偏好」分区 + 白卡列表的样式。
+/// 分组卡片下方那行灰色脚注是否显示。
+///
+/// 与 [kShowSettingsRowSubtitle] 同一次要求（2026-10-30）：设置页的"小字"
+/// 全部去掉，只留标题 + 控件本身。
+const bool kShowSettingsGroupHint = false;
+
 class SettingsGroup extends StatelessWidget {
   final String? title;
   final List<Widget> children;
@@ -623,7 +629,14 @@ class SettingsGroup extends StatelessWidget {
             ],
           ),
         ),
-        if (hint != null)
+        // ── 分组脚注小字已**全局关闭**（2026-10-30）──────────────
+        //
+        // 用户：「所有模块里面，影视模块的设置页面以及子页面、音乐模块里面
+        // 我的页面以及子页、阅读模块里面我的页面以及子页面，不要那些小字」。
+        // 分组卡片下面那行灰色脚注和行内副标题是同一类东西，一起关掉，
+        // 页面才干净。`hint` 参数保留（30 处调用点仍在传），
+        // 想恢复把 `kShowSettingsGroupHint` 改成 true 即可。
+        if (hint != null && kShowSettingsGroupHint)
           Padding(
             padding: const EdgeInsets.only(left: 4, top: 8),
             child: Text(

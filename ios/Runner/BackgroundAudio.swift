@@ -38,6 +38,23 @@ class BackgroundAudio {
     private var isStarted = false
     private let queue = DispatchQueue(label: "com.tvbox.background-audio")
 
+    /// **本 App 是否在"独占播放"模式**（音乐/听书正在放）。
+    ///
+    /// ── 为什么需要这个开关（2026-10-30 修）──────────────────────────
+    /// 用户原话：「音乐模块的播放不能在 iOS 的下拉控制中心播放？还不能在
+    /// 锁屏页面播放么？」
+    ///
+    /// 根因就出在下面 `startLocked()` 里的 `.mixWithOthers`：
+    /// 带这个选项时 iOS 把本 App 当**次要音频源**，
+    /// `MPNowPlayingInfoCenter` 写进去的元数据**一律不显示**在控制中心/锁屏
+    /// —— 于是 `MusicNowPlaying.swift` 那套「推歌名/封面/接远程按键」的代码
+    /// 一直在跑，却永远看不见效果 ✗。
+    ///
+    /// 所以：有音乐在播时切到**不带 mix 的 `.playback`**（成为 Now Playing
+    /// 所有者，控制中心才认），音乐清空后切回混音（不抢别人音频焦点，
+    /// 静音保活继续跑）✓。
+    private var exclusiveMode = false
+
     static let shared = BackgroundAudio()
 
     private init() {}
@@ -82,13 +99,12 @@ class BackgroundAudio {
             //   "外部音乐莫名停了，本 App 却一点声音都没有" ✗✗。
             //   加上 `.mixWithOthers` 后：本 App 依然被系统视为"正在播放音频"
             //   （后台保活效果不变），但**不抢占音频焦点**，外部音乐照常播 ✓。
-            try session.setCategory(
-                .playback,
-                mode: .default,
-                options: [.mixWithOthers]
-            )
+            //
+            // ⚠️ 但混音模式下**控制中心/锁屏永远看不到本 App 的正在播放**
+            //   （见 `exclusiveMode` 的说明）⇒ 音乐在播时必须切到独占模式。
+            try Self.applyCategoryLocked(exclusive: self.exclusiveMode)
             try session.setActive(true, options: [])
-            NSLog("[BackgroundAudio] AVAudioSession activated (.playback, mixWithOthers)")
+            NSLog("[BackgroundAudio] AVAudioSession activated (.playback, exclusive=\(self.exclusiveMode))")
 
             // 2. 创建静音 buffer
             guard let format = AVAudioFormat(
@@ -170,6 +186,57 @@ class BackgroundAudio {
             NSLog("[BackgroundAudio] ✅ silent audio started, app can run in background")
         } catch {
             NSLog("[BackgroundAudio] ❌ start failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// 配置音频会话类别。
+    ///
+    /// · `exclusive == true`  → `.playback` **不带** `.mixWithOthers`：
+    ///   本 App 成为 Now Playing 所有者，控制中心/锁屏才会显示封面与控件
+    /// · `exclusive == false` → 带 `.mixWithOthers`：不抢音频焦点，
+    ///   静音保活可以和用户正在听的其它 App 共存
+    ///
+    /// 静态方法是因为它要在 `startLocked()` 与 [setExclusive] 两处复用。
+    private static func applyCategoryLocked(exclusive: Bool) throws {
+        try AVAudioSession.sharedInstance().setCategory(
+            .playback,
+            mode: .default,
+            options: exclusive ? [] : [.mixWithOthers]
+        )
+    }
+
+    /// 音乐/听书开始或结束播放时调用：切换「独占 / 混音」两种会话模式。
+    ///
+    /// 由 `MusicNowPlaying` / `TtsNowPlaying` 在收到 Dart 的 `update` 时调用
+    /// （见那边 `syncSessionMode` 的注释）。
+    ///
+    /// ⚠️ 切换类别会打断正在跑的 `AVAudioEngine`（player node 停止），
+    /// 所以切完之后必须把静音循环重新播起来，否则 Node 保活会断。
+    /// 整个过程包 `TvBoxTryCatch`：`play()` 在会话状态不合法时抛 ObjC 异常，
+    /// Swift 的 `catch` 接不住 → SIGABRT 闪退。
+    func setExclusive(_ on: Bool) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            guard self.exclusiveMode != on else { return }
+            self.exclusiveMode = on
+            NSLog("[BackgroundAudio] session mode → \(on ? "exclusive" : "mix")")
+
+            let ok = TvBoxTryCatch({
+                try Self.applyCategoryLocked(exclusive: on)
+                try AVAudioSession.sharedInstance().setActive(true, options: [])
+
+                // 类别切换后引擎可能已经停了：重启再播，别盲目 play()
+                if self.isStarted {
+                    if !self.audioEngine.isRunning {
+                        self.restartEngine()
+                    } else if !self.player.isPlaying {
+                        self.player.play()
+                    }
+                }
+            })
+            if !ok {
+                NSLog("[BackgroundAudio] ⚠️ setExclusive 抛异常，已忽略（App 继续运行）")
+            }
         }
     }
 
