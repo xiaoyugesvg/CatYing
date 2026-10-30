@@ -1104,20 +1104,34 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
           // 用户 2026-10-18：「把简介放在解析结果前面」——
           // 先看简介再决定点哪条解析地址，顺序更自然。
           // 2026-10-29：包成卡片 + 超长可折叠（长简介以前会把「解析结果」整块顶出屏幕）
-          if (it.desc.isNotEmpty) ...[
-            const SizedBox(height: 18),
-            const HikerSectionTitle('简介'),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(13, 11, 13, 11),
-              decoration: BoxDecoration(
-                color: AppTheme.backgroundCard,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppTheme.borderLight, width: 0.6),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+          //
+          // 2026-10-30：**空简介也要显示**，内容写「无」。
+          //   原来是 `if (it.desc.isNotEmpty)` 整块不画 —— 脚本没给简介时这一节
+          //   凭空消失，用户以为界面少了东西（而且没法和"简介被解析错"区分）。
+          //   现在固定出现：有内容就显示内容，没有就显示「无」。
+          const SizedBox(height: 18),
+          const HikerSectionTitle('简介'),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(13, 11, 13, 11),
+            decoration: BoxDecoration(
+              color: AppTheme.backgroundCard,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppTheme.borderLight, width: 0.6),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (it.desc.isEmpty)
+                  Text(
+                    '无',
+                    style: TextStyle(
+                      color: AppTheme.textTertiary,
+                      fontSize: AppTheme.fontSubhead,
+                      height: 1.65,
+                    ),
+                  )
+                else ...[
                   Text(
                     it.desc,
                     maxLines: _descOpen ? null : 4,
@@ -1156,9 +1170,9 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
                     ),
                   ],
                 ],
-              ),
+              ],
             ),
-          ],
+          ),
 
           if (_candidates.isNotEmpty) ...[
             const SizedBox(height: 18),
@@ -1333,6 +1347,10 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
     final infos = <_Candidate>[];
     for (final c in _candidates) {
       if (_isLabel(c)) {
+        // 服务器错误页正文被脚本当成分节标题塞进来（用户截图：
+        // 「Web server is returning an unknown error Error code 520」）。
+        // 它不是标题、也不是能点的东西，画出来只会让人以为解析结果坏了 —— 丢掉。
+        if (_isNoiseLabel(c)) continue;
         labels.add(c);
         continue;
       }
@@ -1356,6 +1374,14 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
       }
     }
 
+    // 图片组里"取不出图片地址"的那些不能铺成缩略图 —— 那会是一排灰框
+    // （用户截图：一格里只有个图片图标）。退回普通卡片，至少能看到是什么。
+    final imgWithSrc = <_Candidate>[];
+    final imgNoSrc = <_Candidate>[];
+    for (final c in images) {
+      (_firstImageOf(c).isEmpty ? imgNoSrc : imgWithSrc).add(c);
+    }
+
     final rows = <Widget>[
       for (final l in labels) _labelRow(l),
       if (metas.isNotEmpty) ...[
@@ -1371,7 +1397,8 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
       if (images.isNotEmpty) ...[
         const SizedBox(height: 10),
         _candGroupTitle('图片', images.length, Icons.photo_library_outlined),
-        _imageTiles(images),
+        if (imgWithSrc.isNotEmpty) _imageTiles(imgWithSrc),
+        if (imgNoSrc.isNotEmpty) ..._cardsRows(imgNoSrc),
       ],
       if (opens.isNotEmpty) ...[
         const SizedBox(height: 10),
@@ -1387,10 +1414,51 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
           trailing: _infoOpen ? '收起' : '展开',
           onTap: () => setState(() => _infoOpen = !_infoOpen),
         ),
-        if (_infoOpen) ..._cardsRows(infos),
+        if (_infoOpen) ..._cardsRows(_collapseHints(infos)),
       ],
     ];
     return Column(mainAxisSize: MainAxisSize.min, children: rows);
+  }
+
+  /// 把「操作与提示」里**同一句提示**的条目合并成一张卡。
+  ///
+  /// 实测（用户 2026-10-30 的截图）：一个 46 集的源，46 个条目全都是
+  /// 「第N集 / 本集暂无720p」—— 展开之后是 46 张一模一样的卡片，
+  /// 既看不出哪集不一样，也翻不到底。按提示文案分组后只剩一张：
+  /// 「第1集 – 第46集（共46项）」。
+  ///
+  /// 只有一条的组原样返回（不改变单条时的观感）。
+  static List<_Candidate> _collapseHints(List<_Candidate> items) {
+    final groups = <String, List<_Candidate>>{};
+    final order = <String>[];
+    for (final c in items) {
+      final key = describeHikerLink(c.url).detail.trim();
+      if (!groups.containsKey(key)) order.add(key);
+      groups.putIfAbsent(key, () => []).add(c);
+    }
+    final out = <_Candidate>[];
+    for (final k in order) {
+      final g = groups[k]!;
+      if (g.length == 1) {
+        out.add(g.first);
+        continue;
+      }
+      final first = hikerPlainText(g.first.note);
+      final last = hikerPlainText(g.last.note);
+      out.add(
+        _Candidate(
+          g.first.url,
+          hikerCollapsedHintTitle(first, last, g.length),
+          lazy: g.first.lazy,
+          chain: g.first.chain,
+          headers: g.first.headers,
+          input: g.first.input,
+          colType: g.first.colType,
+          pic: g.first.pic,
+        ),
+      );
+    }
+    return out;
   }
 
   /// 解析结果的分组维度 —— 按"点了会发生什么"，而不是按脚本给的顺序。
@@ -1774,6 +1842,18 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
   static bool _isLabel(_Candidate c) =>
       c.url.isEmpty || c.url == 'hiker://empty';
 
+  /// 服务器错误页的正文 —— 脚本把 5xx 错误页当"标题"抓了回来。
+  ///
+  /// 用户 2026-10-30 的截图：解析结果里孤零零一行
+  /// 「Web server is returning an unknown error Error code 520」。
+  /// 那是源站返回的错误页文字，既不是标题也不是地址，画出来只会让人以为
+  /// 解析结果坏了。判定逻辑见顶层 [hikerIsServerErrorText]。
+  static bool _isNoiseLabel(_Candidate c) {
+    final t = hikerPlainText(c.note).trim();
+    if (t.isEmpty) return true;
+    return hikerIsServerErrorText(t);
+  }
+
   Widget _labelRow(_Candidate c) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
@@ -2015,4 +2095,52 @@ class _LineGroup {
 
   final String name;
   final List<_Candidate> items = [];
+}
+
+// ============================================================
+// 纯函数（与 UI 无关，单独抽出来是为了能直接测）
+// ============================================================
+
+/// 这行文字是不是**源站返回的错误页正文**（而不是脚本给的标题）。
+///
+/// 现场（用户 2026-10-30 截图）：解析结果里孤零零一行
+/// `Web server is returning an unknown error Error code 520` ——
+/// 源站 5xx 了，脚本把错误页的正文当成了分节标题。这类文字画出来
+/// 只会让人以为解析结果坏了，应当直接丢掉。
+///
+/// ⚠️ 判据刻意很窄：**整行不含中文** 且命中错误码 / 网关固定措辞。
+///   否则会误杀「第520集」「第 502 话」这种正常分节标题。
+bool hikerIsServerErrorText(String text) {
+  final t = text.trim();
+  if (t.isEmpty) return false;
+  if (RegExp(r'[\u4e00-\u9fa5]').hasMatch(t)) return false;
+  return _kServerErrorPattern.hasMatch(t);
+}
+
+final RegExp _kServerErrorPattern = RegExp(
+  r'error code \d{3}|bad gateway|gateway time-?out|'
+  r'internal server error|service (temporarily )?unavailable|'
+  r'web server is returning|cloudflare|just a moment|enable javascript',
+  caseSensitive: false,
+);
+
+/// 「操作与提示」合并卡片时的标题文案。
+///
+/// 例：46 条「第1集…第46集 / 本集暂无720p」合并成一张
+/// `第1集 – 第46集（共46项）`。
+String hikerCollapsedHintTitle(String first, String last, int count) {
+  final a = first.trim();
+  final b = last.trim();
+  final String range;
+  if (a.isEmpty && b.isEmpty) {
+    range = '';
+  } else if (a.isEmpty) {
+    // 第一条没标题、最后一条有 —— 用有的那条，别把信息丢掉
+    range = b;
+  } else if (b.isEmpty || a == b) {
+    range = a;
+  } else {
+    range = '$a – $b';
+  }
+  return range.isEmpty ? '共 $count 项' : '$range（共$count项）';
 }
