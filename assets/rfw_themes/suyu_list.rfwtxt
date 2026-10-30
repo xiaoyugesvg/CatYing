@@ -212,6 +212,62 @@ widget PosterItem = GestureDetector(
 // ── 列表条目：无卡片底，只靠一条 0.5px 分隔线 ──────────────────
 // 这是「素影」的核心：去掉底色块之后，一屏能多看到 1~2 条，
 // 滚动时也没有一堆圆角在眼前晃。
+// ── 加载态骨架行（2026-10-30）──────────────────────────────────
+// 与 RowItem 同结构：左 84×112 缩略图 + 右两条文字占位，
+// 内外边距也照抄 [12,8,12,8]，加载完切到真实行不会跳版。
+widget RowGhost = Padding(
+  padding: [12.0, 8.0, 12.0, 8.0],
+  child: Row(
+    children: [
+      Container(
+        width: 84.0,
+        height: 112.0,
+        decoration: {
+          type: "box",
+          color: data.home.theme.border,
+          borderRadius: [6.0],
+        },
+      ),
+      SizedBox(width: 12.0),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: "start",
+          children: [
+            Container(
+              height: 13.0,
+              decoration: {
+                type: "box",
+                color: data.home.theme.border,
+                borderRadius: [6.0],
+              },
+            ),
+            SizedBox(height: 8.0),
+            Container(
+              height: 13.0,
+              width: 120.0,
+              decoration: {
+                type: "box",
+                color: data.home.theme.border,
+                borderRadius: [6.0],
+              },
+            ),
+            SizedBox(height: 8.0),
+            Container(
+              height: 11.0,
+              width: 72.0,
+              decoration: {
+                type: "box",
+                color: data.home.theme.border,
+                borderRadius: [6.0],
+              },
+            ),
+          ],
+        ),
+      ),
+    ],
+  ),
+);
+
 widget RowItem = GestureDetector(
   onTap: event "openItem" { index: args.item.index },
   child: Column(
@@ -444,17 +500,83 @@ widget root = Container(
     hero: SizedBoxShrink(),
     pinnedHeader: Header(),
     sectionHeader: SectionTitle(),
-    empty: Container(
-      alignment: "center",
-      padding: [0.0, 48.0],
-      child: Text(
-        text: switch data.home.loading {
-          true: "加载中…",
-          false: "暂无内容",
-        },
-        style: { color: data.home.theme.textTertiary, fontSize: 14.0 },
+    // ── 空态 / 加载态（2026-10-30 重做）──────────────────────────
+    // 用户：「RWF 主题的内容加载页面不好看」——原来是正中间一行灰字
+    // 「加载中…」。这套主题是**列表**形态，所以骨架也做成列表行
+    //（左缩略图 + 右两条文字占位），与真实行同高，加载完不会跳版。
+    //
+    // ⚠️ 颜色一律走 `decoration: {type:"box", ...}`，**不要**写
+    //    `Container(color: …, borderRadius: …)`：RFW 的 Container 解码成
+    //    `AnimatedContainer`，color 与 decoration 同时非空会直接断言崩掉。
+    empty: switch data.home.loading {
+      true: Container(
+        padding: [0.0, 6.0, 0.0, 0.0],
+        child: Column(
+          crossAxisAlignment: "start",
+          children: [
+            Row(
+              children: [
+                Container(
+                  height: 13.0,
+                  width: 96.0,
+                  decoration: {
+                    type: "box",
+                    color: data.home.theme.border,
+                    borderRadius: [7.0],
+                  },
+                ),
+                Spacer(),
+                Container(
+                  height: 13.0,
+                  width: 42.0,
+                  decoration: {
+                    type: "box",
+                    color: data.home.theme.border,
+                    borderRadius: [7.0],
+                  },
+                ),
+              ],
+            ),
+            SizedBox(height: 10.0),
+            RowGhost(),
+            RowGhost(),
+            RowGhost(),
+            RowGhost(),
+            RowGhost(),
+            SizedBox(height: 6.0),
+            Row(
+              children: [
+                Container(
+                  width: 13.0,
+                  height: 13.0,
+                  decoration: {
+                    type: "box",
+                    color: data.home.theme.border,
+                    borderRadius: [7.0],
+                  },
+                ),
+                SizedBox(width: 8.0),
+                Text(
+                  text: "正在加载…",
+                  style: {
+                    color: data.home.theme.textTertiary,
+                    fontSize: 12.0,
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
-    ),
+      false: Container(
+        alignment: "center",
+        padding: [0.0, 48.0],
+        child: Text(
+          text: "暂无内容",
+          style: { color: data.home.theme.textTertiary, fontSize: 14.0 },
+        ),
+      ),
+    },
     children: [
       ...for item in data.home.items: switch data.home.displayStyle {
         "list": RowItem(item: item),

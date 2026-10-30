@@ -179,6 +179,46 @@ widget HeroCard = GestureDetector(
   ),
 );
 
+// ── 加载态骨架卡（2026-10-30）──────────────────────────────────
+// 与 PosterItem 同宽、同圆角，只是一块灰底 + 两条文字占位。
+// 高度写死 168 而不是用 AspectRatio：三列布局下与真实海报卡基本同高，
+// 而 AspectRatio 在 RFW 核心库里是否注册过不确定，宁可用最笨的写法。
+widget PosterGhost = Container(
+  decoration: { type: "box", borderRadius: [data.home.theme.radiusCard] },
+  child: Column(
+    crossAxisAlignment: "start",
+    children: [
+      Container(
+        height: 168.0,
+        decoration: {
+          type: "box",
+          color: data.home.theme.border,
+          borderRadius: [data.home.theme.radiusCard],
+        },
+      ),
+      SizedBox(height: 7.0),
+      Container(
+        height: 10.0,
+        decoration: {
+          type: "box",
+          color: data.home.theme.border,
+          borderRadius: [5.0],
+        },
+      ),
+      SizedBox(height: 5.0),
+      Container(
+        height: 10.0,
+        width: 52.0,
+        decoration: {
+          type: "box",
+          color: data.home.theme.border,
+          borderRadius: [5.0],
+        },
+      ),
+    ],
+  ),
+);
+
 // ── 网格海报：1px 细描边靠"外圈底色 + 内缩 1px"实现 ──────────────
 // 直接给 Container 加 border 会被里面的图片盖住（BoxDecoration 的
 // border 画在背景层），所以用 padding: 1 + 外层填 border 色的办法。
@@ -475,17 +515,99 @@ widget root = Container(
     ),
     pinnedHeader: Header(),
     sectionHeader: SectionTitle(),
-    empty: Container(
-      alignment: "center",
-      padding: [0.0, 48.0],
-      child: Text(
-        text: switch data.home.loading {
-          true: "加载中…",
-          false: "暂无内容",
-        },
-        style: { color: data.home.theme.textTertiary, fontSize: 14.0 },
+    // ── 空态 / 加载态（2026-10-30 重做）──────────────────────────
+    // 用户：「RWF 主题的内容加载页面不好看」——原来是正中间一行灰字
+    // 「加载中…」，整块内容区空着，看着像坏了。
+    // 现在加载时铺**骨架卡**（与真实海报卡同尺寸的圆角灰块）。
+    //
+    // ⚠️ 颜色一律走 `decoration: {type:"box", ...}`，**不要**写
+    //    `Container(color: …, borderRadius: …)`：RFW 的 Container 解码成
+    //    `AnimatedContainer`，color 与 decoration 同时非空会直接断言崩掉。
+    empty: switch data.home.loading {
+      true: Container(
+        padding: [12.0, 14.0, 12.0, 0.0],
+        child: Column(
+          crossAxisAlignment: "start",
+          children: [
+            Row(
+              children: [
+                Container(
+                  height: 13.0,
+                  width: 96.0,
+                  decoration: {
+                    type: "box",
+                    color: data.home.theme.border,
+                    borderRadius: [7.0],
+                  },
+                ),
+                Spacer(),
+                Container(
+                  height: 13.0,
+                  width: 42.0,
+                  decoration: {
+                    type: "box",
+                    color: data.home.theme.border,
+                    borderRadius: [7.0],
+                  },
+                ),
+              ],
+            ),
+            SizedBox(height: 14.0),
+            Row(
+              crossAxisAlignment: "start",
+              children: [
+                Expanded(child: PosterGhost()),
+                SizedBox(width: 10.0),
+                Expanded(child: PosterGhost()),
+                SizedBox(width: 10.0),
+                Expanded(child: PosterGhost()),
+              ],
+            ),
+            SizedBox(height: 12.0),
+            Row(
+              crossAxisAlignment: "start",
+              children: [
+                Expanded(child: PosterGhost()),
+                SizedBox(width: 10.0),
+                Expanded(child: PosterGhost()),
+                SizedBox(width: 10.0),
+                Expanded(child: PosterGhost()),
+              ],
+            ),
+            SizedBox(height: 16.0),
+            Row(
+              children: [
+                Container(
+                  width: 13.0,
+                  height: 13.0,
+                  decoration: {
+                    type: "box",
+                    color: data.home.theme.border,
+                    borderRadius: [7.0],
+                  },
+                ),
+                SizedBox(width: 8.0),
+                Text(
+                  text: "正在加载…",
+                  style: {
+                    color: data.home.theme.textTertiary,
+                    fontSize: 12.0,
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
-    ),
+      false: Container(
+        alignment: "center",
+        padding: [0.0, 48.0],
+        child: Text(
+          text: "暂无内容",
+          style: { color: data.home.theme.textTertiary, fontSize: 14.0 },
+        ),
+      ),
+    },
     children: [
       ...for item in data.home.items: switch data.home.displayStyle {
         "list": RowItem(item: item),
