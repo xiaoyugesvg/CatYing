@@ -5,15 +5,17 @@ import 'package:tvbox/music/models/models.dart';
 import 'package:tvbox/music/services/library_store.dart';
 import 'package:tvbox/music/services/player_manager.dart';
 import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/music/widgets/music_skeleton.dart';
 import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/widgets/app_toast.dart';
 
 /// 歌单编辑（本地歌单，**不需要账号**）。
 ///
-/// ── 为什么单独一个文件、且不 import `music_components.dart` ──────
+/// ── 为什么这里 import 的是 `music_skeleton.dart` 而不是 components ──
 /// `music_components.dart` 要 import 本文件来挂「添加到歌单」入口；
-/// 若本文件反过来 import 它取封面组件，就形成**循环依赖**（能用，但很脏）。
-/// 所以这里只用一个轻量封面占位，保持方向单一：components → playlist。
+/// 若本文件反过来 import 它取骨架组件，就形成**循环依赖**。
+/// 所以纯展示的骨架组件放在 `music_skeleton.dart`（不依赖任何页面），
+/// 依赖方向保持单向：components → pages → skeleton ✓
 ///
 /// 数据层在 `MusicLibraryStore`（`createPlaylist` / `renamePlaylist` /
 /// `deletePlaylist` / `addToPlaylist` / `removeFromPlaylist`），
@@ -44,8 +46,11 @@ Future<void> showAddToPlaylistSheet(BuildContext context, Song song) async {
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
                 child: Row(
                   children: [
-                    Icon(Icons.playlist_add_rounded,
-                        size: 18, color: MusicTheme.tint),
+                    Icon(
+                      Icons.playlist_add_rounded,
+                      size: 18,
+                      color: MusicTheme.tint,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -65,8 +70,7 @@ Future<void> showAddToPlaylistSheet(BuildContext context, Song song) async {
               const Divider(height: 1),
               ListTile(
                 leading: Icon(Icons.add_rounded, color: MusicTheme.tint),
-                title: Text('新建歌单',
-                    style: TextStyle(color: MusicTheme.label)),
+                title: Text('新建歌单', style: TextStyle(color: MusicTheme.label)),
                 onTap: () async {
                   final name = await _promptName(ctx, title: '新建歌单');
                   if (name == null) return;
@@ -79,10 +83,13 @@ Future<void> showAddToPlaylistSheet(BuildContext context, Song song) async {
               if (lists.isEmpty)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
-                  child: Text('还没有歌单，点上面「新建歌单」',
-                      style: TextStyle(
-                          color: MusicTheme.secondary,
-                          fontSize: AppTheme.fontBody)),
+                  child: Text(
+                    '还没有歌单，点上面「新建歌单」',
+                    style: TextStyle(
+                      color: MusicTheme.secondary,
+                      fontSize: AppTheme.fontBody,
+                    ),
+                  ),
                 )
               else
                 Flexible(
@@ -99,14 +106,19 @@ Future<void> showAddToPlaylistSheet(BuildContext context, Song song) async {
                                 ? MusicTheme.tint
                                 : MusicTheme.secondary,
                           ),
-                          title: Text(p.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(color: MusicTheme.label)),
-                          subtitle: Text('${p.length} 首',
-                              style: TextStyle(
-                                  color: MusicTheme.secondary,
-                                  fontSize: AppTheme.fontFootnote)),
+                          title: Text(
+                            p.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: MusicTheme.label),
+                          ),
+                          subtitle: Text(
+                            '${p.length} 首',
+                            style: TextStyle(
+                              color: MusicTheme.secondary,
+                              fontSize: AppTheme.fontFootnote,
+                            ),
+                          ),
                           onTap: () async {
                             await store.addToPlaylist(p.id, song);
                             if (!ctx.mounted) return;
@@ -145,10 +157,13 @@ Future<String?> _promptName(
       ),
       actions: [
         TextButton(
-            onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('取消'),
+        ),
         TextButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-            child: const Text('确定')),
+          onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+          child: const Text('确定'),
+        ),
       ],
     ),
   ).whenComplete(ctrl.dispose);
@@ -189,100 +204,134 @@ class _PlaylistListPageState extends State<PlaylistListPage> {
       // `MusicRootView` 的 `Theme(MusicTheme.themeData())` 作用域里 ✗ →
       // 不显式指定的话，页面底色会取**影视侧** AppTheme 的 `scaffoldBackgroundColor`
       //（音乐与影视选不同调色板时一眼就能看出不对 ✗）。
-      // 包整棵 Theme 要动到 Scaffold 的右括号，风险大；这里按最小改动
-      // 先把**底色**拉到音乐主题 ✓（同一批次里其余页面用同样做法 ✓）。
       backgroundColor: MusicTheme.background,
-      appBar: AppBar(
-        title: const Text('我的歌单'),
-        actions: [
-          IconButton(
-            tooltip: '新建歌单',
-            icon: const Icon(Icons.add_rounded),
-            onPressed: _create,
-          ),
+      body: SafeArea(
+        bottom: false,
+        child: ValueListenableBuilder<int>(
+          valueListenable: _store.revisionProxy,
+          builder: (_, __, ___) {
+            final lists = _store.playlists;
+            return Column(
+              children: [
+                MusicPageHeader(
+                  leading: const MusicBackButton(),
+                  title: '我的歌单',
+                  subtitle: lists.isEmpty
+                      ? '本地歌单 · 不需要账号'
+                      : '共 ${lists.length} 个歌单 · '
+                            '${lists.fold<int>(0, (a, p) => a + p.length)} 首歌',
+                  action: MusicRoundAction(
+                    icon: Icons.add_rounded,
+                    tooltip: '新建歌单',
+                    onTap: _create,
+                  ),
+                ),
+                if (lists.isEmpty)
+                  Expanded(child: _empty())
+                else
+                  Expanded(
+                    child: ListView.builder(
+                      // 底部留白：悬浮播放球会盖住最后一行
+                      padding: const EdgeInsets.fromLTRB(0, 6, 0, 120),
+                      itemCount: lists.length,
+                      itemBuilder: (_, i) => _row(lists[i]),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _empty() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: MusicTheme.tint.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Icon(
+                Icons.queue_music_rounded,
+                size: 30,
+                color: MusicTheme.tint,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              '还没有歌单',
+              style: TextStyle(
+                color: MusicTheme.label,
+                fontSize: AppTheme.fontHeadline,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '在歌曲右侧菜单里选「添加到歌单」即可新建，\n也可以点右上角的 + 直接建一个空歌单。',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: MusicTheme.secondary,
+                fontSize: AppTheme.fontFootnote,
+                height: 1.55,
+              ),
+            ),
+            const SizedBox(height: 18),
+            FilledButton(onPressed: _create, child: const Text('新建歌单')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _row(MusicPlaylist p) {
+    final name = p.name;
+    final count = p.length;
+    final id = p.id;
+    return MusicNavTile(
+      icon: Icons.queue_music_rounded,
+      title: name,
+      subtitle: '$count 首',
+      trailing: PopupMenuButton<String>(
+        icon: Icon(Icons.more_horiz, size: 20, color: MusicTheme.secondary),
+        onSelected: (v) async {
+          if (v == 'rename') {
+            final next = await _promptName(
+              context,
+              title: '重命名歌单',
+              initial: name,
+            );
+            if (next == null) return;
+            await _store.renamePlaylist(id, next);
+          } else if (v == 'delete') {
+            final ok = await _confirmDelete(context, name);
+            if (ok != true) return;
+            await _store.deletePlaylist(id);
+            AppToast.show('已删除「$name」', '');
+          }
+        },
+        itemBuilder: (_) => const [
+          PopupMenuItem(value: 'rename', child: Text('重命名')),
+          PopupMenuItem(value: 'delete', child: Text('删除歌单')),
         ],
       ),
-      body: ValueListenableBuilder<int>(
-        valueListenable: _store.revisionProxy,
-        builder: (_, __, ___) {
-          final lists = _store.playlists;
-          if (lists.isEmpty) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 40),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.queue_music_rounded,
-                        size: 40, color: MusicTheme.secondary),
-                    const SizedBox(height: 12),
-                    Text(
-                      '还没有歌单\n在歌曲右侧菜单里选「添加到歌单」即可新建',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                          color: MusicTheme.secondary,
-                          fontSize: AppTheme.fontBody,
-                          height: 1.5),
-                    ),
-                    const SizedBox(height: 16),
-                    FilledButton(
-                      onPressed: _create,
-                      child: const Text('新建歌单'),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-          return ListView.separated(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            itemCount: lists.length,
-            separatorBuilder: (_, __) => const Divider(height: 1),
-            itemBuilder: (_, i) {
-              final p = lists[i];
-              return ListTile(
-                leading: _PlaylistThumb(count: p.length),
-                title: Text(p.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: MusicTheme.label)),
-                subtitle: Text('${p.length} 首',
-                    style: TextStyle(
-                        color: MusicTheme.secondary,
-                        fontSize: AppTheme.fontFootnote)),
-                onTap: () async {
-                  await Navigator.of(context).push<void>(
-                    MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
-                      builder: (_) => PlaylistDetailPage(playlistId: p.id),
-                    ),
-                  );
-                  if (mounted) setState(() {});
-                },
-                trailing: PopupMenuButton<String>(
-                  icon: Icon(Icons.more_horiz, color: MusicTheme.secondary),
-                  onSelected: (v) async {
-                    if (v == 'rename') {
-                      final name = await _promptName(context,
-                          title: '重命名歌单', initial: p.name);
-                      if (name == null) return;
-                      await _store.renamePlaylist(p.id, name);
-                    } else if (v == 'delete') {
-                      final ok = await _confirmDelete(context, p.name);
-                      if (ok != true) return;
-                      await _store.deletePlaylist(p.id);
-                      AppToast.show('已删除「${p.name}」', '');
-                    }
-                  },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(value: 'rename', child: Text('重命名')),
-                    PopupMenuItem(value: 'delete', child: Text('删除歌单')),
-                  ],
-                ),
-              );
-            },
-          );
-        },
-      ),
+      onTap: () async {
+        await Navigator.of(context).push<void>(
+          MaterialPageRoute(
+            settings: const RouteSettings(name: 'music:page'),
+            builder: (_) => PlaylistDetailPage(playlistId: id),
+          ),
+        );
+        if (mounted) setState(() {});
+      },
     );
   }
 }
@@ -295,46 +344,16 @@ Future<bool?> _confirmDelete(BuildContext context, String name) {
       content: Text('确定删除「$name」？歌单里的歌不会被删，只是这个歌单没了。'),
       actions: [
         TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消')),
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('取消'),
+        ),
         FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('删除')),
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('删除'),
+        ),
       ],
     ),
   );
-}
-
-/// 歌单缩略图占位：不引封面组件（见文件头说明），用"曲目数"做成一个小方块。
-class _PlaylistThumb extends StatelessWidget {
-  const _PlaylistThumb({required this.count});
-  final int count;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 44,
-      height: 44,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: MusicTheme.fill,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.queue_music_rounded,
-              size: 16, color: MusicTheme.secondary),
-          const SizedBox(height: 1),
-          Text('$count',
-              style: TextStyle(
-                  color: MusicTheme.secondary,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600)),
-        ],
-      ),
-    );
-  }
 }
 
 // ============================================================
@@ -363,105 +382,169 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<int>(
-      valueListenable: _store.revisionProxy,
-      builder: (_, __, ___) {
-        final p = _store.playlistById(widget.playlistId);
-        if (p == null) {
-          // 歌单可能在别处被删了 —— 给明确提示，不要空白页
-          return Scaffold(
-            appBar: AppBar(title: const Text('歌单')),
-            body: Center(
-              child: Text('歌单已删除',
-                  style: TextStyle(
-                      color: MusicTheme.secondary,
-                      fontSize: AppTheme.fontBody)),
-            ),
-          );
-        }
-        return Scaffold(
-          appBar: AppBar(
-            title: Text(p.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-            actions: [
-              if (p.songs.isNotEmpty)
-                IconButton(
-                  tooltip: '播放全部',
-                  icon: const Icon(Icons.play_arrow_rounded),
-                  onPressed: () => _player.playQueue(p.songs, index: 0),
-                ),
-            ],
-          ),
-          body: p.songs.isEmpty
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 40),
-                    child: Text(
-                      '这个歌单还没有歌\n在歌曲右侧菜单里选「添加到歌单」',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
+    return Scaffold(
+      backgroundColor: MusicTheme.background,
+      body: SafeArea(
+        bottom: false,
+        child: ValueListenableBuilder<int>(
+          valueListenable: _store.revisionProxy,
+          builder: (_, __, ___) {
+            final p = _store.playlistById(widget.playlistId);
+            if (p == null) {
+              // 歌单可能在别处被删了 —— 给明确提示，不要空白页
+              return Column(
+                children: [
+                  const MusicPageHeader(
+                    leading: MusicBackButton(),
+                    title: '歌单',
+                    subtitle: '这个歌单已经不存在了',
+                  ),
+                  Expanded(
+                    child: Center(
+                      child: Text(
+                        '歌单已删除',
+                        style: TextStyle(
                           color: MusicTheme.secondary,
                           fontSize: AppTheme.fontBody,
-                          height: 1.5),
+                        ),
+                      ),
                     ),
                   ),
-                )
-              // ── 🔴 必须监听 player（同 ximalaya_album_page 的说明）────
-              // 外层只监听了 `_store.revisionProxy`，而下面 `playing` 读的是
-              // `_player.currentSong` → 点歌后**高亮不刷新** ✗
-              : ListenableBuilder(
-                  listenable: _player,
-                  builder: (context, _) => ListView.separated(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  itemCount: p.songs.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (_, i) {
-                    final s = p.songs[i];
-                    final playing =
-                        _player.currentSong?.identityKey == s.identityKey;
-                    return ListTile(
-                      leading: SizedBox(
-                        width: 28,
-                        child: Text('${i + 1}',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                                color: playing
-                                    ? MusicTheme.tint
-                                    : MusicTheme.secondary,
-                                fontSize: AppTheme.fontFootnote)),
+                ],
+              );
+            }
+            return Column(
+              children: [
+                MusicPageHeader(
+                  leading: const MusicBackButton(),
+                  title: p.name,
+                  subtitle: '${p.length} 首 · 本地歌单',
+                  action: p.songs.isEmpty
+                      ? null
+                      : MusicRoundAction(
+                          icon: Icons.play_arrow_rounded,
+                          tooltip: '播放全部',
+                          onTap: () => _player.playQueue(p.songs, index: 0),
+                        ),
+                ),
+                if (p.songs.isEmpty)
+                  Expanded(
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 40),
+                        child: Text(
+                          '这个歌单还没有歌\n在歌曲右侧菜单里选「添加到歌单」',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: MusicTheme.secondary,
+                            fontSize: AppTheme.fontBody,
+                            height: 1.5,
+                          ),
+                        ),
                       ),
-                      title: Text(
+                    ),
+                  )
+                else
+                  // ── 🔴 必须监听 player（同 ximalaya_album_page 的说明）────
+                  // 外层只监听了 `_store.revisionProxy`，而下面 `playing` 读的是
+                  // `_player.currentSong` → 点歌后**高亮不刷新** ✗
+                  Expanded(
+                    child: ListenableBuilder(
+                      listenable: _player,
+                      builder: (context, _) => ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(0, 6, 0, 120),
+                        itemCount: p.songs.length,
+                        itemBuilder: (_, i) => _row(p, i),
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _row(MusicPlaylist p, int i) {
+    final songs = p.songs;
+    final s = songs[i];
+    final playing = _player.currentSong?.identityKey == s.identityKey;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 3, 16, 3),
+      child: Material(
+        color: MusicTheme.card,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => _player.playQueue(songs, index: i),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 24,
+                  child: Text(
+                    '${i + 1}',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: playing ? MusicTheme.tint : MusicTheme.secondary,
+                      fontSize: AppTheme.fontFootnote,
+                      fontWeight: playing ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
                         s.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: playing ? MusicTheme.tint : MusicTheme.label,
-                          fontWeight:
-                              playing ? FontWeight.w600 : FontWeight.w400,
+                          fontSize: AppTheme.fontSubhead,
+                          fontWeight: playing
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                          height: 1.25,
                         ),
                       ),
-                      subtitle: Text(s.artists,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              color: MusicTheme.secondary,
-                              fontSize: AppTheme.fontFootnote)),
-                      onTap: () => _player.playQueue(p.songs, index: i),
-                      trailing: IconButton(
-                        tooltip: '移出歌单',
-                        icon: Icon(Icons.remove_circle_outline,
-                            size: 20, color: MusicTheme.secondary),
-                        onPressed: () async {
-                          await _store.removeFromPlaylist(p.id, s);
-                          if (!mounted) return;
-                          AppToast.show('已移出「${s.name}」', '');
-                        },
+                      const SizedBox(height: 2),
+                      Text(
+                        s.artists,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: MusicTheme.secondary,
+                          fontSize: AppTheme.fontCaption,
+                        ),
                       ),
-                    );
-                  },
+                    ],
                   ),
                 ),
-        );
-      },
+                IconButton(
+                  tooltip: '移出歌单',
+                  visualDensity: VisualDensity.compact,
+                  icon: Icon(
+                    Icons.remove_circle_outline,
+                    size: 19,
+                    color: MusicTheme.secondary,
+                  ),
+                  onPressed: () async {
+                    await _store.removeFromPlaylist(p.id, s);
+                    if (!mounted) return;
+                    AppToast.show('已移出「${s.name}」', '');
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

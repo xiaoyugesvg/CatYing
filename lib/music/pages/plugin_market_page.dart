@@ -132,17 +132,21 @@ class _PluginMarketPageState extends State<PluginMarketPage> {
   Future<void> _openVariables(PluginMarketEntry e) async {
     final src = ThirdPartySourceStore.instance.byId(e.sourceId);
     if (src == null) return;
-    await Navigator.of(context).push<bool>(MaterialPageRoute<bool>(
-      settings: const RouteSettings(name: 'music:page'),
-      builder: (_) => PluginVariablesPage(source: src),
-    ));
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        settings: const RouteSettings(name: 'music:page'),
+        builder: (_) => PluginVariablesPage(source: src),
+      ),
+    );
   }
 
   Future<void> _openSubscriptions() async {
-    await Navigator.of(context).push<void>(MaterialPageRoute<void>(
-      settings: const RouteSettings(name: 'music:page'),
-      builder: (_) => const PluginSubscriptionPage(),
-    ));
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        settings: const RouteSettings(name: 'music:page'),
+        builder: (_) => const PluginSubscriptionPage(),
+      ),
+    );
     // 订阅页里可能加了新清单 → 回来重新拉一次
     if (mounted) _load();
   }
@@ -153,90 +157,100 @@ class _PluginMarketPageState extends State<PluginMarketPage> {
       data: MusicTheme.themeData(),
       child: Scaffold(
         backgroundColor: MusicTheme.background,
-        appBar: AppBar(
-          backgroundColor: MusicTheme.background,
-          elevation: 0,
-          iconTheme: IconThemeData(color: MusicTheme.label),
-          title: Text(
-            '插件市场',
-            style: TextStyle(
-              color: MusicTheme.label,
-              fontSize: AppTheme.fontHeadline,
-            ),
-          ),
-          actions: [
-            IconButton(
-              tooltip: '定位到已安装',
-              icon: Icon(Icons.my_location_rounded, color: MusicTheme.tint),
-              onPressed: _locateInstalled,
-            ),
-            IconButton(
-              tooltip: '订阅管理',
-              icon: Icon(Icons.rss_feed_rounded, color: MusicTheme.tint),
-              onPressed: _openSubscriptions,
-            ),
-            IconButton(
-              tooltip: '刷新清单',
-              icon: Icon(Icons.refresh_rounded, color: MusicTheme.tint),
-              onPressed: _loading ? null : _load,
-            ),
-          ],
-        ),
-        body: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-              child: Container(
-                height: 40,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: BoxDecoration(
-                  color: MusicTheme.fill,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
+        body: SafeArea(
+          bottom: false,
+          child: Column(
+            children: [
+              // 和其他音乐子页面统一：返回 + 大标题 + 说明 + 右侧动作
+              MusicPageHeader(
+                leading: const MusicBackButton(),
+                title: '插件市场',
+                subtitle: _loading
+                    ? '正在拉取订阅清单…'
+                    : '${_market.entries.length} 个插件 · 来自已启用的订阅',
+                action: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.search_rounded,
-                        size: 18, color: MusicTheme.secondary),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: _searchCtrl,
-                        style: TextStyle(
-                          color: MusicTheme.label,
-                          fontSize: AppTheme.fontHeadline,
-                        ),
-                        cursorColor: MusicTheme.tint,
-                        textInputAction: TextInputAction.search,
-                        onSubmitted: (_) => FocusScope.of(context).unfocus(),
-                        decoration: InputDecoration(
-                          isDense: true,
-                          filled: false,
-                          border: InputBorder.none,
-                          enabledBorder: InputBorder.none,
-                          focusedBorder: InputBorder.none,
-                          hintText: '搜索插件',
-                          hintStyle: TextStyle(
-                            color: MusicTheme.secondary,
-                            fontSize: AppTheme.fontBody,
-                          ),
-                        ),
-                      ),
+                    MusicRoundAction(
+                      icon: Icons.my_location_rounded,
+                      tooltip: '定位到已安装',
+                      onTap: _locateInstalled,
                     ),
-                    if (_query.isNotEmpty)
-                      GestureDetector(
-                        onTap: () {
-                          _searchCtrl.clear();
-                          setState(() => _query = '');
-                        },
-                        child: Icon(Icons.cancel,
-                            size: 16, color: MusicTheme.secondary),
-                      ),
+                    const SizedBox(width: 6),
+                    MusicRoundAction(
+                      icon: Icons.rss_feed_rounded,
+                      tooltip: '订阅管理',
+                      onTap: _openSubscriptions,
+                    ),
+                    const SizedBox(width: 6),
+                    MusicRoundAction(
+                      icon: Icons.refresh_rounded,
+                      tooltip: '刷新清单',
+                      onTap: _loading ? null : _load,
+                    ),
                   ],
                 ),
               ),
-            ),
-            Expanded(child: _body()),
-          ],
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: Container(
+                  height: 40,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: MusicTheme.fill,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.search_rounded,
+                        size: 18,
+                        color: MusicTheme.secondary,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: _searchCtrl,
+                          style: TextStyle(
+                            color: MusicTheme.label,
+                            fontSize: AppTheme.fontHeadline,
+                          ),
+                          cursorColor: MusicTheme.tint,
+                          textInputAction: TextInputAction.search,
+                          onSubmitted: (_) => FocusScope.of(context).unfocus(),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            filled: false,
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            hintText: '搜索插件',
+                            hintStyle: TextStyle(
+                              color: MusicTheme.secondary,
+                              fontSize: AppTheme.fontBody,
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (_query.isNotEmpty)
+                        GestureDetector(
+                          onTap: () {
+                            _searchCtrl.clear();
+                            setState(() => _query = '');
+                          },
+                          child: Icon(
+                            Icons.cancel,
+                            size: 16,
+                            color: MusicTheme.secondary,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              Expanded(child: _body()),
+            ],
+          ),
         ),
       ),
     );
@@ -257,8 +271,8 @@ class _PluginMarketPageState extends State<PluginMarketPage> {
     final list = _query.isEmpty
         ? all
         : all
-            .where((e) => e.name.toLowerCase().contains(_query.toLowerCase()))
-            .toList();
+              .where((e) => e.name.toLowerCase().contains(_query.toLowerCase()))
+              .toList();
 
     return ValueListenableBuilder<int>(
       valueListenable: ThirdPartySourceStore.instance.revision,
@@ -290,8 +304,11 @@ class _PluginMarketPageState extends State<PluginMarketPage> {
           storeOrder[storeAll[i].id] = i;
         }
         final installedList = list.where(_market.isInstalled).toList()
-          ..sort((a, b) => (storeOrder[a.sourceId] ?? 1 << 20)
-              .compareTo(storeOrder[b.sourceId] ?? 1 << 20));
+          ..sort(
+            (a, b) => (storeOrder[a.sourceId] ?? 1 << 20).compareTo(
+              storeOrder[b.sourceId] ?? 1 << 20,
+            ),
+          );
         final others = list.where((e) => !_market.isInstalled(e)).toList();
 
         if (list.isEmpty) {
@@ -316,9 +333,9 @@ class _PluginMarketPageState extends State<PluginMarketPage> {
               child: Text(
                 _query.isEmpty
                     ? '共 ${all.length} 个插件 · 已安装 $installed'
-                        '${updatable > 0 ? ' · $updatable 个可更新' : ''}'
+                          '${updatable > 0 ? ' · $updatable 个可更新' : ''}'
                     : '「$_query」· 找到 ${list.length} 个'
-                        '${installedList.isEmpty ? '' : ' · 已安装 ${installedList.length}'}',
+                          '${installedList.isEmpty ? '' : ' · 已安装 ${installedList.length}'}',
                 style: TextStyle(
                   color: MusicTheme.secondary,
                   fontSize: AppTheme.fontFootnote,
@@ -338,11 +355,11 @@ class _PluginMarketPageState extends State<PluginMarketPage> {
                       sliver: SliverGrid(
                         gridDelegate:
                             const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          mainAxisSpacing: 10,
-                          crossAxisSpacing: 10,
-                          mainAxisExtent: 132,
-                        ),
+                              crossAxisCount: 2,
+                              mainAxisSpacing: 10,
+                              crossAxisSpacing: 10,
+                              mainAxisExtent: 132,
+                            ),
                         delegate: SliverChildBuilderDelegate(
                           (_, i) => _draggableCard(
                             installedList[i],
@@ -362,11 +379,11 @@ class _PluginMarketPageState extends State<PluginMarketPage> {
                       sliver: SliverGrid(
                         gridDelegate:
                             const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          mainAxisSpacing: 10,
-                          crossAxisSpacing: 10,
-                          mainAxisExtent: 132,
-                        ),
+                              crossAxisCount: 2,
+                              mainAxisSpacing: 10,
+                              crossAxisSpacing: 10,
+                              mainAxisExtent: 132,
+                            ),
                         delegate: SliverChildBuilderDelegate(
                           (_, i) => _entryCard(others[i]),
                           childCount: others.length,
@@ -471,14 +488,20 @@ class _PluginMarketPageState extends State<PluginMarketPage> {
                   color: MusicTheme.tint.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(9),
                 ),
-                child: Icon(Icons.extension_rounded,
-                    size: 17, color: MusicTheme.tint),
+                child: Icon(
+                  Icons.extension_rounded,
+                  size: 17,
+                  color: MusicTheme.tint,
+                ),
               ),
               const Spacer(),
               // 已安装的卡片给了拖动把手（长按拖动排序）
               if (draggable)
-                Icon(Icons.drag_indicator_rounded,
-                    size: 18, color: MusicTheme.secondary),
+                Icon(
+                  Icons.drag_indicator_rounded,
+                  size: 18,
+                  color: MusicTheme.secondary,
+                ),
             ],
           ),
           const SizedBox(height: 8),

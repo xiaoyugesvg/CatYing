@@ -81,34 +81,11 @@ class _ChartsPageState extends State<ChartsPage>
         child: ListView(
           padding: const EdgeInsets.only(bottom: 160),
           children: [
-            // ── 标题 ────────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text('榜单',
-                        style: TextStyle(
-                            color: MusicTheme.label,
-                            fontSize: AppTheme.fontPageTitle,
-                            fontWeight: FontWeight.w700)),
-                  ),
-                  // 平台标签：让用户知道"这是哪个平台的榜单"
-                  //（切平台后榜单完全不同，不标出来会困惑）
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: MusicTheme.fill,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(_source.displayName,
-                        style: TextStyle(
-                            color: MusicTheme.secondary,
-                            fontSize: AppTheme.fontCaption)),
-                  ),
-                ],
-              ),
+            // ── 标题（对齐设计稿：大标题 + 副标题，副标题顺便交代
+            //    "这是哪个平台的榜单" —— 切平台后榜单完全不同，不标会困惑）──
+            MusicPageHeader(
+              title: '榜单',
+              subtitle: '当前平台 · ${_source.displayName}',
             ),
 
             if (_loading)

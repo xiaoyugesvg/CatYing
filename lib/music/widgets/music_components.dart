@@ -15,6 +15,12 @@ import 'package:tvbox/music/widgets/comment_sheet.dart';
 import 'package:tvbox/music/widgets/quick_actions.dart';
 import 'package:tvbox/music/pages/playlist_page.dart';
 
+// 页面骨架组件（大标题 / 返回按钮 / 统计格 / 卡片式导航行）已抽到
+// `music_skeleton.dart`：本文件 import 了 `pages/playlist_page.dart`，
+// 而那个页面也要用这些组件 —— 留在这里会形成循环依赖。
+// 这里**转导出**，老的 `import music_components.dart` 调用点零改动。
+export 'package:tvbox/music/widgets/music_skeleton.dart';
+
 /// 音乐模块的通用 UI 组件 —— 对应 Beans 的 `Components.swift` / `SongCell.swift`。
 ///
 /// 这里统一封装封面、VIP 角标、歌曲行、玻璃卡片，
@@ -139,10 +145,9 @@ class _CoverImageState extends State<CoverImage> {
         // 淡入让"图从无到有"不那么突兀（列表滚动时尤其明显）
         fadeInDuration: const Duration(milliseconds: 180),
         // 网易云的封面有多个尺寸后缀，缓存键用完整 URL 即可
-        memCacheWidth:
-            (widget.size * MediaQuery.devicePixelRatioOf(context))
-                .round()
-                .clamp(1, 2048),
+        memCacheWidth: (widget.size * MediaQuery.devicePixelRatioOf(context))
+            .round()
+            .clamp(1, 2048),
       );
     }
     return ClipRRect(
@@ -152,23 +157,25 @@ class _CoverImageState extends State<CoverImage> {
   }
 
   Widget _placeholder(double radius) => Container(
-        width: widget.size,
-        height: widget.size,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              MusicTheme.tint.withValues(alpha: 0.75),
-              MusicTheme.tint.withValues(alpha: 0.35),
-            ],
-          ),
-        ),
-        alignment: Alignment.center,
-        child: Icon(Icons.music_note_rounded,
-            size: widget.size * 0.45,
-            color: Colors.white.withValues(alpha: 0.9)),
-      );
+    width: widget.size,
+    height: widget.size,
+    decoration: BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          MusicTheme.tint.withValues(alpha: 0.75),
+          MusicTheme.tint.withValues(alpha: 0.35),
+        ],
+      ),
+    ),
+    alignment: Alignment.center,
+    child: Icon(
+      Icons.music_note_rounded,
+      size: widget.size * 0.45,
+      color: Colors.white.withValues(alpha: 0.9),
+    ),
+  );
 }
 
 // ============================================================
@@ -260,8 +267,9 @@ class SongCell extends StatelessWidget {
                             ? MusicTheme.tint
                             : MusicTheme.secondary,
                         fontSize: AppTheme.fontSubhead,
-                        fontWeight:
-                            isCurrent ? FontWeight.w600 : FontWeight.w400,
+                        fontWeight: isCurrent
+                            ? FontWeight.w600
+                            : FontWeight.w400,
                       ),
                     ),
                   ),
@@ -302,12 +310,17 @@ class SongCell extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                            color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote),
+                          color: MusicTheme.secondary,
+                          fontSize: AppTheme.fontFootnote,
+                        ),
                       ),
                     ],
                   ),
                 ),
-                if (trailing != null) trailing! else _defaultTrailing(context, player),
+                if (trailing != null)
+                  trailing!
+                else
+                  _defaultTrailing(context, player),
               ],
             ),
           ),
@@ -380,19 +393,25 @@ Future<void> showSongActions(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(song.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                color: MusicTheme.label,
-                                fontSize: AppTheme.fontHeadline,
-                                fontWeight: FontWeight.w600)),
-                        Text(song.artists,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                color: MusicTheme.secondary,
-                                fontSize: AppTheme.fontFootnote)),
+                        Text(
+                          song.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: MusicTheme.label,
+                            fontSize: AppTheme.fontHeadline,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Text(
+                          song.artists,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: MusicTheme.secondary,
+                            fontSize: AppTheme.fontFootnote,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -471,8 +490,7 @@ Future<void> showSongActions(
                       // ⚠️ 既有 `MusicApi.comments()` 只走网易云。
                       // 对酷狗的歌必须挡住，否则拿酷狗 id 查网易云必然空。
                       if (song.source != SongSource.netease) {
-                        AppToast.show(
-                            '${song.source.displayName}暂无评论接口', '');
+                        AppToast.show('${song.source.displayName}暂无评论接口', '');
                         return;
                       }
                       showCommentSheet(context, song);
@@ -546,12 +564,15 @@ class _SongActionTile extends StatelessWidget {
             child: Icon(icon, size: 20, color: MusicTheme.tint),
           ),
           const SizedBox(height: 5),
-          Text(label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  color: MusicTheme.secondary,
-                  fontSize: AppTheme.fontCaption)),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: MusicTheme.secondary,
+              fontSize: AppTheme.fontCaption,
+            ),
+          ),
         ],
       ),
     );
@@ -614,7 +635,12 @@ class GlassCard extends StatelessWidget {
 
 /// 分区标题（Beans 各处 "推荐歌单 / 榜单 / 新歌" 的标题行）
 class SectionTitle extends StatelessWidget {
-  const SectionTitle({super.key, required this.title, this.action, this.onAction});
+  const SectionTitle({
+    super.key,
+    required this.title,
+    this.action,
+    this.onAction,
+  });
 
   final String title;
   final String? action;
@@ -637,22 +663,32 @@ class SectionTitle extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          Text(title,
-              style: TextStyle(
-                  color: MusicTheme.label,
-                  fontSize: AppTheme.fontTitle3,
-                  fontWeight: FontWeight.w700)),
+          Text(
+            title,
+            style: TextStyle(
+              color: MusicTheme.label,
+              fontSize: AppTheme.fontTitle3,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
           const Spacer(),
           if (action != null)
             GestureDetector(
               onTap: onAction,
               child: Row(
                 children: [
-                  Text(action!,
-                      style:
-                          TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead)),
-                  Icon(Icons.chevron_right,
-                      size: 16, color: MusicTheme.secondary),
+                  Text(
+                    action!,
+                    style: TextStyle(
+                      color: MusicTheme.secondary,
+                      fontSize: AppTheme.fontSubhead,
+                    ),
+                  ),
+                  Icon(
+                    Icons.chevron_right,
+                    size: 16,
+                    color: MusicTheme.secondary,
+                  ),
                 ],
               ),
             ),
@@ -686,7 +722,8 @@ class HorizontalCards extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16),
         itemCount: itemCount,
         separatorBuilder: (_, __) => const SizedBox(width: 12),
-        itemBuilder: (c, i) => SizedBox(width: itemWidth, child: itemBuilder(c, i)),
+        itemBuilder: (c, i) =>
+            SizedBox(width: itemWidth, child: itemBuilder(c, i)),
       ),
     );
   }
@@ -728,32 +765,47 @@ class CoverCard extends StatelessWidget {
                   right: 6,
                   top: 6,
                   child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.55),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: Text(badge!,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: AppTheme.fontCaption,
-                            fontWeight: FontWeight.w600)),
+                    child: Text(
+                      badge!,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: AppTheme.fontCaption,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
                 ),
             ],
           ),
           const SizedBox(height: 6),
-          Text(title,
-              maxLines: 2,
+          Text(
+            title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: MusicTheme.label,
+              fontSize: AppTheme.fontFootnote,
+              height: 1.3,
+            ),
+          ),
+          if (subtitle != null)
+            Text(
+              subtitle!,
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                  color: MusicTheme.label, fontSize: AppTheme.fontFootnote, height: 1.3)),
-          if (subtitle != null)
-            Text(subtitle!,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontCaption)),
+                color: MusicTheme.secondary,
+                fontSize: AppTheme.fontCaption,
+              ),
+            ),
         ],
       ),
     );

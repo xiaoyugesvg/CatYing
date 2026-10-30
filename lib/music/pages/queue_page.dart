@@ -41,6 +41,23 @@ class MusicQueuePage extends StatelessWidget {
           ),
         ),
         iconTheme: IconThemeData(color: MusicTheme.label),
+        // 副标题条：把「怎么用」写在标题下面（设计稿每页都有这一行小字），
+        // 用户第一次进来就知道能拖、能滑删，不用猜。
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(20),
+          child: ListenableBuilder(
+            listenable: player,
+            builder: (context, _) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(
+                '共 ${player.queue.length} 首 · 拖右侧手柄排序 · 左滑删除',
+                style: TextStyle(
+                    color: MusicTheme.secondary,
+                    fontSize: AppTheme.fontCaption),
+              ),
+            ),
+          ),
+        ),
         actions: [
           ListenableBuilder(
             listenable: player,

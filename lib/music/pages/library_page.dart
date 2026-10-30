@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:tvbox/music/models/models.dart';
 import 'package:tvbox/music/services/library_store.dart';
+import 'package:tvbox/music/services/download_service.dart';
 import 'package:tvbox/music/services/music_api.dart';
 import 'package:tvbox/music/services/player_manager.dart';
 import 'package:tvbox/music/services/settings_store.dart';
@@ -124,13 +125,25 @@ class _LibraryPageState extends State<LibraryPage>
         child: ListView(
         padding: const EdgeInsets.only(bottom: 160),
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
-            child: Text('乐库',
-                style: TextStyle(
-                    color: MusicTheme.label,
-                    fontSize: AppTheme.fontPageTitle,
-                    fontWeight: FontWeight.w700)),
+          // 大标题 + 副标题（对齐设计稿「墨律」：每页都是"大标题 + 一行说明"）
+          const MusicPageHeader(
+            title: '乐库',
+            subtitle: '全部存在本机 · 不需要账号',
+          ),
+          // 四个统计格：收藏 / 歌单 / 最近 / 下载（等分，随数量变）
+          MusicStatRow(
+            stats: [
+              MusicStat(value: '${_favorites.length}', label: '收藏'),
+              MusicStat(
+                value: '${MusicLibraryStore.instance.playlists.length}',
+                label: '歌单',
+              ),
+              MusicStat(value: '${_recent.length}', label: '最近'),
+              MusicStat(
+                value: '${MusicDownloadService.instance.localSongs.length}',
+                label: '下载',
+              ),
+            ],
           ),
 
           // ══════════════════════════════════════════════════════════
@@ -147,34 +160,25 @@ class _LibraryPageState extends State<LibraryPage>
           //    而且 `榜单` 已拆成独立 tab（见 charts_page.dart），
           //    这里**不再重复**。
           const SectionTitle(title: '我的内容'),
-          ListTile(
-            leading: Icon(Icons.queue_music_rounded, color: MusicTheme.tint),
-            title: Text('我的歌单',
-                style: TextStyle(
-                    color: MusicTheme.label,
-                    fontSize: AppTheme.fontHeadline)),
-            subtitle: Text('本地歌单，不需要账号',
-                style: TextStyle(
-                    color: MusicTheme.secondary,
-                    fontSize: AppTheme.fontFootnote)),
-            trailing:
-                Icon(Icons.chevron_right, size: 18, color: MusicTheme.secondary),
+          // 卡片式导航行（原来是裸 ListTile：系统列表长相，
+          // 跟下面的圆角卡片不是一个语言 —— 见 music_components 的说明）
+          MusicNavTile(
+            icon: Icons.queue_music_rounded,
+            title: '我的歌单',
+            subtitle: '本地歌单，不需要账号',
+            trailingText: '${MusicLibraryStore.instance.playlists.length}',
             onTap: () => Navigator.of(context).push<void>(
-              MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),builder: (_) => const PlaylistListPage()),
+              MaterialPageRoute(
+                  settings: const RouteSettings(name: 'music:page'),
+                  builder: (_) => const PlaylistListPage()),
             ),
           ),
-          ListTile(
-            leading: Icon(Icons.download_done_rounded, color: MusicTheme.tint),
-            title: Text('本地音乐',
-                style: TextStyle(
-                    color: MusicTheme.label,
-                    fontSize: AppTheme.fontHeadline)),
-            subtitle: Text('已下载的歌，离线可听',
-                style: TextStyle(
-                    color: MusicTheme.secondary,
-                    fontSize: AppTheme.fontFootnote)),
-            trailing:
-                Icon(Icons.chevron_right, size: 18, color: MusicTheme.secondary),
+          MusicNavTile(
+            icon: Icons.download_done_rounded,
+            title: '本地音乐',
+            subtitle: '已下载的歌，离线可听',
+            trailingText:
+                '${MusicDownloadService.instance.localSongs.length}',
             onTap: () => Navigator.of(context).push<void>(
               MaterialPageRoute(
                 settings: const RouteSettings(name: 'music:page'),

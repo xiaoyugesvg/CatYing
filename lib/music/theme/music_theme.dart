@@ -312,6 +312,81 @@ class MusicTheme {
         TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
         TargetPlatform.android: CupertinoPageTransitionsBuilder(),
       }),
+
+      // ── 统一所有音乐子页的顶栏（2026-10-30）────────────────────
+      //
+      // 用户：「音乐按你设计的 UI 界面，优化美化每一个分类界面吧，
+      // 还有其余页面。」
+      //
+      // 之前这里**只配了底色**，没配 `appBarTheme` —— 于是本地音乐 /
+      // 我的歌单 / 歌单详情 / 源管理 / 插件市场 / 各平台专辑页全都用
+      // Material 默认顶栏：20 号 Roboto、默认灰底、滚动时还会变一层色。
+      // 摆在手绘的圆角卡片旁边，一眼就能看出"这是系统列表，不是这个 App"。
+      //
+      // 现在统一成：卡片底色 + 18 号粗标题 + 左对齐 + 无阴影 + 滚动不变色。
+      // 改这一处，十几个子页一起对齐，比逐页改 AppBar 稳。
+      appBarTheme: AppBarTheme(
+        backgroundColor: background,
+        foregroundColor: label,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        centerTitle: false,
+        titleSpacing: 16,
+        titleTextStyle: TextStyle(
+          color: label,
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.1,
+        ),
+        iconTheme: IconThemeData(color: label, size: 22),
+        actionsIconTheme: IconThemeData(color: label, size: 22),
+      ),
+
+      // 列表项：图标走强调色，标题走正文色，副标题走次级色。
+      // 音乐模块里还有不少 ListTile（歌单选择、源列表），
+      // 不配的话它们会用默认的蓝/灰。
+      listTileTheme: ListTileThemeData(
+        iconColor: tint,
+        textColor: label,
+        titleTextStyle: TextStyle(
+          color: label,
+          fontSize: AppTheme.fontHeadline,
+          fontWeight: FontWeight.w500,
+        ),
+        subtitleTextStyle: TextStyle(
+          color: secondary,
+          fontSize: AppTheme.fontFootnote,
+        ),
+      ),
+
+      // 分隔线统一 0.5px：音乐模块的卡片都是圆角的，
+      // 1px 的实线在中间显得很硬。
+      dividerTheme: DividerThemeData(
+        color: divider,
+        thickness: 0.5,
+        space: 0.5,
+      ),
+
+      iconTheme: IconThemeData(color: label, size: 22),
+
+      // 弹层（底部 sheet）统一卡片底 + 顶部圆角
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: card,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+      ),
+
+      // SnackBar 别用 Material 默认的深灰 —— 音乐模块的 toast 走 AppToast，
+      // 这里只是兜底，保持配色一致。
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: card,
+        contentTextStyle: TextStyle(color: label, fontSize: AppTheme.fontBody),
+        behavior: SnackBarBehavior.floating,
+      ),
     );
   }
 }

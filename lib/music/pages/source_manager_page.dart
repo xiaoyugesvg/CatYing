@@ -120,14 +120,20 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     return Theme(
       data: MusicTheme.themeData(),
       child: Scaffold(
-        backgroundColor: Colors.transparent,
+        // push 到 root Navigator → 不在音乐 Theme 作用域里；
+        // 透明底色会让**影视侧**的 canvas 色透出来（深色下一眼能看出不对）。
+        backgroundColor: MusicTheme.background,
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
           iconTheme: IconThemeData(color: MusicTheme.label),
-          title: Text('音乐源',
-              style:
-                  TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
+          title: Text(
+            '音乐源',
+            style: TextStyle(
+              color: MusicTheme.label,
+              fontSize: AppTheme.fontHeadline,
+            ),
+          ),
           bottom: _checking
               ? PreferredSize(
                   preferredSize: const Size.fromHeight(2),
@@ -145,10 +151,11 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                   ? '体检中 $_checkDone/$_checkTotal'
                   : '音源体检（批量测活）',
               icon: Icon(
-                  _checking
-                      ? Icons.hourglass_top_rounded
-                      : Icons.monitor_heart_outlined,
-                  color: MusicTheme.tint),
+                _checking
+                    ? Icons.hourglass_top_rounded
+                    : Icons.monitor_heart_outlined,
+                color: MusicTheme.tint,
+              ),
               onPressed: _checking ? null : _runHealth,
             ),
             IconButton(
@@ -158,11 +165,14 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
             ),
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: Text('完成',
-                  style: TextStyle(
-                      color: MusicTheme.tint,
-                      fontSize: AppTheme.fontSubhead,
-                      fontWeight: FontWeight.w600)),
+              child: Text(
+                '完成',
+                style: TextStyle(
+                  color: MusicTheme.tint,
+                  fontSize: AppTheme.fontSubhead,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
           ],
         ),
@@ -214,8 +224,9 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
       AppToast.show('正在体检中…', '');
       return;
     }
-    final targets =
-        ThirdPartySourceStore.instance.all.where((s) => s.enabled).toList();
+    final targets = ThirdPartySourceStore.instance.all
+        .where((s) => s.enabled)
+        .toList();
     if (targets.isEmpty) {
       AppToast.show('没有已启用的音源', '');
       return;
@@ -225,102 +236,114 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
       _checkDone = 0;
       _checkTotal = targets.length;
     });
-    final ok = await health.checkAll(targets, onProgress: (d, t) {
-      if (mounted) setState(() => _checkDone = d);
-    });
+    final ok = await health.checkAll(
+      targets,
+      onProgress: (d, t) {
+        if (mounted) setState(() => _checkDone = d);
+      },
+    );
     if (!mounted) return;
     setState(() => _checking = false);
     AppToast.show('体检完成：$ok/${targets.length} 可用', '');
   }
 
   Widget _checkBanner() => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 13,
-              height: 13,
-              child: CircularProgressIndicator(
-                  strokeWidth: 1.6, color: MusicTheme.tint),
-            ),
-            const SizedBox(width: 8),
-            Text('正在测活 $_checkDone/$_checkTotal（每源最多 15 秒）',
-                style: TextStyle(
-                    color: MusicTheme.secondary,
-                    fontSize: AppTheme.fontCaption)),
-          ],
+    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+    child: Row(
+      children: [
+        SizedBox(
+          width: 13,
+          height: 13,
+          child: CircularProgressIndicator(
+            strokeWidth: 1.6,
+            color: MusicTheme.tint,
+          ),
         ),
-      );
+        const SizedBox(width: 8),
+        Text(
+          '正在测活 $_checkDone/$_checkTotal（每源最多 15 秒）',
+          style: TextStyle(
+            color: MusicTheme.secondary,
+            fontSize: AppTheme.fontCaption,
+          ),
+        ),
+      ],
+    ),
+  );
 
   /// 有失效源时给一条「一键禁用」的操作条
   Widget _failedBanner(int enabledFailed) => Container(
-        margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-        padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
-        decoration: BoxDecoration(
-          color: Colors.redAccent.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-              color: Colors.redAccent.withValues(alpha: 0.35), width: 0.8),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.error_outline,
-                size: 16, color: Colors.redAccent),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                enabledFailed > 0
-                    ? '$enabledFailed 个已启用音源体检失效'
-                    : '失效音源都已被禁用',
-                style: TextStyle(
-                    color: MusicTheme.label,
-                    fontSize: AppTheme.fontFootnote),
-              ),
+    margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+    padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+    decoration: BoxDecoration(
+      color: Colors.redAccent.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(
+        color: Colors.redAccent.withValues(alpha: 0.35),
+        width: 0.8,
+      ),
+    ),
+    child: Row(
+      children: [
+        const Icon(Icons.error_outline, size: 16, color: Colors.redAccent),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            enabledFailed > 0 ? '$enabledFailed 个已启用音源体检失效' : '失效音源都已被禁用',
+            style: TextStyle(
+              color: MusicTheme.label,
+              fontSize: AppTheme.fontFootnote,
             ),
-            if (enabledFailed > 0)
-              TextButton(
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.redAccent,
-                  minimumSize: const Size(0, 32),
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  visualDensity: VisualDensity.compact,
-                ),
-                onPressed: () async {
-                  final n = await SourceHealthService.instance.disableFailed();
-                  if (!context.mounted) return;
-                  AppToast.show('已禁用 $n 个失效音源', '');
-                },
-                child: const Text('一键禁用',
-                    style: TextStyle(fontSize: AppTheme.fontFootnote)),
-              ),
-          ],
+          ),
         ),
-      );
+        if (enabledFailed > 0)
+          TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.redAccent,
+              minimumSize: const Size(0, 32),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              visualDensity: VisualDensity.compact,
+            ),
+            onPressed: () async {
+              final n = await SourceHealthService.instance.disableFailed();
+              if (!context.mounted) return;
+              AppToast.show('已禁用 $n 个失效音源', '');
+            },
+            child: const Text(
+              '一键禁用',
+              style: TextStyle(fontSize: AppTheme.fontFootnote),
+            ),
+          ),
+      ],
+    ),
+  );
 
   // ── 顶部说明：一句话讲清"有两个入口、为什么分两张卡" ──────────
   Widget _intro() => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '两种音乐源，各用各的卡片。',
-              style: TextStyle(
-                  color: MusicTheme.label,
-                  fontSize: AppTheme.fontSubhead,
-                  fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              '导入后，内置接口拿不到播放地址时会自动逐个尝试。在线导入会保存本地副本。',
-              style: TextStyle(
-                  color: MusicTheme.secondary,
-                  fontSize: AppTheme.fontFootnote,
-                  height: 1.5),
-            ),
-          ],
+    padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '两种音乐源，各用各的卡片。',
+          style: TextStyle(
+            color: MusicTheme.label,
+            fontSize: AppTheme.fontSubhead,
+            fontWeight: FontWeight.w600,
+          ),
         ),
-      );
+        const SizedBox(height: 3),
+        Text(
+          '导入后，内置接口拿不到播放地址时会自动逐个尝试。在线导入会保存本地副本。',
+          style: TextStyle(
+            color: MusicTheme.secondary,
+            fontSize: AppTheme.fontFootnote,
+            height: 1.5,
+          ),
+        ),
+      ],
+    ),
+  );
 
   // ============================================================
   // 两种音乐源的展示元数据
@@ -342,7 +365,9 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
         color: MusicTheme.card,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
-            color: MusicTheme.label.withValues(alpha: 0.06), width: 0.5),
+          color: MusicTheme.label.withValues(alpha: 0.06),
+          width: 0.5,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -368,17 +393,23 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(kind.title,
-                          style: TextStyle(
-                              color: MusicTheme.label,
-                              fontSize: AppTheme.fontHeadline,
-                              fontWeight: FontWeight.w600)),
+                      Text(
+                        kind.title,
+                        style: TextStyle(
+                          color: MusicTheme.label,
+                          fontSize: AppTheme.fontHeadline,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                       const SizedBox(height: 2),
-                      Text(kind.subtitle,
-                          style: TextStyle(
-                              color: MusicTheme.secondary,
-                              fontSize: AppTheme.fontFootnote,
-                              height: 1.45)),
+                      Text(
+                        kind.subtitle,
+                        style: TextStyle(
+                          color: MusicTheme.secondary,
+                          fontSize: AppTheme.fontFootnote,
+                          height: 1.45,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -420,21 +451,26 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                       backgroundColor: color,
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(11)),
+                        borderRadius: BorderRadius.circular(11),
+                      ),
                     ),
                     onPressed: _busy ? null : () => _import(context, kind),
                     icon: Icon(
-                        _busy ? Icons.hourglass_top : Icons.add_rounded,
-                        size: 18),
+                      _busy ? Icons.hourglass_top : Icons.add_rounded,
+                      size: 18,
+                    ),
                     label: Text(_busy ? '导入中…' : kind.buttonText),
                   ),
                 ),
                 const SizedBox(height: 8),
-                Text(kind.hint,
-                    style: TextStyle(
-                        color: MusicTheme.secondary,
-                        fontSize: AppTheme.fontCaption,
-                        height: 1.5)),
+                Text(
+                  kind.hint,
+                  style: TextStyle(
+                    color: MusicTheme.secondary,
+                    fontSize: AppTheme.fontCaption,
+                    height: 1.5,
+                  ),
+                ),
               ],
             ),
           ),
@@ -449,47 +485,47 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     required String hint,
     int maxLines = 1,
     TextInputType? keyboardType,
-  }) =>
-      TextField(
-        controller: controller,
-        maxLines: maxLines,
-        minLines: maxLines > 1 ? 3 : 1,
-        keyboardType: keyboardType,
-        style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontSubhead),
-        cursorColor: MusicTheme.tint,
-        decoration: InputDecoration(
-          hintText: hint,
-          hintStyle: TextStyle(
-              color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead),
-          hintMaxLines: maxLines > 1 ? 3 : 2,
-          filled: false,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: MusicTheme.divider, width: 0.5),
-          ),
-        ),
-      );
+  }) => TextField(
+    controller: controller,
+    maxLines: maxLines,
+    minLines: maxLines > 1 ? 3 : 1,
+    keyboardType: keyboardType,
+    style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontSubhead),
+    cursorColor: MusicTheme.tint,
+    decoration: InputDecoration(
+      hintText: hint,
+      hintStyle: TextStyle(
+        color: MusicTheme.secondary,
+        fontSize: AppTheme.fontSubhead,
+      ),
+      hintMaxLines: maxLines > 1 ? 3 : 2,
+      filled: false,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: MusicTheme.divider, width: 0.5),
+      ),
+    ),
+  );
 
   /// 列表筛选（全部 / 洛雪 / MusicFree / 仅看失效）
   ///
   /// 用 Wrap 而不是 Row：四个 chip 带数字，窄屏会溢出
   Widget _filterRow(int all, int lx, int mf, int failed) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            _filterChip('全部', '', all, MusicTheme.tint),
-            _filterChip('洛雪音乐源', 'lx', lx, _CardKind.lx.accent),
-            _filterChip('MusicFree', 'musicfree', mf, _CardKind.musicFree.accent),
-            // 只有体检过才出现 —— 没数据时这个筛选没有意义
-            if (SourceHealthService.instance.hasResults)
-              _filterChip('失效', 'failed', failed, Colors.redAccent),
-          ],
-        ),
-      );
+    padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+    child: Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        _filterChip('全部', '', all, MusicTheme.tint),
+        _filterChip('洛雪音乐源', 'lx', lx, _CardKind.lx.accent),
+        _filterChip('MusicFree', 'musicfree', mf, _CardKind.musicFree.accent),
+        // 只有体检过才出现 —— 没数据时这个筛选没有意义
+        if (SourceHealthService.instance.hasResults)
+          _filterChip('失效', 'failed', failed, Colors.redAccent),
+      ],
+    ),
+  );
 
   Widget _filterChip(String label, String value, int count, Color color) {
     final selected = _kindFilter == value;
@@ -500,12 +536,12 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
         duration: const Duration(milliseconds: 160),
         padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
         decoration: BoxDecoration(
-          color: selected
-              ? color.withValues(alpha: 0.16)
-              : MusicTheme.fill,
+          color: selected ? color.withValues(alpha: 0.16) : MusicTheme.fill,
           borderRadius: BorderRadius.circular(9),
           border: Border.all(
-            color: selected ? color.withValues(alpha: 0.45) : Colors.transparent,
+            color: selected
+                ? color.withValues(alpha: 0.45)
+                : Colors.transparent,
             width: 0.8,
           ),
         ),
@@ -545,13 +581,14 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                   color: selected ? MusicTheme.tint : Colors.transparent,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Text(labels[i],
-                    style: TextStyle(
-                      color: selected ? Colors.white : MusicTheme.secondary,
-                      fontSize: AppTheme.fontSubhead,
-                      fontWeight:
-                          selected ? FontWeight.w600 : FontWeight.w400,
-                    )),
+                child: Text(
+                  labels[i],
+                  style: TextStyle(
+                    color: selected ? Colors.white : MusicTheme.secondary,
+                    fontSize: AppTheme.fontSubhead,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                  ),
+                ),
               ),
             ),
           );
@@ -566,16 +603,18 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
       onTap: () => _pickFile(kind),
       child: Container(
         width: double.infinity,
-        padding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         decoration: BoxDecoration(
           border: Border.all(color: MusicTheme.divider, width: 0.5),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
           children: [
-            Icon(Icons.insert_drive_file_outlined,
-                size: 20, color: MusicTheme.tint),
+            Icon(
+              Icons.insert_drive_file_outlined,
+              size: 20,
+              color: MusicTheme.tint,
+            ),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -584,14 +623,18 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                    color: _pickedName[kind] == null
-                        ? MusicTheme.secondary
-                        : MusicTheme.label,
-                    fontSize: AppTheme.fontSubhead),
+                  color: _pickedName[kind] == null
+                      ? MusicTheme.secondary
+                      : MusicTheme.label,
+                  fontSize: AppTheme.fontSubhead,
+                ),
               ),
             ),
-            Icon(Icons.folder_open_rounded,
-                size: 18, color: MusicTheme.secondary),
+            Icon(
+              Icons.folder_open_rounded,
+              size: 18,
+              color: MusicTheme.secondary,
+            ),
           ],
         ),
       ),
@@ -670,7 +713,10 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
         _toast(context, r.mismatch!);
         return;
       }
-      _toast(context, r.count > 0 ? '已导入 ${r.count} 个${kind.title}' : '这些音源已存在，未重复导入');
+      _toast(
+        context,
+        r.count > 0 ? '已导入 ${r.count} 个${kind.title}' : '这些音源已存在，未重复导入',
+      );
     } on SourceImportException catch (e) {
       if (!mounted) return;
       _toast(context, '无法识别：${e.message}');
@@ -715,53 +761,65 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
 
   // ── 音源列表标题行 + 数量角标 ────────────────────────────────
   Widget _listHeader(int count) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-        child: Row(
-          children: [
-            Text('音源列表',
-                style: TextStyle(
-                    color: MusicTheme.label,
-                    fontSize: AppTheme.fontHeadline,
-                    fontWeight: FontWeight.w600)),
-            const Spacer(),
-            Text('$count',
-                style: TextStyle(
-                    color: MusicTheme.tint,
-                    fontSize: AppTheme.fontHeadline,
-                    fontWeight: FontWeight.w600)),
-          ],
+    padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+    child: Row(
+      children: [
+        Text(
+          '音源列表',
+          style: TextStyle(
+            color: MusicTheme.label,
+            fontSize: AppTheme.fontHeadline,
+            fontWeight: FontWeight.w600,
+          ),
         ),
-      );
+        const Spacer(),
+        Text(
+          '$count',
+          style: TextStyle(
+            color: MusicTheme.tint,
+            fontSize: AppTheme.fontHeadline,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    ),
+  );
 
   Widget _emptyHint(bool storeEmpty) => Padding(
-        padding: const EdgeInsets.fromLTRB(40, 30, 40, 10),
-        child: Column(
-          children: [
-            Icon(
-              storeEmpty ? Icons.queue_music_outlined : Icons.filter_alt_off_outlined,
-              size: 30,
-              color: MusicTheme.secondary.withValues(alpha: 0.5),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              storeEmpty
-                  ? '还没有音乐源。\n用上面两张卡片导入后，播放时内置接口拿不到地址会自动尝试这里。'
-                  : (_kindFilter == 'failed'
-                      ? '没有体检失效的音源。\n点上面的「全部」看所有源。'
-                      : '这个分类下还没有音乐源。\n点上面的「全部」看所有源。'),
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                  color: MusicTheme.secondary,
-                  fontSize: AppTheme.fontFootnote,
-                  height: 1.6),
-            ),
-          ],
+    padding: const EdgeInsets.fromLTRB(40, 30, 40, 10),
+    child: Column(
+      children: [
+        Icon(
+          storeEmpty
+              ? Icons.queue_music_outlined
+              : Icons.filter_alt_off_outlined,
+          size: 30,
+          color: MusicTheme.secondary.withValues(alpha: 0.5),
         ),
-      );
+        const SizedBox(height: 10),
+        Text(
+          storeEmpty
+              ? '还没有音乐源。\n用上面两张卡片导入后，播放时内置接口拿不到地址会自动尝试这里。'
+              : (_kindFilter == 'failed'
+                    ? '没有体检失效的音源。\n点上面的「全部」看所有源。'
+                    : '这个分类下还没有音乐源。\n点上面的「全部」看所有源。'),
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: MusicTheme.secondary,
+            fontSize: AppTheme.fontFootnote,
+            height: 1.6,
+          ),
+        ),
+      ],
+    ),
+  );
 
   // ── 音源条目（对齐参考图：名称 / 标签 / 描述 + 编辑·排序·删除）──
-  Widget _tile(BuildContext context, ThirdPartySourceStore store,
-      ThirdPartySource s) {
+  Widget _tile(
+    BuildContext context,
+    ThirdPartySourceStore store,
+    ThirdPartySource s,
+  ) {
     // ⚠️ 用 `usesScript` / `kindLabel`，不要用 `isScript` ——
     // MusicFree 插件也是"脚本型"，用 isScript 会显示成 KEYWORD
     // 内置源加「内置」标记，让用户一眼认出"这是 App 自带的"
@@ -782,8 +840,8 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     final desc = s.isMusicFree
         ? 'MusicFree 插件 · ${(s.script ?? '').length} 字符'
         : (s.isScript
-            ? 'LX 脚本 · ${(s.script ?? '').length} 字符'
-            : (s.template.isEmpty ? '（无模板）' : s.template));
+              ? 'LX 脚本 · ${(s.script ?? '').length} 字符'
+              : (s.template.isEmpty ? '（无模板）' : s.template));
     final descExtra = s.headers.isEmpty ? '' : ' · ${s.headers.length} 个请求头';
     // 体检结果：失效 → 整卡描红 + 红标签；可用 → 绿标签带耗时
     final h = SourceHealthService.instance.of(s.id);
@@ -795,10 +853,11 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
         color: MusicTheme.card,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-            color: failed
-                ? Colors.redAccent.withValues(alpha: 0.55)
-                : MusicTheme.label.withValues(alpha: 0.06),
-            width: failed ? 1.0 : 0.5),
+          color: failed
+              ? Colors.redAccent.withValues(alpha: 0.55)
+              : MusicTheme.label.withValues(alpha: 0.06),
+          width: failed ? 1.0 : 0.5,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -810,13 +869,16 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(s.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            color: failed ? Colors.redAccent : MusicTheme.label,
-                            fontSize: AppTheme.fontHeadline,
-                            fontWeight: FontWeight.w600)),
+                    Text(
+                      s.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: failed ? Colors.redAccent : MusicTheme.label,
+                        fontSize: AppTheme.fontHeadline,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     const SizedBox(height: 4),
                     Wrap(
                       spacing: 6,
@@ -828,21 +890,27 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                       ],
                     ),
                     const SizedBox(height: 4),
-                    Text('$desc$descExtra',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            color: MusicTheme.secondary,
-                            fontSize: AppTheme.fontFootnote)),
+                    Text(
+                      '$desc$descExtra',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: MusicTheme.secondary,
+                        fontSize: AppTheme.fontFootnote,
+                      ),
+                    ),
                     if (failed && h.message.isNotEmpty) ...[
                       const SizedBox(height: 3),
-                      Text(h.message,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              color: Colors.redAccent.withValues(alpha: 0.85),
-                              fontSize: AppTheme.fontCaption,
-                              height: 1.35)),
+                      Text(
+                        h.message,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.redAccent.withValues(alpha: 0.85),
+                          fontSize: AppTheme.fontCaption,
+                          height: 1.35,
+                        ),
+                      ),
                     ],
                   ],
                 ),
@@ -858,22 +926,32 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              _action(Icons.play_circle_outline, '测试',
-                  () => testSource(context, s)),
+              _action(
+                Icons.play_circle_outline,
+                '测试',
+                () => testSource(context, s),
+              ),
               // MusicFree 插件：登录变量（Cookie / Token / 卡密）
               if (s.isMusicFree)
                 _action(Icons.tune_rounded, '变量', () {
-                  Navigator.of(context).push(MaterialPageRoute(
-                    settings: const RouteSettings(name: 'music:page'),
-                    builder: (_) => PluginVariablesPage(source: s),
-                  ));
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      settings: const RouteSettings(name: 'music:page'),
+                      builder: (_) => PluginVariablesPage(source: s),
+                    ),
+                  );
                 }),
-              _action(Icons.edit_outlined, '编辑',
-                  () => _showDetail(context, s)),
-              _action(Icons.swap_vert, '排序',
-                  () => _sortMenu(context, store, s)),
-              _action(Icons.delete_outline, '删除',
-                  () => _confirmDelete(context, store, s)),
+              _action(Icons.edit_outlined, '编辑', () => _showDetail(context, s)),
+              _action(
+                Icons.swap_vert,
+                '排序',
+                () => _sortMenu(context, store, s),
+              ),
+              _action(
+                Icons.delete_outline,
+                '删除',
+                () => _confirmDelete(context, store, s),
+              ),
             ],
           ),
         ],
@@ -882,17 +960,20 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
   }
 
   Widget _tag(String text) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-          color: MusicTheme.tint.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Text(text,
-            style: TextStyle(
-                color: MusicTheme.tint,
-                fontSize: AppTheme.fontCaption,
-                fontWeight: FontWeight.w600)),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: MusicTheme.tint.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(999),
+    ),
+    child: Text(
+      text,
+      style: TextStyle(
+        color: MusicTheme.tint,
+        fontSize: AppTheme.fontCaption,
+        fontWeight: FontWeight.w600,
+      ),
+    ),
+  );
 
   /// 体检状态标签：可用（绿·耗时）/ 失效（红）
   Widget _healthTag(SourceHealth h) {
@@ -906,14 +987,20 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(h.ok ? Icons.check_circle_outline : Icons.error_outline,
-              size: 11, color: color),
+          Icon(
+            h.ok ? Icons.check_circle_outline : Icons.error_outline,
+            size: 11,
+            color: color,
+          ),
           const SizedBox(width: 3),
-          Text(h.ok ? '可用 ${h.ms}ms' : '体检失效',
-              style: TextStyle(
-                  color: color,
-                  fontSize: AppTheme.fontCaption,
-                  fontWeight: FontWeight.w600)),
+          Text(
+            h.ok ? '可用 ${h.ms}ms' : '体检失效',
+            style: TextStyle(
+              color: color,
+              fontSize: AppTheme.fontCaption,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ],
       ),
     );
@@ -929,9 +1016,13 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
         ),
         onPressed: onTap,
         icon: Icon(icon, size: 16),
-        label: Text(label,
-            style: TextStyle(
-                color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
+        label: Text(
+          label,
+          style: TextStyle(
+            color: MusicTheme.secondary,
+            fontSize: AppTheme.fontFootnote,
+          ),
+        ),
       );
 
   /// 该源被绑定的平台名列表（如 ['酷狗','QQ']；无绑定 → null）
@@ -940,15 +1031,19 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
   /// 这里只保留只读徽标，让人一眼看出"这个源被哪些平台固定使用"。
   String? _boundPlatformsLabel(String sourceId) {
     final names = SongSource.values
-        .where((p) =>
-            SettingsStore.instance.boundSourceIdsFor(p).contains(sourceId))
+        .where(
+          (p) => SettingsStore.instance.boundSourceIdsFor(p).contains(sourceId),
+        )
         .map((p) => p.displayName)
         .toList();
     return names.isEmpty ? null : '固定:${names.join('/')}';
   }
 
-  Future<void> _sortMenu(BuildContext context,
-      ThirdPartySourceStore store, ThirdPartySource s) async {
+  Future<void> _sortMenu(
+    BuildContext context,
+    ThirdPartySourceStore store,
+    ThirdPartySource s,
+  ) async {
     final action = await showMusicSheet<String>(
       context: context,
       backgroundColor: MusicTheme.card,
@@ -959,16 +1054,24 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
           children: [
             ListTile(
               leading: Icon(Icons.arrow_upward, color: MusicTheme.tint),
-              title: Text('上移',
-                  style: TextStyle(
-                      color: MusicTheme.label, fontSize: AppTheme.fontSubhead)),
+              title: Text(
+                '上移',
+                style: TextStyle(
+                  color: MusicTheme.label,
+                  fontSize: AppTheme.fontSubhead,
+                ),
+              ),
               onTap: () => Navigator.pop(ctx, 'up'),
             ),
             ListTile(
               leading: Icon(Icons.arrow_downward, color: MusicTheme.tint),
-              title: Text('下移',
-                  style: TextStyle(
-                      color: MusicTheme.label, fontSize: AppTheme.fontSubhead)),
+              title: Text(
+                '下移',
+                style: TextStyle(
+                  color: MusicTheme.label,
+                  fontSize: AppTheme.fontSubhead,
+                ),
+              ),
               onTap: () => Navigator.pop(ctx, 'down'),
             ),
           ],
@@ -979,28 +1082,40 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     if (action == 'down') await store.move(s.id, 1);
   }
 
-  Future<void> _confirmDelete(BuildContext context, ThirdPartySourceStore store,
-      ThirdPartySource s) async {
+  Future<void> _confirmDelete(
+    BuildContext context,
+    ThirdPartySourceStore store,
+    ThirdPartySource s,
+  ) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: MusicTheme.card,
-        title: Text('删除音源',
-            style:
-                TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
+        title: Text(
+          '删除音源',
+          style: TextStyle(
+            color: MusicTheme.label,
+            fontSize: AppTheme.fontHeadline,
+          ),
+        ),
         content: Text(
           s.isBuiltin
               ? '确定删除内置音源「${s.name}」？\n\n（内置源删除后，App 下次启动会自动重新出现。）'
               : '确定删除「${s.name}」？',
           style: TextStyle(
-              color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead)),
+            color: MusicTheme.secondary,
+            fontSize: AppTheme.fontSubhead,
+          ),
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
           TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('删除', style: TextStyle(color: Colors.red))),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除', style: TextStyle(color: Colors.red)),
+          ),
         ],
       ),
     );
@@ -1019,7 +1134,8 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     final urlPathCtrl = TextEditingController(text: s.urlPath);
     final qualityCtrl = TextEditingController(text: s.quality);
     final headersCtrl = TextEditingController(
-        text: s.headers.entries.map((e) => '${e.key}=${e.value}').join('\n'));
+      text: s.headers.entries.map((e) => '${e.key}=${e.value}').join('\n'),
+    );
     final saved = await showMusicSheet<bool>(
       context: context,
       backgroundColor: MusicTheme.card,
@@ -1039,11 +1155,14 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
               Row(
                 children: [
                   Expanded(
-                    child: Text('编辑音源',
-                        style: TextStyle(
-                            color: MusicTheme.label,
-                            fontSize: AppTheme.fontHeadline,
-                            fontWeight: FontWeight.w600)),
+                    child: Text(
+                      '编辑音源',
+                      style: TextStyle(
+                        color: MusicTheme.label,
+                        fontSize: AppTheme.fontHeadline,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
                   TextButton.icon(
                     style: TextButton.styleFrom(
@@ -1051,18 +1170,23 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                       visualDensity: VisualDensity.compact,
                     ),
                     onPressed: () {
-                      Clipboard.setData(ClipboardData(
-                        text: const JsonEncoderShim().encode(s.toJson()),
-                      ));
+                      Clipboard.setData(
+                        ClipboardData(
+                          text: const JsonEncoderShim().encode(s.toJson()),
+                        ),
+                      );
                       ScaffoldMessenger.of(ctx).showSnackBar(
                         const SnackBar(content: Text('已复制音源配置')),
                       );
                     },
                     icon: const Icon(Icons.copy_rounded, size: 15),
-                    label: Text('复制配置',
-                        style: TextStyle(
-                            color: MusicTheme.secondary,
-                            fontSize: AppTheme.fontFootnote)),
+                    label: Text(
+                      '复制配置',
+                      style: TextStyle(
+                        color: MusicTheme.secondary,
+                        fontSize: AppTheme.fontFootnote,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -1070,7 +1194,10 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
               _fieldLabel('名称'),
               TextField(
                 controller: nameCtrl,
-                style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontSubhead),
+                style: TextStyle(
+                  color: MusicTheme.label,
+                  fontSize: AppTheme.fontSubhead,
+                ),
                 decoration: _fieldDeco('音源名称'),
               ),
               const SizedBox(height: 12),
@@ -1081,32 +1208,44 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                   maxLines: 12,
                   minLines: 6,
                   style: TextStyle(
-                      color: MusicTheme.label,
-                      fontSize: AppTheme.fontFootnote,
-                      fontFamily: 'monospace',
-                      height: 1.4),
+                    color: MusicTheme.label,
+                    fontSize: AppTheme.fontFootnote,
+                    fontFamily: 'monospace',
+                    height: 1.4,
+                  ),
                   decoration: _fieldDeco('整份脚本源码，保存后生效'),
                 ),
               ] else ...[
                 _fieldLabel('模板 URL'),
                 TextField(
                   controller: templateCtrl,
-                  style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontSubhead),
+                  style: TextStyle(
+                    color: MusicTheme.label,
+                    fontSize: AppTheme.fontSubhead,
+                  ),
                   decoration: _fieldDeco('如 https://api.xxx.com/url?id={id}'),
                 ),
                 const SizedBox(height: 12),
                 _fieldLabel('取值路径'),
                 TextField(
                   controller: urlPathCtrl,
-                  style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontSubhead),
+                  style: TextStyle(
+                    color: MusicTheme.label,
+                    fontSize: AppTheme.fontSubhead,
+                  ),
                   decoration: _fieldDeco('播放地址在响应里的字段路径，如 data.url'),
                 ),
                 const SizedBox(height: 12),
                 _fieldLabel('音质'),
                 TextField(
                   controller: qualityCtrl,
-                  style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontSubhead),
-                  decoration: _fieldDeco('128k / 320k / flac / flac24bit / hires'),
+                  style: TextStyle(
+                    color: MusicTheme.label,
+                    fontSize: AppTheme.fontSubhead,
+                  ),
+                  decoration: _fieldDeco(
+                    '128k / 320k / flac / flac24bit / hires',
+                  ),
                 ),
                 const SizedBox(height: 12),
                 _fieldLabel('请求头（每行 键=值）'),
@@ -1114,10 +1253,11 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                   controller: headersCtrl,
                   maxLines: 5,
                   style: TextStyle(
-                      color: MusicTheme.label,
-                      fontSize: AppTheme.fontFootnote,
-                      fontFamily: 'monospace',
-                      height: 1.4),
+                    color: MusicTheme.label,
+                    fontSize: AppTheme.fontFootnote,
+                    fontFamily: 'monospace',
+                    height: 1.4,
+                  ),
                   decoration: _fieldDeco('User-Agent=Mozilla/5.0 …'),
                 ),
               ],
@@ -1162,10 +1302,14 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     final updated = s.copyWith(
       name: name,
       template: s.usesScript ? s.template : templateCtrl.text.trim(),
-      urlPath: s.usesScript ? s.urlPath : urlPathCtrl.text.trim().isEmpty
+      urlPath: s.usesScript
+          ? s.urlPath
+          : urlPathCtrl.text.trim().isEmpty
           ? 'url'
           : urlPathCtrl.text.trim(),
-      quality: qualityCtrl.text.trim().isEmpty ? '320k' : qualityCtrl.text.trim(),
+      quality: qualityCtrl.text.trim().isEmpty
+          ? '320k'
+          : qualityCtrl.text.trim(),
       headers: s.usesScript ? s.headers : _parseHeaders(headersCtrl.text),
       // 🔴 **关键**：必须是 `usesScript` —— 用 `isScript` 时
       // MusicFree 插件会走 else 分支把 `script` 写回**旧值**，
@@ -1192,23 +1336,30 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
   }
 
   Widget _fieldLabel(String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Text(text,
-            style: TextStyle(
-                color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
-      );
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Text(
+      text,
+      style: TextStyle(
+        color: MusicTheme.secondary,
+        fontSize: AppTheme.fontFootnote,
+      ),
+    ),
+  );
 
   InputDecoration _fieldDeco(String hint) => InputDecoration(
-        hintText: hint,
-        hintStyle: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead),
-        filled: true,
-        fillColor: MusicTheme.fill,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide.none,
-        ),
-      );
+    hintText: hint,
+    hintStyle: TextStyle(
+      color: MusicTheme.secondary,
+      fontSize: AppTheme.fontSubhead,
+    ),
+    filled: true,
+    fillColor: MusicTheme.fill,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: BorderSide.none,
+    ),
+  );
 }
 
 /// 极简 JSON 编码（避免为了一个小功能再引依赖；只处理本模块的数据结构）
@@ -1264,10 +1415,12 @@ Future<void> testSource(BuildContext context, ThirdPartySource s) async {
   );
 
   final messenger = ScaffoldMessenger.of(context);
-  messenger.showSnackBar(SnackBar(
-    content: Text('正在测试「${s.name}」…'),
-    duration: const Duration(seconds: 1),
-  ));
+  messenger.showSnackBar(
+    SnackBar(
+      content: Text('正在测试「${s.name}」…'),
+      duration: const Duration(seconds: 1),
+    ),
+  );
 
   final sw = Stopwatch()..start();
   final r = await UnblockService.instance.testOne(s, probe);
@@ -1285,39 +1438,57 @@ Future<void> testSource(BuildContext context, ThirdPartySource s) async {
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: MusicTheme.card,
-      title: Text(r.ok ? '音源可用' : '音源不可用',
-          style: TextStyle(
-              color: r.ok ? MusicTheme.sage : Colors.redAccent,
-              fontSize: AppTheme.fontHeadline)),
+      title: Text(
+        r.ok ? '音源可用' : '音源不可用',
+        style: TextStyle(
+          color: r.ok ? MusicTheme.sage : Colors.redAccent,
+          fontSize: AppTheme.fontHeadline,
+        ),
+      ),
       content: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('音源：${s.name}',
-                style: TextStyle(
-                    color: MusicTheme.secondary,
-                    fontSize: AppTheme.fontFootnote)),
-            Text('方式：${s.isMusicFree ? "MusicFree 插件" : (s.isScript ? "LX 脚本" : "模板")}',
-                style: TextStyle(
-                    color: MusicTheme.secondary,
-                    fontSize: AppTheme.fontFootnote)),
+            Text(
+              '音源：${s.name}',
+              style: TextStyle(
+                color: MusicTheme.secondary,
+                fontSize: AppTheme.fontFootnote,
+              ),
+            ),
+            Text(
+              '方式：${s.isMusicFree ? "MusicFree 插件" : (s.isScript ? "LX 脚本" : "模板")}',
+              style: TextStyle(
+                color: MusicTheme.secondary,
+                fontSize: AppTheme.fontFootnote,
+              ),
+            ),
             const SizedBox(height: 10),
             if (r.ok) ...[
-              Text('解析到播放地址：',
-                  style: TextStyle(
-                      color: MusicTheme.label,
-                      fontSize: AppTheme.fontSubhead)),
+              Text(
+                '解析到播放地址：',
+                style: TextStyle(
+                  color: MusicTheme.label,
+                  fontSize: AppTheme.fontSubhead,
+                ),
+              ),
               const SizedBox(height: 4),
-              SelectableText(r.url,
-                  style: TextStyle(
-                      color: MusicTheme.tint,
-                      fontSize: AppTheme.fontFootnote)),
+              SelectableText(
+                r.url,
+                style: TextStyle(
+                  color: MusicTheme.tint,
+                  fontSize: AppTheme.fontFootnote,
+                ),
+              ),
             ] else
-              Text(r.error.isEmpty ? '未返回播放地址' : r.error,
-                  style: TextStyle(
-                      color: MusicTheme.label,
-                      fontSize: AppTheme.fontSubhead)),
+              Text(
+                r.error.isEmpty ? '未返回播放地址' : r.error,
+                style: TextStyle(
+                  color: MusicTheme.label,
+                  fontSize: AppTheme.fontSubhead,
+                ),
+              ),
           ],
         ),
       ),
@@ -1331,9 +1502,11 @@ Future<void> testSource(BuildContext context, ThirdPartySource s) async {
             onPressed: () {
               Navigator.pop(ctx);
               // 失败时把配置摊开，方便用户自己比对哪里配错了
-              Clipboard.setData(ClipboardData(
-                text: const JsonEncoderShim().encode(s.toJson()),
-              ));
+              Clipboard.setData(
+                ClipboardData(
+                  text: const JsonEncoderShim().encode(s.toJson()),
+                ),
+              );
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('已复制该音源配置，便于排查')),
               );
@@ -1353,10 +1526,12 @@ Future<void> testSource(BuildContext context, ThirdPartySource s) async {
 /// 你能亲眼确认 App 没卡住。
 Future<void> runLxSelfTest(BuildContext context) async {
   final messenger = ScaffoldMessenger.of(context);
-  messenger.showSnackBar(const SnackBar(
-    content: Text('正在自检（含一段死循环，约 8 秒）…'),
-    duration: Duration(seconds: 1),
-  ));
+  messenger.showSnackBar(
+    const SnackBar(
+      content: Text('正在自检（含一段死循环，约 8 秒）…'),
+      duration: Duration(seconds: 1),
+    ),
+  );
 
   final r = await MusicApi.instance.lxSelfTest();
   if (!context.mounted) return;
@@ -1371,8 +1546,9 @@ Future<void> runLxSelfTest(BuildContext context) async {
       title: Text(
         r['allPass'] == true ? 'LX 引擎自检通过' : 'LX 引擎自检有问题',
         style: TextStyle(
-            color: r['allPass'] == true ? MusicTheme.sage : Colors.redAccent,
-            fontSize: AppTheme.fontHeadline),
+          color: r['allPass'] == true ? MusicTheme.sage : Colors.redAccent,
+          fontSize: AppTheme.fontHeadline,
+        ),
       ),
       content: SizedBox(
         width: 340,
@@ -1386,7 +1562,9 @@ Future<void> runLxSelfTest(BuildContext context) async {
                 '脚本上限 ${asInt(info['maxScriptChars']) ~/ 1024}KB · '
                 '沙箱已开',
                 style: TextStyle(
-                    color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote),
+                  color: MusicTheme.secondary,
+                  fontSize: AppTheme.fontFootnote,
+                ),
               ),
               const SizedBox(height: 10),
               ...cases.map((c) {
@@ -1399,29 +1577,40 @@ Future<void> runLxSelfTest(BuildContext context) async {
                     children: [
                       Row(
                         children: [
-                          Icon(ok ? Icons.check_circle : Icons.cancel,
-                              size: 14,
-                              color: ok ? MusicTheme.sage : Colors.redAccent),
+                          Icon(
+                            ok ? Icons.check_circle : Icons.cancel,
+                            size: 14,
+                            color: ok ? MusicTheme.sage : Colors.redAccent,
+                          ),
                           const SizedBox(width: 6),
                           Expanded(
-                            child: Text('${m['name']}',
-                                style: TextStyle(
-                                    color: MusicTheme.label,
-                                    fontSize: AppTheme.fontSubhead)),
-                          ),
-                          Text('${m['ms']}ms',
+                            child: Text(
+                              '${m['name']}',
                               style: TextStyle(
-                                  color: MusicTheme.secondary,
-                                  fontSize: AppTheme.fontCaption)),
+                                color: MusicTheme.label,
+                                fontSize: AppTheme.fontSubhead,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            '${m['ms']}ms',
+                            style: TextStyle(
+                              color: MusicTheme.secondary,
+                              fontSize: AppTheme.fontCaption,
+                            ),
+                          ),
                         ],
                       ),
                       if (m['error'] != null)
                         Padding(
                           padding: const EdgeInsets.only(left: 20, top: 2),
-                          child: Text('${m['error']}',
-                              style: TextStyle(
-                                  color: MusicTheme.secondary,
-                                  fontSize: AppTheme.fontCaption)),
+                          child: Text(
+                            '${m['error']}',
+                            style: TextStyle(
+                              color: MusicTheme.secondary,
+                              fontSize: AppTheme.fontCaption,
+                            ),
+                          ),
                         ),
                     ],
                   ),
@@ -1462,45 +1651,45 @@ enum _CardKind {
 extension on _CardKind {
   /// 卡片标题
   String get title => switch (this) {
-        _CardKind.lx => '洛雪音乐源',
-        _CardKind.musicFree => 'MusicFree 源',
-      };
+    _CardKind.lx => '洛雪音乐源',
+    _CardKind.musicFree => 'MusicFree 源',
+  };
 
   /// 卡片副标题（一句话讲清是什么）
   String get subtitle => switch (this) {
-        _CardKind.lx => '洛雪音乐的 LX 音源：JSON 配置、JS 脚本、模板 URL。',
-        _CardKind.musicFree => 'MusicFree 插件：带 platform 的 getMediaSource 插件。',
-      };
+    _CardKind.lx => '洛雪音乐的 LX 音源：JSON 配置、JS 脚本、模板 URL。',
+    _CardKind.musicFree => 'MusicFree 插件：带 platform 的 getMediaSource 插件。',
+  };
 
   /// 卡头图标
   IconData get icon => switch (this) {
-        _CardKind.lx => Icons.library_music_outlined,
-        _CardKind.musicFree => Icons.extension_outlined,
-      };
+    _CardKind.lx => Icons.library_music_outlined,
+    _CardKind.musicFree => Icons.extension_outlined,
+  };
 
   /// 主题色（两卡一眼区分）
   ///
   /// ⚠️ 用 MusicTheme 的语义色，不要在深/浅色模式下手写死颜色 ——
   /// 手写色在浅色模式下会糊掉。
   Color get accent => switch (this) {
-        _CardKind.lx => MusicTheme.sage,
-        _CardKind.musicFree => MusicTheme.tint,
-      };
+    _CardKind.lx => MusicTheme.sage,
+    _CardKind.musicFree => MusicTheme.tint,
+  };
 
   /// 导入按钮文案
   String get buttonText => switch (this) {
-        _CardKind.lx => '导入洛雪音乐源',
-        _CardKind.musicFree => '导入 MusicFree 源',
-      };
+    _CardKind.lx => '导入洛雪音乐源',
+    _CardKind.musicFree => '导入 MusicFree 源',
+  };
 
   /// 卡内灰色小字（说明支持哪些格式）
   String get hint => switch (this) {
-        _CardKind.lx =>
-          '支持：JSON 数组 / 洛雪 User API 导出 JSON / JS 脚本 / '
-              '`SERVER_SCRIPT_CONFIG` 片段 / `@name`+`@template` 头部格式。',
-        _CardKind.musicFree =>
-          '支持：MusicFree 插件（`module.exports` 里有 `platform` 与 '
-              '`getMediaSource`）。插件里的 require("axios")/require("he") '
-              '会自动注入，无需自己打包。',
-      };
+    _CardKind.lx =>
+      '支持：JSON 数组 / 洛雪 User API 导出 JSON / JS 脚本 / '
+          '`SERVER_SCRIPT_CONFIG` 片段 / `@name`+`@template` 头部格式。',
+    _CardKind.musicFree =>
+      '支持：MusicFree 插件（`module.exports` 里有 `platform` 与 '
+          '`getMediaSource`）。插件里的 require("axios")/require("he") '
+          '会自动注入，无需自己打包。',
+  };
 }

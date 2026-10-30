@@ -127,8 +127,7 @@ class _SearchPageState extends State<SearchPage>
     // 新结果覆盖成旧结果（防抖只解决"还没发"，不解决"已在途乱序"）。
     final epoch = ++_runEpoch;
     ctrl.text = k;
-    ctrl.selection =
-        TextSelection.collapsed(offset: k.length);
+    ctrl.selection = TextSelection.collapsed(offset: k.length);
     focus.unfocus();
     setState(() {
       _loading = true;
@@ -229,6 +228,14 @@ class _SearchPageState extends State<SearchPage>
       bottom: false,
       child: Column(
         children: [
+          // 大标题只在「还没搜」时出现：输入后要立刻把纵向空间让给结果，
+          // 搜索框自己会顶到最上面（iOS 搜索页的常见做法）。
+          if (!_searching)
+            const MusicPageHeader(
+              title: '搜索',
+              subtitle: '跨平台找歌 · 点一下就播',
+              padding: EdgeInsets.fromLTRB(16, 10, 16, 2),
+            ),
           _searchBar(),
           _platformBar(),
           if (_searching) _kindTabs(),
@@ -253,82 +260,95 @@ class _SearchPageState extends State<SearchPage>
         scrollDirection: Axis.horizontal,
         child: Row(
           children: [
-          // 「有声书」**不是"平台切换"**，而是进分类页：
-          // 喜马拉雅是**专辑模型**（专辑→单集），跟"单曲搜索"不是一回事；
-          // 直接切换搜索平台会让搜索结果出现"点一下播不了"的假可用。
-          GestureDetector(
-            onTap: () => Navigator.of(context).push<void>(
-              MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
-                builder: (_) => const XimalayaCategoryPage(),
+            // 「有声书」**不是"平台切换"**，而是进分类页：
+            // 喜马拉雅是**专辑模型**（专辑→单集），跟"单曲搜索"不是一回事；
+            // 直接切换搜索平台会让搜索结果出现"点一下播不了"的假可用。
+            GestureDetector(
+              onTap: () => Navigator.of(context).push<void>(
+                MaterialPageRoute(
+                  settings: const RouteSettings(name: 'music:page'),
+                  builder: (_) => const XimalayaCategoryPage(),
+                ),
               ),
-            ),
-            child: Container(
-              margin: const EdgeInsets.only(right: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: MusicTheme.fill,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                    color: MusicTheme.secondary.withValues(alpha: 0.35)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.headphones_rounded,
-                      size: 13, color: MusicTheme.secondary),
-                  const SizedBox(width: 4),
-                  Text('喜雅',
+              child: Container(
+                margin: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: MusicTheme.fill,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: MusicTheme.secondary.withValues(alpha: 0.35),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.headphones_rounded,
+                      size: 13,
+                      color: MusicTheme.secondary,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '喜雅',
                       style: TextStyle(
-                          color: MusicTheme.label,
-                          fontSize: AppTheme.fontCaption)),
-                ],
-              ),
-            ),
-          ),
-          for (final s in const [
-            SongSource.netease,
-            SongSource.kugou,
-            SongSource.ximalaya,
-          ])
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ValueListenableBuilder<SongSource>(
-                valueListenable: SettingsStore.instance.musicSource,
-                builder: (_, cur, __) {
-                  final on = cur == s;
-                  return GestureDetector(
-                    onTap: () async {
-                      if (on && _plugin == null) return;
-                      await SettingsStore.instance.setMusicSource(s);
-                      if (!mounted) return;
-                      // 切回内置平台 ⇒ 退出插件搜索模式
-                      setState(() => _plugin = null);
-                      // 已有关键词就立刻用新平台重搜
-                      final k = ctrl.text.trim();
-                      if (k.isNotEmpty) unawaited(_run(k));
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: on ? MusicTheme.tint : MusicTheme.fill,
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Text(
-                        s.displayName,
-                        style: TextStyle(
-                          color: on ? Colors.white : MusicTheme.label,
-                          fontSize: AppTheme.fontCaption,
-                          fontWeight: on ? FontWeight.w600 : FontWeight.w400,
-                        ),
+                        color: MusicTheme.label,
+                        fontSize: AppTheme.fontCaption,
                       ),
                     ),
-                  );
-                },
+                  ],
+                ),
               ),
             ),
-          // 插件源（2026-10-21 第二阶段）：点开选择已启用的 MusicFree 插件
-          _pluginChip(),
+            for (final s in const [
+              SongSource.netease,
+              SongSource.kugou,
+              SongSource.ximalaya,
+            ])
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ValueListenableBuilder<SongSource>(
+                  valueListenable: SettingsStore.instance.musicSource,
+                  builder: (_, cur, __) {
+                    final on = cur == s;
+                    return GestureDetector(
+                      onTap: () async {
+                        if (on && _plugin == null) return;
+                        await SettingsStore.instance.setMusicSource(s);
+                        if (!mounted) return;
+                        // 切回内置平台 ⇒ 退出插件搜索模式
+                        setState(() => _plugin = null);
+                        // 已有关键词就立刻用新平台重搜
+                        final k = ctrl.text.trim();
+                        if (k.isNotEmpty) unawaited(_run(k));
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: on ? MusicTheme.tint : MusicTheme.fill,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Text(
+                          s.displayName,
+                          style: TextStyle(
+                            color: on ? Colors.white : MusicTheme.label,
+                            fontSize: AppTheme.fontCaption,
+                            fontWeight: on ? FontWeight.w600 : FontWeight.w400,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            // 插件源（2026-10-21 第二阶段）：点开选择已启用的 MusicFree 插件
+            _pluginChip(),
           ],
         ),
       ),
@@ -339,8 +359,9 @@ class _SearchPageState extends State<SearchPage>
   ///
   /// 只列**已启用**的 MusicFree 插件（LX 脚本没有 search，不参与）。
   Widget _pluginChip() {
-    final plugins =
-        ThirdPartySourceStore.instance.enabled.where((s) => s.isMusicFree).toList();
+    final plugins = ThirdPartySourceStore.instance.enabled
+        .where((s) => s.isMusicFree)
+        .toList();
     final on = _plugin != null;
     return Padding(
       padding: const EdgeInsets.only(right: 8),
@@ -362,7 +383,9 @@ class _SearchPageState extends State<SearchPage>
               ),
               const SizedBox(width: 4),
               Text(
-                on ? _plugin!.name : '插件源${plugins.isEmpty ? '' : ' ${plugins.length}'}',
+                on
+                    ? _plugin!.name
+                    : '插件源${plugins.isEmpty ? '' : ' ${plugins.length}'}',
                 style: TextStyle(
                   color: on ? Colors.white : MusicTheme.label,
                   fontSize: AppTheme.fontCaption,
@@ -387,8 +410,10 @@ class _SearchPageState extends State<SearchPage>
           ListTile(
             leading: Icon(Icons.apps_rounded, color: MusicTheme.secondary),
             title: Text('内置平台', style: TextStyle(color: MusicTheme.label)),
-            subtitle: Text('网易云 / 酷狗 / 喜马拉雅',
-                style: TextStyle(color: MusicTheme.secondary, fontSize: 12)),
+            subtitle: Text(
+              '网易云 / 酷狗 / 喜马拉雅',
+              style: TextStyle(color: MusicTheme.secondary, fontSize: 12),
+            ),
             trailing: _plugin == null
                 ? Icon(Icons.check_rounded, color: MusicTheme.tint, size: 20)
                 : null,
@@ -397,16 +422,25 @@ class _SearchPageState extends State<SearchPage>
           const Divider(height: 1),
           for (final p in plugins)
             ListTile(
-              leading: Icon(Icons.extension_rounded, color: MusicTheme.secondary),
-              title: Text(p.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: MusicTheme.label)),
+              leading: Icon(
+                Icons.extension_rounded,
+                color: MusicTheme.secondary,
+              ),
+              title: Text(
+                p.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: MusicTheme.label),
+              ),
               subtitle: p.quality.isEmpty
                   ? null
-                  : Text('音质 ${p.quality}',
-                      style:
-                          TextStyle(color: MusicTheme.secondary, fontSize: 12)),
+                  : Text(
+                      '音质 ${p.quality}',
+                      style: TextStyle(
+                        color: MusicTheme.secondary,
+                        fontSize: 12,
+                      ),
+                    ),
               trailing: _plugin?.id == p.id
                   ? Icon(Icons.check_rounded, color: MusicTheme.tint, size: 20)
                   : null,
@@ -442,8 +476,11 @@ class _SearchPageState extends State<SearchPage>
               ),
               child: Row(
                 children: [
-                  Icon(Icons.search_rounded,
-                      size: 18, color: MusicTheme.secondary),
+                  Icon(
+                    Icons.search_rounded,
+                    size: 18,
+                    color: MusicTheme.secondary,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: TextField(
@@ -458,20 +495,27 @@ class _SearchPageState extends State<SearchPage>
                         _debounce?.cancel();
                         final k = v.trim();
                         if (k.isEmpty) return; // 清空时回到落地页，不发请求
-                        _debounce = Timer(const Duration(milliseconds: 300), () {
-                          if (!mounted) return;
-                          unawaited(_run(k));
-                        });
+                        _debounce = Timer(
+                          const Duration(milliseconds: 300),
+                          () {
+                            if (!mounted) return;
+                            unawaited(_run(k));
+                          },
+                        );
                       },
                       style: TextStyle(
-                          color: MusicTheme.label, fontSize: AppTheme.fontHeadline),
+                        color: MusicTheme.label,
+                        fontSize: AppTheme.fontHeadline,
+                      ),
                       cursorColor: MusicTheme.tint,
                       decoration: InputDecoration(
                         isDense: true,
                         border: InputBorder.none,
                         hintText: '搜索歌曲、歌手、专辑',
                         hintStyle: TextStyle(
-                            color: MusicTheme.secondary, fontSize: AppTheme.fontBody),
+                          color: MusicTheme.secondary,
+                          fontSize: AppTheme.fontBody,
+                        ),
                       ),
                     ),
                   ),
@@ -481,8 +525,11 @@ class _SearchPageState extends State<SearchPage>
                         ctrl.clear();
                         setState(() {});
                       },
-                      child: Icon(Icons.cancel,
-                          size: 16, color: MusicTheme.secondary),
+                      child: Icon(
+                        Icons.cancel,
+                        size: 16,
+                        color: MusicTheme.secondary,
+                      ),
                     ),
                 ],
               ),
@@ -495,8 +542,13 @@ class _SearchPageState extends State<SearchPage>
                 focus.unfocus();
                 setState(() {});
               },
-              child: Text('取消',
-                  style: TextStyle(color: MusicTheme.tint, fontSize: AppTheme.fontBody)),
+              child: Text(
+                '取消',
+                style: TextStyle(
+                  color: MusicTheme.tint,
+                  fontSize: AppTheme.fontBody,
+                ),
+              ),
             ),
         ],
       ),
@@ -522,21 +574,24 @@ class _SearchPageState extends State<SearchPage>
                 if (_searching) _run(ctrl.text);
               },
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: active
                       ? MusicTheme.tint.withValues(alpha: 0.16)
                       : MusicTheme.fill,
                   borderRadius: BorderRadius.circular(999),
                 ),
-                child: Text(label,
-                    style: TextStyle(
-                      color: active ? MusicTheme.tint : MusicTheme.secondary,
-                      fontSize: AppTheme.fontSubhead,
-                      fontWeight:
-                          active ? FontWeight.w600 : FontWeight.w400,
-                    )),
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color: active ? MusicTheme.tint : MusicTheme.secondary,
+                    fontSize: AppTheme.fontSubhead,
+                    fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+                  ),
+                ),
               ),
             ),
           );
@@ -556,16 +611,22 @@ class _SearchPageState extends State<SearchPage>
         if (_history.isNotEmpty) ...[
           Row(
             children: [
-              Text('搜索历史',
-                  style: TextStyle(
-                      color: MusicTheme.label,
-                      fontSize: AppTheme.fontHeadline,
-                      fontWeight: FontWeight.w600)),
+              Text(
+                '搜索历史',
+                style: TextStyle(
+                  color: MusicTheme.label,
+                  fontSize: AppTheme.fontHeadline,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
               const Spacer(),
               GestureDetector(
                 onTap: _clearHistory,
-                child: Icon(Icons.delete_outline,
-                    size: 18, color: MusicTheme.secondary),
+                child: Icon(
+                  Icons.delete_outline,
+                  size: 18,
+                  color: MusicTheme.secondary,
+                ),
               ),
             ],
           ),
@@ -582,16 +643,22 @@ class _SearchPageState extends State<SearchPage>
         if (_hot.isNotEmpty) ...[
           Row(
             children: [
-              Text('热门搜索',
-                  style: TextStyle(
-                      color: MusicTheme.label,
-                      fontSize: AppTheme.fontHeadline,
-                      fontWeight: FontWeight.w600)),
+              Text(
+                '热门搜索',
+                style: TextStyle(
+                  color: MusicTheme.label,
+                  fontSize: AppTheme.fontHeadline,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
               const Spacer(),
               GestureDetector(
                 onTap: _loadHot,
-                child: Icon(Icons.refresh_rounded,
-                    size: 17, color: MusicTheme.secondary),
+                child: Icon(
+                  Icons.refresh_rounded,
+                  size: 17,
+                  color: MusicTheme.secondary,
+                ),
               ),
             ],
           ),
@@ -618,9 +685,13 @@ class _SearchPageState extends State<SearchPage>
           Padding(
             padding: const EdgeInsets.only(top: 60),
             child: Center(
-              child: Text('输入关键词开始搜索',
-                  style:
-                      TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead)),
+              child: Text(
+                '输入关键词开始搜索',
+                style: TextStyle(
+                  color: MusicTheme.secondary,
+                  fontSize: AppTheme.fontSubhead,
+                ),
+              ),
             ),
           ),
       ],
@@ -651,8 +722,9 @@ class _SearchPageState extends State<SearchPage>
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                    color: MusicTheme.label,
-                    fontSize: AppTheme.fontBody),
+                  color: MusicTheme.label,
+                  fontSize: AppTheme.fontBody,
+                ),
               ),
             ),
           ],
@@ -661,22 +733,31 @@ class _SearchPageState extends State<SearchPage>
     );
   }
 
-  Widget _chip(String text, VoidCallback onTap,
-      {bool filled = false, bool hot = false}) {
+  Widget _chip(
+    String text,
+    VoidCallback onTap, {
+    bool filled = false,
+    bool hot = false,
+  }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
-          color: filled ? MusicTheme.tint.withValues(alpha: 0.12) : MusicTheme.fill,
+          color: filled
+              ? MusicTheme.tint.withValues(alpha: 0.12)
+              : MusicTheme.fill,
           borderRadius: BorderRadius.circular(999),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (hot) ...[
-              Icon(Icons.local_fire_department_rounded,
-                  size: 13, color: MusicTheme.tint),
+              Icon(
+                Icons.local_fire_department_rounded,
+                size: 13,
+                color: MusicTheme.tint,
+              ),
               const SizedBox(width: 4),
             ],
             ConstrainedBox(
@@ -709,9 +790,14 @@ class _SearchPageState extends State<SearchPage>
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
-          child: Text(_error,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead)),
+          child: Text(
+            _error,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: MusicTheme.secondary,
+              fontSize: AppTheme.fontSubhead,
+            ),
+          ),
         ),
       );
     }
@@ -738,23 +824,29 @@ class _SearchPageState extends State<SearchPage>
             itemBuilder: (c, i) {
               final a = _songs[i];
               return ListTile(
-                leading:
-                    CoverImage(url: a.coverUrl, size: 46, cornerRadius: 8),
-                title: Text(a.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        color: MusicTheme.label,
-                        fontSize: AppTheme.fontHeadline)),
-                subtitle: Text(a.artists.isEmpty ? '喜马拉雅专辑' : a.artists,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        color: MusicTheme.secondary,
-                        fontSize: AppTheme.fontFootnote)),
+                leading: CoverImage(url: a.coverUrl, size: 46, cornerRadius: 8),
+                title: Text(
+                  a.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: MusicTheme.label,
+                    fontSize: AppTheme.fontHeadline,
+                  ),
+                ),
+                subtitle: Text(
+                  a.artists.isEmpty ? '喜马拉雅专辑' : a.artists,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: MusicTheme.secondary,
+                    fontSize: AppTheme.fontFootnote,
+                  ),
+                ),
                 trailing: const Icon(Icons.chevron_right, size: 18),
                 onTap: () => Navigator.of(context).push<void>(
-                  MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
+                  MaterialPageRoute(
+                    settings: const RouteSettings(name: 'music:page'),
                     builder: (_) => XimalayaAlbumPage(
                       albumId: '${a.id}',
                       albumName: a.name,
@@ -783,13 +875,21 @@ class _SearchPageState extends State<SearchPage>
           itemBuilder: (c, i) {
             final a = _artists[i];
             return ListTile(
-              leading: CoverImage(
-                  url: a.avatarUrl, size: 46, cornerRadius: 23),
-              title: Text(a.name,
-                  style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
-              subtitle: Text('歌手',
-                  style:
-                      TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
+              leading: CoverImage(url: a.avatarUrl, size: 46, cornerRadius: 23),
+              title: Text(
+                a.name,
+                style: TextStyle(
+                  color: MusicTheme.label,
+                  fontSize: AppTheme.fontHeadline,
+                ),
+              ),
+              subtitle: Text(
+                '歌手',
+                style: TextStyle(
+                  color: MusicTheme.secondary,
+                  fontSize: AppTheme.fontFootnote,
+                ),
+              ),
               onTap: () => _openArtist(a),
             );
           },
@@ -805,13 +905,22 @@ class _SearchPageState extends State<SearchPage>
             final al = _albums[i];
             return ListTile(
               leading: CoverImage(url: al.coverUrl, size: 46, cornerRadius: 8),
-              title: Text(al.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
-              subtitle: Text(al.artist ?? '',
-                  style:
-                      TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
+              title: Text(
+                al.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: MusicTheme.label,
+                  fontSize: AppTheme.fontHeadline,
+                ),
+              ),
+              subtitle: Text(
+                al.artist ?? '',
+                style: TextStyle(
+                  color: MusicTheme.secondary,
+                  fontSize: AppTheme.fontFootnote,
+                ),
+              ),
               onTap: () => _openAlbum(al),
             );
           },
@@ -820,9 +929,14 @@ class _SearchPageState extends State<SearchPage>
   }
 
   Widget _empty() => Center(
-        child: Text('没有找到相关结果',
-            style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead)),
-      );
+    child: Text(
+      '没有找到相关结果',
+      style: TextStyle(
+        color: MusicTheme.secondary,
+        fontSize: AppTheme.fontSubhead,
+      ),
+    ),
+  );
 
   /// 插件搜索的歌手 / 专辑列表（条目是插件的原始 Map）。
   Widget _pluginPeopleList({required bool artist}) {
@@ -840,29 +954,38 @@ class _SearchPageState extends State<SearchPage>
         final sub = artist
             ? '歌手'
             : ((m['artist'] ?? '').toString().isEmpty
-                ? '专辑'
-                : (m['artist'] ?? '').toString());
+                  ? '专辑'
+                  : (m['artist'] ?? '').toString());
         return ListTile(
           leading: CoverImage(
             url: cover.isEmpty ? null : cover,
             size: 46,
             cornerRadius: artist ? 23 : 8,
           ),
-          title: Text(name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
-          subtitle: Text(sub,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  color: MusicTheme.secondary,
-                  fontSize: AppTheme.fontFootnote)),
-          trailing:
-              Icon(Icons.chevron_right, size: 18, color: MusicTheme.secondary),
-          onTap: () =>
-              artist ? _openPluginArtist(m) : _openPluginAlbum(m),
+          title: Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: MusicTheme.label,
+              fontSize: AppTheme.fontHeadline,
+            ),
+          ),
+          subtitle: Text(
+            sub,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: MusicTheme.secondary,
+              fontSize: AppTheme.fontFootnote,
+            ),
+          ),
+          trailing: Icon(
+            Icons.chevron_right,
+            size: 18,
+            color: MusicTheme.secondary,
+          ),
+          onTap: () => artist ? _openPluginArtist(m) : _openPluginAlbum(m),
         );
       },
     );
@@ -916,10 +1039,12 @@ class _SearchPageState extends State<SearchPage>
       );
       return;
     }
-    Navigator.of(context).push(MaterialPageRoute(
-      settings: const RouteSettings(name: 'music:page'),
-      builder: (_) => _SongListPage(title: title, songs: songs),
-    ));
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        settings: const RouteSettings(name: 'music:page'),
+        builder: (_) => _SongListPage(title: title, songs: songs),
+      ),
+    );
   }
 
   Future<void> _openArtist(Artist a) async {
@@ -931,9 +1056,12 @@ class _SearchPageState extends State<SearchPage>
       );
       return;
     }
-    await Navigator.of(context).push(MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
-      builder: (_) => _SongListPage(title: a.name, songs: songs),
-    ));
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        settings: const RouteSettings(name: 'music:page'),
+        builder: (_) => _SongListPage(title: a.name, songs: songs),
+      ),
+    );
   }
 
   Future<void> _openAlbum(Album al) async {
@@ -945,9 +1073,12 @@ class _SearchPageState extends State<SearchPage>
       );
       return;
     }
-    await Navigator.of(context).push(MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
-      builder: (_) => _SongListPage(title: al.name, songs: songs),
-    ));
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        settings: const RouteSettings(name: 'music:page'),
+        builder: (_) => _SongListPage(title: al.name, songs: songs),
+      ),
+    );
   }
 }
 
@@ -963,28 +1094,38 @@ class _SongListPage extends StatelessWidget {
     return Theme(
       data: MusicTheme.themeData(),
       child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          iconTheme: IconThemeData(color: MusicTheme.label),
-          title: Text(title,
-              style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
-          actions: [
-            IconButton(
-              tooltip: '播放全部',
-              icon: Icon(Icons.play_circle_outline_rounded,
-                  color: MusicTheme.tint),
-              onPressed: () =>
-                  MusicPlayerManager.instance.playQueue(songs, index: 0),
-            ),
-          ],
-        ),
-        body: ListView.builder(
-          padding: const EdgeInsets.only(bottom: 120),
-          itemCount: songs.length,
-          itemBuilder: (c, i) =>
-              SongCell(song: songs[i], index: i, playbackContext: songs),
+        // 原来是 `Colors.transparent` + AppBar —— push 到这个页面时
+        // 底下已经没有内容可透，透明等于让系统底色露出来（深色下会发灰）。
+        backgroundColor: MusicTheme.background,
+        body: SafeArea(
+          bottom: false,
+          child: Column(
+            children: [
+              // 和其他音乐子页面统一：返回按钮 + 大标题 + 一行说明
+              MusicPageHeader(
+                leading: const MusicBackButton(),
+                title: title,
+                subtitle: '${songs.length} 首',
+                action: MusicRoundAction(
+                  icon: Icons.play_arrow_rounded,
+                  tooltip: '播放全部',
+                  onTap: () =>
+                      MusicPlayerManager.instance.playQueue(songs, index: 0),
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(0, 6, 0, 120),
+                  itemCount: songs.length,
+                  itemBuilder: (c, i) => SongCell(
+                    song: songs[i],
+                    index: i,
+                    playbackContext: songs,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

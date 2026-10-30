@@ -67,8 +67,9 @@ class _PluginSongListPageState extends State<PluginSongListPage> {
       try {
         // 插件歌没有平台归属 → 打上 pluginId，播放时优先问这个插件
         songs.add(
-          Song.fromJson(Map<String, dynamic>.from(e))
-              .withPluginId(widget.source.id),
+          Song.fromJson(
+            Map<String, dynamic>.from(e),
+          ).withPluginId(widget.source.id),
         );
       } catch (_) {
         // 单条坏数据不影响整页
@@ -90,7 +91,8 @@ class _PluginSongListPageState extends State<PluginSongListPage> {
     return Theme(
       data: MusicTheme.themeData(),
       child: Scaffold(
-        backgroundColor: Colors.transparent,
+        // 同 source_manager_page：opaque route 上透明 = 露出影视侧底色
+        backgroundColor: MusicTheme.background,
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
@@ -107,12 +109,14 @@ class _PluginSongListPageState extends State<PluginSongListPage> {
           actions: [
             IconButton(
               tooltip: '播放全部',
-              icon: Icon(Icons.play_circle_outline_rounded,
-                  color: MusicTheme.tint),
+              icon: Icon(
+                Icons.play_circle_outline_rounded,
+                color: MusicTheme.tint,
+              ),
               onPressed: _songs.isEmpty
                   ? null
-                  : () => MusicPlayerManager.instance
-                      .playQueue(_songs, index: 0),
+                  : () =>
+                        MusicPlayerManager.instance.playQueue(_songs, index: 0),
             ),
           ],
         ),

@@ -7,6 +7,7 @@ import 'package:tvbox/music/models/models.dart';
 import 'package:tvbox/music/models/third_party_source.dart';
 import 'package:tvbox/music/services/settings_store.dart';
 import 'package:tvbox/music/theme/music_theme.dart';
+import 'package:tvbox/music/widgets/music_components.dart';
 import 'package:tvbox/music/widgets/floating_play_button.dart';
 import 'package:tvbox/music/pages/music_log_page.dart';
 import 'package:tvbox/music/pages/music_source_settings_page.dart';
@@ -46,13 +47,9 @@ class ProfilePage extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.only(bottom: 170),
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-            child: Text('我的',
-                style: TextStyle(
-                    color: MusicTheme.label,
-                    fontSize: AppTheme.fontPageTitle,
-                    fontWeight: FontWeight.w700)),
+          const MusicPageHeader(
+            title: '我的',
+            subtitle: '外观 / 播放 / 音源 · 全部存在本机',
           ),
 
           // ── 外观 ────────────────────────────────────────────
