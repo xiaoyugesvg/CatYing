@@ -562,7 +562,21 @@ class AppState extends GetxController {
     // 「程序」模块的 spider 源（key 前缀 app_）不走全局加载链路：
     // 它们由程序详情页惰性加载（Node 引擎单源架构，全局加载会触发
     // /config 线路替换并覆盖主源），这里只加载主订阅源里的蜘蛛源。
-    final spiderSource = ApiConfig.instance.sourceBeanList.firstWhereOrNull(
+    //
+    // 🔴 2026-10-30：**优先取用户当前选中的那条线路**。
+    //   原来一律按 `sourceBeanList` 的顺序取"第一个 spider 源"当主源脚本，
+    //   而列表顺序跟用户选了谁无关。订阅里有两条以上 spider 线路时（聚合订阅
+    //   很常见），切到第二条之后，那些 `api` 为空 / `csp_` 占位的线路**仍然**
+    //   被派到第一条的脚本上 ⇒ 表现为"切了源，内容还是上一个源的"。
+    //   首页源本身就是脚本线路时，它才是主源；它不是（比如选中的是聚合里的
+    //   某条 csp_ 占位线路）才退回按列表顺序找。
+    final api = ApiConfig.instance;
+    final home = api.homeSourceBean.value;
+    final ordered = <SourceBean>[
+      if (home != null) home,
+      ...api.sourceBeanList,
+    ];
+    final spiderSource = ordered.firstWhereOrNull(
       (s) =>
           s.isSpiderSource &&
           !s.key.startsWith('app_') &&

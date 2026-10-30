@@ -126,11 +126,12 @@ widget HeroCard = GestureDetector(
     child: ClipRRect(
       borderRadius: [data.home.theme.radiusCard],
       child: Stack(
+        fit: "expand",
         children: [
           T4Image(url: args.item.pic, fit: "cover"),
           Positioned(
-            left: 0.0,
-            right: 0.0,
+            start: 0.0,
+            end: 0.0,
             bottom: 0.0,
             child: Container(
               padding: [12.0, 26.0, 12.0, 10.0],
@@ -283,8 +284,8 @@ widget BannerItem = GestureDetector(
         children: [
           T4Image(url: args.item.pic, fit: "cover"),
           Positioned(
-            left: 0.0,
-            right: 0.0,
+            start: 0.0,
+            end: 0.0,
             bottom: 0.0,
             child: Container(
               padding: [12.0, 26.0, 12.0, 10.0],
@@ -348,6 +349,12 @@ widget Header = Container(
               },
             ),
           ),
+          // 换源（2026-10-30）：挪到顶栏功能按钮这一排 ——
+          // 原来它挂在分组标题右边当一个文字链接，用户：「换源也要在那个按钮边上」。
+          ToolIcon(
+            icon: data.home.icons.source,
+            onTap: event "showSourcePicker" {},
+          ),
           ToolIcon(icon: data.home.icons.search, onTap: event "openSearch" {}),
           ToolIcon(icon: data.home.icons.refresh, onTap: event "refresh" {}),
           ToolIcon(
@@ -398,14 +405,6 @@ widget SectionTitle = Container(
           fontSize: 12.5,
           fontWeight: "w600",
         },
-      ),
-      Spacer(),
-      GestureDetector(
-        onTap: event "showSourcePicker" {},
-        child: Text(
-          text: "换源",
-          style: { color: data.home.theme.accent, fontSize: 12.5 },
-        ),
       ),
     ],
   ),

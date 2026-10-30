@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:tvbox/pages/cf_verify_page.dart';
 import 'package:tvbox/widgets/video_player_pip.dart';
 import 'package:tvbox/services/api_config.dart';
+import 'package:tvbox/models/source_bean.dart';
 import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/play_context_store.dart';
 import 'package:tvbox/services/cf_session.dart';
@@ -423,7 +424,7 @@ class SpiderService {
     _engineSiteTypes.clear();
     _scriptLoadInFlight.clear();
     _drpyLoadInFlight.clear();
-    AppLog.instance.log('[SpiderService] 换源 ⇒ 作废脚本/端口记忆，下次请求重新载入');
+    AppLog.instance.log('[SpiderService] 换源 ⇒ 作废脚本记忆（端口不动，引擎还在跑），下次请求重新载入');
   }
 
   /// 当前已载入 Node 引擎的脚本地址 + 该脚本在引擎里的真实站点 key
@@ -562,7 +563,16 @@ class SpiderService {
   void _tryDeriveMainScript() {
     if (mainScriptUrl.isNotEmpty) return;
     try {
-      final beans = ApiConfig.instance.sourceBeanList;
+      // 🔴 2026-10-30：**先看用户当前选中的线路**，再退回列表顺序。
+      //   与 `AppState._loadSpiderSource` 同一套口径 —— 两处都按"列表第一个"
+      //   推导的话，切到订阅里第二条 spider 线路后，主源脚本仍指向第一条，
+      //   `api` 为空 / `csp_` 占位的线路会被派到旧脚本上（切了源内容不变）。
+      final api = ApiConfig.instance;
+      final home = api.homeSourceBean.value;
+      final beans = <SourceBean>[
+        if (home != null) home,
+        ...api.sourceBeanList,
+      ];
       for (final s in beans) {
         if (!s.isSpiderSource || s.isPythonScriptSource) continue;
         if (s.key.startsWith('app_')) continue;

@@ -27,6 +27,9 @@ import 'package:tvbox/rfw_theme/rfw_theme_store.dart';
 void main() {
   /// 顶栏四个工具按钮的期望图标（与 `rfw_theme_data.dart` 的 icons 表一致）
   const expectedToolIcons = <IconData>[
+    // 换源（2026-10-30）：从分组标题右边的文字链接挪进顶栏按钮排，
+    // 用户原话「换源也要在那个按钮边上」——所以它必须出现在顶栏图标里。
+    Icons.swap_horiz,
     Icons.search,
     Icons.refresh,
     Icons.grid_view,
@@ -75,7 +78,7 @@ void main() {
 
   group('顶栏工具图标', () {
     for (final entry in builtinRfwThemes) {
-      testWidgets('${entry.name}：四个工具图标不是豆腐块', (tester) async {
+      testWidgets('${entry.name}：顶栏五个工具图标不是豆腐块', (tester) async {
         await pumpTheme(tester, entry.id);
 
         final icons = tester.widgetList<Icon>(find.byType(Icon)).toList();

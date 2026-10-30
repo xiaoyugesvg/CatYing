@@ -129,6 +129,9 @@ Map<String, Object?> buildRfwHomeData(RfwHomeDataInput input) {
         'open': Icons.open_in_new,
         'back': Icons.arrow_back,
         'search': Icons.search,
+        // 换源（2026-10-30）：主题的顶栏要能把「换源」放进功能按钮那一排，
+        // 而不是在分组标题右边挂一个文字链接（用户：「换源也要在那个按钮边上」）。
+        'source': Icons.swap_horiz,
       }.entries)
         e.key: <String, Object?>{
           'icon': e.value.codePoint,

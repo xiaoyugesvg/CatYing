@@ -189,11 +189,19 @@ class _DramaPageState extends State<DramaPage> {
   }
 
   /// 全部可选源（订阅线路 + 本地源）
+  ///
+  /// 🔴 2026-10-30 修（用户：「那个本地JS还是会影响短剧」）：
+  ///   原来只判 `localSourcesEnabled`（那是**本地 Python 源**的开关），
+  ///   于是「本地 JS 源」不管自己的开关是开是关，都会进短剧页的切换器和聚合
+  ///   ⇒ 用户把 JS 开关关掉、影视里也切到订阅线路了，短剧还是被那一个 JS 源
+  ///   顶着（`resolveCurrentSource` 的"跟随首页源"分支会选中它）。
+  ///   现在每个本地源**按自己那一族**的开关判定（`isLocalSourceEnabled`，
+  ///   与搜索、源面板、主页源恢复用的是同一份规则）。
   List<SourceBean> _allSources() {
     final api = ApiConfig.instance;
     return <SourceBean>[
       ...api.sourceBeanList,
-      if (api.localSourcesEnabled.value) ...api.localVideoSources,
+      ...api.localVideoSources.where(api.isLocalSourceEnabled),
     ];
   }
 
