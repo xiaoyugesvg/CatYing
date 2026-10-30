@@ -130,6 +130,43 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
   Widget build(BuildContext context) {
     return SettingsSubPage(
       title: '弹幕服务',
+      help: const [
+        SettingsHelpItem(
+          icon: Icons.dns_outlined,
+          title: '方式一：本地服务',
+          body: '弹幕由 App 自己在本机算/取，不依赖任何外部接口。'
+              '最稳、不会因为第三方服务关停而失效，但能匹配到的片源相对少。'
+              '只想"有弹幕看"又不想折腾就选它。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.inventory_2_outlined,
+          title: '方式二：订阅自带',
+          body: '用当前订阅源自己带的弹幕接口。换源即换弹幕库，'
+              '匹配度通常最高（同一个源里的片名和它自己的弹幕是对得上的）。'
+              '源没带弹幕接口时这一档等于没有弹幕。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.cloud_outlined,
+          title: '方式三：自定义远程',
+          body: '填一个弹幕接口地址（支持 {name} / {episode} 这类占位符），'
+              '用别人搭好的弹幕服务。最灵活，但要自己保证地址长期可用；'
+              '地址失效时播放页会一直没有弹幕，换回前两档即可。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.tune_rounded,
+          title: '显示与样式',
+          body: '上面的预览区会按当前参数实时滚动，调完不用退出去看视频。'
+              '字号/透明度/速度/描边都只影响显示，不影响取弹幕。'
+              '「屏蔽词」按行填，命中就整条不显示。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.speed,
+          title: '同步视频速度',
+          body: '开启后弹幕滚动速度会跟着播放倍速一起变（2 倍速时弹幕也快一倍），'
+              '保持"弹幕和画面同一个节奏"。关掉则弹幕恒定速度，'
+              '高倍速时弹幕会显得很拖。',
+        ),
+      ],
       children: [
         // #11：实时预览 —— 原来调字号/透明度/速度时**看不到任何效果**，
         // 必须退出去播视频才知道对不对，来回试很折磨。

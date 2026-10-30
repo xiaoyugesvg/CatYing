@@ -1,9 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:tvbox/models/movie.dart';
 import 'package:tvbox/models/movie_sort.dart';
 import 'package:tvbox/rfw_theme/rfw_theme_data.dart';
+import 'package:tvbox/rfw_theme/rfw_theme_palette.dart';
 import 'package:tvbox/rfw_theme/rfw_theme_store.dart';
 import 'package:tvbox/widgets/live_danmu.dart';
 
@@ -134,6 +137,130 @@ widget root = Text(text: "x");
       expect(data['heroHeight'], 0.0);
       expect(data['hasRecommend'], isFalse);
       expect((data['immersive'] as Map)['imageUrl'], 'a.jpg');
+    });
+  });
+
+  group('内置主题贴合软件配色', () {
+    test('三个内置主题都能解析且通过安全校验', () {
+      for (final entry in builtinRfwThemes) {
+        final file = File(entry.asset!);
+        expect(file.existsSync(), isTrue, reason: '缺少主题文件 ${entry.asset}');
+        final text = file.readAsStringSync();
+        final r = validateRfwThemeText(text);
+        expect(r.ok, isTrue, reason: '${entry.name}: ${r.reason}');
+      }
+    });
+
+    test('主题文件里不许再出现写死的色值（透明除外）', () {
+      // 2026-10-30 用户：「这个 RFW 主题没有贴合我的软件界面。」
+      // 根因就是三个主题把底色/强调色/文字色全写死了，跟 24 套调色板无关。
+      // 这条测试保证以后再加主题也必须走 data.home.theme.* 色板。
+      final literal = RegExp(r'0x[0-9A-Fa-f]{8}');
+      for (final entry in builtinRfwThemes) {
+        final text = File(entry.asset!).readAsStringSync();
+        final bad = literal
+            .allMatches(text)
+            .map((m) => m.group(0)!)
+            .where((c) => c.toUpperCase() != '0X00000000') // 透明是允许的
+            .toList();
+        expect(bad, isEmpty, reason: '${entry.name} 还有写死色值：$bad');
+      }
+    });
+
+    test('色板对每个主题都给出可读的文字与强调色', () {
+      for (final id in ['chenguang', 'suyu', 'xinghe', 'custom_unknown']) {
+        final p = RfwThemePalette.of(id);
+        double contrast(Color a, Color b) {
+          final la = a.computeLuminance();
+          final lb = b.computeLuminance();
+          final hi = la > lb ? la : lb;
+          final lo = la > lb ? lb : la;
+          return (hi + 0.05) / (lo + 0.05);
+        }
+
+        expect(
+          contrast(p.textPrimary, p.bg),
+          greaterThanOrEqualTo(7.0),
+          reason: '$id 的正文压在底色上不够清楚',
+        );
+        expect(
+          contrast(p.accent, p.bg),
+          greaterThanOrEqualTo(4.4),
+          reason: '$id 的强调色压在底色上看不清',
+        );
+        expect(
+          contrast(p.onAccent, p.accentFill),
+          greaterThanOrEqualTo(4.4),
+          reason: '$id 的选中态文字压不住实底',
+        );
+        // 色板里的每个颜色都必须是不透明的（RFW 只有 int 色值，
+        // 半透明底在吸顶头上会透出下面的海报，观感很脏）
+        for (final c in [p.bg, p.card, p.textPrimary, p.accent, p.chipBg]) {
+          expect(c.a, 1.0, reason: '$id 有半透明色混进了不透明 token');
+        }
+      }
+    });
+
+    test('星河强制深色，晨光/素影跟随软件明暗', () {
+      expect(RfwThemePalette.of('xinghe').isDark, isTrue);
+      expect(RfwThemePalette.of('xinghe').bg.computeLuminance(), lessThan(0.2));
+      // 晨光与素影不是强制深色 —— 它们跟随 AppBrightness
+      expect(
+        RfwThemePalette.of('chenguang').isDark,
+        RfwThemePalette.of('suyu').isDark,
+      );
+    });
+
+    test('主题 id 回落：空/未知 id 不会把色板算错', () {
+      expect(effectiveRfwThemeId(null), builtinRfwThemes.first.id);
+      expect(effectiveRfwThemeId(''), builtinRfwThemes.first.id);
+      expect(effectiveRfwThemeId('suyu'), 'suyu');
+      // 自定义主题原样返回（色板走"跟随软件配色"分支）
+      expect(effectiveRfwThemeId('我的主题.rfwtxt'), '我的主题.rfwtxt');
+    });
+
+    test('data.home.theme 的每个 token 都到位且类型正确', () {
+      final data = buildRfwHomeData(
+        RfwHomeDataInput(
+          categories: const [],
+          category: '',
+          items: const [],
+          recommend: const [],
+          filters: const [],
+          selectedFilters: const {},
+          themeId: 'suyu',
+        ),
+      );
+      final theme = data['theme'] as Map<String, Object?>;
+      for (final key in [
+        'bg',
+        'surface',
+        'card',
+        'textPrimary',
+        'textSecondary',
+        'textTertiary',
+        'accent',
+        'accentFill',
+        'onAccent',
+        'chipBg',
+        'border',
+        'scrim',
+        'onImage',
+        'glassTint',
+      ]) {
+        expect(theme[key], isA<int>(), reason: '色板缺少 $key');
+      }
+      for (final key in [
+        'radiusCard',
+        'radiusChip',
+        'radiusPill',
+        'gap',
+        'pad',
+        'headerPadTop',
+      ]) {
+        expect(theme[key], isA<double>(), reason: '尺寸 token 缺少 $key');
+      }
+      expect(theme['isDark'], isA<bool>());
     });
   });
 

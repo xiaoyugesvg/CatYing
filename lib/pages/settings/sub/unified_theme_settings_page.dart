@@ -45,6 +45,40 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
   Widget build(BuildContext context) {
     return SettingsSubPage(
       title: '主题与外观',
+      help: const [
+        SettingsHelpItem(
+          icon: Icons.brightness_6_outlined,
+          title: '外观模式：浅色 / 深色 / 跟随系统',
+          body: '决定整个 App 的底色明暗。「跟随系统」会跟着手机的深色模式开关走，'
+              '晚上自动变深色。选完立刻生效，不用重启。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.palette_outlined,
+          title: '配色：24 套预设 + 自定义',
+          body: '每套预设同时给了浅色底、深色底和一个强调色，'
+              '按钮/选中态/图标高亮都跟着它走。'
+              '自定义可以自己取一个主色，其余色由它推出来。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.splitscreen_outlined,
+          title: '分模块配色：影视 / 阅读 / 音乐 各来一套',
+          body: '默认三个模块共用阅读那套配色。想让「影视用碧青、音乐用蕉红」'
+              '就分别给它们单独指定 —— 各模块互不影响，'
+              '但同一屏只显示一个模块，不会打架。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.restart_alt_rounded,
+          title: '一键还原',
+          body: '把配色、分模块跟随、明暗、壁纸全部恢复默认。'
+              '改乱了、或者觉得哪块颜色不对劲，先点它回到起点再逐项调。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.format_size_rounded,
+          title: '界面字号',
+          body: '整体缩放所有界面文字（不含视频播放器里的字幕）。'
+              '调大后卡片高度会跟着变，排版不会挤在一起。',
+        ),
+      ],
       children: [
         // ── 全局：明暗模式（自绘三选一，与下方配色分区同一套视觉）──
         _modeCard(),

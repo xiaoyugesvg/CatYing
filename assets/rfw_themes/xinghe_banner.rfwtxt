@@ -1,33 +1,51 @@
+// 星河横幅 —— 强制深色 · 大图横滑 · 标题压图
+//
+// ⚠️ 颜色一律从 `data.home.theme.*` 取，不许写死色值。
+// 星河是唯一「不跟随软件明暗」的主题：底色恒为深色（从强调色借 10% 色相），
+// 因为它的定位是"关灯看片"—— 浅底会让海报失去沉浸感。
+//
+// ── 视觉语言（2026-10-30 重做）─────────────────────────────────
+//   · 轮播 190 高、视口 0.92 —— 接近满屏的大图，左右只露一丝边；
+//   · 网格海报**标题压在图上**（底部渐变蒙层），而不是图下面排两行字 ——
+//     这是流媒体首页的语言（Netflix/Disney+），和另两个主题明显不同；
+//   · 横向条目用卡片底 + 1px 描边，深底上"浮起来"；
+//   · 分组标题用强调色小圆点做锚。
+
 import core.widgets;
 import peek.home;
 
 widget ToolIcon = GestureDetector(
   onTap: args.onTap,
   child: Container(
-    padding: [8.0],
-    child: Icon(icon: args.icon, size: 20.0, color: 0xFFFFFFFF),
+    padding: [6.0],
+    child: Icon(
+      icon: args.icon.icon,
+      fontFamily: args.icon.fontFamily,
+      size: 20.0,
+      color: data.home.theme.textPrimary,
+    ),
   ),
 );
 
 widget TabButton = GestureDetector(
   onTap: event "selectType" { typeId: args.typeId },
   child: Container(
-    padding: [12.0, 8.0],
+    padding: [12.0, 7.0],
     margin: [0.0, 0.0, 8.0, 0.0],
     decoration: {
       type: "box",
       color: switch args.selected {
-        true: 0xFFD9A441,
+        true: data.home.theme.accentFill,
         false: 0x00000000,
       },
-      borderRadius: [16.0],
+      borderRadius: [data.home.theme.radiusPill],
     },
     child: Text(
       text: args.name,
       style: {
         color: switch args.selected {
-          true: 0xFF0E1424,
-          false: 0xFFFFFFFF,
+          true: data.home.theme.onAccent,
+          false: data.home.theme.textPrimary,
         },
         fontSize: 13.0,
         fontWeight: "w600",
@@ -42,20 +60,20 @@ widget FilterChip = GestureDetector(
     value: args.option.value,
   },
   child: Container(
-    padding: [10.0, 6.0],
+    padding: [10.0, 5.0],
     margin: [0.0, 0.0, 8.0, 8.0],
     decoration: {
       type: "box",
       color: switch args.option.selected {
-        true: 0xFFD9A441,
-        false: 0xFF1A2340,
+        true: data.home.theme.accentFill,
+        false: data.home.theme.chipBg,
       },
-      borderRadius: [12.0],
+      borderRadius: [data.home.theme.radiusChip],
       border: [
         {
           color: switch args.option.selected {
-            true: 0xFFD9A441,
-            false: 0xFF2E3A5C,
+            true: data.home.theme.accentFill,
+            false: data.home.theme.border,
           },
           width: 1.0,
         },
@@ -65,8 +83,8 @@ widget FilterChip = GestureDetector(
       text: args.option.name,
       style: {
         color: switch args.option.selected {
-          true: 0xFF0E1424,
-          false: 0xFFFFFFFF,
+          true: data.home.theme.onAccent,
+          false: data.home.theme.textSecondary,
         },
         fontSize: 12.0,
       },
@@ -81,7 +99,11 @@ widget FilterGroup = Container(
     children: [
       Text(
         text: args.group.name,
-        style: { color: 0xFF9AA7C7, fontSize: 12.0, fontWeight: "w600" },
+        style: {
+          color: data.home.theme.textSecondary,
+          fontSize: 12.0,
+          fontWeight: "w600",
+        },
       ),
       SizedBox(height: 6.0),
       Wrap(
@@ -95,13 +117,14 @@ widget FilterGroup = Container(
   ),
 );
 
+// ── 大图轮播卡：标题 18 号压在渐变上，像影院大厅的海报灯箱 ──────
 widget HeroCard = GestureDetector(
   onTap: event "openRecommend" { index: args.item.index },
   child: Container(
-    margin: [0.0, 0.0, 8.0, 0.0],
-    decoration: { type: "box", borderRadius: [12.0] },
+    margin: [0.0, 0.0, 10.0, 0.0],
+    decoration: { type: "box", borderRadius: [data.home.theme.radiusCard] },
     child: ClipRRect(
-      borderRadius: [12.0],
+      borderRadius: [data.home.theme.radiusCard],
       child: Stack(
         children: [
           T4Image(url: args.item.pic, fit: "cover"),
@@ -110,8 +133,16 @@ widget HeroCard = GestureDetector(
             right: 0.0,
             bottom: 0.0,
             child: Container(
-              color: 0x99000000,
-              padding: [12.0, 8.0],
+              padding: [14.0, 44.0, 14.0, 14.0],
+              decoration: {
+                type: "box",
+                gradient: {
+                  type: "linear",
+                  begin: "bottomCenter",
+                  end: "topCenter",
+                  colors: [data.home.theme.scrim, 0x00000000],
+                },
+              },
               child: Column(
                 crossAxisAlignment: "start",
                 children: [
@@ -120,14 +151,20 @@ widget HeroCard = GestureDetector(
                     maxLines: 1,
                     overflow: "ellipsis",
                     style: {
-                      color: 0xFFFFFFFF,
-                      fontSize: 15.0,
+                      color: data.home.theme.onImage,
+                      fontSize: 18.0,
                       fontWeight: "w700",
                     },
                   ),
+                  SizedBox(height: 2.0),
                   Text(
                     text: args.item.remarks,
-                    style: { color: 0xFFFFFFFF, fontSize: 12.0 },
+                    maxLines: 1,
+                    overflow: "ellipsis",
+                    style: {
+                      color: data.home.theme.onImage,
+                      fontSize: 12.0,
+                    },
                   ),
                 ],
               ),
@@ -139,46 +176,83 @@ widget HeroCard = GestureDetector(
   ),
 );
 
+// ── 网格海报：标题压在图内底部（影院语言）────────────────────────
 widget PosterItem = GestureDetector(
   onTap: event "openItem" { index: args.item.index },
-  child: Column(
-    crossAxisAlignment: "start",
-    children: [
-      Expanded(
-        child: ClipRRect(
-          borderRadius: [10.0],
-          child: T4Image(url: args.item.pic, fit: "cover"),
-        ),
+  child: Container(
+    decoration: { type: "box", borderRadius: [data.home.theme.radiusCard] },
+    child: ClipRRect(
+      borderRadius: [data.home.theme.radiusCard],
+      child: Stack(
+        children: [
+          T4Image(url: args.item.pic, fit: "cover"),
+          Positioned(
+            left: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+            child: Container(
+              padding: [8.0, 22.0, 8.0, 7.0],
+              decoration: {
+                type: "box",
+                gradient: {
+                  type: "linear",
+                  begin: "bottomCenter",
+                  end: "topCenter",
+                  colors: [data.home.theme.scrim, 0x00000000],
+                },
+              },
+              child: Column(
+                crossAxisAlignment: "start",
+                children: [
+                  Text(
+                    text: args.item.name,
+                    maxLines: 1,
+                    overflow: "ellipsis",
+                    style: {
+                      color: data.home.theme.onImage,
+                      fontSize: 12.5,
+                      fontWeight: "w700",
+                    },
+                  ),
+                  Text(
+                    text: args.item.remarks,
+                    maxLines: 1,
+                    overflow: "ellipsis",
+                    style: {
+                      color: data.home.theme.onImage,
+                      fontSize: 10.5,
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
-      SizedBox(height: 6.0),
-      Text(
-        text: args.item.name,
-        maxLines: 1,
-        overflow: "ellipsis",
-        style: { color: 0xFFFFFFFF, fontSize: 13.0, fontWeight: "w600" },
-      ),
-      Text(
-        text: args.item.remarks,
-        maxLines: 1,
-        overflow: "ellipsis",
-        style: { color: 0xFF9AA7C7, fontSize: 12.0 },
-      ),
-    ],
+    ),
   ),
 );
 
+// ── 横向条目：卡片底 + 1px 描边，深底上浮起来 ───────────────────
 widget RowItem = GestureDetector(
   onTap: event "openItem" { index: args.item.index },
   child: Container(
-    color: 0xFF1A2340,
-    padding: [12.0],
+    decoration: {
+      type: "box",
+      color: data.home.theme.card,
+      borderRadius: [data.home.theme.radiusCard],
+      border: [
+        { color: data.home.theme.border, width: 1.0 },
+      ],
+    },
+    padding: [10.0],
     child: Row(
       children: [
         ClipRRect(
           borderRadius: [8.0],
           child: SizedBox(
-            width: 96.0,
-            height: 128.0,
+            width: 92.0,
+            height: 124.0,
             child: T4Image(url: args.item.pic, fit: "cover"),
           ),
         ),
@@ -192,19 +266,27 @@ widget RowItem = GestureDetector(
                 maxLines: 2,
                 overflow: "ellipsis",
                 style: {
-                  color: 0xFFFFFFFF,
+                  color: data.home.theme.textPrimary,
                   fontSize: 15.0,
                   fontWeight: "w700",
                 },
               ),
-              SizedBox(height: 4.0),
+              SizedBox(height: 5.0),
               Text(
                 text: args.item.remarks,
-                style: { color: 0xFF9AA7C7, fontSize: 12.0 },
+                maxLines: 1,
+                overflow: "ellipsis",
+                style: {
+                  color: data.home.theme.textSecondary,
+                  fontSize: 12.0,
+                },
               ),
               Text(
                 text: args.item.year,
-                style: { color: 0xFF9AA7C7, fontSize: 12.0 },
+                style: {
+                  color: data.home.theme.textTertiary,
+                  fontSize: 11.5,
+                },
               ),
             ],
           ),
@@ -218,9 +300,9 @@ widget BannerItem = GestureDetector(
   onTap: event "openItem" { index: args.item.index },
   child: Container(
     margin: [12.0, 6.0],
-    decoration: { type: "box", borderRadius: [12.0] },
+    decoration: { type: "box", borderRadius: [data.home.theme.radiusCard] },
     child: ClipRRect(
-      borderRadius: [12.0],
+      borderRadius: [data.home.theme.radiusCard],
       child: Stack(
         children: [
           T4Image(url: args.item.pic, fit: "cover"),
@@ -229,8 +311,16 @@ widget BannerItem = GestureDetector(
             right: 0.0,
             bottom: 0.0,
             child: Container(
-              color: 0x99000000,
-              padding: [12.0, 8.0],
+              padding: [12.0, 40.0, 12.0, 12.0],
+              decoration: {
+                type: "box",
+                gradient: {
+                  type: "linear",
+                  begin: "bottomCenter",
+                  end: "topCenter",
+                  colors: [data.home.theme.scrim, 0x00000000],
+                },
+              },
               child: Column(
                 crossAxisAlignment: "start",
                 children: [
@@ -239,14 +329,19 @@ widget BannerItem = GestureDetector(
                     maxLines: 1,
                     overflow: "ellipsis",
                     style: {
-                      color: 0xFFFFFFFF,
-                      fontSize: 15.0,
+                      color: data.home.theme.onImage,
+                      fontSize: 17.0,
                       fontWeight: "w700",
                     },
                   ),
                   Text(
                     text: args.item.remarks,
-                    style: { color: 0xFFFFFFFF, fontSize: 12.0 },
+                    maxLines: 1,
+                    overflow: "ellipsis",
+                    style: {
+                      color: data.home.theme.onImage,
+                      fontSize: 12.0,
+                    },
                   ),
                 ],
               ),
@@ -258,87 +353,92 @@ widget BannerItem = GestureDetector(
   ),
 );
 
-widget Header = PeekGlass(
-  blur: 16.0,
-  radius: 0.0,
-  tintColor: 0x660E1424,
-  child: Container(
-    padding: [12.0, 12.0, 12.0, 4.0],
-    child: Column(
-      children: [
-        Row(
+widget Header = Container(
+  color: data.home.theme.surface,
+  padding: [12.0, 12.0, 12.0, 4.0],
+  child: Column(
+    children: [
+      Row(
+        children: [
+          Expanded(
+            child: Text(
+              text: data.home.source,
+              maxLines: 1,
+              overflow: "ellipsis",
+              style: {
+                color: data.home.theme.textPrimary,
+                fontSize: 17.0,
+                fontWeight: "w700",
+              },
+            ),
+          ),
+          ToolIcon(icon: data.home.icons.search, onTap: event "openSearch" {}),
+          ToolIcon(icon: data.home.icons.refresh, onTap: event "refresh" {}),
+          ToolIcon(
+            icon: data.home.icons.layout,
+            onTap: event "showDisplayStylePicker" {},
+          ),
+          ToolIcon(
+            icon: data.home.icons.filter,
+            onTap: event "toggleFilters" {},
+          ),
+        ],
+      ),
+      SizedBox(height: 8.0),
+      SingleChildScrollView(
+        scrollDirection: "horizontal",
+        child: Row(
           children: [
-            Expanded(
-              child: Text(
-                text: data.home.source,
-                maxLines: 1,
-                overflow: "ellipsis",
-                style: {
-                  color: 0xFFFFFFFF,
-                  fontSize: 16.0,
-                  fontWeight: "w700",
-                },
-              ),
-            ),
-            ToolIcon(
-              icon: data.home.icons.search,
-              onTap: event "openSearch" {},
-            ),
-            ToolIcon(
-              icon: data.home.icons.refresh,
-              onTap: event "refresh" {},
-            ),
-            ToolIcon(
-              icon: data.home.icons.layout,
-              onTap: event "showDisplayStylePicker" {},
-            ),
-            ToolIcon(
-              icon: data.home.icons.filter,
-              onTap: event "toggleFilters" {},
+            ...for entry in data.home.classes: TabButton(
+              typeId: entry.typeId,
+              name: entry.typeName,
+              selected: entry.selected,
             ),
           ],
         ),
-        SizedBox(height: 8.0),
-        SingleChildScrollView(
-          scrollDirection: "horizontal",
-          child: Row(
-            children: [
-              ...for entry in data.home.classes: TabButton(
-                typeId: entry.typeId,
-                name: entry.typeName,
-                selected: entry.selected,
-              ),
-            ],
-          ),
+      ),
+      switch data.home.showFilters {
+        true: Column(
+          children: [
+            ...for group in data.home.filters: FilterGroup(group: group),
+          ],
         ),
-        switch data.home.showFilters {
-          true: Column(
-            children: [
-              ...for group in data.home.filters: FilterGroup(group: group),
-            ],
-          ),
-          false: SizedBoxShrink(),
-        },
-      ],
-    ),
+        false: SizedBoxShrink(),
+      },
+    ],
   ),
 );
 
+// 分组标题：强调色小圆点 + 略大的字（影院的"正在热映"）
 widget SectionTitle = Container(
-  color: 0xFF0E1424,
-  padding: [12.0, 8.0],
+  color: data.home.theme.surface,
+  padding: [12.0, 9.0],
   child: Row(
     children: [
+      Container(
+        width: 6.0,
+        height: 6.0,
+        margin: [0.0, 0.0, 8.0, 0.0],
+        decoration: {
+          type: "box",
+          color: data.home.theme.accentFill,
+          borderRadius: [3.0],
+        },
+      ),
       Text(
-        text: ["全部剧集 · ", data.home.totalLabel, "部"],
-        style: { color: 0xFFFFFFFF, fontSize: 14.0, fontWeight: "w700" },
+        text: ["正在热映 · ", data.home.totalLabel, " 部"],
+        style: {
+          color: data.home.theme.textPrimary,
+          fontSize: 15.0,
+          fontWeight: "w700",
+        },
       ),
       Spacer(),
       GestureDetector(
         onTap: event "showSourcePicker" {},
         child: Text(
           text: "换源",
-          style: { color: 0xFFD9A441, fontSize: 13.0 },
+          style: { color: data.home.theme.accent, fontSize: 13.0 },
         ),
       ),
     ],
@@ -346,14 +446,14 @@ widget SectionTitle = Container(
 );
 
 widget root = Container(
-  color: 0xFF0E1424,
+  color: data.home.theme.bg,
   child: PeekStickyGrid(
     heroHeight: switch data.home.hasRecommend {
       true: data.home.heroHeight,
       false: 0.0,
     },
     pinnedHeight: data.home.stickyHeaderHeight,
-    sectionHeight: 40.0,
+    sectionHeight: 38.0,
     crossAxisCount: switch data.home.displayStyle {
       "grid": data.home.gridColumns,
       "largeGrid": data.home.largeGridColumns,
@@ -365,24 +465,26 @@ widget root = Container(
       default: data.home.gridColumns,
     },
     childAspectRatio: switch data.home.displayStyle {
-      "grid": 0.72,
-      "largeGrid": 0.72,
-      "banner": 1.2,
+      "grid": 0.68,
+      "largeGrid": 0.68,
+      "banner": 1.15,
       "list": data.home.wideListRatio,
       "list2": data.home.textListRatio,
       "textList": data.home.textListRatio,
-      "card": 2.1,
-      default: 0.72,
+      "card": 2.05,
+      default: 0.68,
     },
-    mainAxisSpacing: 8.0,
-    crossAxisSpacing: 8.0,
+    mainAxisSpacing: 10.0,
+    crossAxisSpacing: 10.0,
+    horizontalPadding: 12.0,
+    bottomPadding: 32.0,
     hero: PeekCarousel(
       height: data.home.heroHeight,
-      viewportFraction: 0.88,
+      viewportFraction: 0.92,
       autoPlay: true,
-      autoPlayInterval: 4.0,
-      activeColor: 0xFFD9A441,
-      inactiveColor: 0xFF2E3A5C,
+      autoPlayInterval: 5.0,
+      activeColor: data.home.theme.accentFill,
+      inactiveColor: data.home.theme.border,
       children: [
         ...for item in data.home.home.recommend: HeroCard(item: item),
       ],
@@ -397,7 +499,7 @@ widget root = Container(
           true: "加载中…",
           false: "暂无内容",
         },
-        style: { color: 0xFF9AA7C7, fontSize: 14.0 },
+        style: { color: data.home.theme.textTertiary, fontSize: 14.0 },
       ),
     ),
     children: [

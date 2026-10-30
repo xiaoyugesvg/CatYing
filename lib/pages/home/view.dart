@@ -24,6 +24,7 @@ import 'package:tvbox/reading/services/settings_service.dart';
 import 'package:tvbox/rfw_theme/rfw_home_theme.dart';
 import 'package:tvbox/rfw_theme/rfw_theme_data.dart';
 import 'package:tvbox/rfw_theme/rfw_theme_events.dart';
+import 'package:tvbox/rfw_theme/rfw_theme_palette.dart';
 import 'package:tvbox/rfw_theme/rfw_theme_store.dart';
 
 /// 首页 - 对应 Swift HomeView
@@ -47,28 +48,51 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      // 透明背景,让 app.dart ContentView 里的 BackgroundService 全局背景层透出
-      backgroundColor: Colors.transparent,
-      body: Stack(
-        children: [
-          // 底部不避让 Home Indicator：内容延伸到小白条下方，
-          // 一屏显示更多卡片（用户要求）
-          SafeArea(
-            bottom: false,
-            child: Column(
-              children: [
-                // 顶部：源切换 + 搜索
-                _buildHeaderBar(),
-                // 主内容：大图幻灯片 → 分类 →（点分类弹出）筛选 → 片单/网格
-                Expanded(child: _buildContentArea()),
-              ],
-            ),
+    // ── RFW 主题模式下**不画原生顶栏**（2026-10-30）──────────────
+    //
+    // 用户：「切换 RWF 主题的时候，应该是没有顶栏了，因为刚才那个位置
+    // 应该有了这些按钮呢」
+    //
+    // `.rfwtxt` 里的 `Header` 自己就画了「源名 + 搜索/刷新/布局/筛选 +
+    // 分类胶囊」这一整条吸顶栏。外面再套一层 `_buildHeaderBar()` 就是
+    // **两排一模一样的按钮**，而且原生那排不会跟着主题吸顶滚动，
+    // 观感上像是主题没生效。
+    //
+    // 所以这里按开关分流：
+    //   · 主题关 → 原生顶栏（原行为，不变）
+    //   · 主题开 → 交给主题，Scaffold 底色也跟着换成主题底色，
+    //     这样状态栏那一条不会露出壁纸、和主题页底色断开。
+    return ValueListenableBuilder<bool>(
+      valueListenable: rfwThemeModeNotifier,
+      builder: (context, rfwOn, _) {
+        final rfwBg = rfwOn
+            ? RfwThemePalette.of(effectiveRfwThemeId(rfwThemeIdNotifier.value)).bg
+            : null;
+        return Scaffold(
+          // 透明背景,让 app.dart ContentView 里的 BackgroundService 全局背景层透出
+          // （RFW 主题模式除外：主题自带底色，壁纸会破坏它的配色）
+          backgroundColor: rfwBg ?? Colors.transparent,
+          body: Stack(
+            children: [
+              // 底部不避让 Home Indicator：内容延伸到小白条下方，
+              // 一屏显示更多卡片（用户要求）
+              SafeArea(
+                bottom: false,
+                child: Column(
+                  children: [
+                    // 顶部：源切换 + 搜索（RFW 主题自带，不重复画）
+                    if (!rfwOn) _buildHeaderBar(),
+                    // 主内容：大图幻灯片 → 分类 →（点分类弹出）筛选 → 片单/网格
+                    Expanded(child: _buildContentArea()),
+                  ],
+                ),
+              ),
+              // 重连覆盖层
+              if (_isReconnecting) _buildReconnectingOverlay(),
+            ],
           ),
-          // 重连覆盖层
-          if (_isReconnecting) _buildReconnectingOverlay(),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -1064,6 +1088,7 @@ class _HomePageState extends State<HomePage> {
             _controller.selectedFilters,
           ),
           displayStyle: rfwDisplayStyleNotifier.value,
+          themeId: effectiveRfwThemeId(rfwThemeIdNotifier.value),
           gridColumns: PlayerPrefs.instance.gridColumns.value.clamp(2, 4),
           largeGridColumns: 2,
           bannerColumns: 1,

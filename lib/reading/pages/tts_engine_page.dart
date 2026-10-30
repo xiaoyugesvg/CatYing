@@ -6,6 +6,87 @@ import 'package:tvbox/reading/services/tts_source_store.dart';
 import 'package:tvbox/reading/theme/jelly_theme.dart';
 import 'package:tvbox/reading/pages/tts_source_edit_page.dart';
 import 'package:tvbox/common/theme.dart';
+import 'package:tvbox/reading/widgets/reading_help.dart';
+import 'package:tvbox/widgets/help_sheet.dart';
+
+/// 朗读引擎页右上角「?」的说明（用户 2026-10-30：
+/// 「听书管理等页面右上角加个 ? 按钮，详情说明怎么用每一种方式」）。
+///
+/// 这里按 `TtsSource.type` 的每一种**逐个写清**：要不要 Key、免不免费、
+/// 怎么填、有什么坑 —— 而不是只说"选一个引擎"。
+const List<HelpItem> _ttsHelpItems = [
+  HelpItem(
+    icon: Icons.info_outline_rounded,
+    title: '先搞清两件事：引擎 与 朗读源',
+    body: '「引擎」是手机系统自带的朗读（免费、离线、音色一般）；'
+        '「朗读源」是外接的语音合成服务（音色好得多，多数要联网）。'
+        '两者只需选一个作为当前发声路径，上面的卡片会直接告诉你现在用的是谁。',
+  ),
+  HelpItem(
+    icon: Icons.memory_rounded,
+    title: '方式一：系统朗读（兜底，零配置）',
+    body: '不用填任何东西，装上系统语音包就能念。优点是离线、不花钱；'
+        '缺点是音色机械。打开「失败自动降级」后，朗读源连不上会自动切回它，'
+        '不会让你听着听着断掉。',
+  ),
+  HelpItem(
+    icon: Icons.cloud_done_outlined,
+    title: '方式二：Edge 内置朗读（推荐先用这个）',
+    body: 'App 自带，不用地址、不用 Key，走内置 Node 直连微软 Edge 的语音。'
+        '音色是「晓晓 / 云希」这一档，明显好于系统朗读。'
+        '想换人声就改「音色」那一栏（如 zh-CN-YunxiNeural）。',
+  ),
+  HelpItem(
+    icon: Icons.smart_toy_outlined,
+    title: '方式三：小米 MiMo（限时免费）',
+    body: '走小米的 chat 接口做语音合成：正文当 assistant 消息、'
+        '风格指令当 user 消息，所以你能用自然语言写「用慵懒的语气，语速稍慢」。'
+        '⚠️ 它没有语速字段，朗读面板的语速滑杆对它无效 —— 想调快慢写进风格指令。'
+        '音频固定 wav、base64 返回。',
+  ),
+  HelpItem(
+    icon: Icons.graphic_eq_rounded,
+    title: '方式四：OpenAI 兼容（/audio/speech）',
+    body: '通用形状，任何实现了 /audio/speech 的服务都能接（OpenAI、'
+        '各家兼容网关、自建）。填接口地址 + 模型（如 tts-1）+ 音色（如 alloy）。'
+        '有的服务不认 speed 字段会整体报错，那种就把「发送语速参数」关掉。',
+  ),
+  HelpItem(
+    icon: Icons.record_voice_over_outlined,
+    title: '方式五：微软 Azure 语音服务',
+    body: '音色最多、最稳定，要订阅 Key。填区域（如 eastasia）与 Key 即可，'
+        '主机地址按区域自动拼；主权云才需要自己填完整地址。'
+        '支持情绪风格（emotion），适合有声书。',
+  ),
+  HelpItem(
+    icon: Icons.volunteer_activism_outlined,
+    title: '方式六：EasyVoice（免费 Edge-TTS 服务）',
+    body: '自部署或公共实例，HTTP 直接回 mp3，不需要 API Key。'
+        '打开「AI 智能推荐配音」后会交给它的大模型按角色分段、自动挑音色'
+        '（多角色有声书效果），但会慢一些。',
+  ),
+  HelpItem(
+    icon: Icons.link_rounded,
+    title: '方式七：自定义 HTTP（URL 模板）',
+    body: '最自由的一种：把地址写成带占位符的模板，'
+        '如 https://host/tts?text={{speakText}}&speed={{speakSpeed}}，'
+        '返回音频流即可。适合接自建或冷门服务。',
+  ),
+  HelpItem(
+    icon: Icons.download_outlined,
+    title: '方式八：网络导入 engine.json',
+    body: '别人配好的引擎定义，填一个 URL 直接导进来。'
+        '适合朋友分享现成配置，不用自己逐项填。',
+  ),
+  HelpItem(
+    icon: Icons.tune_rounded,
+    title: '调优那几个数字怎么设',
+    body: '并发 2、间隔 200ms、预取 3 句是稳的默认值。'
+        '遇到 429（限流）就把并发降到 1、间隔加到 500ms；'
+        '网络差就把超时提到 20s、重试加到 3。'
+        '单次字数按服务上限设，超长句会被拆开发。',
+  ),
+];
 
 /// 朗读引擎（截图 IMG_8087/8088）。
 ///
@@ -146,6 +227,12 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
         title: Text('朗读引擎',
             style: TextStyle(
                 fontSize: AppTheme.fontTitle3, fontWeight: FontWeight.w700, color: label)),
+        actions: [
+          readingHelpAction(
+            onPressed: () =>
+                showReadingHelp(context, '朗读引擎怎么用', _ttsHelpItems),
+          ),
+        ],
       ),
       body: ListenableBuilder(
         listenable: TtsSourceStore.instance,

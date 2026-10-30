@@ -62,6 +62,19 @@ final ValueNotifier<bool> rfwThemeModeNotifier = ValueNotifier(false);
 /// 选中的主题 id（null = 用第一个内置主题）。
 final ValueNotifier<String?> rfwThemeIdNotifier = ValueNotifier(null);
 
+/// 当前**实际生效**的主题 id。
+///
+/// 存的是 null（从没选过）或某个已被删掉的自定义主题时，
+/// 渲染层会回落到第一个内置主题 —— 色板也必须跟着回落，
+/// 否则会出现「布局是晨光、配色却按自定义主题算」的错位。
+String effectiveRfwThemeId(String? id) {
+  if (id == null || id.isEmpty) return builtinRfwThemes.first.id;
+  final builtin = builtinRfwThemes.where((e) => e.id == id);
+  if (builtin.isNotEmpty) return builtin.first.id;
+  // 自定义主题：色板按「跟随软件配色」处理（见 RfwThemePalette.of 的 default 分支）
+  return id;
+}
+
 /// 主题内的「显示样式」：grid / largeGrid / banner / list / list2 / textList / card
 final ValueNotifier<String> rfwDisplayStyleNotifier = ValueNotifier('grid');
 

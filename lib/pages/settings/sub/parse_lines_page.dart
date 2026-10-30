@@ -156,6 +156,34 @@ class _ParseLinesPageState extends State<ParseLinesPage> {
     final custom = _store.customLines;
     return SettingsSubPage(
       title: '解析线路',
+      help: const [
+        SettingsHelpItem(
+          icon: Icons.auto_mode_rounded,
+          title: '方式一：自动（推荐）',
+          body: '按下面列表的顺序一条条试，直到解析出真正的媒体地址。'
+              '某条挂了会自动跳下一条，是日常最省心的选法。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.rss_feed,
+          title: '方式二：订阅线路',
+          body: '来自影视配置里的 parses，随订阅一起下发，**只读** —— '
+              '改了也会被下次刷新覆盖。源作者维护得好的话，这条最不容易失效。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.edit_note_rounded,
+          title: '方式三：自定义线路',
+          body: '自己加一条：起个名字 + 填解析接口地址（支持带 ?url= 的模板）。'
+              '加完会排在订阅线路之后参与「自动」；想固定用它就点一下选中。'
+              '右上角「+」新增，长按或点进去可改可删。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.link_off_rounded,
+          title: '解析失败是什么样',
+          body: '点播放后一直转圈、或直接弹「解析失败」，通常是这条线路挂了。'
+              '切「自动」再试，或在列表里换一条；'
+              '全都失败说明这个源的播放地址需要登录/付费，换源更快。',
+        ),
+      ],
       action: IconButton(
         tooltip: '新增',
         icon: Icon(Icons.add_rounded, color: AppTheme.textSecondary),

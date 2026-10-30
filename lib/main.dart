@@ -570,12 +570,24 @@ class _BootGate extends StatelessWidget {
 ///
 /// 因为这一帧的目的就是"在任何服务初始化之前先画点东西"，
 /// 一旦它依赖了还没注册的服务（`Get.find` 会直接抛），就等于把黑屏换成闪退。
-/// 所以这里的**颜色 / 字号 / 字体全部写死**，一个字都不从设置里读。
+/// 所以这里的**颜色全部写死**，一个字都不从设置里读。
 ///
 /// 底色取原生启动屏的同一组颜色（`LaunchBackground`：浅 #F7F5F1 / 深 #1C1C1E），
 /// 并按**系统明暗**选（原生启动屏也是按系统明暗显示的）—— 从启动屏切到这一帧
-/// 时颜色不跳。图案与 `AppLoadingView` 的 `CircularLogoProgress` 同款
-/// （猫爪 + 猫影），所以这里切到正式加载页时视觉是连续的。
+/// 时颜色不跳。
+///
+/// ── 为什么这里**不画 Logo**（2026-10-30）────────────────────────
+/// 用户发了两张截图问「为啥有两个这种」：先是金色圆环 + 猫影，闪一下
+/// 又变成灰色圆环 + 猫影。
+///
+/// 原因是这一帧和 `AppLoadingView` **各画了一个 logo**：
+///   · 这里颜色写死（金色 #D4A574），因为它不能读主题；
+///   · `AppLoadingView` 走 `AppTheme`（浅色主题下强调色是灰的）。
+/// 两个 logo 形状一样、颜色不一样 ⇒ 看起来就是"闪了两次、换了个人"。
+///
+/// 现在这一帧只铺底色：原生启动屏（纯色）→ 这里（同色）→ 正式加载页
+/// （唯一的 logo，且用的是用户自己的配色）。全程只出现一次 logo，
+/// 也不会出现"金色跳灰色"。
 class _BootSplash extends StatelessWidget {
   const _BootSplash();
 
@@ -583,69 +595,14 @@ class _BootSplash extends StatelessWidget {
   static const Color _bgLight = Color(0xFFF7F5F1);
   static const Color _bgDark = Color(0xFF1C1C1E);
 
-  /// 与 `CircularLogoProgress` 里写死的那几个颜色一致
-  static const Color _logoBg = Color(0xFFFFF8F0);
-  static const Color _paw = Color(0xFFD4A574);
-  static const Color _logoText = Color(0xFF3A2A1A);
-
   @override
   Widget build(BuildContext context) {
     final isLight =
         MediaQuery.platformBrightnessOf(context) == Brightness.light;
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      // 包内自带 MiSans；不指定的话这一帧会用系统字体，切到正式界面时"猫影"
-      // 两个字会跳一下字形。
       theme: ThemeData(fontFamily: 'MiSans'),
-      home: ColoredBox(
-        color: isLight ? _bgLight : _bgDark,
-        child: Center(
-          child: SizedBox(
-            width: 132,
-            height: 132,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                SizedBox(
-                  width: 132,
-                  height: 132,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 3.2,
-                    strokeCap: StrokeCap.round,
-                    valueColor: const AlwaysStoppedAnimation<Color>(_paw),
-                    backgroundColor: _paw.withValues(alpha: 0.18),
-                  ),
-                ),
-                Container(
-                  width: 96,
-                  height: 96,
-                  decoration: const BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _logoBg,
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: const Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.pets, size: 30, color: _paw),
-                      SizedBox(height: 2),
-                      Text(
-                        '猫影',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: _logoText,
-                          letterSpacing: 2,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+      home: ColoredBox(color: isLight ? _bgLight : _bgDark),
     );
   }
 }

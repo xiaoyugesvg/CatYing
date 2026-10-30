@@ -113,92 +113,85 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
   // 显得和别的卡片不一样）；头部也对齐 SettingsRow 的样式
   // （图标进强调色圆角容器 + 同款标题/副标题 + 同款开关）。
   Widget _remoteCard() {
-    final accent = AppTheme.accentOnSurface;
-    // ⚠️ 这里**不要**再套 Padding：外层 `_card()` 的 AppCard(dense) 已经给了
-    // horizontal 12 / vertical 4 的内边距，再叠 14 会让本卡片比同级 SettingsRow
-    // 多缩进 14px（2026-10-29 复核发现）。
+    // ── 与同级卡片完全同款（2026-10-30）───────────────────────────
+    //
+    // 用户原话：「远程引擎那个卡片不能和其他卡片样式一样吗？」
+    //
+    // 原因：这里原来是手搓的 `Row`（图标容器 + Text + AppSwitch），
+    // 而外层 `_card()` 的 `AppCard(dense)` 只给 horizontal 12 / vertical 4；
+    // 同级的 `SettingsRow` **自己**还会再加 horizontal 12 / vertical 14。
+    // 于是别的卡片图标缩进 24、行高 62，这一张缩进 12、行高 44 ——
+    // 摆在一列里一眼就能看出"这张不一样"。
+    //
+    // 现在标题行直接复用 `SettingsRow`，样式天然一致；展开的配置项
+    // 左缩进 12（= SettingsRow 的 horizontal padding）与图标左缘对齐。
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: accent.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(10),
-                border:
-                    Border.all(color: accent.withValues(alpha: 0.22), width: 0.5),
-              ),
-              child: Icon(Icons.cloud_outlined, size: 18, color: accent),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Text('远程引擎',
-                  style: TextStyle(
-                      fontSize: AppTheme.fontSubhead + 0.5,
-                      fontWeight: FontWeight.w500,
-                      color: AppTheme.textPrimary)),
-            ),
-            AppSwitch(
-              value: _remote.enabled,
-              onChanged: (v) => _setRemote(enabled: v),
-            ),
-          ],
+        SettingsRow(
+          icon: Icons.cloud_outlined,
+          title: '远程引擎',
+          trailingSwitch: true,
+          switchValue: _remote.enabled,
+          onSwitchChanged: (v) => _setRemote(enabled: v),
         ),
-          if (_remote.enabled) ...[
-            const SizedBox(height: 10),
-            _remoteField(_remoteBaseCtrl, '地址', 'http://192.168.1.10:8080'),
-            const SizedBox(height: 8),
-            _remoteField(_remoteTokenCtrl, 'Token（可空）', 'X-Token'),
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _remoteBusy ? null : _testRemote,
-                icon: const Icon(Icons.wifi_tethering, size: 17),
-                label: Text(_remoteBusy ? '测试中…' : '测试连接'),
-              ),
-            ),
-            if (_remoteMsg != null) ...[
-              const SizedBox(height: 8),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    _remoteOk
-                        ? Icons.check_circle_outline
-                        : Icons.error_outline,
-                    size: 15,
-                    color: _remoteOk ? Colors.green : Colors.orangeAccent,
+        if (_remote.enabled)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _remoteField(_remoteBaseCtrl, '地址', 'http://192.168.1.10:8080'),
+                const SizedBox(height: 8),
+                _remoteField(_remoteTokenCtrl, 'Token（可空）', 'X-Token'),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _remoteBusy ? null : _testRemote,
+                    icon: const Icon(Icons.wifi_tethering, size: 17),
+                    label: Text(_remoteBusy ? '测试中…' : '测试连接'),
                   ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      _remoteMsg!,
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        height: 1.5,
-                        color: _remoteOk
-                            ? AppTheme.textSecondary
-                            : Colors.orangeAccent,
+                ),
+                if (_remoteMsg != null) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        _remoteOk
+                            ? Icons.check_circle_outline
+                            : Icons.error_outline,
+                        size: 15,
+                        color: _remoteOk ? Colors.green : Colors.orangeAccent,
                       ),
-                    ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          _remoteMsg!,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            height: 1.5,
+                            color: _remoteOk
+                                ? AppTheme.textSecondary
+                                : Colors.orangeAccent,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
-              ),
-            ],
-            const SizedBox(height: 10),
-            _remoteSwitch('TG', '频道列表与播放都指向服务器', _remote.useTg,
-                (v) => _setRemote(useTg: v)),
-            _remoteSwitch('书源', 'Legado 规则在服务器上执行', _remote.useBook,
-                (v) => _setRemote(useBook: v)),
-            _remoteSwitch('py 源', '需服务端带 Python 桥（本版只保存开关）',
-                _remote.usePy, (v) => _setRemote(usePy: v)),
-          ],
-        ],
+                const SizedBox(height: 10),
+                _remoteSwitch('TG', '频道列表与播放都指向服务器', _remote.useTg,
+                    (v) => _setRemote(useTg: v)),
+                _remoteSwitch('书源', 'Legado 规则在服务器上执行', _remote.useBook,
+                    (v) => _setRemote(useBook: v)),
+                _remoteSwitch('py 源', '需服务端带 Python 桥（本版只保存开关）',
+                    _remote.usePy, (v) => _setRemote(usePy: v)),
+              ],
+            ),
+          ),
+      ],
     );
   }
 

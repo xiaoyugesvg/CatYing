@@ -17,6 +17,28 @@ class EngineSettingsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return SettingsSubPage(
       title: '引擎管理',
+      help: const [
+        SettingsHelpItem(
+          icon: Icons.terminal_rounded,
+          title: 'Node 引擎（.js / .jar 源）',
+          body: 'JS 与 jar 爬虫源都跑在这个 Node 运行时里。App 启动时会自动拉起来，'
+              '正常用不着管它。只有在「切了源却没反应」「某源一直报错」时，'
+              '点一下「加载」强制重载一次 —— 不用重启 App。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.code_rounded,
+          title: 'Python 引擎（.py 源）',
+          body: '本地 PY / 订阅里的 Python 源跑在 CPython 里，与 Node 完全独立：'
+              '一个挂了不影响另一个。同样是启动时自动加载，出问题才手动点。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.info_outline_rounded,
+          title: '看到「加载中」一直不动怎么办',
+          body: '说明引擎启动失败或端口没起来。先点「加载」重试一次；'
+              '还不行就去「设置 → 订阅管理」确认源本身没问题，'
+              '或到「日志诊断」看具体报错。',
+        ),
+      ],
       children: [
         SettingsGroup(
           title: '运行时引擎',

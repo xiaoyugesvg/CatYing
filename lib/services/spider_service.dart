@@ -271,6 +271,39 @@ class SpiderService {
   /// 登记。用于「打开过程序脚本源后回到主源」时把主源脚本重新载入引擎。
   String mainScriptUrl = '';
 
+  /// **换主页源时把"引擎槽位里驻留着谁"的记忆全部作废**（2026-10-30）。
+  ///
+  /// ── 为什么必须（用户原话）──────────────────────────────────────
+  /// 「订阅JS脚本源为啥和本地JS这个切换总是出问题了，本地JS加载不出来，
+  ///   但是在订阅JS这个里面又出现了，并且订阅里面所有的全是这个本地JS的内容」
+  ///
+  /// 根因是**一组单槽位缓存**（[_loadedScriptUrl] / [_loadedScriptKey] /
+  /// [mainScriptUrl]）只描述"上一次载入了什么"，而 Node 引擎本身是**单源**
+  /// 的：换源、切订阅、引擎重启、别的模块（音乐/阅读）借 Node 跑脚本，
+  /// 任何一件事都会让槽位内容变掉，但这份记忆不会跟着变。
+  ///
+  /// 于是出现两个互相纠缠的症状：
+  ///   · 切到本地 JS：缓存说"已经载入过了"⇒ 跳过 loadSource ⇒ 请求打到
+  ///     引擎里**还驻留着的订阅脚本**上 ⇒ key 不认识 ⇒ 404 ⇒「本地JS加载不出来」；
+  ///   · 切回订阅：`_tryDeriveMainScript` 又把本地 JS 当成主源脚本推导出来 ⇒
+  ///     key 正好命中引擎里的本地 JS ⇒ 订阅页面上**全是本地 JS 的内容**。
+  ///
+  /// 换源是用户主动动作，此时唯一正确的假设是"我不知道槽位里是什么"，
+  /// 下次请求老老实实按新源重新判断 + 重新载入。
+  void resetScriptCache() {
+    _loadedScriptUrl = '';
+    _loadedScriptKey = '';
+    _loadedScriptCandidates = [];
+    _loadedDrpyExt = '';
+    _mainDrpyApi = '';
+    _mainDrpyExt = '';
+    mainScriptUrl = '';
+    _engineSiteTypes.clear();
+    _scriptLoadInFlight.clear();
+    _drpyLoadInFlight.clear();
+    AppLog.instance.log('[SpiderService] 换源 ⇒ 作废脚本/端口记忆，下次请求重新载入');
+  }
+
   /// 当前已载入 Node 引擎的脚本地址 + 该脚本在引擎里的真实站点 key
   String _loadedScriptUrl = '';
   String _loadedScriptKey = '';
@@ -411,11 +444,21 @@ class SpiderService {
       for (final s in beans) {
         if (!s.isSpiderSource || s.isPythonScriptSource) continue;
         if (s.key.startsWith('app_')) continue;
+        // 🔴 本地 JS 源**不是**订阅主脚本（2026-10-30）。
+        //
+        // 它的 `scriptUrl` 是 `ljs_xxxx.js` 这种**相对标识**，落在
+        // `<Documents>/local_js/` 里，是用户自己导进来的"程序脚本源"。
+        // 之前这里只排除了 `app_` 前缀，于是本地 JS 源会被当成"订阅主源脚本"
+        // 登记进 `mainScriptUrl` —— 而它在引擎里的 key 恰好正驻留着，
+        // 后续所有"api 为空"的订阅线路请求都会命中它 ⇒
+        // 订阅页面**整页都是本地 JS 的内容**（用户 2026-10-30 报的就是这个）。
+        if (s.isLocalJsSource) continue;
         final u = s.scriptUrl.trim();
         if (u.isEmpty) continue;
         final lower = u.toLowerCase();
         if (lower.startsWith('csp_')) continue; // 占位不是脚本地址
         final path = lower.split('?').first;
+        if (path.startsWith('ljs_')) continue; // 兜底：相对标识一律不认
         if (!lower.startsWith('http') && !path.endsWith('.js')) continue;
         mainScriptUrl = u;
         AppLog.instance.log(
@@ -1162,7 +1205,7 @@ class SpiderService {
     }
 
     // ✅ 候选 + 响应验证：404（路由不存在）⇒ 换下一个候选 key 重试（自愈）。
-    return _postSpiderWithKeyFallback(
+    final first = await _postSpiderWithKeyFallback(
       candidates: candidates,
       primaryKey: engineKey,
       type: type,
@@ -1170,6 +1213,45 @@ class SpiderService {
       action: action,
       body: nodeArgs,
     );
+    if (first != null) return first;
+
+    // ── 404 的最后一道自愈：强制重载脚本再试一次（2026-10-30）──────────
+    //
+    // 缓存说"这个脚本已经载入了"，但 Node 是**单槽位**：换源、引擎重启、
+    // 音乐/阅读模块借 Node 跑脚本，都会把槽位换成别的东西，而
+    // `_loadedScriptUrl` 不会跟着变。此时请求会落到**另一个脚本**上，
+    // 表现就是「切了源内容没变」「本地JS加载不出来」。
+    //
+    // 404 = 路由不存在 = 引擎里那个脚本根本不认识这条 action。
+    // 这是唯一能确认"缓存撒谎了"的信号，所以只对它重载一次
+    // （连接错误 / 500 不重载：那是真故障，重载只会白等一遍）。
+    //
+    // ⚠️ OmniBox 私有协议（`omniKey != null`）**必须排除**：它的脚本是
+    //    整包驻留的，重载会把整包顶掉，反而把本来能用的源弄坏。
+    if (lastHttpStatus == 404 &&
+        omniKey == null &&
+        !isCspPlaceholder &&
+        script.isNotEmpty) {
+      AppLog.instance.w(
+        '[SpiderService] $action 404 ⇒ 判定槽位与缓存不一致，强制重载后重试: $script',
+      );
+      _loadedScriptUrl = '';
+      _loadedScriptKey = '';
+      _loadedScriptCandidates = [];
+      final k = await _ensureNodeScript(script, fallback: key, type: type);
+      if (k != null) {
+        final retry = await _postSpiderWithKeyFallback(
+          candidates: List<String>.of(_loadedScriptCandidates),
+          primaryKey: k,
+          type: type,
+          api: api,
+          action: action,
+          body: nodeArgs,
+        );
+        if (retry != null) return retry;
+      }
+    }
+    return null;
   }
 
   // ============================================================

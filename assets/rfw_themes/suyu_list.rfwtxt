@@ -1,33 +1,51 @@
+// 素影列表 —— 零色调偏移 · 列表优先 · 极简分隔线
+//
+// ⚠️ 颜色一律从 `data.home.theme.*` 取，不许写死色值。
+// 这个主题是"最贴合软件"的一档：色板完全等于用户当前选的配色，不做任何偏移。
+//
+// ── 视觉语言（2026-10-30 重做）─────────────────────────────────
+// 「素影」= 去掉一切装饰，只留内容。
+//   · 不做轮播（hero 恒为 0）—— 首页第一眼就是片单，不被推荐位挤掉；
+//   · 条目**没有卡片底色**，只用一条 0.5px 分隔线分句，
+//     和 iOS 原生列表/设置页一个语言；
+//   · 网格海报圆角更小（8），标题 12.5 号，密度更高；
+//   · 分组标题不带强调色竖条 —— 这个主题里强调色只出现在"选中"上。
+
 import core.widgets;
 import peek.home;
 
 widget ToolIcon = GestureDetector(
   onTap: args.onTap,
   child: Container(
-    padding: [8.0],
-    child: Icon(icon: args.icon, size: 20.0, color: 0xFF232323),
+    padding: [6.0],
+    child: Icon(
+      icon: args.icon.icon,
+      fontFamily: args.icon.fontFamily,
+      size: 20.0,
+      color: data.home.theme.textPrimary,
+    ),
   ),
 );
 
 widget TabButton = GestureDetector(
   onTap: event "selectType" { typeId: args.typeId },
   child: Container(
-    padding: [12.0, 8.0],
+    padding: [12.0, 7.0],
     margin: [0.0, 0.0, 8.0, 0.0],
     decoration: {
       type: "box",
       color: switch args.selected {
-        true: 0xFF2E7D74,
+        true: data.home.theme.accentFill,
         false: 0x00000000,
       },
-      borderRadius: [16.0],
+      borderRadius: [data.home.theme.radiusPill],
     },
     child: Text(
       text: args.name,
       style: {
         color: switch args.selected {
-          true: 0xFFFFFFFF,
-          false: 0xFF232323,
+          true: data.home.theme.onAccent,
+          false: data.home.theme.textPrimary,
         },
         fontSize: 13.0,
         fontWeight: "w600",
@@ -42,20 +60,20 @@ widget FilterChip = GestureDetector(
     value: args.option.value,
   },
   child: Container(
-    padding: [10.0, 6.0],
+    padding: [10.0, 5.0],
     margin: [0.0, 0.0, 8.0, 8.0],
     decoration: {
       type: "box",
       color: switch args.option.selected {
-        true: 0xFF2E7D74,
-        false: 0xFFFFFFFF,
+        true: data.home.theme.accentFill,
+        false: data.home.theme.chipBg,
       },
-      borderRadius: [12.0],
+      borderRadius: [data.home.theme.radiusChip],
       border: [
         {
           color: switch args.option.selected {
-            true: 0xFF2E7D74,
-            false: 0xFFD8D8D8,
+            true: data.home.theme.accentFill,
+            false: data.home.theme.border,
           },
           width: 1.0,
         },
@@ -65,8 +83,8 @@ widget FilterChip = GestureDetector(
       text: args.option.name,
       style: {
         color: switch args.option.selected {
-          true: 0xFFFFFFFF,
-          false: 0xFF232323,
+          true: data.home.theme.onAccent,
+          false: data.home.theme.textSecondary,
         },
         fontSize: 12.0,
       },
@@ -81,7 +99,11 @@ widget FilterGroup = Container(
     children: [
       Text(
         text: args.group.name,
-        style: { color: 0xFF7A7A7A, fontSize: 12.0, fontWeight: "w600" },
+        style: {
+          color: data.home.theme.textSecondary,
+          fontSize: 12.0,
+          fontWeight: "w600",
+        },
       ),
       SizedBox(height: 6.0),
       Wrap(
@@ -95,88 +117,14 @@ widget FilterGroup = Container(
   ),
 );
 
-widget PosterItem = GestureDetector(
-  onTap: event "openItem" { index: args.item.index },
-  child: Column(
-    crossAxisAlignment: "start",
-    children: [
-      Expanded(
-        child: ClipRRect(
-          borderRadius: [10.0],
-          child: T4Image(url: args.item.pic, fit: "cover"),
-        ),
-      ),
-      SizedBox(height: 6.0),
-      Text(
-        text: args.item.name,
-        maxLines: 1,
-        overflow: "ellipsis",
-        style: { color: 0xFF232323, fontSize: 13.0, fontWeight: "w600" },
-      ),
-      Text(
-        text: args.item.remarks,
-        maxLines: 1,
-        overflow: "ellipsis",
-        style: { color: 0xFF7A7A7A, fontSize: 12.0 },
-      ),
-    ],
-  ),
-);
-
-widget RowItem = GestureDetector(
-  onTap: event "openItem" { index: args.item.index },
+// 素影不做轮播，但推荐位仍要有入口 —— 用极窄的横条卡片。
+widget HeroCard = GestureDetector(
+  onTap: event "openRecommend" { index: args.item.index },
   child: Container(
-    color: 0xFFFFFFFF,
-    padding: [12.0],
-    child: Row(
-      children: [
-        ClipRRect(
-          borderRadius: [8.0],
-          child: SizedBox(
-            width: 96.0,
-            height: 128.0,
-            child: T4Image(url: args.item.pic, fit: "cover"),
-          ),
-        ),
-        SizedBox(width: 12.0),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: "start",
-            children: [
-              Text(
-                text: args.item.name,
-                maxLines: 2,
-                overflow: "ellipsis",
-                style: {
-                  color: 0xFF232323,
-                  fontSize: 15.0,
-                  fontWeight: "w700",
-                },
-              ),
-              SizedBox(height: 4.0),
-              Text(
-                text: args.item.remarks,
-                style: { color: 0xFF7A7A7A, fontSize: 12.0 },
-              ),
-              Text(
-                text: args.item.year,
-                style: { color: 0xFF7A7A7A, fontSize: 12.0 },
-              ),
-            ],
-          ),
-        ),
-      ],
-    ),
-  ),
-);
-
-widget BannerItem = GestureDetector(
-  onTap: event "openItem" { index: args.item.index },
-  child: Container(
-    margin: [12.0, 6.0],
-    decoration: { type: "box", borderRadius: [12.0] },
+    margin: [0.0, 0.0, 8.0, 0.0],
+    decoration: { type: "box", borderRadius: [data.home.theme.radiusCard] },
     child: ClipRRect(
-      borderRadius: [12.0],
+      borderRadius: [data.home.theme.radiusCard],
       child: Stack(
         children: [
           T4Image(url: args.item.pic, fit: "cover"),
@@ -185,8 +133,16 @@ widget BannerItem = GestureDetector(
             right: 0.0,
             bottom: 0.0,
             child: Container(
-              color: 0x99000000,
-              padding: [12.0, 8.0],
+              padding: [12.0, 26.0, 12.0, 10.0],
+              decoration: {
+                type: "box",
+                gradient: {
+                  type: "linear",
+                  begin: "bottomCenter",
+                  end: "topCenter",
+                  colors: [data.home.theme.scrim, 0x00000000],
+                },
+              },
               child: Column(
                 crossAxisAlignment: "start",
                 children: [
@@ -195,14 +151,173 @@ widget BannerItem = GestureDetector(
                     maxLines: 1,
                     overflow: "ellipsis",
                     style: {
-                      color: 0xFFFFFFFF,
+                      color: data.home.theme.onImage,
                       fontSize: 15.0,
                       fontWeight: "w700",
                     },
                   ),
                   Text(
                     text: args.item.remarks,
-                    style: { color: 0xFFFFFFFF, fontSize: 12.0 },
+                    maxLines: 1,
+                    overflow: "ellipsis",
+                    style: {
+                      color: data.home.theme.onImage,
+                      fontSize: 11.5,
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  ),
+);
+
+// 网格海报：小圆角、无描边、密度高
+widget PosterItem = GestureDetector(
+  onTap: event "openItem" { index: args.item.index },
+  child: Column(
+    crossAxisAlignment: "start",
+    children: [
+      Expanded(
+        child: ClipRRect(
+          borderRadius: [8.0],
+          child: T4Image(url: args.item.pic, fit: "cover"),
+        ),
+      ),
+      SizedBox(height: 5.0),
+      Text(
+        text: args.item.name,
+        maxLines: 1,
+        overflow: "ellipsis",
+        style: {
+          color: data.home.theme.textPrimary,
+          fontSize: 12.5,
+          fontWeight: "w600",
+        },
+      ),
+      Text(
+        text: args.item.remarks,
+        maxLines: 1,
+        overflow: "ellipsis",
+        style: { color: data.home.theme.textTertiary, fontSize: 11.0 },
+      ),
+    ],
+  ),
+);
+
+// ── 列表条目：无卡片底，只靠一条 0.5px 分隔线 ──────────────────
+// 这是「素影」的核心：去掉底色块之后，一屏能多看到 1~2 条，
+// 滚动时也没有一堆圆角在眼前晃。
+widget RowItem = GestureDetector(
+  onTap: event "openItem" { index: args.item.index },
+  child: Column(
+    children: [
+      Expanded(
+        child: Padding(
+          padding: [12.0, 8.0, 12.0, 8.0],
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: [6.0],
+                child: SizedBox(
+                  width: 84.0,
+                  height: 112.0,
+                  child: T4Image(url: args.item.pic, fit: "cover"),
+                ),
+              ),
+              SizedBox(width: 12.0),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: "start",
+                  children: [
+                    Text(
+                      text: args.item.name,
+                      maxLines: 2,
+                      overflow: "ellipsis",
+                      style: {
+                        color: data.home.theme.textPrimary,
+                        fontSize: 15.0,
+                        fontWeight: "w600",
+                      },
+                    ),
+                    SizedBox(height: 4.0),
+                    Text(
+                      text: args.item.remarks,
+                      maxLines: 1,
+                      overflow: "ellipsis",
+                      style: {
+                        color: data.home.theme.textSecondary,
+                        fontSize: 12.0,
+                      },
+                    ),
+                    Text(
+                      text: args.item.year,
+                      style: {
+                        color: data.home.theme.textTertiary,
+                        fontSize: 11.5,
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      Container(height: 0.5, color: data.home.theme.border),
+    ],
+  ),
+);
+
+widget BannerItem = GestureDetector(
+  onTap: event "openItem" { index: args.item.index },
+  child: Container(
+    margin: [12.0, 4.0],
+    decoration: { type: "box", borderRadius: [data.home.theme.radiusCard] },
+    child: ClipRRect(
+      borderRadius: [data.home.theme.radiusCard],
+      child: Stack(
+        children: [
+          T4Image(url: args.item.pic, fit: "cover"),
+          Positioned(
+            left: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+            child: Container(
+              padding: [12.0, 26.0, 12.0, 10.0],
+              decoration: {
+                type: "box",
+                gradient: {
+                  type: "linear",
+                  begin: "bottomCenter",
+                  end: "topCenter",
+                  colors: [data.home.theme.scrim, 0x00000000],
+                },
+              },
+              child: Column(
+                crossAxisAlignment: "start",
+                children: [
+                  Text(
+                    text: args.item.name,
+                    maxLines: 1,
+                    overflow: "ellipsis",
+                    style: {
+                      color: data.home.theme.onImage,
+                      fontSize: 15.0,
+                      fontWeight: "w700",
+                    },
+                  ),
+                  Text(
+                    text: args.item.remarks,
+                    maxLines: 1,
+                    overflow: "ellipsis",
+                    style: {
+                      color: data.home.theme.onImage,
+                      fontSize: 11.5,
+                    },
                   ),
                 ],
               ),
@@ -215,7 +330,7 @@ widget BannerItem = GestureDetector(
 );
 
 widget Header = Container(
-  color: 0xFFF2F2F0,
+  color: data.home.theme.surface,
   padding: [12.0, 12.0, 12.0, 4.0],
   child: Column(
     children: [
@@ -227,20 +342,14 @@ widget Header = Container(
               maxLines: 1,
               overflow: "ellipsis",
               style: {
-                color: 0xFF232323,
+                color: data.home.theme.textPrimary,
                 fontSize: 16.0,
                 fontWeight: "w700",
               },
             ),
           ),
-          ToolIcon(
-            icon: data.home.icons.search,
-            onTap: event "openSearch" {},
-          ),
-          ToolIcon(
-            icon: data.home.icons.refresh,
-            onTap: event "refresh" {},
-          ),
+          ToolIcon(icon: data.home.icons.search, onTap: event "openSearch" {}),
+          ToolIcon(icon: data.home.icons.refresh, onTap: event "refresh" {}),
           ToolIcon(
             icon: data.home.icons.layout,
             onTap: event "showDisplayStylePicker" {},
@@ -276,21 +385,26 @@ widget Header = Container(
   ),
 );
 
+// 分组标题：极简，无竖条、无底色差 —— 只有一行字 + 换源
 widget SectionTitle = Container(
-  color: 0xFFF2F2F0,
-  padding: [12.0, 8.0],
+  color: data.home.theme.surface,
+  padding: [12.0, 10.0, 12.0, 6.0],
   child: Row(
     children: [
       Text(
-        text: ["全部剧集 · ", data.home.totalLabel, "部"],
-        style: { color: 0xFF232323, fontSize: 14.0, fontWeight: "w700" },
+        text: ["全部剧集 · ", data.home.totalLabel, " 部"],
+        style: {
+          color: data.home.theme.textSecondary,
+          fontSize: 12.5,
+          fontWeight: "w600",
+        },
       ),
       Spacer(),
       GestureDetector(
         onTap: event "showSourcePicker" {},
         child: Text(
           text: "换源",
-          style: { color: 0xFF2E7D74, fontSize: 13.0 },
+          style: { color: data.home.theme.accent, fontSize: 12.5 },
         ),
       ),
     ],
@@ -298,11 +412,12 @@ widget SectionTitle = Container(
 );
 
 widget root = Container(
-  color: 0xFFF2F2F0,
+  color: data.home.theme.bg,
   child: PeekStickyGrid(
+    // 素影不占首屏放轮播
     heroHeight: 0.0,
     pinnedHeight: data.home.stickyHeaderHeight,
-    sectionHeight: 40.0,
+    sectionHeight: 36.0,
     crossAxisCount: switch data.home.displayStyle {
       "grid": data.home.gridColumns,
       "largeGrid": data.home.largeGridColumns,
@@ -314,17 +429,19 @@ widget root = Container(
       default: data.home.gridColumns,
     },
     childAspectRatio: switch data.home.displayStyle {
-      "grid": 0.72,
-      "largeGrid": 0.72,
-      "banner": 1.2,
+      "grid": 0.74,
+      "largeGrid": 0.74,
+      "banner": 1.25,
       "list": data.home.wideListRatio,
       "list2": data.home.textListRatio,
       "textList": data.home.textListRatio,
-      "card": 2.1,
-      default: 0.72,
+      "card": 2.2,
+      default: 0.74,
     },
-    mainAxisSpacing: 8.0,
+    mainAxisSpacing: 12.0,
     crossAxisSpacing: 8.0,
+    horizontalPadding: 12.0,
+    bottomPadding: 28.0,
     hero: SizedBoxShrink(),
     pinnedHeader: Header(),
     sectionHeader: SectionTitle(),
@@ -336,7 +453,7 @@ widget root = Container(
           true: "加载中…",
           false: "暂无内容",
         },
-        style: { color: 0xFF7A7A7A, fontSize: 14.0 },
+        style: { color: data.home.theme.textTertiary, fontSize: 14.0 },
       ),
     ),
     children: [

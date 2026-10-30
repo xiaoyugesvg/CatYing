@@ -7,6 +7,7 @@ import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:tvbox/reading/services/ai_service.dart';
 import 'package:tvbox/pages/settings/sub/log_diagnosis_page.dart';
+import 'package:tvbox/pages/settings/sub/settings_shared.dart';
 
 /// 一个候选模型。[free] 表示「不花钱就能用」（免费层 / `:free` 后缀）。
 class _ModelItem {
@@ -141,6 +142,85 @@ const List<_Provider> _providers = [
       _ModelItem('Qwen/Qwen3-8B', free: true),
       _ModelItem('deepseek-ai/DeepSeek-V3'),
     ],
+  ),
+];
+
+/// 「AI 管理」的说明条目（右上角「?」用）。
+///
+/// 用户 2026-10-30：「AI 管理以及听书管理等页面右上角加个 ? 按钮，
+/// 详情说明怎么用每一种方式呢。」
+/// 所以这里按**每一种方式**逐条写清：去哪儿拿 Key、免费额度多少、
+/// 需不需要外网、填哪个模型 —— 而不是一句"填 Key 就能用"。
+const List<SettingsHelpItem> _aiHelpItems = [
+  SettingsHelpItem(
+    icon: Icons.auto_awesome_rounded,
+    title: '这份配置管什么',
+    body: '全 App 只有这一处填 AI Key。宠物对话固定用这里；阅读可以单独配一套'
+        '（下面的「阅读使用独立 AI」）。Key 只存本机，不上传、不内置。',
+  ),
+  SettingsHelpItem(
+    icon: Icons.card_giftcard_rounded,
+    title: '免费用法 ①：智谱 GLM（国内直连，最省事）',
+    body: '打开 open.bigmodel.cn 注册 → 控制台「API Keys」新建 → 复制填进来。'
+        '模型选 glm-4.7-flash（标「免费」，200K 上下文），不绑卡也能跑。'
+        '地址已自动填好，不用改。',
+  ),
+  SettingsHelpItem(
+    icon: Icons.card_giftcard_rounded,
+    title: '免费用法 ②：OpenRouter 免费路由',
+    body: '打开 openrouter.ai 用 GitHub 登录 → Keys 里新建 → 填进来。'
+        '模型填 openrouter/free，它会自动挑一个当前可用的免费模型，'
+        '某个免费模型下架也不会整个失效。需外网。',
+  ),
+  SettingsHelpItem(
+    icon: Icons.card_giftcard_rounded,
+    title: '免费用法 ③：Groq / Gemini / 硅基流动',
+    body: 'Groq：免费 1000 次/天、速度最快，但需外网（console.groq.com）。'
+        'Gemini：Google AI Studio 有免费层，需外网。'
+        '硅基流动：国内直连，站内标「免费」的小模型可用（cloud.siliconflow.cn）。',
+  ),
+  SettingsHelpItem(
+    icon: Icons.payments_outlined,
+    title: '付费的几家（更稳、更聪明）',
+    body: 'DeepSeek：便宜、中文好，充 10 元能用很久。'
+        '通义千问（阿里云百炼）：qwen-turbo 有免费额度。'
+        'Kimi：长文本强，适合让它读整本书。'
+        'OpenAI：效果最好但需外网 + 外币卡。',
+  ),
+  SettingsHelpItem(
+    icon: Icons.list_alt_rounded,
+    title: '模型怎么选：点选 or 手填',
+    body: '「选择模型」里是内置清单（带「免费」标签，离线也能选）+ 点'
+        '「拉取在线模型」用你自己的 Key 现拉一份最新列表（会标出免费的）。'
+        '选中只是回填输入框，随时可以手动改成清单里没有的模型名。',
+  ),
+  SettingsHelpItem(
+    icon: Icons.science_outlined,
+    title: '填完先「测试连接」',
+    body: '测试会真的发一句 ping 过去。成功说明地址 + Key + 模型三项都对；'
+        '失败会显示具体原因（401 = Key 错，404 = 模型名不存在，'
+        '超时 = 网络/地址不通）。测通了再退出，否则各处 AI 都会报错。',
+  ),
+  SettingsHelpItem(
+    icon: Icons.menu_book_rounded,
+    title: '阅读使用独立 AI',
+    body: '打开后阅读的总结 / 问答走下面那套地址与 Key，宠物不受影响。'
+        '适合「便宜模型给阅读、好模型给对话」这种搭配。'
+        '听书朗读里的「小米 MiMo / OpenAI 兼容」源可以打开「复用 AI 管理」，'
+        '直接借这份地址与 Key，不用再填一遍。',
+  ),
+  SettingsHelpItem(
+    icon: Icons.link_rounded,
+    title: '接口地址怎么填',
+    body: '所有服务商都按 OpenAI 兼容协议调用。地址以 /v1、/v4 结尾会自动补全，'
+        '也可以直接填完整的 .../chat/completions。点服务商胶囊会自动填好地址和'
+        '推荐模型，一般不用手改。',
+  ),
+  SettingsHelpItem(
+    icon: Icons.troubleshoot_rounded,
+    title: '日志诊断',
+    body: '读本机运行日志，让 AI 直接给出优化建议（比如哪个源老失败、'
+        '哪里在反复重试）。用当前这份 AI 配置，不额外收费。',
   ),
 ];
 
@@ -688,6 +768,12 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
             color: AppTheme.textPrimary,
           ),
         ),
+        actions: [
+          // 每一种服务商怎么拿 Key、免费额度、要不要外网，全在这里（用户 2026-10-30）
+          SettingsHelp.helpButton(
+            onPressed: () => SettingsHelp.show(context, 'AI 管理怎么用', _aiHelpItems),
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
@@ -796,15 +882,6 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
             ),
           ),
           const SizedBox(height: 16),
-          Text(
-            '所有服务商都按 OpenAI 兼容协议调用。地址以 /v1、/v4 结尾会自动补全，'
-            '也可以直接填完整的 .../chat/completions。',
-            style: TextStyle(
-              fontSize: 11.5,
-              height: 1.6,
-              color: AppTheme.textTertiary,
-            ),
-          ),
         ],
       ),
     );
@@ -898,13 +975,6 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
             ],
           ),
           const SizedBox(height: 10),
-          Text(
-            '宠物对话固定用这份配置；阅读可以单独配一套。Key 只存本机。\n'
-            '听书朗读里的「小米 MiMo / OpenAI 兼容」源可以打开「复用 AI 管理」，'
-            '直接借这份地址与 Key，不用再填一遍。',
-            style: TextStyle(
-                fontSize: 11.5, height: 1.55, color: AppTheme.textTertiary),
-          ),
         ],
       ),
     );

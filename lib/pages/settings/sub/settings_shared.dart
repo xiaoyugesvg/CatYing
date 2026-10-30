@@ -4,6 +4,7 @@ import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/models/import_conflict.dart';
 import 'package:tvbox/services/prefs_mirror.dart';
 import 'package:tvbox/widgets/common_widgets.dart';
+import 'package:tvbox/widgets/help_sheet.dart';
 
 /// 设置子页的共享构件。
 ///
@@ -385,19 +386,13 @@ class SettingsDialogs {
 }
 
 /// 设置/管理页右上角「?」说明弹窗里的一条说明。
-class SettingsHelpItem {
-  final IconData? icon;
-  final String title;
-  final String body;
+///
+/// 2026-10-30：实现搬到了 `widgets/help_sheet.dart`（听书 / 音乐模块
+/// 也要用，但它们的配色体系不是 AppTheme）。这里保留别名，
+/// 24 个子页里的 `SettingsHelpItem(...)` 一个字都不用改。
+typedef SettingsHelpItem = HelpItem;
 
-  const SettingsHelpItem({
-    this.icon,
-    required this.title,
-    required this.body,
-  });
-}
-
-/// 设置/管理页右上角的「?」说明按钮 + 弹窗。
+/// 设置/管理页右上角的「?」说明按钮 + 弹窗（AppTheme 配色版）。
 ///
 /// 用户（本会话）：「卡片里的小字说明别直接铺在卡片下，
 /// 改成在页面右上角放个 ? 图标，想看就点开看。」
@@ -407,14 +402,20 @@ class SettingsHelpItem {
 class SettingsHelp {
   SettingsHelp._();
 
+  /// 设置体系的说明配色（AppTheme）
+  static HelpPalette get palette => HelpPalette(
+        surface: AppTheme.backgroundSecondary,
+        textPrimary: AppTheme.textPrimary,
+        textSecondary: AppTheme.textSecondary,
+        textTertiary: AppTheme.textTertiary,
+        accent: AppTheme.accentColor,
+        border: AppTheme.borderLight,
+        radius: AppTheme.radiusLG,
+      );
+
   /// 右上角「?」按钮（与 `action` 并列）。
   static Widget helpButton({required VoidCallback onPressed}) {
-    return IconButton(
-      tooltip: '说明',
-      onPressed: onPressed,
-      icon: Icon(Icons.help_outline_rounded,
-          color: AppTheme.textPrimary, size: 22),
-    );
+    return helpAction(onPressed: onPressed, color: AppTheme.textPrimary);
   }
 
   /// 弹出说明弹窗（AlertDialog 风格，与 SettingsDialogs 统一）。
@@ -423,87 +424,11 @@ class SettingsHelp {
     String pageTitle,
     List<SettingsHelpItem> items,
   ) {
-    return showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.backgroundSecondary,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppTheme.radiusLG)),
-        title: Row(
-          children: [
-            Icon(Icons.help_outline_rounded,
-                size: 22, color: AppTheme.accentColor),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(pageTitle,
-                  style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: AppTheme.fontTitle3,
-                      fontWeight: FontWeight.w700)),
-            ),
-          ],
-        ),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.separated(
-            shrinkWrap: true,
-            itemCount: items.length,
-            separatorBuilder: (_, __) => Divider(
-                color: AppTheme.borderLight, height: 1, thickness: 0.5),
-            itemBuilder: (c, i) {
-              final it = items[i];
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (it.icon != null) ...[
-                      Container(
-                        width: 30,
-                        height: 30,
-                        margin: const EdgeInsets.only(top: 1),
-                        decoration: BoxDecoration(
-                          color: AppTheme.accentColor.withValues(alpha: 0.14),
-                          borderRadius: BorderRadius.circular(9),
-                        ),
-                        child: Icon(it.icon,
-                            size: 17, color: AppTheme.accentColor),
-                      ),
-                      const SizedBox(width: 10),
-                    ],
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(it.title,
-                              style: TextStyle(
-                                  color: AppTheme.textPrimary,
-                                  fontSize: AppTheme.fontSubhead,
-                                  fontWeight: FontWeight.w600,
-                                  height: 1.3)),
-                          const SizedBox(height: 3),
-                          Text(it.body,
-                              style: TextStyle(
-                                  color: AppTheme.textSecondary,
-                                  fontSize: AppTheme.fontFootnote,
-                                  height: 1.45)),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('知道了',
-                style: TextStyle(color: AppTheme.accentColor)),
-          ),
-        ],
-      ),
+    return showHelpSheet(
+      context,
+      title: pageTitle,
+      items: items,
+      palette: palette,
     );
   }
 }

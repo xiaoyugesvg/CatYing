@@ -54,6 +54,65 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
   Widget build(BuildContext context) {
     return SettingsSubPage(
       title: '播放器',
+      // 用户 2026-10-30：「AI 管理以及听书管理等页面右上角加个 ? 按钮，
+      // 详情说明怎么用每一种方式呢。」播放器这一页是"方式最多"的一页，
+      // 三种内核、硬/软解、几种缓冲，光看名字根本选不出来。
+      help: const [
+        SettingsHelpItem(
+          icon: Icons.video_settings,
+          title: '方式一：AVPlayer 内核（iPhone 默认）',
+          body: '苹果系统自带，起播最快、最省电，与小窗共用同一个播放器。'
+              '日常在线点播首选。遇到 MKV / 多音轨 / ASS 字幕这类"苹果吃不下"的'
+              '格式会黑屏或没声音，换另外两个。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.movie_filter_outlined,
+          title: '方式二：MPV 内核（兼容性最好）',
+          body: '基于 libmpv，什么格式都能放，字幕/音轨/画面调节最全，'
+              '也是安卓端默认。代价是起播比 AVPlayer 慢一点、更耗电。'
+              '选中它之后才会出现「视频解码（MPV）」和「MPV 缓冲」两项。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.hd_outlined,
+          title: '方式三：KSPlayer 内核（FFmpeg + Metal）',
+          body: 'FFmpeg 解码 + Metal 渲染，专治 AVPlayer 放不了的高码率 / MKV / '
+              '多音轨片源，也自带小窗。4K HDR 卡顿时优先试它。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.memory,
+          title: '硬件加速 / 视频解码怎么选',
+          body: '「硬件加速」开着用 GPU 解码，省电、发热低，绝大多数片源都该开。'
+              '「视频解码（MPV）」里的"硬件"同理；出现花屏、绿屏、音画不同步时'
+              '切到"软件"（CPU 解码）通常就好了，只是更耗电。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.sd_card_outlined,
+          title: 'MPV 缓冲：卡不卡就看这一项',
+          body: '默认档够用。经常缓冲转圈（尤其看高码率或网络差）就调大一档，'
+              '代价是起播多等一两秒、多占内存。本地文件可以调到最小，起播最快。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.aspect_ratio,
+          title: '画面填充',
+          body: '「适应」保持原比例、可能留黑边；「拉伸」铺满全屏但会变形；'
+              '「裁剪」铺满且不变形，代价是切掉画面边缘。老片 4:3 建议"适应"，'
+              '宽银幕电影建议"裁剪"。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.speed,
+          title: '倍速与手势',
+          body: '「默认倍速」是每次开播的起始速度。'
+              '「长按倍速」是按住屏幕时临时切到的速度，松手还原；'
+              '打开「长按滑动调节倍速」后，按住上下滑还能微调。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.bug_report_outlined,
+          title: '调试日志 / 信息显示',
+          body: '播放出问题时打开「调试日志」，日志会写进「日志诊断」，'
+              '可以让 AI 直接读并给建议。「信息显示」会在画面上叠帧率与编码信息，'
+              '只在排查卡顿时需要开。',
+        ),
+      ],
       children: [
         // ---------- 硬件加速（顶部独立卡片）----------
         Obx(() => AppCard(

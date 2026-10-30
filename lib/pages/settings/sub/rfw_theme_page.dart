@@ -81,6 +81,42 @@ class _RfwThemePageState extends State<RfwThemePage> {
   Widget build(BuildContext context) {
     return SettingsSubPage(
       title: 'RFW 首页主题',
+      help: const [
+        SettingsHelpItem(
+          icon: Icons.dashboard_customize_outlined,
+          title: '这是什么',
+          body: '用一段文本（.rfwtxt）描述的**影视首页皮肤**：分类、筛选、推荐位、'
+              '片单网格长什么样，全由主题决定。它只管首页，播放页/详情页/'
+              '其它模块都不受影响。默认关闭，保持原生首页。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.palette_outlined,
+          title: '配色会跟着软件走',
+          body: '三个内置主题的颜色不是写死的，而是从「外观 → 主题」里你当前选的'
+              '那套配色实时算出来的：换配色，首页跟着变。'
+              '晨光偏暖、素影完全跟随、星河强制深色但取你的强调色做底。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.grid_view_rounded,
+          title: '显示样式怎么选',
+          body: '网格/大网格适合挑海报；列表信息多、扫得快；'
+              '横幅适合有横图的源；纯文字列表最省流量。'
+              '换样式只改排版，不改内容。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.upload_file_rounded,
+          title: '导入自己的主题',
+          body: '点「导入主题文件」选一个 .rfwtxt。主题只能引用内置的两个库'
+              '（core.widgets / peek.home），越权的文件会被拒绝 —— '
+              '这是防止主题拿到系统能力的安全边界。导入后长按可删除。',
+        ),
+        SettingsHelpItem(
+          icon: Icons.report_problem_outlined,
+          title: '首页显示成一片「?」或空白',
+          body: '「?」是主题里的图标缺字体信息（老版本主题的问题，重新导入或换内置主题'
+              '即可）。空白/报错说明主题解析失败，换回内置主题先保证能用。',
+        ),
+      ],
       children: [
         ListenableBuilder(
           listenable: Listenable.merge([

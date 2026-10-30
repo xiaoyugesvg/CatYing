@@ -9,6 +9,7 @@ import 'package:tvbox/services/local_js_sources.dart';
 import 'package:tvbox/services/local_python_sources.dart';
 import 'package:tvbox/services/moontv_converter.dart';
 import 'package:tvbox/services/prefs_mirror.dart';
+import 'package:tvbox/services/spider_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tvbox/models/app_config.dart';
 import 'package:tvbox/models/source_bean.dart';
@@ -532,6 +533,11 @@ class ApiConfig extends GetxController {
   /// 设置主页源
   Future<void> setHomeSource(SourceBean source) async {
     homeSourceBean.value = source;
+    // 换源 = 引擎槽位里"现在是谁"已经不可知 ⇒ 作废脚本/端口记忆。
+    // 不这么做的话，切到本地 JS 会命中"已载入"的假缓存而跳过 loadSource，
+    // 请求打到还驻留着的旧脚本上（404）；切回订阅又会被旧 key 带回本地 JS 的内容。
+    // 详见 SpiderService.resetScriptCache 的注释（用户 2026-10-30 反馈）。
+    SpiderService.instance.resetScriptCache();
     final prefs = await SharedPreferences.getInstance();
     // 仍写一份全局键，兼容旧逻辑/旧数据
     await prefs.setString(AppConstants.homeApi, source.key);
