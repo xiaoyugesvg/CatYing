@@ -218,14 +218,15 @@ class _DramaPageState extends State<DramaPage> {
 
   /// 当前源：设置里挑过的优先（且必须在白名单内），否则白名单第一个，
   /// 再否则跟随首页当前源。
+  ///
+  /// ⚠️ 这里**不再传** `pickedHomeKey`：挑的源不会因为影视换了源而作废
+  ///（见 `DramaSettings.resolveCurrentSource` 的 2026-10-30 说明）。
   Future<SourceBean?> _currentSource() async {
     return DramaSettings.resolveCurrentSource(
       all: _allSources(),
       keys: await DramaSettings.sourceKeys(),
       pickedKey: await DramaSettings.pickedSourceKey(),
       homeSource: ApiConfig.instance.homeSourceBean.value,
-      // 挑源时的首页 key：和现在的首页源不一致 ⇒ 那次挑的已过期，跟首页走
-      pickedHomeKey: await DramaSettings.pickedHomeKey(),
     );
   }
 

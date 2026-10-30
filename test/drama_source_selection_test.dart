@@ -135,66 +135,72 @@ void main() {
     });
   });
 
-  // 2026-10-29：「本地JS和订阅切换的时候，没切换过来」——
-  // 短剧页挑过的源不能永久钉死，首页源换了要跟着换。
-  group('首页源变化后短剧页跟随切换', () {
+  // 2026-10-30：用户「短剧不要影视模块源是什么就是什么呀，我不是选了源吗？」
+  // —— 短剧页挑的源**只要还可用就永远优先**，不会因为在影视里换了源而作废。
+  // （10-29 那条"首页源一变就作废"的规则已删，理由见 resolveCurrentSource 注释）
+  group('短剧挑的源优先于影视当前源', () {
     final homeA = src('homeA');
     final homeB = src('homeB');
     final mixed = <SourceBean>[...all, homeA, homeB];
 
-    test('挑的时候首页就是它 → 挑的源继续生效', () {
+    test('挑过源、影视后来换了源 → 仍然用挑的那个', () {
       final s = DramaSettings.resolveCurrentSource(
         all: mixed,
         keys: <String>{},
         pickedKey: 'c',
-        homeSource: homeA,
-        pickedHomeKey: 'homeA',
+        homeSource: homeB,
       );
       expect(s?.key, 'c');
     });
 
-    test('首页源换过了 → 跟着新首页源（挑的源还在列表里也不认）', () {
-      final s = DramaSettings.resolveCurrentSource(
-        all: mixed,
-        keys: <String>{},
-        pickedKey: 'c',
-        homeSource: homeB,
-        pickedHomeKey: 'homeA',
-      );
-      expect(s?.key, 'homeB');
-    });
-
-    test('首页源换过了、但新首页源不在白名单 → 落白名单第一个', () {
-      final s = DramaSettings.resolveCurrentSource(
-        all: mixed,
-        keys: {'a', 'b'},
-        pickedKey: 'c',
-        homeSource: homeB,
-        pickedHomeKey: 'homeA',
-      );
-      expect(s?.key, 'a');
-    });
-
-    test('首页源换过了、新首页源在白名单 → 用新首页源（不是白名单第一个）', () {
+    test('挑过源、影视换源且新首页源在白名单 → 仍用挑的那个', () {
       final s = DramaSettings.resolveCurrentSource(
         all: mixed,
         keys: {'a', 'homeB'},
         pickedKey: 'a',
         homeSource: homeB,
-        pickedHomeKey: 'homeA',
+      );
+      expect(s?.key, 'a');
+    });
+
+    test('挑的源被移出白名单 → 落白名单第一个（不跟影视源）', () {
+      final s = DramaSettings.resolveCurrentSource(
+        all: mixed,
+        keys: {'a', 'b'},
+        pickedKey: 'c',
+        homeSource: homeB,
+      );
+      expect(s?.key, 'a');
+    });
+
+    test('挑的源已被删 → 跟影视当前源（它可用时）', () {
+      final s = DramaSettings.resolveCurrentSource(
+        all: mixed,
+        keys: <String>{},
+        pickedKey: 'ghost',
+        homeSource: homeB,
       );
       expect(s?.key, 'homeB');
     });
 
-    test('老数据（没记过 pickedHomeKey）→ 维持旧行为：挑的优先', () {
+    test('挑的源已被删、影视源也不可用 → 白名单第一个', () {
+      final s = DramaSettings.resolveCurrentSource(
+        all: mixed,
+        keys: {'a', 'b'},
+        pickedKey: 'ghost',
+        homeSource: homeB,
+      );
+      expect(s?.key, 'a');
+    });
+
+    test('没挑过源 → 跟随影视当前源', () {
       final s = DramaSettings.resolveCurrentSource(
         all: mixed,
         keys: <String>{},
-        pickedKey: 'c',
+        pickedKey: '',
         homeSource: homeB,
-        pickedHomeKey: '',
       );
-      expect(s?.key, 'c');
+      expect(s?.key, 'homeB');
     });
   });
 
@@ -253,7 +259,7 @@ void main() {
       expect(await DramaSettings.pickedSourceKey(), 'c');
     });
 
-    test('挑源时一并记下首页 key，可读回（用于判断是否已过期）', () async {
+    test('挑源时一并记下首页 key，可读回（仅留档，不再参与解析）', () async {
       await DramaSettings.savePickedSourceKey('c', homeKey: 'homeA');
       expect(await DramaSettings.pickedSourceKey(), 'c');
       expect(await DramaSettings.pickedHomeKey(), 'homeA');
