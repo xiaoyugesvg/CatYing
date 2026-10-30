@@ -62,8 +62,7 @@ import 'package:tvbox/services/tmdb_service.dart';
 import 'package:tvbox/pages/search/controller.dart';
 import 'package:tvbox/music/services/library_store.dart';
 import 'package:tvbox/widgets/app_toast.dart';
-import 'package:tvbox/widgets/app_splash_backdrop.dart';
-import 'package:tvbox/widgets/circular_logo_progress.dart';
+import 'package:tvbox/widgets/app_splash_view.dart';
 import 'package:tvbox/widgets/video_player_pip.dart';
 import 'package:tvbox/webhome/webhtv_playback_sync_service.dart';
 import 'package:tvbox/rfw_theme/rfw_theme_store.dart';
@@ -579,7 +578,7 @@ class _BootGate extends StatelessWidget {
   }
 }
 
-/// 首帧启动页 —— 与正式加载页（`AppLoadingView`）**画同一个画面**。
+/// 首帧启动页 —— 只是把 [AppSplashView] 套进一个最小 `MaterialApp`。
 ///
 /// ── 演进史（两次都是同一个坑：两帧画得不一样）────────────────────
 /// ① 最早这里画了一个**写死金色**的 logo（#D4A574），而 `AppLoadingView`
@@ -589,16 +588,13 @@ class _BootGate extends StatelessWidget {
 ///    结果深色模式下这块纯色就是**一片黑**，而加载页是渐变 + logo ⇒
 ///    用户又说「一打开就是黑屏，然后才出加载页」。
 ///
-/// 现在（2026-10-30）的正确解法：**两帧共用同一套组件、同一套取色**——
-///   · 背景：`AppSplashBackdrop`（启动页与加载页的唯一实现）
-///   · 前景：`CircularLogoProgress`（不确定态转圈，无文案）
-///   · 明暗：`ThemeModeStore.preloadSync()` 已在 `runApp` **之前**同步定好
-/// 所以从这一帧切到加载页时，底色、logo、圆环颜色全都不变 —— 既不是黑屏，
-/// 也不会出现"两个 logo"（本来就是同一个）。
+/// 现在（2026-10-30）：**启动画面只剩一份实现** —— [AppSplashView]
+///（背景 `AppSplashBackdrop` + 前景 `CircularLogoProgress`，与加载页同一份）。
+/// 本文件只负责"把它挂到最外层"，不再自己拼任何一个像素。
 ///
-/// ⚠️ 仍然**不碰 GetX**：这一帧要早于任何服务注册，`Get.find` 会直接抛。
-///   用到的 `AppTheme` 全是**纯静态 getter**（读 `AppBrightness` / 调色板），
-///   不依赖任何已注册的实例。
+/// ⚠️ 两个挂载点删不掉（GetX 时序）：这一帧必须早于服务注册，所以不能直接用
+///   `AppLoadingView`（它 `Get.find<AppState>()` 会抛）。见
+///   `lib/widgets/app_splash_view.dart` 顶部的说明。
 class _BootSplash extends StatelessWidget {
   const _BootSplash();
 
@@ -618,18 +614,7 @@ class _BootSplash extends StatelessWidget {
         return MaterialApp(
           debugShowCheckedModeBanner: false,
           theme: ThemeData(fontFamily: 'MiSans'),
-          home: const AppSplashBackdrop(
-            child: SafeArea(
-              child: Center(
-                child: CircularLogoProgress(
-                  progress: null,
-                  percentText: '',
-                  caption: '',
-                  indeterminate: true,
-                ),
-              ),
-            ),
-          ),
+          home: const AppSplashView(),
         );
       },
     );

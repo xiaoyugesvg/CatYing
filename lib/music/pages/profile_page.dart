@@ -7,7 +7,6 @@ import 'package:tvbox/music/models/models.dart';
 import 'package:tvbox/music/models/third_party_source.dart';
 import 'package:tvbox/music/services/settings_store.dart';
 import 'package:tvbox/music/theme/music_theme.dart';
-import 'package:tvbox/music/widgets/music_components.dart';
 import 'package:tvbox/music/widgets/floating_play_button.dart';
 import 'package:tvbox/music/pages/music_log_page.dart';
 import 'package:tvbox/music/pages/music_source_settings_page.dart';
@@ -47,10 +46,14 @@ class ProfilePage extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.only(bottom: 170),
         children: [
-          const MusicPageHeader(
-            title: '我的',
-            subtitle: '外观 / 播放 / 音源 · 全部存在本机',
-          ),
+          // ⚠️ 这里原来有一个大标题「我的」+ 一行小字
+          //（「外观 / 播放 / 音源 · 全部存在本机」）。
+          // 用户 2026-10-30：「我的上面那个我的和小字都去掉」——
+          // 底栏 tab 已经写着「我的」，页内再顶一个大标题纯属重复；
+          // 那行小字也是废话（下面三个分组标题已经说明了内容）。
+          // 所以整块**删掉**，直接从「个性化外观」开始。
+          // 留一点顶部呼吸感（原来靠 header 的 padding 撑着）。
+          const SizedBox(height: 12),
 
           // ── 外观 ────────────────────────────────────────────
           const _GroupTitle('个性化外观'),
@@ -350,6 +353,15 @@ class ProfilePage extends StatelessWidget {
   ///
   /// 修法：加一个 [listen] 参数指定要监听哪个 notifier，
   /// 并且**以 [value] 为准**（调用方传的是它自己那份的状态）。
+  /// 开关行。
+  ///
+  /// 用户 2026-10-30：「音乐里面的小字也不要，然后加？来说明」——
+  /// 原来每行下面挂一行灰色小字（"关闭后只用内置的公开接口"这种），
+  /// 一屏下来小字比标题还多、扫读时全是噪音。现在改成：
+  ///   · 小字**不显示**；
+  ///   · 标题后面跟一个淡淡的「？」，点一下才弹出这句说明。
+  /// 状态型的副标题（音质=无损、封面形态=方形…）**不在此列** —— 那是当前值，
+  /// 不是解释，去掉了用户就不知道现在是哪个档。
   Widget _switchTile({
     required String label,
     String? subtitle,
@@ -365,13 +377,22 @@ class ProfilePage extends StatelessWidget {
           value: v,
           activeThumbColor: MusicTheme.tint,
           contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-          title: Text(label,
-              style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
-          subtitle: subtitle == null
-              ? null
-              : Text(subtitle,
-                  style: TextStyle(
-                      color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
+          title: Row(
+            children: [
+              Flexible(
+                child: Text(label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: MusicTheme.label,
+                        fontSize: AppTheme.fontHeadline)),
+              ),
+              if (subtitle != null && subtitle.trim().isNotEmpty) ...[
+                const SizedBox(width: 6),
+                _HelpDot(text: subtitle),
+              ],
+            ],
+          ),
           onChanged: onChanged,
         ),
       );
@@ -815,5 +836,75 @@ class _AccentPicker extends StatelessWidget {
       closed = true;
       worker.dispose();
     }
+  }
+}
+
+/// 标题后面那个淡淡的「？」—— 点开才显示这一项的说明。
+///
+/// 用户 2026-10-30：「音乐里面的小字也不要，然后加？来说明」。
+/// 说明文字本身**不删**（删了就没法解释这个开关干什么），只是从
+/// "每行都挂着的小字"变成"点开才看"。
+///
+/// 样式刻意压得很轻（14px、secondary 色、无边框），避免又变成一屏噪音。
+class _HelpDot extends StatelessWidget {
+  const _HelpDot({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => showMusicSheet<void>(
+        context: context,
+        backgroundColor: MusicTheme.card,
+        builder: (ctx) => SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(22, 20, 22, 26),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '说明',
+                  style: TextStyle(
+                    color: MusicTheme.label,
+                    fontSize: AppTheme.fontSubhead,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  text,
+                  style: TextStyle(
+                    color: MusicTheme.secondary,
+                    fontSize: AppTheme.fontFootnote,
+                    height: 1.6,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    child: Text('知道了',
+                        style: TextStyle(color: MusicTheme.tint)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+        child: Icon(
+          Icons.help_outline_rounded,
+          size: 14,
+          color: MusicTheme.secondary.withValues(alpha: 0.75),
+        ),
+      ),
+    );
   }
 }

@@ -3,10 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/pages/settings/sub/data_source_settings_page.dart';
 import 'package:tvbox/services/app_state.dart';
-import 'package:tvbox/widgets/app_splash_backdrop.dart';
+import 'package:tvbox/widgets/app_splash_view.dart';
 import 'package:tvbox/widgets/app_toast.dart';
 import 'package:tvbox/widgets/circular_logo_progress.dart';
 
@@ -65,35 +64,23 @@ class _AppLoadingViewState extends State<AppLoadingView> {
   Widget build(BuildContext context) {
     final appState = Get.find<AppState>();
 
-    // 背景必须与「启动首帧」(`_BootSplash`) **完全同源**，否则从启动页切到
-    // 本页时整块底色会跳一下（用户读作"先黑屏再出加载页"）。
-    // 唯一实现见 `AppSplashBackdrop`。
-    return AppSplashBackdrop(
-      child: SafeArea(
-        child: Center(
-          child: Obx(() {
-            final phase = appState.loadingPhase.value;
-            final failed = phase.isFailed;
-            final showActions = failed || _slow;
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _buildProgress(appState),
-                if (showActions) ...[
-                  const SizedBox(height: 28),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 40),
-                    child: Text(
-                      failed
-                          ? '当前源加载失败，你仍可以先进入应用，\n稍后在「设置 → 订阅管理」更换源。'
-                          : '加载时间有点久，可以先进入应用。',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: AppTheme.fontSubhead,
-                        height: 1.5,
-                      ),
-                    ),
+    // 画面只来自 [AppSplashView]（与启动首帧**同一份实现**）——
+    // 以前这里自己又拼了一遍 backdrop + logo，改一处忘一处就会出现
+    // "两个 logo / 底色跳变"（见 app_splash_view.dart 顶部的说明）。
+    return Obx(() {
+      final phase = appState.loadingPhase.value;
+      final failed = phase.isFailed;
+      final showActions = failed || _slow;
+      return AppSplashView(
+        progress: _buildProgress(appState),
+        footer: showActions
+            ? Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AppSplashHint(
+                    text: failed
+                        ? '当前源加载失败，你仍可以先进入应用，\n稍后在「设置 → 订阅管理」更换源。'
+                        : '加载时间有点久，可以先进入应用。',
                   ),
                   const SizedBox(height: 16),
                   Row(
@@ -116,12 +103,10 @@ class _AppLoadingViewState extends State<AppLoadingView> {
                     child: const Text('更换源'),
                   ),
                 ],
-              ],
-            );
-          }),
-        ),
-      ),
-    );
+              )
+            : null,
+      );
+    });
   }
 
   Widget _buildProgress(AppState appState) {

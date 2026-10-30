@@ -144,12 +144,27 @@ void main() {
           reason: '预读必须早于 runApp，否则首帧还是按深色画');
     });
 
-    test('_BootSplash 用同一套背景 + logo 组件', () {
-      final bootAt = mainSrc.indexOf('class _BootSplash');
-      expect(bootAt, greaterThan(0));
-      final bootSrc = mainSrc.substring(bootAt);
-      expect(bootSrc, contains('AppSplashBackdrop'));
-      expect(bootSrc, contains('CircularLogoProgress'));
+    test('启动画面只有一份实现：两处挂载点都只用 AppSplashView', () {
+      // 用户 2026-10-30：「与加载页画同一画面，就不能去掉一个吗？」
+      // 能去掉的是**重复的那份实现** —— 背景/前景/居中以前在 main.dart 和
+      // app_loading_view.dart 各写一遍，改一处忘一处就会"两个 logo / 跳色"。
+      final bootSrc = mainSrc.substring(mainSrc.indexOf('class _BootSplash'));
+      expect(bootSrc, contains('AppSplashView'));
+      expect(bootSrc, isNot(contains('AppSplashBackdrop')),
+          reason: '首帧不许自己拼背景，必须走 AppSplashView');
+      expect(bootSrc, isNot(contains('CircularLogoProgress')),
+          reason: '首帧不许自己拼进度环，必须走 AppSplashView');
+
+      expect(loadingSrc, contains('AppSplashView'));
+      expect(loadingSrc, isNot(contains('AppSplashBackdrop')),
+          reason: '加载页不许自己拼背景，必须走 AppSplashView');
+
+      // 唯一实现里才允许出现这两个底层组件
+      final viewSrc = read('lib/widgets/app_splash_view.dart');
+      expect(viewSrc, contains('AppSplashBackdrop'));
+      expect(viewSrc, contains('CircularLogoProgress'));
+      expect(viewSrc, isNot(contains('RadialGradient')),
+          reason: '渐变只能有一份（在 AppSplashBackdrop 里）');
     });
 
     test('_BootSplash 不再写死底色（黑屏的直接原因）', () {
@@ -161,8 +176,7 @@ void main() {
       expect(bootSrc, isNot(contains('ColoredBox')));
     });
 
-    test('加载页背景也走 AppSplashBackdrop，不许自己再写渐变', () {
-      expect(loadingSrc, contains('AppSplashBackdrop'));
+    test('加载页不许自己再写渐变（同源检查见上一条）', () {
       expect(loadingSrc, isNot(contains('RadialGradient')),
           reason: '两处各写一份渐变迟早会改漏一处，必须同源');
     });
