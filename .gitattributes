@@ -13,3 +13,8 @@ ios/Flutter/Release.xcconfig text eol=lf
 lib/**/*.dart text eol=lf
 pubspec.yaml text eol=lf
 pubspec.lock text eol=lf
+
+# RFW 主题文件必须用 LF：rfw 解析器遇到 \r 直接报
+# 「Unexpected character U+000D」，主题加载失败、整页空白。
+# autocrlf=true 的机器（Windows）默认会把它写成 CRLF，所以显式钉死。
+assets/rfw_themes/** text eol=lf
