@@ -22,6 +22,7 @@ class RfwThemeEntry {
     required this.isBuiltin,
     this.asset,
     this.fileName,
+    this.followsPalette = true,
   });
 
   final String id;
@@ -29,6 +30,18 @@ class RfwThemeEntry {
   final bool isBuiltin;
   final String? asset;
   final String? fileName;
+
+  /// 这套主题是否**跟随软件配色**（颜色全部从 `data.home.theme.*` 取）。
+  ///
+  ///   · true（默认）：换「外观 → 配色」时首页跟着变。
+  ///     内置的晨光 / 素影 / 星河都是这一类。
+  ///   · false：主题自带完整配色方案（用户提供的 PeekPro 风格主题）。
+  ///     这类主题的颜色就是它的设计本身，硬改成跟随调色板等于把它拆了。
+  ///
+  /// 加这个字段是因为 `test/rfw_theme_test.dart` 有一条"主题文件里不许出现
+  /// 写死色值"的守护测试 —— 不区分这两类的话，用户自己导入的风格主题
+  /// 会被误判成回归（2026-10-30 内置蓝魔凝光 / 春日记忆时踩到）。
+  final bool followsPalette;
 }
 
 const List<RfwThemeEntry> builtinRfwThemes = [
@@ -49,6 +62,28 @@ const List<RfwThemeEntry> builtinRfwThemes = [
     name: '星河横幅',
     isBuiltin: true,
     asset: 'assets/rfw_themes/xinghe_banner.rfwtxt',
+  ),
+  // 2026-10-30 用户提供并内置的两套「PeekPro」主题。
+  //
+  // 它们和上面三套用的是**同一份数据契约**（data.home.icons / classes /
+  // filterPanelHeight …），额外只多用了两个 PeekPro 的便捷组件：
+  //   · SizedBoxShrink()        → 空占位
+  //   · AnimationDefaults(...)  → 动画包装（静态渲染时直接透传 child）
+  // 这两个已在 `createPeekHomeLibrary()` 里补上，所以不用改主题文件本身。
+  RfwThemeEntry(
+    id: 'lanmo',
+    name: '蓝魔凝光·琥珀玻璃',
+    isBuiltin: true,
+    asset: 'assets/rfw_themes/lanmo_amber.rfwtxt',
+    // 自带琥珀玻璃配色方案，不跟「外观 → 配色」走（见 followsPalette 注释）
+    followsPalette: false,
+  ),
+  RfwThemeEntry(
+    id: 'chunri',
+    name: '春日记忆',
+    isBuiltin: true,
+    asset: 'assets/rfw_themes/chunri_memory.rfwtxt',
+    followsPalette: false,
   ),
 ];
 

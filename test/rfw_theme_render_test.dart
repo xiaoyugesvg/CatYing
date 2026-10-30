@@ -50,7 +50,16 @@ void main() {
         recommend: [
           Video(id: 'r1', name: '推荐一', pic: 'r.jpg', note: '2024'),
         ],
-        filters: const [],
+        // 必须给一组筛选：晨光/素影/星河把筛选按钮无条件画出来，但
+        // 蓝魔凝光/春日记忆是按 `hasFilters` 条件渲染的 —— 传空数组时
+        // 那个按钮根本不存在，断言"五个图标都在"就会误报成豆腐块 bug。
+        filters: const [
+          SortFilter(
+            key: 'year',
+            name: '年份',
+            values: [SortFilterValue(n: '2024', v: '2024')],
+          ),
+        ],
         selectedFilters: const {},
         sourceName: 'Makka聚合',
         themeId: themeId,
@@ -213,6 +222,85 @@ void main() {
       final expanded = buildRfwHomeData(input)['stickyHeaderHeight'] as double;
       // 两组：2 * 66 + 12 = 144
       expect(expanded - collapsed, closeTo(144.0, 0.01));
+    });
+
+    /// 2026-10-30：蓝魔凝光首跑就报 `RenderFlex overflowed by 2.0 pixels`。
+    /// 它的 PinnedHeader = 分类栏 58（padding 6+6 + 内框 46）+ 按钮栏 34
+    /// （padding 2+2 + 圆钮 30）= 92，而主题里把 pinnedHeight 写成了 90。
+    /// 现在改成读这个键：102 基准 + 展开筛选时的面板高。
+    test('沉浸式吸顶头 = 94 基准 + 筛选面板高（蓝魔凝光）', () {
+      final collapsed = buildRfwHomeData(buildInput('lanmo'))[
+          'immersiveStickyHeaderHeight'] as double;
+      // 内容实测 92（分类栏 58 + 按钮栏 34），留 2px 余量。
+      expect(collapsed, closeTo(94.0, 0.01));
+
+      final expanded = buildRfwHomeData(
+        RfwHomeDataInput(
+          categories: const [],
+          category: '',
+          items: const [],
+          recommend: const [],
+          filters: const [
+            SortFilter(
+              key: 'year',
+              name: '年份',
+              values: [SortFilterValue(n: '2024', v: '2024')],
+            ),
+            SortFilter(
+              key: 'area',
+              name: '地区',
+              values: [SortFilterValue(n: '韩国', v: '韩国')],
+            ),
+          ],
+          selectedFilters: const {},
+          showFilters: true,
+        ),
+      )['immersiveStickyHeaderHeight'] as double;
+      // 面板 2 * 66 + 12 = 144，加 padding/边框 12 ⇒ 156
+      expect(expanded - collapsed, closeTo(156.0, 0.01));
+    });
+
+    testWidgets('蓝魔凝光展开筛选时不溢出', (tester) async {
+      tester.view.physicalSize = const Size(1170, 2532);
+      tester.view.devicePixelRatio = 3.0;
+      addTearDown(tester.view.reset);
+
+      final entry = builtinRfwThemes.firstWhere((e) => e.id == 'lanmo');
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: RfwThemeHost(
+              themeText: File(entry.asset!).readAsStringSync(),
+              homeData: buildRfwHomeData(
+                RfwHomeDataInput(
+                  categories: const [SortData(id: '1', name: '韩国')],
+                  category: '1',
+                  items: const [],
+                  recommend: const [],
+                  filters: const [
+                    SortFilter(
+                      key: 'year',
+                      name: '年份',
+                      values: [SortFilterValue(n: '2024', v: '2024')],
+                    ),
+                    SortFilter(
+                      key: 'area',
+                      name: '地区',
+                      values: [SortFilterValue(n: '韩国', v: '韩国')],
+                    ),
+                  ],
+                  selectedFilters: const {},
+                  showFilters: true,
+                  themeId: 'lanmo',
+                ),
+              ),
+              onAction: (_) {},
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(tester.takeException(), isNull);
     });
   });
 

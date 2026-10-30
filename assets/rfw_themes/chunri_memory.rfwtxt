@@ -1,0 +1,1148 @@
+// 春日记忆 · 绿色清新主题
+import core.widgets;
+import peek.home;
+
+// --------------------- Hero 推荐卡片（带元数据）---------------------
+widget HeroPoster = GestureDetector(
+  onTap: event "openRecommend" { index: args.item.index },
+  child: Center(
+    child: AspectRatio(
+      aspectRatio: switch data.home.gridColumns {
+        3: 0.70,
+        4: 0.62,
+        5: 0.68,
+        6: 0.70,
+        default: 0.56,
+      },
+      child: Container(
+        margin: [8.0, 10.0],
+        decoration: {
+          type: "box",
+          color: 0xFFFFFFFF,
+          borderRadius: [ { x: 24.0 } ],
+          border: [ { color: 0x99C8E6C9, width: 1.0 } ],
+          boxShadow: [
+            { color: 0x332E7D32, blurRadius: 28.0, offset: { x: 0.0, y: 16.0 }, spreadRadius: 1.0 },
+            { color: 0x1A2E7D32, blurRadius: 18.0, offset: { x: 0.0, y: 5.0 } },
+          ],
+        },
+        child: ClipRRect(
+          borderRadius: [ { x: 24.0 } ],
+          child: Stack(
+            fit: "expand",
+            children: [
+              T4Image(url: args.item.pic),
+              Container(
+                decoration: {
+                  type: "box",
+                  gradient: {
+                    type: "linear",
+                    begin: { x: 0.0, y: -1.0 },
+                    end: { x: 0.0, y: 1.0 },
+                    colors: [0x00000000, 0x05000000, 0xC97EC8E3],
+                  },
+                },
+              ),
+              Align(
+                alignment: { x: -1.0, y: 1.0 },
+                child: Padding(
+                  padding: [12.0, 12.0, 12.0, 13.0],
+                  child: Column(
+                    mainAxisSize: "min",
+                    crossAxisAlignment: "start",
+                    children: [
+                      switch args.item.year {
+                        "": switch args.item.typeName {
+                          "": SizedBoxShrink(),
+                          default: Padding(
+                            padding: [0.0, 0.0, 0.0, 4.0],
+                            child: Text(
+                              text: args.item.typeName,
+                              maxLines: 1,
+                              overflow: "ellipsis",
+                              style: { color: 0xFF66BB6A, fontSize: 12.0, fontWeight: "w600" },
+                            ),
+                          ),
+                        },
+                        default: Padding(
+                          padding: [0.0, 0.0, 0.0, 4.0],
+                          child: Text(
+                            text: switch args.item.typeName {
+                              "": args.item.year,
+                              default: [args.item.year, " / ", args.item.typeName],
+                            },
+                            maxLines: 1,
+                            overflow: "ellipsis",
+                            style: { color: 0xFF66BB6A, fontSize: 12.0, fontWeight: "w600" },
+                          ),
+                        ),
+                      },
+                      Text(
+                        text: args.item.name,
+                        maxLines: 2,
+                        overflow: "ellipsis",
+                        style: { color: 0xFFFFFFFF, fontSize: 14.0, fontWeight: "w900", height: 1.05 },
+                      ),
+                      switch args.item.remarks {
+                        "": SizedBoxShrink(),
+                        default: Padding(
+                          padding: [0.0, 5.0, 0.0, 0.0],
+                          child: Text(
+                            text: args.item.remarks,
+                            maxLines: 1,
+                            overflow: "ellipsis",
+                            style: { color: 0xFF66BB6A, fontSize: 12.0, fontWeight: "w600" },
+                          ),
+                        ),
+                      },
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  ),
+);
+
+// --------------------- 分类 ---------------------
+widget CategoryChip = GestureDetector(
+  onTap: event "selectType" { typeId: args.item.typeId },
+  child: Container(
+    height: 42.0,
+    margin: [0.0, 6.0, 2.0, 6.0],
+    padding: [16.0, 0.0],
+    alignment: { x: 0.0, y: 0.0 },
+    decoration: {
+      type: "box",
+      gradient: switch args.item.selected {
+        true: {
+          type: "linear",
+          begin: { x: -1.0, y: -1.0 },
+          end: { x: 1.0, y: 1.0 },
+          colors: [0xFF43A047, 0xFF2E7D32],
+        },
+        false: {
+          type: "linear",
+          colors: [0xFFFFFFFF, 0xFFF5F9F5],
+        },
+      },
+      borderRadius: [ { x: 18.0 } ],
+      border: [
+        {
+          color: switch args.item.selected { true: 0xFF43A047, false: 0xFFC8E6C9 },
+          width: 1.0,
+        },
+      ],
+      boxShadow: switch args.item.selected {
+        true: [ { color: 0x332E7D32, blurRadius: 14.0, offset: { x: 0.0, y: 5.0 } } ],
+        false: [ { color: 0x0D2E7D32, blurRadius: 8.0, offset: { x: 0.0, y: 3.0 } } ],
+      },
+    },
+    child: Text(
+      text: args.item.typeName,
+      maxLines: 1,
+      overflow: "ellipsis",
+      style: {
+        color: switch args.item.selected { true: 0xFFFFFFFF, false: 0xFF0D1B0D },
+        fontSize: 14.0,
+        fontWeight: "w900",
+        height: 1.0,
+      },
+    ),
+  ),
+);
+
+// --------------------- 工具按钮 ---------------------
+widget ToolButton = GestureDetector(
+  onTap: args.action,
+  child: Container(
+    width: 36.0,
+    height: 36.0,
+    margin: [1.0, 0.0, 0.0, 0.0],
+    alignment: { x: 0.0, y: 0.0 },
+    decoration: {
+      type: "box",
+      gradient: {
+        type: "linear",
+        begin: { x: -1.0, y: -1.0 },
+        end: { x: 1.0, y: 1.0 },
+        colors: [0xFFFFFFFF, 0xFFF5F9F5],
+      },
+      borderRadius: [ { x: 18.0 } ],
+      border: [ { color: 0xFFC8E6C9, width: 1.0 } ],
+      boxShadow: [ { color: 0x332E7D32, blurRadius: 10.0, offset: { x: 0.0, y: 5.0 } } ],
+    },
+    child: Icon(
+      icon: args.icon.icon,
+      fontFamily: args.icon.fontFamily,
+      size: 18.0,
+      color: 0xFF43A047,
+    ),
+  ),
+);
+
+// 小型工具按钮
+widget TinyToolButton = GestureDetector(
+  onTap: args.action,
+  child: Container(
+    width: 37.0,
+    height: 37.0,
+    margin: [0.0, 4.0, 0.0, 4.0],
+    alignment: { x: 0.0, y: 0.0 },
+    decoration: {
+      type: "box",
+      gradient: {
+        type: "linear",
+        colors: [0xFFFFFFFF, 0xFFF5F9F5],
+      },
+      borderRadius: [ { x: 14.0 } ],
+      border: [ { color: 0xFFC8E6C9, width: 1.0 } ],
+      boxShadow: [ { color: 0x142E7D32, blurRadius: 6.0, offset: { x: 0.0, y: 3.0 } } ],
+    },
+    child: Icon(
+      icon: args.icon.icon,
+      fontFamily: args.icon.fontFamily,
+      size: 18.0,
+      color: 0xFF43A047,
+    ),
+  ),
+);
+
+// --------------------- 过滤器选项与行（支持展开）---------------------
+widget FilterOption = GestureDetector(
+  onTap: event "selectFilter" { key: args.item.filterKey, value: args.item.value },
+  child: Container(
+    height: 30.0,
+    margin: [0.0, 4.0, 2.0, 4.0],
+    padding: [11.0, 0.0],
+    alignment: { x: 0.0, y: 0.0 },
+    decoration: {
+      type: "box",
+      color: switch args.item.selected { true: 0xFF43A047, false: 0xFFFFFFFF },
+      borderRadius: [ { x: 13.0 } ],
+      border: [
+        {
+          color: switch args.item.selected { true: 0xFF43A047, false: 0xFFC8E6C9 },
+          width: 1.0,
+        },
+      ],
+    },
+    child: Text(
+      text: args.item.name,
+      maxLines: 1,
+      overflow: "ellipsis",
+      style: {
+        color: switch args.item.selected { true: 0xFFFFFFFF, false: 0xFF0D1B0D },
+        fontSize: 12.0,
+        fontWeight: "w800",
+        height: 1.0,
+      },
+    ),
+  ),
+);
+
+widget FilterRow = Row(
+  children: [
+    Container(
+      width: 62.0,
+      child: Text(
+        text: args.group.name,
+        maxLines: 1,
+        overflow: "ellipsis",
+        style: { color: 0xFF43A047, fontSize: 12.0, fontWeight: "w900" },
+      ),
+    ),
+    Expanded(
+      child: SingleChildScrollView(
+        scrollDirection: "horizontal",
+        child: Row(
+          mainAxisSize: "min",
+          children: [
+          ...for option in args.group.options:
+            FilterOption(item: option),
+        ],
+        ),
+      ),
+    ),
+    switch args.group.canExpand {
+      true: ToolButton(
+        icon: data.home.icons.expand,
+        action: event "showFilterPicker" { key: args.group.key },
+      ),
+      false: SizedBoxShrink(),
+    },
+  ],
+);
+
+// --------------------- 分类头（分类滚动条 + 筛选面板）---------------------
+widget CategoryHeader = Column(
+  children: [
+    Container(
+      decoration: {
+        type: "box",
+        color: 0xFAF5F9F5,
+        boxShadow: [ { color: 0x142E7D32, blurRadius: 16.0, offset: { x: 0.0, y: 8.0 } } ],
+      },
+      child: Container(
+        height: 54.0,
+        padding: [14.0, 0.0],
+        child: SingleChildScrollView(
+          scrollDirection: "horizontal",
+          child: Row(
+            mainAxisSize: "min",
+            children: [
+            ...for item in data.home.classes:
+              CategoryChip(item: item),
+          ],
+          ),
+        ),
+      ),
+    ),
+    switch data.home.showFilters {
+      true: Container(
+        margin: [14.0, 4.0, 14.0, 6.0],
+        child: PeekGlass(
+          blur: 20.0,
+          radius: 16.0,
+          tintColor: 0x08FFFFFF,
+          borderColor: 0xFFC8E6C9,
+          borderWidth: 1.0,
+          child: Container(
+            height: data.home.filterPanelHeight,
+            padding: [10.0, 4.0],
+            child: SingleChildScrollView(
+              child: Column(
+                children: [
+                ...for group in data.home.filters:
+                  Container(height: 39.0, child: FilterRow(group: group)),
+              ],
+              ),
+            ),
+          ),
+        ),
+      ),
+      false: SizedBoxShrink(),
+    },
+  ],
+);
+
+// --------------------- 顶部栏（站源名 + 所有工具按钮）---------------------
+widget SectionTitleSource = GestureDetector(
+  onTap: event "showSourcePicker" {},
+  child: Column(
+    mainAxisSize: "min",
+    crossAxisAlignment: "start",
+    children: [
+      Text(
+        text: switch data.home.source.name {
+          "": "春日记忆片库",
+          default: data.home.source.name,
+        },
+        maxLines: 1,
+        overflow: "ellipsis",
+        style: { color: 0xFF0D1B0D, fontSize: 16.0, fontWeight: "w900" },
+      ),
+      Padding(
+        padding: [0.0, 1.0, 0.0, 0.0],
+        child: Text(
+          text: "🌿切换站源",
+          maxLines: 1,
+          overflow: "ellipsis",
+          style: { color: 0xFF8BA98B, fontSize: 12.0, fontWeight: "w600" },
+        ),
+      ),
+    ],
+  ),
+);
+
+// ★ 紧凑工具栏（竖屏）
+widget SectionActionsCompact = SingleChildScrollView(
+  scrollDirection: "horizontal",
+  child: Row(
+    mainAxisSize: "min",
+    children: [
+    switch data.home.hasManyClasses {
+      true: Padding(padding: [0.0, 0.0, 1.0, 0.0], child: TinyToolButton(icon: data.home.icons.expand, action: event "showCategoryPicker" {})),
+      false: SizedBoxShrink(),
+    },
+    switch data.home.hasFilters {
+      true: Padding(padding: [0.0, 0.0, 1.0, 0.0], child: TinyToolButton(icon: data.home.icons.filter, action: event "toggleFilters" {})),
+      false: SizedBoxShrink(),
+    },
+    Padding(padding: [0.0, 0.0, 1.0, 0.0], child: TinyToolButton(icon: data.home.icons.layout, action: event "showDisplayStylePicker" {})),
+    // 2026-10-30：换源按钮原来只在宽屏工具栏里有，竖屏就点不到换源了
+    //（用户：「换源也要在那个按钮边上」）。补进紧凑工具栏。
+    Padding(padding: [0.0, 0.0, 1.0, 0.0], child: TinyToolButton(icon: data.home.icons.source, action: event "showSourcePicker" {})),
+    Padding(padding: [0.0, 0.0, 1.0, 0.0], child: TinyToolButton(icon: data.home.icons.api, action: event "showApiConfigPicker" {})),
+    Padding(padding: [0.0, 0.0, 1.0, 0.0], child: TinyToolButton(icon: data.home.icons.search, action: event "openSearch" {})),
+    Padding(padding: [0.0, 0.0, 1.0, 0.0], child: TinyToolButton(icon: data.home.icons.push, action: event "openPush" {})),
+    Padding(padding: [0.0, 0.0, 1.0, 0.0], child: TinyToolButton(icon: data.home.icons.history, action: event "openHistory" {})),
+    Padding(padding: [0.0, 0.0, 1.0, 0.0], child: TinyToolButton(icon: data.home.icons.favorite, action: event "openFavorite" {})),
+    TinyToolButton(icon: data.home.icons.refresh, action: event "refresh" {}),
+  ],
+  ),
+);
+
+// ★ 宽屏工具栏（横屏/平板）
+widget SectionActionsWide = SingleChildScrollView(
+  scrollDirection: "horizontal",
+  child: Row(
+    mainAxisSize: "min",
+    children: [
+    switch data.home.hasManyClasses {
+      true: Padding(padding: [0.0, 0.0, 3.0, 0.0], child: TinyToolButton(icon: data.home.icons.expand, action: event "showCategoryPicker" {})),
+      false: SizedBoxShrink(),
+    },
+    switch data.home.hasFilters {
+      true: Padding(padding: [0.0, 0.0, 3.0, 0.0], child: TinyToolButton(icon: data.home.icons.filter, action: event "toggleFilters" {})),
+      false: SizedBoxShrink(),
+    },
+    Padding(padding: [0.0, 0.0, 3.0, 0.0], child: TinyToolButton(icon: data.home.icons.layout, action: event "showDisplayStylePicker" {})),
+    Padding(padding: [0.0, 0.0, 3.0, 0.0], child: TinyToolButton(icon: data.home.icons.source, action: event "showSourcePicker" {})),
+    Padding(padding: [0.0, 0.0, 3.0, 0.0], child: TinyToolButton(icon: data.home.icons.api, action: event "showApiConfigPicker" {})),
+    Padding(padding: [0.0, 0.0, 3.0, 0.0], child: TinyToolButton(icon: data.home.icons.search, action: event "openSearch" {})),
+    Padding(padding: [0.0, 0.0, 3.0, 0.0], child: TinyToolButton(icon: data.home.icons.push, action: event "openPush" {})),
+    Padding(padding: [0.0, 0.0, 3.0, 0.0], child: TinyToolButton(icon: data.home.icons.history, action: event "openHistory" {})),
+    Padding(padding: [0.0, 0.0, 3.0, 0.0], child: TinyToolButton(icon: data.home.icons.favorite, action: event "openFavorite" {})),
+    TinyToolButton(icon: data.home.icons.refresh, action: event "refresh" {}),
+  ],
+  ),
+);
+
+// 顶部栏主体
+widget RecommendToolbar = Container(
+  padding: [14.0, 8.0],
+  decoration: {
+    type: "box",
+    color: 0xFFF5F9F5,
+    border: [ { color: 0x33C8E6C9, width: 1.0 } ],
+  },
+  child: Row(
+    children: [
+      Container(
+        width: 4.0,
+        height: 26.0,
+        decoration: {
+          type: "box",
+          gradient: {
+            type: "linear",
+            begin: { x: 0.0, y: -1.0 },
+            end: { x: 0.0, y: 1.0 },
+            colors: [0xFF43A047, 0xFF2E7D32],
+          },
+          borderRadius: [ { x: 2.0 } ],
+        },
+      ),
+      Flexible(
+        fit: "tight",
+        child: Padding(
+          padding: [10.0, 0.0],
+          child: SectionTitleSource(),
+        ),
+      ),
+      Expanded(
+        child: switch data.home.isLandscape {
+          true: SectionActionsWide(),
+          false: SectionActionsCompact(),
+        },
+      ),
+    ],
+  ),
+);
+
+// --------------------- 卡片样式 ---------------------
+// 1. PosterCard
+widget PosterCard = GestureDetector(
+  onTap: event "openItem" { index: args.item.index },
+  onLongPress: event "longPressItem" { index: args.item.index },
+  child: Container(
+    decoration: {
+      type: "box",
+      color: 0xFFFFFFFF,
+      borderRadius: [ { x: 17.0 } ],
+      boxShadow: [ { color: 0x332E7D32, blurRadius: 15.0, offset: { x: 0.0, y: 8.0 } } ],
+    },
+    child: ClipRRect(
+      borderRadius: [ { x: 17.0 } ],
+      child: Stack(
+        fit: "expand",
+        children: [
+          T4Image(url: args.item.pic),
+          Container(
+            decoration: {
+              type: "box",
+              gradient: {
+                type: "linear",
+                begin: { x: 0.0, y: -1.0 },
+                end: { x: 0.0, y: 1.0 },
+                colors: [0x00000000, 0x05000000, 0xC97EC8E3],
+              },
+            },
+          ),
+          Align(
+            alignment: { x: -1.0, y: 1.0 },
+            child: Padding(
+              padding: [12.0, 12.0, 12.0, 13.0],
+              child: Column(
+                mainAxisSize: "min",
+                crossAxisAlignment: "start",
+                children: [
+                  SingleChildScrollView(
+                    scrollDirection: "horizontal",
+                    child: Text(
+                      text: args.item.name,
+                      maxLines: 1,
+                      style: { color: 0xFFFFFFFF, fontSize: 13.0, fontWeight: "w900", height: 1.05 },
+                    ),
+                  ),
+                  switch args.item.remarks {
+                    "": SizedBoxShrink(),
+                    default: Padding(
+                      padding: [0.0, 5.0, 0.0, 0.0],
+                      child: Text(
+                        text: args.item.remarks,
+                        maxLines: 1,
+                        overflow: "ellipsis",
+                        style: { color: 0xFF66BB6A, fontSize: 11.0, fontWeight: "w600" },
+                      ),
+                    ),
+                  },
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  ),
+);
+
+// 2. LargePosterCard
+widget LargePosterCard = GestureDetector(
+  onTap: event "openItem" { index: args.item.index },
+  onLongPress: event "longPressItem" { index: args.item.index },
+  child: Container(
+    decoration: {
+      type: "box",
+      color: 0xFFFFFFFF,
+      borderRadius: [ { x: 21.0 } ],
+      boxShadow: [ { color: 0x332E7D32, blurRadius: 20.0, offset: { x: 0.0, y: 10.0 } } ],
+    },
+    child: ClipRRect(
+      borderRadius: [ { x: 21.0 } ],
+      child: Stack(
+        fit: "expand",
+        children: [
+          T4Image(url: args.item.pic),
+          Container(
+            decoration: {
+              type: "box",
+              gradient: {
+                type: "linear",
+                begin: { x: 0.0, y: -1.0 },
+                end: { x: 0.0, y: 1.0 },
+                colors: [0x00000000, 0x11000000, 0xDA5499C7],
+              },
+            },
+          ),
+          Align(
+            alignment: { x: -1.0, y: 1.0 },
+            child: Padding(
+              padding: [15.0],
+              child: Column(
+                mainAxisSize: "min",
+                crossAxisAlignment: "start",
+                children: [
+                  SingleChildScrollView(
+                    scrollDirection: "horizontal",
+                    child: Text(
+                      text: args.item.name,
+                      maxLines: 1,
+                      style: { color: 0xFFFFFFFF, fontSize: 16.0, fontWeight: "w900", height: 1.08 },
+                    ),
+                  ),
+                  switch args.item.remarks {
+                    "": SizedBoxShrink(),
+                    default: Padding(
+                      padding: [0.0, 5.0, 0.0, 0.0],
+                      child: Text(
+                        text: args.item.remarks,
+                        maxLines: 1,
+                        overflow: "ellipsis",
+                        style: { color: 0xFF66BB6A, fontSize: 12.0 },
+                      ),
+                    ),
+                  },
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  ),
+);
+
+// 3. BannerCard
+widget BannerCard = GestureDetector(
+  onTap: event "openItem" { index: args.item.index },
+  onLongPress: event "longPressItem" { index: args.item.index },
+  child: Container(
+    padding: [9.0],
+    decoration: {
+      type: "box",
+      gradient: {
+        type: "linear",
+        begin: { x: -1.0, y: 0.0 },
+        end: { x: 1.0, y: 0.0 },
+        colors: [0xFFFFFFFF, 0xFFF5F9F5],
+      },
+      borderRadius: [ { x: 16.0 } ],
+      boxShadow: [ { color: 0x332E7D32, blurRadius: 12.0, offset: { x: 0.0, y: 5.0 } } ],
+    },
+    child: Row(
+      children: [
+        AspectRatio(
+          aspectRatio: 0.60,
+          child: ClipRRect(
+            borderRadius: [ { x: 11.0 } ],
+            child: T4Image(url: args.item.pic),
+          ),
+        ),
+        Expanded(
+          child: Padding(
+            padding: [14.0, 3.0],
+            child: Column(
+              mainAxisSize: "min",
+              crossAxisAlignment: "start",
+              children: [
+                SingleChildScrollView(
+                  scrollDirection: "horizontal",
+                  child: Text(
+                    text: args.item.name,
+                    maxLines: 1,
+                    style: { color: 0xFF0D1B0D, fontSize: 15.0, fontWeight: "w900" },
+                  ),
+                ),
+                switch args.item.remarks {
+                  "": SizedBoxShrink(),
+                  default: Padding(
+                    padding: [0.0, 6.0, 0.0, 0.0],
+                    child: Text(
+                      text: args.item.remarks,
+                      maxLines: 1,
+                      overflow: "ellipsis",
+                      style: { color: 0xFF8BA98B, fontSize: 12.0 },
+                    ),
+                  ),
+                },
+              ],
+            ),
+          ),
+        ),
+        Icon(
+          icon: data.home.icons.open.icon,
+          fontFamily: data.home.icons.open.fontFamily,
+          size: 19.0,
+          color: 0xFF43A047,
+        ),
+      ],
+    ),
+  ),
+);
+
+// 4. ListCard
+widget ListCard = GestureDetector(
+  onTap: event "openItem" { index: args.item.index },
+  onLongPress: event "longPressItem" { index: args.item.index },
+  child: Container(
+    padding: [10.0],
+    decoration: {
+      type: "box",
+      color: 0xFFFFFFFF,
+      borderRadius: [ { x: 15.0 } ],
+      boxShadow: [ { color: 0x332E7D32, blurRadius: 10.0, offset: { x: 0.0, y: 5.0 } } ],
+    },
+    child: Row(
+      children: [
+        AspectRatio(
+          aspectRatio: 0.60,
+          child: ClipRRect(
+            borderRadius: [ { x: 11.0 } ],
+            child: T4Image(url: args.item.pic),
+          ),
+        ),
+        Expanded(
+          child: Padding(
+            padding: [15.0, 5.0],
+            child: Column(
+              mainAxisSize: "min",
+              crossAxisAlignment: "start",
+              children: [
+                SingleChildScrollView(
+                  scrollDirection: "horizontal",
+                  child: Text(
+                    text: args.item.name,
+                    maxLines: 1,
+                    style: { color: 0xFF0D1B0D, fontSize: 15.0, fontWeight: "w900" },
+                  ),
+                ),
+                switch args.item.remarks {
+                  "": SizedBoxShrink(),
+                  default: Padding(
+                    padding: [0.0, 7.0, 0.0, 0.0],
+                    child: Text(
+                      text: args.item.remarks,
+                      maxLines: 1,
+                      overflow: "ellipsis",
+                      style: { color: 0xFF8BA98B, fontSize: 12.0 },
+                    ),
+                  ),
+                },
+              ],
+            ),
+          ),
+        ),
+      ],
+    ),
+  ),
+);
+
+// 5. CompactCard
+widget CompactCard = GestureDetector(
+  onTap: event "openItem" { index: args.item.index },
+  onLongPress: event "longPressItem" { index: args.item.index },
+  child: Container(
+    padding: [8.0],
+    decoration: {
+      type: "box",
+      color: 0xFFFFFFFF,
+      borderRadius: [ { x: 12.0 } ],
+    },
+    child: Row(
+      children: [
+        AspectRatio(
+          aspectRatio: 0.60,
+          child: ClipRRect(
+            borderRadius: [ { x: 8.0 } ],
+            child: T4Image(url: args.item.pic),
+          ),
+        ),
+        Container(
+          width: 46.0,
+          alignment: { x: 0.0, y: 0.0 },
+          child: Text(
+            text: args.item.rankLabel,
+            style: { color: 0xFF43A047, fontSize: 14.0, fontWeight: "w900" },
+          ),
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            scrollDirection: "horizontal",
+            child: Text(
+              text: args.item.name,
+              maxLines: 1,
+              style: { color: 0xFF0D1B0D, fontSize: 12.0, fontWeight: "w800" },
+            ),
+          ),
+        ),
+        switch args.item.remarks {
+          "": SizedBoxShrink(),
+          default: Padding(
+            padding: [8.0, 0.0],
+            child: Text(
+              text: args.item.remarks,
+              maxLines: 1,
+              overflow: "ellipsis",
+              style: { color: 0xFF8BA98B, fontSize: 11.0 },
+            ),
+          ),
+        },
+        Icon(
+          icon: data.home.icons.open.icon,
+          fontFamily: data.home.icons.open.fontFamily,
+          size: 17.0,
+          color: 0xFF43A047,
+        ),
+      ],
+    ),
+  ),
+);
+
+// 6. TextOnlyCard
+widget TextOnlyCard = GestureDetector(
+  onTap: event "openItem" { index: args.item.index },
+  onLongPress: event "longPressItem" { index: args.item.index },
+  child: Container(
+    padding: [15.0, 9.0],
+    decoration: {
+      type: "box",
+      gradient: {
+        type: "linear",
+        begin: { x: -1.0, y: 0.0 },
+        end: { x: 1.0, y: 0.0 },
+        colors: [0xFFFFFFFF, 0xFFF5F9F5],
+      },
+      borderRadius: [ { x: 11.0 } ],
+    },
+    child: Row(
+      children: [
+        Container(
+          width: 45.0,
+          child: Text(
+            text: args.item.rankLabel,
+            style: { color: 0xFF43A047, fontSize: 18.0, fontWeight: "w900" },
+          ),
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            scrollDirection: "horizontal",
+            child: Padding(
+              padding: [10.0, 0.0],
+              child: Text(
+                text: args.item.name,
+                maxLines: 1,
+                style: { color: 0xFF0D1B0D, fontSize: 13.0, fontWeight: "w800" },
+              ),
+            ),
+          ),
+        ),
+        switch args.item.remarks {
+          "": SizedBoxShrink(),
+          default: Text(
+            text: args.item.remarks,
+            maxLines: 1,
+            overflow: "ellipsis",
+            style: { color: 0xFF8BA98B, fontSize: 11.0 },
+          ),
+        },
+      ],
+    ),
+  ),
+);
+
+// 7. WideCollectionCard
+widget WideCollectionCard = GestureDetector(
+  onTap: event "openItem" { index: args.item.index },
+  onLongPress: event "longPressItem" { index: args.item.index },
+  child: Container(
+    decoration: {
+      type: "box",
+      gradient: {
+        type: "linear",
+        begin: { x: -1.0, y: -1.0 },
+        end: { x: 1.0, y: 1.0 },
+        colors: [0xFFFFFFFF, 0xFFF5F9F5],
+      },
+      borderRadius: [ { x: 18.0 } ],
+      boxShadow: [ { color: 0x332E7D32, blurRadius: 15.0, offset: { x: 0.0, y: 7.0 } } ],
+    },
+    child: ClipRRect(
+      borderRadius: [ { x: 18.0 } ],
+      child: Row(
+        children: [
+          AspectRatio(
+            aspectRatio: 0.60,
+            child: T4Image(url: args.item.pic),
+          ),
+          Expanded(
+            child: Padding(
+              padding: [10.0],
+              child: Column(
+                mainAxisSize: "min",
+                crossAxisAlignment: "start",
+                children: [
+                  SingleChildScrollView(
+                    scrollDirection: "horizontal",
+                    child: Text(
+                      text: args.item.name,
+                      maxLines: 1,
+                      style: { color: 0xFF0D1B0D, fontSize: 16.0, fontWeight: "w900", height: 1.05 },
+                    ),
+                  ),
+                  switch args.item.remarks {
+                    "": SizedBoxShrink(),
+                    default: Padding(
+                      padding: [0.0, 5.0, 0.0, 0.0],
+                      child: Text(
+                        text: args.item.remarks,
+                        maxLines: 1,
+                        overflow: "ellipsis",
+                        style: { color: 0xFF8BA98B, fontSize: 12.0 },
+                      ),
+                    ),
+                  },
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: [14.0],
+            child: Icon(
+              icon: data.home.icons.open.icon,
+              fontFamily: data.home.icons.open.fontFamily,
+              size: 21.0,
+              color: 0xFF43A047,
+            ),
+          ),
+        ],
+      ),
+    ),
+  ),
+);
+
+// --------------------- 卡片选择器 ---------------------
+widget ThemeItem = switch data.home.displayStyle {
+  "grid": PosterCard(item: args.item),
+  "largeGrid": LargePosterCard(item: args.item),
+  "banner": BannerCard(item: args.item),
+  "list": ListCard(item: args.item),
+  "list2": CompactCard(item: args.item),
+  "textList": TextOnlyCard(item: args.item),
+  "card": WideCollectionCard(item: args.item),
+  default: PosterCard(item: args.item),
+};
+
+// --------------------- 空状态 ---------------------
+// 加载骨架（2026-10-30）：原来只有一行「正在准备春日记忆片单…」，
+// 整块内容区空着。现在铺与真实卡片同尺寸的圆角灰块。
+// ⚠️ 颜色只能走 decoration: {type:"box", ...}，color 与 decoration 同时
+//    非空会让 RFW 的 AnimatedContainer 断言崩。
+widget SkeletonPoster = Column(
+  crossAxisAlignment: "start",
+  children: [
+    Container(
+      height: 150.0,
+      decoration: {
+        type: "box",
+        color: 0xFFDCEFDC,
+        borderRadius: [ { x: 14.0 } ],
+      },
+    ),
+    Padding(
+      padding: [ 0.0, 8.0, 0.0, 0.0 ],
+      child: Container(
+        height: 10.0,
+        decoration: {
+          type: "box",
+          color: 0xFFE8F5E9,
+          borderRadius: [ { x: 5.0 } ],
+        },
+      ),
+    ),
+    Padding(
+      padding: [ 0.0, 6.0, 0.0, 0.0 ],
+      child: Container(
+        width: 52.0,
+        height: 10.0,
+        decoration: {
+          type: "box",
+          color: 0xFFE8F5E9,
+          borderRadius: [ { x: 5.0 } ],
+        },
+      ),
+    ),
+  ],
+);
+
+widget LoadingSkeleton = Container(
+  padding: [ 12.0, 14.0, 12.0, 0.0 ],
+  child: Column(
+    crossAxisAlignment: "start",
+    children: [
+      Row(
+        children: [
+          Container(
+            width: 96.0,
+            height: 13.0,
+            decoration: {
+              type: "box",
+              color: 0xFFDCEFDC,
+              borderRadius: [ { x: 7.0 } ],
+            },
+          ),
+          Spacer(),
+          Container(
+            width: 42.0,
+            height: 13.0,
+            decoration: {
+              type: "box",
+              color: 0xFFDCEFDC,
+              borderRadius: [ { x: 7.0 } ],
+            },
+          ),
+        ],
+      ),
+      Padding(
+        padding: [ 0.0, 14.0, 0.0, 0.0 ],
+        child: Row(
+          crossAxisAlignment: "start",
+          children: [
+            Expanded(child: SkeletonPoster()),
+            SizedBox(width: 10.0),
+            Expanded(child: SkeletonPoster()),
+            SizedBox(width: 10.0),
+            Expanded(child: SkeletonPoster()),
+          ],
+        ),
+      ),
+      Padding(
+        padding: [ 0.0, 12.0, 0.0, 0.0 ],
+        child: Row(
+          crossAxisAlignment: "start",
+          children: [
+            Expanded(child: SkeletonPoster()),
+            SizedBox(width: 10.0),
+            Expanded(child: SkeletonPoster()),
+            SizedBox(width: 10.0),
+            Expanded(child: SkeletonPoster()),
+          ],
+        ),
+      ),
+      Padding(
+        padding: [ 0.0, 18.0, 0.0, 0.0 ],
+        child: Row(
+          children: [
+            Container(
+              width: 13.0,
+              height: 13.0,
+              decoration: {
+                type: "box",
+                color: 0xFF43A047,
+                borderRadius: [ { x: 7.0 } ],
+              },
+            ),
+            SizedBox(width: 8.0),
+            Text(
+              text: "正在加载…",
+              style: { color: 0xFF8BA98B, fontSize: 12.0 },
+            ),
+          ],
+        ),
+      ),
+    ],
+  ),
+);
+
+widget EmptyState = switch data.home.loading {
+  true: LoadingSkeleton(),
+
+  false: switch data.home.errorMessage {
+    "": Center(
+      child: Text(
+        text: "暂无可展示内容",
+        style: { color: 0xFF8BA98B, fontSize: 13.0 },
+      ),
+    ),
+    default: GestureDetector(
+      onTap: event "refresh" {},
+      child: Center(
+        child: Text(
+          text: data.home.errorMessage,
+          maxLines: 2,
+          overflow: "ellipsis",
+          style: { color: 0xFF43A047, fontSize: 12.0 },
+        ),
+      ),
+    ),
+  },
+};
+
+// --------------------- 根布局（添加整体外框）---------------------
+widget root = Container(
+  decoration: {
+    type: "box",
+    gradient: {
+      type: "linear",
+      begin: { x: -1.0, y: -1.0 },
+      end: { x: 1.0, y: 1.0 },
+      colors: [
+        0xFFF5F9F5,
+        0xFFFFFFFF,
+        0xFFE8F5E9,
+      ],
+      stops: [0.0, 0.5, 1.0],
+    },
+  },
+  child: Container(
+    margin: [1.0, 0.0, 1.0, 0.0],
+    decoration: {
+      type: "box",
+      borderRadius: [ { x: 20.0 } ],
+      border: [ { color: 0xFFC8E6C9, width: 1.0 } ],
+      color: 0x00000000,
+    },
+    child: AnimationDefaults(
+      duration: 360,
+      curve: "easeOutCubic",
+      child: PeekStickyGrid(
+        heroHeight: switch data.home.hasRecommend {
+          true: switch data.home.gridColumns {
+            3: 270.0,
+            4: 280.0,
+            5: 290.0,
+            6: 300.0,
+            default: 230.0,
+          },
+          false: 0.0,
+        },
+        pinnedHeight: data.home.stickyHeaderHeight,
+        sectionHeight: 64.0,
+        crossAxisCount: switch data.home.displayStyle {
+          "grid": data.home.gridColumns,
+          "largeGrid": data.home.largeGridColumns,
+          "banner": 1,
+          "list": 1,
+          "list2": 1,
+          "textList": 1,
+          "card": 1,
+          default: data.home.gridColumns,
+        },
+        childAspectRatio: switch data.home.displayStyle {
+          "grid": 0.67,
+          "largeGrid": 0.56,
+          "banner": data.home.wideListRatio,
+          "list": data.home.wideListRatio,
+          "list2": data.home.textListRatio,
+          "textList": data.home.textListRatio,
+          "card": data.home.wideListRatio,
+          default: 0.55,
+        },
+        mainAxisSpacing: 13.0,
+        crossAxisSpacing: 11.0,
+        horizontalPadding: 14.0,
+        bottomPadding: 96.0,
+        hero: switch data.home.hasRecommend {
+          true: PeekCarousel(
+            autoPlay: true,
+            style: "stack",
+            showIndicators: false,
+            interval: 4300,
+            viewportFraction: 1.0,
+            stackScale: 0.74,
+            stackOpacity: 1.0,
+            stackOffset: 0.24,
+            stackRotation: 0.0,
+            activeColor: 0xFF43A047,
+            inactiveColor: 0x33C8E6C9,
+            children: [
+              ...for item in data.home.home.recommend:
+                HeroPoster(item: item),
+            ],
+          ),
+          false: SizedBoxShrink(),
+        },
+        pinnedHeader: CategoryHeader(),
+        sectionHeader: RecommendToolbar(),
+        empty: EmptyState(),
+        children: [
+          ...for item in data.home.items:
+            ThemeItem(item: item),
+        ],
+      ),
+    ),
+  ),
+);

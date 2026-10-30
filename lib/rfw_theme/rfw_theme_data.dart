@@ -132,6 +132,12 @@ Map<String, Object?> buildRfwHomeData(RfwHomeDataInput input) {
         // 换源（2026-10-30）：主题的顶栏要能把「换源」放进功能按钮那一排，
         // 而不是在分组标题右边挂一个文字链接（用户：「换源也要在那个按钮边上」）。
         'source': Icons.swap_horiz,
+        // 2026-10-30 内置「蓝魔凝光 / 春日记忆」时补的四个：
+        // 这两套主题的顶栏/分组标题会用到它们，缺了就是四个「?」豆腐块。
+        'api': Icons.dns_rounded,
+        'favorite': Icons.favorite_border_rounded,
+        'history': Icons.history_rounded,
+        'push': Icons.cast_rounded,
       }.entries)
         e.key: <String, Object?>{
           'icon': e.value.codePoint,
@@ -191,6 +197,20 @@ Map<String, Object?> buildRfwHomeData(RfwHomeDataInput input) {
     'home': <String, Object?>{'recommend': recommend},
     'stickyHeaderHeight': stickyHeaderHeight,
     'filterPanelHeight': filterPanelHeight,
+    // 2026-10-30：PeekPro 主题（蓝魔凝光）把筛选面板画在沉浸式头图里，
+    // 高度读的是这个键。我们这套首页的筛选面板本来就只有一种高度，
+    // 所以直接给同一个值 —— 缺了它 `Container(height: null)` 会让
+    // 沉浸式头图的高度算不出来（面板把内容顶飞）。
+    'immersiveFilterPanelHeight': filterPanelHeight,
+    // 2026-10-30：蓝魔凝光把「分类栏 + 按钮栏 + 筛选面板」叠成一个吸顶头，
+    // 它的分类栏(58)和按钮栏(34)比晨光那套高，所以基准不是 96 而是 94
+    // （实测内容 92，留 2px 余量扛系统字号）。
+    // 展开筛选时还要加 FilterPanel 的上下 padding 10 和 0.8 边框上下各一份
+    // （≈1.6，凑整 12）—— 边框是在固定高度**外面**再长出来的。
+    // RFW 的表达式语法里没有 `+`（连 `1.0 + 2.0` 都过不了词法），主题自己
+    // 算不出这个和，只能由这边算好给它。
+    'immersiveStickyHeaderHeight':
+        94.0 + (input.showFilters ? filterPanelHeight + 12.0 : 0.0),
     'loading': input.loading,
     'source': input.sourceName,
     'totalLabel': input.totalLabel,

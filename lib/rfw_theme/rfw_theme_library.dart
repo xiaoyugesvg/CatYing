@@ -4,6 +4,36 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:rfw/rfw.dart';
 
+/// 「这块 RFW 主题是缩略预览，不是真实首页」的作用域标记。
+///
+/// 目前只有一个用途：让 `PeekCarousel` 在预览里**不要**开自动轮播。
+/// 设置页的主题条上会同时挂 5 张缩略图，每张一个 4 秒计时器纯属白烧电；
+/// 更麻烦的是 `pumpAndSettle` 永远等不到静止 ——
+/// `test/theme_system_regression_test.dart` 就是这么超时的（2026-10-30）。
+///
+/// 用 InheritedWidget 而不是全局开关：真实首页和缩略图可能**同屏共存**
+///（比如从设置页返回后首页还活着），全局开关会误伤真实首页。
+class RfwPreviewScope extends InheritedWidget {
+  const RfwPreviewScope({
+    super.key,
+    required this.enabled,
+    required super.child,
+  });
+
+  final bool enabled;
+
+  static bool of(BuildContext context) {
+    return context
+            .dependOnInheritedWidgetOfExactType<RfwPreviewScope>()
+            ?.enabled ??
+        false;
+  }
+
+  @override
+  bool updateShouldNotify(RfwPreviewScope oldWidget) =>
+      oldWidget.enabled != enabled;
+}
+
 LocalWidgetLibrary createPeekCoreWidgets() {
   final widgets = Map<String, LocalWidgetBuilder>.of(
     createCoreWidgets().widgets,
@@ -83,6 +113,22 @@ LocalWidgetLibrary createPeekHomeLibrary() {
       backgroundColor: _asColor(source, ['backgroundColor']),
       child: source.optionalChild(['child']),
     ),
+
+    // ── PeekPro 便捷组件（2026-10-30，为内置的「蓝魔凝光 / 春日记忆」补）──
+    //
+    // 这两套主题（以及以后从同一个生态拿来的主题）会用到两个不在
+    // core.widgets 里的写法。不补的话解析阶段就报 "unknown widget"，
+    // 整个首页直接白屏 —— 而它们本身没有任何"系统能力"，补上完全安全。
+    //
+    // `SizedBoxShrink()`：主题里当"这个分支不显示"用（switch 的某一支）。
+    // 语义就是 `SizedBox.shrink()`。
+    'SizedBoxShrink': (context, source) => const SizedBox.shrink(),
+
+    // `AnimationDefaults(duration:, curve:, child:)`：PeekPro 里给子树上
+    // 一套默认动画参数。**静态渲染不需要动画**（而且首页一有隐式动画，
+    // 每次数据刷新都会抖），所以这里直接透传 child，只当它是透明包装。
+    'AnimationDefaults': (context, source) =>
+        source.optionalChild(['child']) ?? const SizedBox.shrink(),
   });
 }
 
@@ -172,12 +218,20 @@ class _RfwNetworkImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (url.isEmpty) {
+      // 没有封面（源没给图 / 主题预览的示例数据）时给一块**中性渐变**，
+      // 不画 broken_image：整屏预览里挂十几个碎图标很丑，
+      // 而且"没图"和"加载失败"本来也不是一回事。
       return SizedBox(
         width: width,
         height: height,
-        child: const ColoredBox(
-          color: Color(0xFF1E1E1E),
-          child: Icon(Icons.broken_image, color: Colors.white38, size: 24),
+        child: const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0x339E9E9E), Color(0x149E9E9E)],
+            ),
+          ),
         ),
       );
     }
@@ -342,6 +396,13 @@ class _PeekCarouselState extends State<_PeekCarousel> {
   void initState() {
     super.initState();
     _controller = PageController(viewportFraction: widget.viewportFraction);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 放在这里而不是 initState：`RfwPreviewScope` 是 InheritedWidget，
+    // 只有 didChangeDependencies 之后才读得准。
     _startTimer();
   }
 
@@ -364,6 +425,10 @@ class _PeekCarouselState extends State<_PeekCarousel> {
   void _startTimer() {
     _timer?.cancel();
     if (!widget.autoPlay || widget.children.length < 2) return;
+    // 预览缩略图里不跑自动轮播：设置页可能同时挂着 5 张缩略图，
+    // 每张一个 4 秒周期的计时器纯属白烧电；而且 `pumpAndSettle` 会永远等不到
+    // 静止（见 test/theme_system_regression_test.dart 的踩坑记录）。
+    if (RfwPreviewScope.of(context)) return;
     _timer = Timer.periodic(
       Duration(milliseconds: (widget.autoPlayInterval * 1000).round()),
       (_) {

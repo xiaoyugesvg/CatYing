@@ -1,0 +1,1568 @@
+// 蓝魔凝光·琥珀玻璃 - PeekPro 主题 (终极版)
+import core.widgets;
+import peek.home;
+
+// 顶部品牌面板 - 琥珀玻璃风格（基准边框 FF D4A373）
+widget BrandPanel = Container(
+  padding: [ 16.0, 16.0, 16.0, 12.0 ],
+  decoration: {
+    type: "box",
+    gradient: {
+      type: "linear",
+      begin: { x: -1.0, y: -1.0 },
+      end: { x: 1.0, y: 1.0 },
+      colors: [ 0xFF1A1E24, 0xFF0B0D10, 0xFF1A1E24 ],
+    },
+    border: [ { color: 0xFFD4A373, width: 1.6 } ],
+    boxShadow: [ { color: 0x44D4A373, blurRadius: 20.0, spreadRadius: 2.0 } ],
+  },
+  child: Column(
+    crossAxisAlignment: "start",
+    children: [
+      Row(
+        children: [
+          Expanded(
+            child: Column(
+              mainAxisSize: "min",
+              crossAxisAlignment: "start",
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 40.0,
+                      height: 40.0,
+                      decoration: {
+                        type: "box",
+                        gradient: {
+                          type: "linear",
+                          colors: [ 0xFFD4A373, 0xFFB8834E ],
+                        },
+                        borderRadius: [ { x: 12.0 } ],
+                      },
+                      alignment: { x: 0.0, y: 0.0 },
+                      child: Text(
+                        text: "",
+                        style: {
+                          color: 0xFF0B0D10,
+                          fontSize: 18.0,
+                          fontWeight: "w700",
+                        },
+                      ),
+                    ),
+                    Padding(
+                      padding: [ 8.0, 0.0, 0.0, 0.0 ],
+                      child: Text(
+                        text: "PeekPro",
+                        maxLines: 1,
+                        overflow: "ellipsis",
+                        style: {
+                          color: 0xFFF0E3D4,
+                          fontSize: 22.0,
+                          fontWeight: "w700",
+                          letterSpacing: -0.4,
+                        },
+                      ),
+                    ),
+                    Padding(
+                      padding: [ 6.0, 0.0, 0.0, 0.0 ],
+                      child: Container(
+                        padding: [ 6.0, 2.0, 6.0, 2.0 ],
+                        decoration: {
+                          type: "box",
+                          borderRadius: [ { x: 40.0 } ],
+                          border: [ { color: 0xFFD4A373, width: 0.8 } ],
+                        },
+                        child: Text(
+                          text: "· 凝光",
+                          style: {
+                            color: 0xFFA6B3C9,
+                            fontSize: 11.0,
+                            fontWeight: "w500",
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                Padding(
+                  padding: [ 0.0, 8.0, 0.0, 0.0 ],
+                  child: Container(
+                    height: 3.0,
+                    decoration: {
+                      type: "box",
+                      gradient: {
+                        type: "linear",
+                        begin: { x: -1.0, y: 0.0 },
+                        end: { x: 1.0, y: 0.0 },
+                        colors: [ 0x00D4A373, 0xFFD4A373, 0x00D4A373 ],
+                      },
+                      borderRadius: [ { x: 2.0 } ],
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: [ 0.0, 6.0, 0.0, 0.0 ],
+                  child: Text(
+                    text: "AMBER GLASS / DARK ELEGANCE",
+                    maxLines: 1,
+                    overflow: "ellipsis",
+                    style: {
+                      color: 0xFFD4A373,
+                      fontSize: 9.0,
+                      fontWeight: "w600",
+                      letterSpacing: 1.0,
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          switch data.home.hasManyClasses {
+            true: GestureDetector(
+              onTap: event "showCategoryPicker" {},
+              child: Container(
+                width: 90.0,
+                height: 52.0,
+                margin: [ 12.0, 0.0, 0.0, 0.0 ],
+                alignment: { x: 0.0, y: 0.0 },
+                decoration: {
+                  type: "box",
+                  gradient: {
+                    type: "linear",
+                    colors: [ 0xFFD4A373, 0xFFB8834E ],
+                  },
+                  borderRadius: [ { x: 14.0 } ],
+                  boxShadow: [ { color: 0x44D4A373, blurRadius: 12.0 } ],
+                },
+                child: Text(
+                  text: "分类",
+                  style: { color: 0xFF0B0D10, fontSize: 15.0, fontWeight: "w700" },
+                ),
+              ),
+            ),
+            false: SizedBoxShrink(),
+          },
+        ],
+      ),
+      Padding(
+        padding: [ 0.0, 12.0, 0.0, 0.0 ],
+        child: Row(
+          children: [
+            Container(
+              padding: [ 8.0, 5.0 ],
+              decoration: {
+                type: "box",
+                color: 0x33D4A373,
+                borderRadius: [ { x: 10.0 } ],
+              },
+              child: Text(
+                text: "分类索引",
+                style: { color: 0xFFD4A373, fontSize: 11.0, fontWeight: "w700" },
+              ),
+            ),
+            Padding(
+              padding: [ 8.0, 0.0, 0.0, 0.0 ],
+              child: Text(
+                text: "点击条目进入详情",
+                maxLines: 1,
+                overflow: "ellipsis",
+                style: { color: 0xFFD4A373, fontSize: 10.0 },
+              ),
+            ),
+          ],
+        ),
+      ),
+    ],
+  ),
+);
+
+// 分类标签 - 采用沉浸光影的玻璃质感样式，保留琥珀配色
+widget CategoryChip = GestureDetector(
+  onTap: event "selectType" { typeId: args.item.typeId },
+  child: Container(
+    margin: [ 0.0, 4.0, 8.0, 4.0 ],
+    padding: [ 14.0, 0.0 ],
+    height: 30.0,
+    alignment: { x: 0.0, y: 0.0 },
+    decoration: {
+      type: "box",
+      color: switch args.item.selected {
+        true: 0xFFD4A373,
+        false: 0x1EFFFFFF,
+      },
+      borderRadius: [ { x: 18.0 } ],
+      border: [
+        {
+          color: switch args.item.selected {
+            true: 0xFFD4A373,
+            false: 0xFFD4A373,
+          },
+          width: 1.2,
+        },
+      ],
+      boxShadow: switch args.item.selected {
+        true: [ { color: 0x44D4A373, blurRadius: 12.0 } ],
+        false: [],
+      },
+    },
+    child: Text(
+      text: args.item.typeName,
+      maxLines: 1,
+      overflow: "ellipsis",
+      style: {
+        color: switch args.item.selected {
+          true: 0xFF0B0D10,
+          false: 0xF5FFFFFF,
+        },
+        fontSize: 12.0,
+        fontWeight: "w800",
+        height: 1.0,
+      },
+    ),
+  ),
+);
+
+// 工具按钮 - 采用沉浸光影的玻璃质感样式，保留琥珀配色
+widget ToolButton = GestureDetector(
+  onTap: args.action,
+  child: Container(
+    width: 26.0,
+    height: 26.0,
+    margin: [ 2.0, 0.0 ],
+    alignment: { x: 0.0, y: 0.0 },
+    decoration: {
+      type: "box",
+      color: switch args.active {
+        true: 0xFFD4A373,
+        false: 0x20FFFFFF,
+      },
+      borderRadius: [ { x: 13.0 } ],
+      border: [
+        {
+          color: 0xFFD4A373, 
+          width: 1.0,
+        },
+      ],
+      boxShadow: switch args.active {
+        true: [ { color: 0x44D4A373, blurRadius: 10.0 } ],
+        false: [],
+      },
+    },
+    child: Icon(
+      icon: args.icon.icon,
+      fontFamily: args.icon.fontFamily,
+      size: 14.0,
+      color: switch args.active {
+        true: 0xFF0B0D10,
+        false: 0xF7FFFFFF,
+      },
+    ),
+  ),
+);
+
+// 紧凑工具按钮 - 琥珀色
+widget TinyToolButton = GestureDetector(
+  onTap: args.action,
+  child: Container(
+    width: 30.0,
+    height: 30.0,
+    margin: [ 2.0, 0.0 ],
+    alignment: { x: 0.0, y: 0.0 },
+    decoration: {
+      type: "box",
+      color: switch args.active {
+        true: 0xFFD4A373,
+        false: 0x20FFFFFF,
+      },
+      borderRadius: [ { x: 15.0 } ],
+      border: [
+        {
+              color: 0xFFD4A373, 
+              width: 0.8, 
+        },
+      ],
+      boxShadow: switch args.active {
+        true: [ { color: 0x44D4A373, blurRadius: 8.0 } ],
+        false: [],
+      },
+    },
+    child: Icon(
+      icon: args.icon.icon,
+      fontFamily: args.icon.fontFamily,
+      size: 25.0,
+      color: switch args.active {
+        true: 0xFF0B0D10,
+        false: 0xF7FFFFFF,
+      },
+    ),
+  ),
+);
+
+// 筛选选项
+widget FilterOption = GestureDetector(
+  onTap: event "selectFilter" { key: args.item.filterKey, value: args.item.value },
+  child: Container(
+    margin: [ 0.0, 4.0, 6.0, 4.0 ],
+    padding: [ 9.0, 0.0 ],
+    height: 26.0,
+    alignment: { x: 0.0, y: 0.0 },
+    decoration: {
+      type: "box",
+      color: switch args.item.selected {
+        true: 0xFFD4A373,
+        false: 0x18FFFFFF,
+      },
+      borderRadius: [ { x: 13.0 } ],
+      border: [
+        {
+          color: 0xFFD4A373, 
+          width: 0.8,
+        },
+      ],
+      boxShadow: switch args.item.selected {
+        true: [ { color: 0x44D4A373, blurRadius: 8.0 } ],
+        false: [],
+      },
+    },
+    child: Text(
+      text: args.item.name,
+      maxLines: 1,
+      overflow: "ellipsis",
+      style: {
+        color: switch args.item.selected {
+          true: 0xFF0B0D10,
+          false: 0xF2FFFFFF,
+        },
+        fontSize: 10.0,
+        fontWeight: "w700",
+        height: 1.0,
+      },
+    ),
+  ),
+);
+
+// 筛选标签
+widget FilterLabel = Container(
+  height: 28.0,
+  padding: [ 10.0, 0.0 ],
+  alignment: { x: 0.0, y: 0.0 },
+  decoration: {
+    type: "box",
+    color: 0x12FFFFFF,
+    borderRadius: [ { x: 13.0 } ],
+    border: [ { color: 0x10FFFFFF, width: 1.0 } ],
+  },
+  child: Text(
+    text: args.name,
+    maxLines: 1,
+    overflow: "ellipsis",
+    style: {
+      color: 0xCCFFFFFF,
+      fontSize: 10.0,
+      fontWeight: "w800",
+      height: 1.0,
+    },
+  ),
+);
+
+// 筛选行
+widget FilterRow = Row(
+  children: [
+    Expanded(
+      child: SingleChildScrollView(
+        scrollDirection: "horizontal",
+        child: Row(
+          mainAxisSize: "min",
+          children: [
+          ...for option in args.group.options:
+            Padding(
+              padding: [ 0.0, 1.0, 8.0, 1.0 ],
+              child: FilterOption(item: option),
+            ),
+        ],
+        ),
+      ),
+    ),
+    switch args.group.canExpand {
+      true: Padding(
+        padding: [ 6.0, 1.0, 0.0, 1.0 ],
+        child: ToolButton(
+          icon: data.home.icons.expand,
+          active: false,
+          action: event "showFilterPicker" { key: args.group.key },
+        ),
+      ),
+      false: SizedBoxShrink(),
+    },
+  ],
+);
+
+// ============================================
+// 分类栏 - 只负责分类标签
+// ============================================
+widget CategoryBar = Container(
+  color: 0xFF1A1E24,
+  padding: [ 8.0, 6.0, 8.0, 6.0 ],
+  child: Container(
+    height: 46.0,
+    padding: [ 4.0, 2.0, 4.0, 2.0 ],
+    decoration: {
+      type: "box",
+      color: 0x1A1A1E24,
+      borderRadius: [ { x: 20.0 } ],
+      border: [ { color: 0xFFD4A373, width: 0.8 } ],
+    },
+    child: SingleChildScrollView(
+      scrollDirection: "horizontal",
+      child: Row(
+        mainAxisSize: "min",
+        children: [
+        ...for item in data.home.classes:
+          Padding(
+            padding: [ 0.0, 2.0, 6.0, 2.0 ],
+            child: CategoryChip(item: item),
+          ),
+      ],
+      ),
+    ),
+  ),
+);
+
+// ============================================
+// 按钮栏 - 独立一行，所有操作按钮
+// ============================================
+widget ActionBar = Container(
+  color: 0xFF1A1E24,
+  padding: [ 12.0, 2.0, 12.0, 2.0 ],
+  child: Row(
+    mainAxisAlignment: "spaceBetween",
+    children: [
+      // 筛选
+      switch data.home.hasFilters {
+        true: TinyToolButton(
+          icon: data.home.icons.filter,
+          active: data.home.showFilters,
+          action: event "toggleFilters" {},
+        ),
+        false: SizedBoxShrink(),
+      },
+      // API
+      TinyToolButton(
+        icon: data.home.icons.api,
+        active: false,
+        action: event "showApiConfigPicker" {},
+      ),
+      // 搜索
+      TinyToolButton(
+        icon: data.home.icons.search,
+        active: false,
+        action: event "openSearch" {},
+      ),
+      // 推送
+      TinyToolButton(
+        icon: data.home.icons.push,
+        active: false,
+        action: event "openPush" {},
+      ),
+      // 历史
+      TinyToolButton(
+        icon: data.home.icons.history,
+        active: false,
+        action: event "openHistory" {},
+      ),
+      // 收藏
+      TinyToolButton(
+        icon: data.home.icons.favorite,
+        active: false,
+        action: event "openFavorite" {},
+      ),
+      // 布局
+      TinyToolButton(
+        icon: data.home.icons.layout,
+        active: false,
+        action: event "showDisplayStylePicker" {},
+      ),
+      // 刷新
+      TinyToolButton(
+        icon: data.home.icons.refresh,
+        active: false,
+        action: event "refresh" {},
+      ),
+      // 分类展开（如果有多个分类）
+      switch data.home.hasManyClasses {
+        true: TinyToolButton(
+          icon: data.home.icons.expand,
+          active: false,
+          action: event "showCategoryPicker" {},
+        ),
+        false: SizedBoxShrink(),
+      },
+      // 站源切换
+      TinyToolButton(
+        icon: data.home.icons.source,
+        active: false,
+        action: event "showSourcePicker" {},
+      ),
+    ],
+  ),
+);
+
+// ============================================
+// 站点信息栏 - 独立一行，显示站源名和数量
+// ============================================
+widget SourceInfoBar = GestureDetector(
+  onTap: event "showSourcePicker" {},
+  child: Container(
+    color: 0xFF1A1E24,
+    padding: [ 16.0, 4.0, 16.0, 10.0 ],
+    child: Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: "start",
+            mainAxisSize: "min",
+            children: [
+              Row(
+                children: [
+                  Text(
+                    text: data.home.source.name,
+                    maxLines: 1,
+                    overflow: "ellipsis",
+                    style: {
+                      color: 0xFFF0E3D4,
+                      fontSize: 20.0,
+                      fontWeight: "w900",
+                      shadows: [ { color: 0x33000000, blurRadius: 6.0 } ],
+                    },
+                  ),
+                  Padding(
+                    padding: [ 8.0, 0.0, 0.0, 0.0 ],
+                    child: Container(
+                      padding: [ 6.0, 2.0, 6.0, 2.0 ],
+                      decoration: {
+                        type: "box",
+                        borderRadius: [ { x: 12.0 } ],
+                        border: [ { color: 0xFFD4A373, width: 0.8 } ],
+                      },
+                      child: Text(
+                        text: "点击切换",
+                        style: {
+                          color: 0xFFD4A373,
+                          fontSize: 9.0,
+                          fontWeight: "w500",
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              Padding(
+                padding: [ 0.0, 4.0, 0.0, 0.0 ],
+                child: Text(
+                  text: [ data.home.totalLabel, " 部内容" ],
+                  maxLines: 1,
+                  overflow: "ellipsis",
+                  style: {
+                    color: 0xAFFFFFFF,
+                    fontSize: 11.0,
+                    letterSpacing: 0.4,
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+        // 右侧显示一小条琥珀色装饰线
+        Container(
+          width: 3.0,
+          height: 36.0,
+          decoration: {
+            type: "box",
+            gradient: {
+              type: "linear",
+              begin: { x: -1.0, y: 0.0 },
+              end: { x: 1.0, y: 0.0 },
+              colors: [ 0x00D4A373, 0xFFD4A373 ],
+            },
+            borderRadius: [ { x: 2.0 } ],
+          },
+        ),
+      ],
+    ),
+  ),
+);
+
+// 筛选面板（展开时显示）
+widget FilterPanel = switch data.home.showFilters {
+  true: Container(
+    padding: [ 12.0, 2.0, 12.0, 8.0 ],
+    child: Container(
+      decoration: {
+        type: "box",
+        color: 0x1811161B,
+        borderRadius: [ { x: 18.0 } ],
+        border: [ { color: 0xFFD4A373, width: 0.8 } ],
+      },
+      child: Container(
+        height: data.home.immersiveFilterPanelHeight,
+        padding: [ 10.0, 4.0 ],
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+            ...for group in data.home.filters:
+              Container(
+                height: 28.0,
+                child: FilterRow(group: group),
+              ),
+          ],
+          ),
+        ),
+      ),
+    ),
+  ),
+  false: SizedBoxShrink(),
+};
+
+// ============================================
+// 固定的头部组合（分类栏 + 按钮栏 + 站点信息）
+// ============================================
+widget PinnedHeader = Container(
+  color: 0xFF1A1E24,
+  child: Column(
+    mainAxisSize: "min",
+    children: [
+      CategoryBar(),
+      ActionBar(),
+      FilterPanel(),
+     // SourceInfoBar(),
+    ],
+  ),
+);
+
+// 节标题 - 推荐（用于sectionHeader占位，实际内容已在PinnedHeader中）
+widget SectionTitleRecommend = Column(
+  mainAxisSize: "min",
+  crossAxisAlignment: "start",
+  children: [
+    Text(
+      text: "为你推荐",
+      maxLines: 1,
+      overflow: "ellipsis",
+      style: {
+        color: 0xFFF0E3D4,
+        fontSize: 19.0,
+        fontWeight: "w900",
+        shadows: [ { color: 0x33000000, blurRadius: 6.0 } ],
+      },
+    ),
+    Padding(
+      padding: [ 0.0, 3.0, 0.0, 0.0 ],
+      child: Text(
+        text: [ data.home.source.name, " · ", data.home.totalLabel, " 部内容" ],
+        maxLines: 1,
+        overflow: "ellipsis",
+        style: {
+          color: 0xAFFFFFFF,
+          fontSize: 10.0,
+          letterSpacing: 0.4,
+        },
+      ),
+    ),
+  ],
+);
+
+// 节栏（sectionHeader）- 简化为推荐标题 + 少量操作
+widget SectionBar = Container(
+  color: 0x00000000,
+  padding: [ 16.0, 6.0, 16.0, 4.0 ],
+  child: Row(
+    children: [
+      Expanded(
+        child: SectionTitleRecommend(),
+      ),
+    ],
+  ),
+);
+
+// Grid海报卡片
+widget CatalogPoster = GestureDetector(
+  onTap: event "openItem" { index: args.item.index },
+  onLongPress: event "longPressItem" { index: args.item.index },
+  child: Container(
+    decoration: {
+      type: "box",
+      color: 0xFF1A1E24,
+      borderRadius: [ { x: 10.0 } ],
+      border: [ { color: 0xFFD4A373, width: 0.8 } ],
+      boxShadow: [ { color: 0x44D4A373, blurRadius: 8.0 } ],
+    },
+    child: Column(
+      crossAxisAlignment: "start",
+      children: [
+        Expanded(
+          child: ClipRRect(
+            borderRadius: [ { x: 8.0 } ],
+            child: Stack(
+              fit: "expand",
+              children: [
+                T4Image(url: args.item.pic),
+                Container(
+                  decoration: {
+                    type: "box",
+                    gradient: {
+                      type: "linear",
+                      begin: { x: 0.0, y: -1.0 },
+                      end: { x: 0.0, y: 1.0 },
+                      colors: [ 0x00000000, 0x08000000, 0xBB0B0D10 ],
+                      stops: [ 0.55, 0.76, 1.0 ],
+                    },
+                  },
+                ),
+                Align(
+                  alignment: { x: -1.0, y: 1.0 },
+                  child: Container(
+                    height: 3.0,
+                    margin: [ 6.0 ],
+                    decoration: {
+                      type: "box",
+                      gradient: {
+                        type: "linear",
+                        begin: { x: -1.0, y: 0.0 },
+                        end: { x: 1.0, y: 0.0 },
+                        colors: [ 0x00D4A373, 0xFFD4A373, 0x00D4A373 ],
+                      },
+                      borderRadius: [ { x: 2.0 } ],
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        Padding(
+          padding: [ 8.0, 8.0, 8.0, 2.0 ],
+          child: Text(
+            text: args.item.name,
+            maxLines: 1,
+            overflow: "ellipsis",
+            style: { color: 0xFFF0E3D4, fontSize: 13.0, fontWeight: "w700" },
+          ),
+        ),
+        Padding(
+          padding: [ 8.0, 3.0, 8.0, 8.0 ],
+          child: Text(
+            text: args.item.remarks,
+            maxLines: 1,
+            overflow: "ellipsis",
+            style: { color: 0xFF8F9FB3, fontSize: 9.0 },
+          ),
+        ),
+      ],
+    ),
+  ),
+);
+
+// List行模式
+widget CatalogRow = GestureDetector(
+  onTap: event "openItem" { index: args.item.index },
+  child: Container(
+    decoration: {
+      type: "box",
+      color: 0xFF1A1E24,
+      borderRadius: [ { x: 12.0 } ],
+      border: [ { color: 0xFFD4A373, width: 0.8 } ],
+    },
+    child: Container(
+      padding: [ 8.0 ],
+      margin: [ 0.0, 0.0, 0.0, 6.0 ],
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: [ { x: 8.0 } ],
+            child: Container(width: 100.0, height: 80.0, child: T4Image(url: args.item.pic)),
+          ),
+          Padding(
+            padding: [ 16.0, 0.0, 0.0, 0.0 ],
+          ),
+          Expanded(
+            child: Column(
+              mainAxisSize: "min",
+              crossAxisAlignment: "start",
+              children: [
+                Text(
+                  text: args.item.name,
+                  maxLines: 1,
+                  overflow: "ellipsis",
+                  style: { color: 0xFFF0E3D4, fontSize: 15.0, fontWeight: "w700" },
+                ),
+                Padding(
+                  padding: [ 0.0, 5.0, 0.0, 0.0 ],
+                  child: Text(
+                    text: args.item.remarks,
+                    maxLines: 1,
+                    overflow: "ellipsis",
+                    style: { color: 0xFF8F9FB3, fontSize: 10.0 },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Icon(
+            icon: data.home.icons.open.icon,
+            fontFamily: data.home.icons.open.fontFamily,
+            size: 20.0,
+            color: 0xFFD4A373,
+          ),
+        ],
+      ),
+    ),
+  ),
+);
+
+// 紧凑列表卡片
+widget CatalogCompact = GestureDetector(
+  onTap: event "openItem" { index: args.item.index },
+  child: Container(
+    decoration: {
+      type: "box",
+      color: 0xFF1A1E24,
+      borderRadius: [ { x: 10.0 } ],
+      border: [ { color: 0xFFD4A373, width: 0.8 } ],
+    },
+    child: Container(
+      padding: [ 6.0 ],
+      margin: [ 0.0, 0.0, 0.0, 4.0 ],
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: [ { x: 6.0 } ],
+            child: Container(width: 60.0, child: T4Image(url: args.item.pic)),
+          ),
+          Container(
+            width: 14.0,
+            alignment: { x: 0.0, y: 0.0 },
+          ),
+          Expanded(
+            child: Text(
+              text: args.item.name,
+              maxLines: 1,
+              overflow: "ellipsis",
+              style: { color: 0xFFF0E3D4, fontSize: 12.0, fontWeight: "w600" },
+            ),
+          ),
+          Text(
+            text: args.item.remarks,
+            maxLines: 1,
+            overflow: "ellipsis",
+            style: { color: 0xFF6D7D94, fontSize: 9.0 },
+          ),
+        ],
+      ),
+    ),
+  ),
+);
+
+// 纯文字卡片
+widget CatalogText = GestureDetector(
+  onTap: event "openItem" { index: args.item.index },
+  child: Container(
+    decoration: {
+      type: "box",
+      borderRadius: [ { x: 10.0 } ],
+      border: [ { color: 0xFFD4A373, width: 0.8 } ],
+    },
+    child: Container(
+      padding: [ 14.0, 8.0 ],
+      margin: [ 0.0, 0.0, 0.0, 4.0 ],
+      decoration: {
+        type: "box",
+        gradient: { type: "linear", colors: [ 0xFF1A1E24, 0xFF0B0D10 ] },
+        borderRadius: [ { x: 10.0 } ],
+      },
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              text: args.item.name,
+              maxLines: 1,
+              overflow: "ellipsis",
+              style: { color: 0xFFF0E3D4, fontSize: 13.0, fontWeight: "w600" },
+            ),
+          ),
+          Text(
+            text: args.item.remarks,
+            maxLines: 1,
+            overflow: "ellipsis",
+            style: { color: 0xFF6D7D94, fontSize: 9.0 },
+          ),
+        ],
+      ),
+    ),
+  ),
+);
+
+// 宽横幅卡片
+widget CatalogWide = GestureDetector(
+  onTap: event "openItem" { index: args.item.index },
+  child: Container(
+    decoration: {
+      type: "box",
+      borderRadius: [ { x: 10.0 } ],
+      border: [ { color: 0xFFD4A373, width: 0.8 } ],
+    },
+    child: ClipRRect(
+      borderRadius: [ { x: 10.0 } ],
+      child: Stack(
+        fit: "expand",
+        children: [
+          T4Image(url: args.item.pic),
+          Container(
+            decoration: {
+              type: "box",
+              gradient: {
+                type: "linear",
+                begin: { x: -1.0, y: 0.0 },
+                end: { x: 1.0, y: 0.0 },
+                colors: [ 0xCC0B0D10, 0x880B0D10, 0x08000000 ],
+              },
+            },
+          ),
+          Align(
+            alignment: { x: -1.0, y: 1.0 },
+            child: Padding(
+              padding: [ 14.0, 10.0 ],
+              child: Column(
+                mainAxisSize: "min",
+                crossAxisAlignment: "start",
+                children: [
+                  Text(
+                    text: args.item.name,
+                    maxLines: 1,
+                    overflow: "ellipsis",
+                    style: { color: 0xFFFFFFFF, fontSize: 17.0, fontWeight: "w700" },
+                  ),
+                  Text(
+                    text: args.item.remarks,
+                    maxLines: 1,
+                    overflow: "ellipsis",
+                    style: { color: 0xFFB1C0D6, fontSize: 10.0 },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  ),
+);
+
+// 全屏推荐轮播卡片（用于 largeGrid / banner）
+widget RecommendCardFull = GestureDetector(
+  onTap: event "openRecommend" { index: args.item.index },
+  child: ClipRRect(
+    borderRadius: [ { x: 12.0 } ],
+    child: Stack(
+      fit: "expand",
+      children: [
+        T4Image(url: args.item.pic),
+        Container(
+          decoration: {
+            type: "box",
+            gradient: {
+              type: "linear",
+              begin: { x: 0.0, y: -1.0 },
+              end: { x: 0.0, y: 1.0 },
+              colors: [ 0x00000000, 0xCC0B0D10 ],
+            },
+            border: [ { color: 0xFFD4A373, width: 2.0 } ],
+          },
+        ),
+        Align(
+          alignment: { x: -1.0, y: 1.0 },
+          child: Padding(
+            padding: [ 10.0, 8.0 ],
+            child: Column(
+              mainAxisSize: "min",
+              crossAxisAlignment: "start",
+              children: [
+                Text(
+                  text: args.item.name,
+                  maxLines: 1,
+                  overflow: "ellipsis",
+                  style: { color: 0xFFD4A373, fontSize: 14.0, fontWeight: "w700" },
+                ),
+                Text(
+                  text: args.item.remarks,
+                  maxLines: 1,
+                  overflow: "ellipsis",
+                  style: { color: 0xFFB1C0D6, fontSize: 10.0 },
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    ),
+  ),
+);
+
+// 推荐轮播卡片
+widget RecommendCard = GestureDetector(
+  onTap: event "openRecommend" { index: args.item.index },
+  child: Center(
+    child: AspectRatio(
+      aspectRatio: 0.55,
+      child: Container(
+        decoration: {
+          type: "box",
+          borderRadius: [ { x: 12.0 } ],
+          border: [ { color: 0xFFD4A373, width: 2.0 } ],
+        },
+        child: ClipRRect(
+          borderRadius: [ { x: 12.0 } ],
+          child: Stack(
+            fit: "expand",
+            children: [
+              T4Image(url: args.item.pic),
+              Container(
+                decoration: {
+                  type: "box",
+                  gradient: {
+                    type: "linear",
+                    begin: { x: 0.0, y: -1.0 },
+                    end: { x: 0.0, y: 1.0 },
+                    colors: [ 0x00000000, 0xCC0B0D10 ],
+                  },
+                },
+              ),
+              Align(
+                alignment: { x: -1.0, y: 1.0 },
+                child: Padding(
+                  padding: [ 10.0, 8.0 ],
+                  child: Column(
+                    mainAxisSize: "min",
+                    crossAxisAlignment: "start",
+                    children: [
+                      Text(
+                        text: args.item.name,
+                        maxLines: 1,
+                        overflow: "ellipsis",
+                        style: { color: 0xFFD4A373, fontSize: 14.0, fontWeight: "w700" },
+                      ),
+                      Text(
+                        text: args.item.remarks,
+                        maxLines: 1,
+                        overflow: "ellipsis",
+                        style: { color: 0xFFB1C0D6, fontSize: 10.0 },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  ),
+);
+
+// 小尺寸推荐轮播卡片（用于列表/文字模式）
+widget RecommendCardSmall = GestureDetector(
+  onTap: event "openRecommend" { index: args.item.index },
+  child: Center(
+    child: AspectRatio(
+      aspectRatio: 1.0,
+      child: Container(
+        decoration: {
+          type: "box",
+          borderRadius: [ { x: 8.0 } ],
+          border: [ { color: 0xFFD4A373, width: 1.6 } ],
+        },
+        child: ClipRRect(
+          borderRadius: [ { x: 8.0 } ],
+          child: Stack(
+            fit: "expand",
+            children: [
+              T4Image(url: args.item.pic),
+              Container(
+                decoration: {
+                  type: "box",
+                  gradient: {
+                    type: "linear",
+                    begin: { x: 0.0, y: -1.0 },
+                    end: { x: 0.0, y: 1.0 },
+                    colors: [ 0x00000000, 0xCC0B0D10 ],
+                  },
+                },
+              ),
+              Align(
+                alignment: { x: -1.0, y: 1.0 },
+                child: Padding(
+                  padding: [ 8.0, 6.0 ],
+                  child: Column(
+                    mainAxisSize: "min",
+                    crossAxisAlignment: "start",
+                    children: [
+                      Text(
+                        text: args.item.name,
+                        maxLines: 1,
+                        overflow: "ellipsis",
+                        style: { color: 0xFFD4A373, fontSize: 11.0, fontWeight: "w700" },
+                      ),
+                      Text(
+                        text: args.item.remarks,
+                        maxLines: 1,
+                        overflow: "ellipsis",
+                        style: { color: 0xFFB1C0D6, fontSize: 8.0 },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  ),
+);
+
+// 迷你轮播卡片（用于无图文字模式）
+widget RecommendCardMini = GestureDetector(
+  onTap: event "openRecommend" { index: args.item.index },
+  child: Center(
+    child: AspectRatio(
+      aspectRatio: 1.55,
+      child: Container(
+        decoration: {
+          type: "box",
+          borderRadius: [ { x: 6.0 } ],
+          border: [ { color: 0xFFD4A373, width: 1.6 } ],
+        },
+        child: ClipRRect(
+          borderRadius: [ { x: 6.0 } ],
+          child: Stack(
+            fit: "expand",
+            children: [
+              T4Image(url: args.item.pic),
+              Container(
+                decoration: {
+                  type: "box",
+                  gradient: {
+                    type: "linear",
+                    begin: { x: 0.0, y: -1.0 },
+                    end: { x: 0.0, y: 1.0 },
+                    colors: [ 0x00000000, 0xDD0B0D10 ],
+                  },
+                },
+              ),
+              Align(
+                alignment: { x: -0.5, y: 1.0 },
+                child: Padding(
+                  padding: [ 6.0, 4.0 ],
+                  child: Text(
+                    text: args.item.name,
+                    maxLines: 1,
+                    overflow: "ellipsis",
+                    style: { color: 0xFFD4A373, fontSize: 9.0, fontWeight: "w600" },
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  ),
+);
+
+// 显示模式切换
+widget ThemeItem = switch data.home.displayStyle {
+  "grid": CatalogPoster(item: args.item),
+  "largeGrid": CatalogPoster(item: args.item),
+  "banner": CatalogWide(item: args.item),
+  "list": CatalogRow(item: args.item),
+  "list2": CatalogCompact(item: args.item),
+  "textList": CatalogText(item: args.item),
+  "card": CatalogWide(item: args.item),
+  default: CatalogPoster(item: args.item),
+};
+
+// 空/加载状态
+// ============================================
+// 加载骨架（2026-10-30）
+// 用户：「RWF 主题的内容加载页面不好看」——原来加载时只有正中间一行
+// 「正在加载中...」，整块内容区空着，看着像坏了。现在铺骨架卡：
+// 与真实海报卡同宽同高的圆角灰块 + 底部一行「正在加载…」。
+// ⚠️ 颜色只能走 `decoration: {type:"box", ...}`，不能写
+//    `Container(color: …, borderRadius: …)`：RFW 的 Container 解码成
+//    AnimatedContainer，color 与 decoration 同时非空会直接断言崩。
+// ============================================
+widget SkeletonPoster = Column(
+  crossAxisAlignment: "start",
+  children: [
+    Container(
+      height: 150.0,
+      decoration: {
+        type: "box",
+        color: 0xFF262C35,
+        borderRadius: [ { x: 10.0 } ],
+      },
+    ),
+    Padding(
+      padding: [ 0.0, 8.0, 0.0, 0.0 ],
+      child: Container(
+        height: 10.0,
+        decoration: {
+          type: "box",
+          color: 0xFF1F242B,
+          borderRadius: [ { x: 5.0 } ],
+        },
+      ),
+    ),
+    Padding(
+      padding: [ 0.0, 6.0, 0.0, 0.0 ],
+      child: Container(
+        width: 52.0,
+        height: 10.0,
+        decoration: {
+          type: "box",
+          color: 0xFF1F242B,
+          borderRadius: [ { x: 5.0 } ],
+        },
+      ),
+    ),
+  ],
+);
+
+widget LoadingSkeleton = Container(
+  padding: [ 12.0, 14.0, 12.0, 0.0 ],
+  child: Column(
+    crossAxisAlignment: "start",
+    children: [
+      Row(
+        children: [
+          Container(
+            width: 96.0,
+            height: 13.0,
+            decoration: {
+              type: "box",
+              color: 0xFF262C35,
+              borderRadius: [ { x: 7.0 } ],
+            },
+          ),
+          Spacer(),
+          Container(
+            width: 42.0,
+            height: 13.0,
+            decoration: {
+              type: "box",
+              color: 0xFF262C35,
+              borderRadius: [ { x: 7.0 } ],
+            },
+          ),
+        ],
+      ),
+      Padding(
+        padding: [ 0.0, 14.0, 0.0, 0.0 ],
+        child: Row(
+          crossAxisAlignment: "start",
+          children: [
+            Expanded(child: SkeletonPoster()),
+            SizedBox(width: 10.0),
+            Expanded(child: SkeletonPoster()),
+            SizedBox(width: 10.0),
+            Expanded(child: SkeletonPoster()),
+          ],
+        ),
+      ),
+      Padding(
+        padding: [ 0.0, 12.0, 0.0, 0.0 ],
+        child: Row(
+          crossAxisAlignment: "start",
+          children: [
+            Expanded(child: SkeletonPoster()),
+            SizedBox(width: 10.0),
+            Expanded(child: SkeletonPoster()),
+            SizedBox(width: 10.0),
+            Expanded(child: SkeletonPoster()),
+          ],
+        ),
+      ),
+      Padding(
+        padding: [ 0.0, 18.0, 0.0, 0.0 ],
+        child: Row(
+          children: [
+            Container(
+              width: 13.0,
+              height: 13.0,
+              decoration: {
+                type: "box",
+                color: 0xFFD4A373,
+                borderRadius: [ { x: 7.0 } ],
+              },
+            ),
+            SizedBox(width: 8.0),
+            Text(
+              text: "正在加载…",
+              style: { color: 0xFF8C99AB, fontSize: 12.0 },
+            ),
+          ],
+        ),
+      ),
+    ],
+  ),
+);
+
+widget EmptyState = switch data.home.loading {
+  true: LoadingSkeleton(),
+
+  false: switch data.home.errorMessage {
+    "": Center(
+      child: Column(
+        mainAxisSize: "min",
+        children: [
+          Text(
+            text: "◈",
+            style: { fontSize: 36.0, color: 0xFF6D7D94 },
+          ),
+          Padding(
+            padding: [ 0.0, 8.0, 0.0, 0.0 ],
+            child: Text(
+              text: "暂无条目",
+              style: { color: 0xFF6D7D94, fontSize: 13.0 },
+            ),
+          ),
+        ],
+      ),
+    ),
+    default: GestureDetector(
+      onTap: event "refresh" {},
+      child: Center(
+        child: Column(
+          mainAxisSize: "min",
+          children: [
+            Text(
+              text: "",
+              style: { fontSize: 36.0, color: 0xFFD4A373 },
+            ),
+            Padding(
+              padding: [ 0.0, 8.0, 0.0, 0.0 ],
+              child: Text(
+                text: data.home.errorMessage,
+                maxLines: 2,
+                overflow: "ellipsis",
+                style: { color: 0xFFD4A373, fontSize: 12.0 },
+              ),
+            ),
+            Text(
+              text: "点击重试 ",
+              style: { color: 0xFFD4A373, fontSize: 11.0 },
+            ),
+          ],
+        ),
+      ),
+    ),
+  },
+};
+
+// 顶部轮播推荐
+widget HeroSection = switch data.home.hasRecommend {
+  true: Container(
+    padding: [ 0.0, 6.0, 0.0, 6.0 ],
+    child: switch data.home.displayStyle {
+      "largeGrid" : PeekCarousel(
+        autoPlay: true,
+        interval: 4500,
+        viewportFraction: 1.0,
+        activeColor: 0xFFD4A373,
+        inactiveColor: 0x44D4A373,
+        children: [
+          ...for item in data.home.home.recommend:
+            RecommendCardFull(item: item),
+        ],
+      ),
+      "banner" : PeekCarousel(
+        autoPlay: true,
+        interval: 3000,
+        viewportFraction: 1.0,
+        activeColor: 0xFFD4A373,
+        inactiveColor: 0x44D4A373,
+        children: [
+          ...for item in data.home.home.recommend:
+            RecommendCardFull(item: item),
+        ],
+      ),
+      // 堆叠轮播模式 - 有缩放效果
+      "grid" : PeekCarousel(
+        autoPlay: true,
+        style: "stack",
+        showIndicators: false,
+        interval: 4300,
+        viewportFraction: 0.8,
+        stackScale: 0.5,
+        stackOpacity: 0.88,
+        stackOffset: 0.21,
+        stackRotation: 0.022,
+        activeColor: 0xFFD4A373,
+        inactiveColor: 0x44D4A373,
+        children: [
+          ...for item in data.home.home.recommend:
+            RecommendCard(item: item),
+        ],
+      ),
+      "list" : PeekCarousel(
+        autoPlay: true,
+        style: "stack",
+        showIndicators: false,
+        interval: 4300,
+        viewportFraction: 0.8,
+        stackScale: 0.88,
+        stackOpacity: 0.55,
+        stackOffset: 0.21,
+        stackRotation: 0.022,
+        activeColor: 0xFFD4A373,
+        inactiveColor: 0x44D4A373,
+        children: [
+          ...for item in data.home.home.recommend:
+            RecommendCardSmall(item: item),
+        ],
+      ),
+      "list2" : PeekCarousel(
+        autoPlay: true,
+        style: "stack",
+        showIndicators: false,
+        interval: 4300,
+        viewportFraction: 0.8,
+        stackScale: 0.5,
+        stackOpacity: 0.55,
+        stackOffset: 0.21,
+        stackRotation: 0.022,
+        activeColor: 0xFFD4A373,
+        inactiveColor: 0x44D4A373,
+        children: [
+          ...for item in data.home.home.recommend:
+            RecommendCardSmall(item: item),
+        ],
+      ),
+      "textList" : PeekCarousel(
+        autoPlay: true,
+        style: "stack",
+        showIndicators: false,
+        interval: 4300,
+        viewportFraction: 0.8,
+        stackScale: 0.55,
+        stackOpacity: 0.55,
+        stackOffset: 0.21,
+        stackRotation: 0.022,
+        activeColor: 0xFFD4A373,
+        inactiveColor: 0x44D4A373,
+        children: [
+          ...for item in data.home.home.recommend:
+            RecommendCardMini(item: item),
+        ],
+      ),
+      "card" : PeekCarousel(
+        autoPlay: true,
+        style: "stack",
+        showIndicators: false,
+        interval: 4300,
+        viewportFraction: 0.8,
+        stackScale: 0.9,
+        stackOpacity: 0.21,
+        stackOffset: 0.21,
+        stackRotation: 0.022,
+        activeColor: 0xFFD4A373,
+        inactiveColor: 0x44D4A373,
+        children: [
+          ...for item in data.home.home.recommend:
+            RecommendCardMini(item: item),
+        ],
+      ),
+      default : PeekCarousel(
+        autoPlay: true,
+        interval: 4000,
+        viewportFraction: 1.0,
+        activeColor: 0xFFD4A373,
+        inactiveColor: 0x44D4A373,
+        children: [
+          ...for item in data.home.home.recommend:
+            RecommendCard(item: item),
+        ],
+      ),
+    },
+  ),
+  false: SizedBoxShrink(),
+};
+
+// ============================================
+// 根组件 - 布局结构：
+// ============================================
+widget root = Container(
+  decoration: {
+    type: "box",
+    gradient: {
+      type: "linear",
+      begin: { x: 0.0, y: -1.0 },
+      end: { x: 0.0, y: 1.0 },
+      colors: [ 0xFF0B0D10, 0xFF1A1E24, 0xFF0B0D10 ],
+    },
+  },
+  child: PeekStickyGrid(
+    heroHeight: switch data.home.hasRecommend {
+      true: switch data.home.displayStyle {
+        "grid" : 500.0,
+        "largeGrid" : 620.0,
+        "banner" : 250.0,
+        "list" : 300.0,
+        "list2" : 240.0,
+        "textList" : 150.0,
+        "card" : 220.0,
+        "default" : 500.0,
+      },
+      false: 0.0,
+    },
+    // 吸顶头高度必须等于 PinnedHeader 的实际内容高度，写死就会溢出：
+    //   · 收起筛选：分类栏 58（padding 6+6 + 内框 46）+ 按钮栏 34
+    //     （padding 2+2 + 圆钮 30）= 92，原来写 90 ⇒ RenderFlex 差 2px。
+    //   · 展开筛选：还要加 FilterPanel 的上下 padding 10 和面板本身的高度，
+    //     也就是 102 + immersiveFilterPanelHeight。
+    // RFW 的词法里没有 `+`，所以两个数都由 data 侧算好。
+    pinnedHeight: data.home.immersiveStickyHeaderHeight,
+    sectionHeight: 56.0,
+    crossAxisCount: switch data.home.displayStyle {
+      "grid": data.home.gridColumns,
+      "largeGrid": data.home.largeGridColumns,
+      "banner": data.home.bannerColumns,
+      "list": 1,
+      "list2": 2,
+      "textList": 1,
+      "card": 1,
+      default: data.home.gridColumns,
+    },
+    childAspectRatio: switch data.home.displayStyle {
+      "grid": 0.4,
+      "largeGrid": 0.48,
+      "banner": 1.55,
+      "list": data.home.wideListRatio,
+      "list2": 1.38,
+      "textList": data.home.textListRatio,
+      "card": 1.55,
+      default: 0.48,
+    },
+    mainAxisSpacing: 8.0,
+    crossAxisSpacing: 8.0,
+    horizontalPadding: 10.0,
+    bottomPadding: 88.0,
+    hero: HeroSection(),
+    pinnedHeader: PinnedHeader(),
+    sectionHeader: SectionBar(),
+    empty: EmptyState(),
+    children: [
+      ...for item in data.home.items:
+        ThemeItem(item: item),
+    ],
+  ),
+);

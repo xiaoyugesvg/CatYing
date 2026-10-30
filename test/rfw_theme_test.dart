@@ -156,7 +156,16 @@ widget root = Text(text: "x");
       // 根因就是三个主题把底色/强调色/文字色全写死了，跟 24 套调色板无关。
       // 这条测试保证以后再加主题也必须走 data.home.theme.* 色板。
       final literal = RegExp(r'0x[0-9A-Fa-f]{8}');
-      for (final entry in builtinRfwThemes) {
+      // 只检查 `followsPalette: true` 的主题。
+      // 用户提供的 PeekPro 风格主题（蓝魔凝光 / 春日记忆）自带整套配色，
+      // 颜色就是它们的设计本身，逼它们跟随调色板等于把设计拆了 ——
+      // 所以契约改成"**跟随型**主题不许写死色值"，而不是"所有主题都不许"。
+      final followers =
+          builtinRfwThemes.where((e) => e.followsPalette).toList();
+      expect(followers.length, greaterThanOrEqualTo(3),
+          reason: '跟随配色的内置主题被改少了 —— 是不是把主题标成 '
+              'followsPalette: false 来绕过这条测试？');
+      for (final entry in followers) {
         final text = File(entry.asset!).readAsStringSync();
         final bad = literal
             .allMatches(text)
