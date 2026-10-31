@@ -2603,9 +2603,18 @@ class _BookshelfPageState extends State<BookshelfPage>
                                 toast('已取消推送');
                                 return;
                               }
-                              final task = tasks.firstWhere(
+                              // ⚠️ 不能直接 `firstWhere`：`tasks` 是待推送队列，
+                              //    用户选文件的这几秒里可能已经有任务推完被移走，
+                              //    匹配不到会抛 `StateError: No element`，
+                              //    把整个「推送到 Kindle」流程炸掉。
+                              final matched = tasks.where(
                                 (t) => t.localPath == picked,
                               );
+                              if (matched.isEmpty) {
+                                toast('这个文件不在待推送列表里');
+                                return;
+                              }
+                              final task = matched.first;
                               final bytes = await File(picked).readAsBytes();
                               final r = await SyncService.instance.pushToKindle(
                                 fileName:

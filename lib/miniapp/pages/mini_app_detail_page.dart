@@ -24,8 +24,25 @@ class MiniAppDetailPage extends StatefulWidget {
 
 class _MiniAppDetailPageState extends State<MiniAppDetailPage>
     with SingleTickerProviderStateMixin {
-  MiniApp get _app =>
-      MiniAppService.instance.apps.firstWhere((a) => a.id == widget.appId);
+  /// 找到当前小程序。
+  ///
+  /// ⚠️ 原来是不带 `orElse` 的 `firstWhere`：`MiniAppService.apps` 是 `.obs`
+  ///    响应式列表，用户在「程序」列表里删掉这个程序（或切订阅后整表被
+  ///    `assignAll` 替换）再回到本页，`firstWhere` 直接抛
+  ///    `StateError: No element` ⇒ **整页崩掉**（白屏 + 控制台红屏）。
+  ///    这里兜一个「已不存在」占位：页面能正常渲染，顶栏会显示这个名字，
+  ///    用户看到的是空内容而不是崩溃。
+  MiniApp get _app => MiniAppService.instance.apps.firstWhere(
+        (a) => a.id == widget.appId,
+        orElse: () => MiniApp(
+          id: widget.appId,
+          name: '程序已不存在',
+          type: '',
+          source: '',
+          rawJson: '{}',
+          createdAt: 0,
+        ),
+      );
 
   late TabController _tab;
   final _videoCtrl = _MiniAppVideoController();

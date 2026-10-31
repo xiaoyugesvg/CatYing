@@ -30,8 +30,23 @@ class MiniAppMaiyouPage extends StatefulWidget {
 }
 
 class _MiniAppMaiyouPageState extends State<MiniAppMaiyouPage> {
-  MiniApp get _app =>
-      MiniAppService.instance.apps.firstWhere((a) => a.id == widget.appId);
+  /// 找到当前小程序。
+  ///
+  /// ⚠️ 本页第 `_confirmDelete` 里就有 `MiniAppService.instance.remove(_app)` ——
+  ///    删完自己之后只要页面再 build 一次，原来那个不带 `orElse` 的
+  ///    `firstWhere` 就会抛 `StateError: No element`，把「删除成功」变成崩溃。
+  ///    兜一个「已不存在」占位即可。
+  MiniApp get _app => MiniAppService.instance.apps.firstWhere(
+        (a) => a.id == widget.appId,
+        orElse: () => MiniApp(
+          id: widget.appId,
+          name: '程序已不存在',
+          type: '',
+          source: '',
+          rawJson: '{}',
+          createdAt: 0,
+        ),
+      );
 
   late final _MaiyouController _ctrl;
 

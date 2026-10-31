@@ -426,7 +426,13 @@ class AppState extends GetxController {
             !s.isPythonScriptSource,
       );
       if (main != null && main.api.isNotEmpty && !_sourceLoadedThisSession) {
-        final (loadOk, msg) = await NodeJSManager.instance.loadSource(main.api);
+        // ⚠️ 必须走 SpiderService 的统一入口：这条会进「槽位写锁」队列。
+        //    直接调 `NodeJSManager.loadSource` 是绕过队列的 —— 用户点「加载引擎」
+        //    的同时别处正在换源 / 载入脚本，两者并发写同一个引擎槽位 ⇒ 又变回
+        //    用户说的「串」。`loadSourceSmart` 还会把 drpy 源分流到宿主，
+        //    直接 loadSource(api) 对 drpy 源本来就是错的。
+        final (loadOk, msg) = await SpiderService.instance
+            .loadSourceSmart(main.api, main.ext ?? '');
         if (!loadOk) return 'Node 已就绪，但源加载失败：${msg ?? "未知错误"}';
         SpiderService.instance.mainScriptUrl = main.api;
         _sourceLoadedThisSession = true;

@@ -1091,7 +1091,19 @@ class SpiderService {
     _handBackTimer?.cancel();
     _handBackTimer = null;
     _slotOwner = '';
+    // ⚠️ 必须一起清：换源 / 引擎重启后 `_ownerScript` 里记的是**旧源**的脚本。
+    //    留着它，下一次短剧 / 海阔占完槽位后的空闲归还，会把**旧源**装回去
+    //    ⇒ 用户明明已经切到 B，8 秒后槽位又变回 A，又是一次「串」。
+    _ownerScript.clear();
   }
+
+  /// 单次「写槽位」操作的硬超时。
+  ///
+  /// ⚠️ 队列是**串行**的：前一个不完成，后面全部排队。一旦某个 `loadSource`
+  ///    挂死（Node 进程假死 / 请求发出去没响应），没有超时的话整条队列永久
+  ///    阻塞 —— 换源、详情、分类**全部卡死**，用户只能杀 App。
+  ///    正常载入 0.5~2s，给 30s 是给慢网络留足余量。
+  static const Duration _kLoadTimeout = Duration(seconds: 30);
 
   /// 把一次"写引擎槽位"的操作排进全局队列。
   ///
@@ -1104,6 +1116,16 @@ class SpiderService {
     return prev
         .catchError((Object _) {})
         .then((_) => job())
+        .timeout(
+          _kLoadTimeout,
+          onTimeout: () {
+            AppLog.instance.w(
+              '[SpiderService] 槽位载入超时 ${_kLoadTimeout.inSeconds}s，放行队列',
+            );
+            lastError = '源载入超时（${_kLoadTimeout.inSeconds}s）';
+            throw TimeoutException('槽位载入超时', _kLoadTimeout);
+          },
+        )
         .whenComplete(() {
           if (!gate.isCompleted) gate.complete();
         });
@@ -1126,7 +1148,20 @@ class SpiderService {
     //   · 先 +1 代数，让所有在排队/在飞的其它脚本载入作废；
     //   · 再进全局队列，避免和它们同时写同一个槽位。
     _sessionGeneration++;
-    return _enqueueLoad(() => NodeJSManager.instance.loadSource(api));
+    return _enqueueLoad(() async {
+      try {
+        return await NodeJSManager.instance.loadSource(api);
+      } catch (e, st) {
+        // ⚠️ 这条 job 是队列里**唯一没有内层 try-catch** 的（脚本 / drpy 两条
+        //    都在 `_ensureNodeScriptInner` / `_ensureDrpyScriptInner` 里兜住了）。
+        //    异常会顺着 `_enqueueLoad` 的返回值直接抛给调用方，而调用方
+        //    `AppState._loadSpiderSource` **没有** try ⇒ 异常逃逸后
+        //    `loadingPhase` 永远停在 downloadingSource，用户看到永久转圈。
+        lastError = '主源载入异常：$e';
+        AppLog.instance.log('[SpiderService] 主源载入异常: $e\n$st');
+        return (false, lastError);
+      }
+    });
   }
 
   /// 确保 drpy 源已载入宿主，返回站点 key。
@@ -1154,7 +1189,13 @@ class SpiderService {
     final playing = _drpyLoadInFlight[extUrl];
     if (playing != null) {
       AppLog.instance.log('[SpiderService] drpy 正在载入，复用同一次流程: $extUrl');
-      _noteSlotOwner(owner, 'drpy::$extUrl');
+      // 同 `_ensureNodeScript`：复用不等于成功，成功才登记归属者。
+      playing.then(
+        (k) {
+          if (k != null) _noteSlotOwner(owner, 'drpy::$extUrl');
+        },
+        onError: (Object _) {},
+      );
       return playing;
     }
     final gen = _sessionGeneration;
@@ -1174,11 +1215,13 @@ class SpiderService {
       },
       onError: (Object _) {},
     );
-    fut.whenComplete(() {
-      if (identical(_drpyLoadInFlight[extUrl], fut)) {
-        _drpyLoadInFlight.remove(extUrl);
-      }
-    });
+    unawaited(
+      fut.whenComplete(() {
+        if (identical(_drpyLoadInFlight[extUrl], fut)) {
+          _drpyLoadInFlight.remove(extUrl);
+        }
+      }).catchError((Object _) => null),
+    );
     return fut;
   }
 
@@ -1261,7 +1304,14 @@ class SpiderService {
     final playing = _scriptLoadInFlight[script];
     if (playing != null) {
       AppLog.instance.log('[SpiderService] 脚本正在载入，复用同一次流程: $script');
-      _noteSlotOwner(owner, script);
+      // 不能在这里直接登记归属者：这一趟可能是别的 owner 发起的、也可能失败。
+      // 跟首次发起时保持一致 —— **载入成功才登记**。
+      playing.then(
+        (k) {
+          if (k != null) _noteSlotOwner(owner, script);
+        },
+        onError: (Object _) {},
+      );
       return playing;
     }
     // 入队前记下代数：排队期间用户换源了，这一趟就该作废
@@ -1284,11 +1334,15 @@ class SpiderService {
       },
       onError: (Object _) {},
     );
-    fut.whenComplete(() {
-      if (identical(_scriptLoadInFlight[script], fut)) {
-        _scriptLoadInFlight.remove(script);
-      }
-    });
+    // `whenComplete` 同样会派生一个新 Future：`fut` 若以错误结束，这个派生
+    // Future 没人监听就是未捕获异步异常。清理动作本身不关心结果，兜掉即可。
+    unawaited(
+      fut.whenComplete(() {
+        if (identical(_scriptLoadInFlight[script], fut)) {
+          _scriptLoadInFlight.remove(script);
+        }
+      }).catchError((Object _) => null),
+    );
     return fut;
   }
 
