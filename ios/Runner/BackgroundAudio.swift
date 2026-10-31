@@ -222,8 +222,26 @@ class BackgroundAudio {
             NSLog("[BackgroundAudio] session mode → \(on ? "exclusive" : "mix")")
 
             let ok = TvBoxTryCatch({
-                try Self.applyCategoryLocked(exclusive: on)
-                try AVAudioSession.sharedInstance().setActive(true, options: [])
+                // ⚠️ 这里**不能**直接写 `try`。
+                //
+                // `TvBoxTryCatch` 的签名是 ObjC 的 `BOOL (^)(void)` —— 参数是
+                // **非 throwing** 闭包。闭包里只要出现一个 `try`，Swift 就把整个
+                // 闭包推断成 `() throws -> Void`，于是报：
+                //   Invalid conversion from throwing function of type
+                //   '() throws -> Void' to non-throwing function type '() -> Void'
+                //
+                // 两者职责本来就不同、需要并存：
+                //   · `do/catch`  接 Swift `Error`（AVAudioSession 这些 API）
+                //   · `TvBoxTryCatch` 接 ObjC `NSException`（player.play() 那类，
+                //     Swift 的 catch 根本接不住，会直接 SIGABRT）
+                do {
+                    try Self.applyCategoryLocked(exclusive: on)
+                    try AVAudioSession.sharedInstance().setActive(true, options: [])
+                } catch {
+                    NSLog("[BackgroundAudio] setExclusive 会话切换失败: \(error.localizedDescription)")
+                    // 会话没切成功就不要继续重启引擎 —— 状态不干净时 play() 更危险
+                    return
+                }
 
                 // 类别切换后引擎可能已经停了：重启再播，别盲目 play()
                 if self.isStarted {
