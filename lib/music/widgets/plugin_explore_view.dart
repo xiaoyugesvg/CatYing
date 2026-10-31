@@ -21,6 +21,7 @@ import 'package:tvbox/music/services/music_api.dart';
 import 'package:tvbox/music/services/player_manager.dart';
 import 'package:tvbox/music/theme/music_theme.dart';
 import 'package:tvbox/music/widgets/music_components.dart';
+import 'package:tvbox/music/widgets/mo_lv_blocks.dart';
 import 'package:tvbox/music/pages/plugin_song_list_page.dart';
 
 /// 插件里的一个「条目」（榜单 / 歌单 / 专辑都用它）
@@ -399,22 +400,53 @@ class _PluginExploreViewState extends State<PluginExploreView> {
                 ),
               ),
             ),
-          // ── 热门单曲 ────────────────────────────────────────────
-          //   插件只给榜单（汽水就 3 个榜）时，光靠横向卡片整页很空；
-          //   这里把第一个榜单的前 10 首铺成可点的歌曲行，直接可播。
+          // ── 热门单曲 → 「墨律」三件套（2026-10-31）─────────────────
+          //
+          // 插件只给榜单（汽水就 3 个榜）时，光靠横向卡片整页很空；
+          // 这里把第一个榜单的前 10 首按设计稿铺开：
+          //   hero 大卡 → 今日推荐 3 方卡 → 榜单热歌 01/02/03 编号列表
+          // 和「推荐 / 网易 / 酷狗」那套是**同一批组件**，所以汽水、咪咕、
+          // B站、第三方插件看起来跟内置平台完全一致。
           if (_hotSongs.isNotEmpty) ...[
-            SectionTitle(
-              title: '热门单曲',
-              action: '播放全部',
-              onAction: () =>
+            MoLvHeroCard(
+              badge: '每日推荐',
+              title: _hotSongs.first.name,
+              subtitle:
+                  '${_hotSongs.first.artists} · 共 ${_hotSongs.length} 首 · 每天更新',
+              accent: MusicTheme.tint,
+              coverUrl: _hotSongs.first.coverUrl,
+              onPlay: () =>
                   MusicPlayerManager.instance.playQueue(_hotSongs, index: 0),
             ),
-            for (var i = 0; i < _hotSongs.length; i++)
-              SongCell(
-                song: _hotSongs[i],
-                index: i,
-                playbackContext: _hotSongs,
+            if (_hotSongs.length > 1) ...[
+              const MoLvSectionTitle(title: '今日推荐', trailing: '为你挑的'),
+              MoLvRecGrid(
+                songs: _hotSongs.skip(1).toList(),
+                accent: MusicTheme.tint,
+                onTap: (i) => MusicPlayerManager.instance
+                    .playQueue(_hotSongs, index: i + 1),
               ),
+            ],
+            if (_hotSongs.length > 4) ...[
+              MoLvSectionTitle(
+                title: '榜单热歌',
+                trailing: '热门单曲',
+                onMore: () =>
+                    MusicPlayerManager.instance.playQueue(_hotSongs, index: 0),
+              ),
+              ListenableBuilder(
+                listenable: MusicPlayerManager.instance,
+                builder: (context, _) => MoLvChartList(
+                  songs: _hotSongs.skip(4).toList(),
+                  accent: MusicTheme.tint,
+                  playingKey:
+                      MusicPlayerManager.instance.currentSong?.identityKey,
+                  isPlaying: MusicPlayerManager.instance.isPlaying.value,
+                  onTap: (i) => MusicPlayerManager.instance
+                      .playQueue(_hotSongs, index: i + 4),
+                ),
+              ),
+            ],
           ] else if (_hotLoading) ...[
             const SectionTitle(title: '热门单曲'),
             Padding(

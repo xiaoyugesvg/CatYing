@@ -11,11 +11,11 @@ import 'package:tvbox/music/services/settings_store.dart';
 import 'package:tvbox/music/theme/music_theme.dart';
 import 'package:tvbox/music/theme/discover_preset.dart';
 import 'package:tvbox/music/widgets/music_components.dart';
-import 'package:tvbox/music/widgets/discover_sections.dart';
 import 'package:tvbox/music/pages/playlist_detail_page.dart';
 import 'package:tvbox/music/pages/discover_playlists_page.dart';
 import 'package:tvbox/music/pages/charts_page.dart';
 import 'package:tvbox/music/widgets/mei_cards.dart';
+import 'package:tvbox/music/widgets/mo_lv_blocks.dart';
 import 'package:tvbox/music/pages/plugin_market_page.dart';
 import 'package:tvbox/music/widgets/plugin_explore_view.dart';
 import 'package:tvbox/music/widgets/plugin_source_sheet.dart';
@@ -1327,6 +1327,68 @@ class _DiscoverPageState extends State<DiscoverPage>
   List<Widget> _buildMusicSections(DiscoverStyle style) {
     final out = <Widget>[];
 
+    // ── ⓪ 「墨律」首屏三件套（2026-10-31）─────────────────────────
+    //
+    // 设计稿 `outputs/music_ui/01_首页.png`：
+    //   hero 大卡 → 今日推荐 3 方卡 → 榜单热歌 01/02/03 编号列表
+    //
+    // ⚠️ 所有平台共用（QQ / 网易 / 酷狗 / 汽水 / 咪咕 / B站 / 第三方插件）：
+    //    组件只吃 `List<Song>`，平台差异全在 `_discoverNewSongs` 这类 getter 里，
+    //    所以换源、换平台时版式不会跳。
+    final homeSongs = _discoverNewSongs;
+    if (homeSongs.isNotEmpty) {
+      final first = homeSongs.first;
+      out.add(SliverToBoxAdapter(
+        child: MoLvHeroCard(
+          badge: _isQq ? '每日推荐' : '今日推荐',
+          title: first.name,
+          subtitle: '${first.artists} · 共 ${homeSongs.length} 首 · 每天更新',
+          accent: style.accent,
+          coverUrl: first.coverUrl,
+          onPlay: () =>
+              MusicPlayerManager.instance.playQueue(homeSongs, index: 0),
+        ),
+      ));
+
+      if (homeSongs.length > 1) {
+        out.add(const SliverToBoxAdapter(
+          child: MoLvSectionTitle(title: '今日推荐', trailing: '为你挑的'),
+        ));
+        out.add(SliverToBoxAdapter(
+          child: MoLvRecGrid(
+            songs: homeSongs.skip(1).toList(),
+            accent: style.accent,
+            onTap: (i) =>
+                MusicPlayerManager.instance.playQueue(homeSongs, index: i + 1),
+          ),
+        ));
+      }
+
+      if (homeSongs.length > 4) {
+        out.add(SliverToBoxAdapter(
+          child: MoLvSectionTitle(
+            title: '榜单热歌',
+            trailing: _isQq ? '新歌榜' : '每日更新',
+            onMore: () => _showAllNewSongs(style, songs: homeSongs),
+          ),
+        ));
+        // 必须监听 player：否则点歌后"正在播放"那条高亮不动
+        out.add(SliverToBoxAdapter(
+          child: ListenableBuilder(
+            listenable: MusicPlayerManager.instance,
+            builder: (context, _) => MoLvChartList(
+              songs: homeSongs.skip(4).toList(),
+              accent: style.accent,
+              playingKey: MusicPlayerManager.instance.currentSong?.identityKey,
+              isPlaying: MusicPlayerManager.instance.isPlaying.value,
+              onTap: (i) => MusicPlayerManager.instance.playQueue(homeSongs,
+                  index: i + 4),
+            ),
+          ),
+        ));
+      }
+    }
+
     // ── ① 探索歌单：分类胶囊 + 歌单货架 ────────────────────────────
     final playlists = _discoverPlaylists;
     if (playlists.isNotEmpty || _discoverCats.length > 1) {
@@ -1429,31 +1491,10 @@ class _DiscoverPageState extends State<DiscoverPage>
     }
 
     // ── ③ 新歌速递 / 每日推荐 ──────────────────────────────────────
-    final songs = _discoverNewSongs;
-    if (songs.isNotEmpty) {
-      out.add(SliverToBoxAdapter(
-        child: MeiSectionHeader(
-          title: _isQq ? '每日推荐' : '新歌速递',
-          showAllLabel: '查看全部',
-          onShowAll: () => _showAllNewSongs(style, songs: songs),
-        ),
-      ));
-      out.add(SliverToBoxAdapter(
-        // 🔴 必须监听 player：否则点歌后"正在播放"徽标不动
-        //（`wantKeepAlive = true`，没有监听就永远拿旧值）
-        child: ListenableBuilder(
-          listenable: MusicPlayerManager.instance,
-          builder: (context, _) => DailySongsRow(
-            style: style,
-            songs: songs,
-            playingKey: MusicPlayerManager.instance.currentSong?.identityKey,
-            isPlaying: MusicPlayerManager.instance.isPlaying.value,
-            onPlay: (i) =>
-                MusicPlayerManager.instance.playQueue(songs, index: i),
-          ),
-        ),
-      ));
-    }
+    // 2026-10-31：**已上移到 ⓪**，改成「墨律」三件套（hero + 3 方卡 + 编号列表）。
+    // 原来这里是「区块标题 + 横滑歌卡货架」，同一批歌在首屏要横滑才看得完；
+    // 现在 hero 直接给一首主推、方卡给 3 首、列表给 5 首，一屏内交代清楚。
+    // `_showAllNewSongs` 仍然保留（hero/列表的「全部 ›」都指向它）。
 
     // ── ④ 热搜关键词（真实接口，本来就是横滑卡片行）─────────────────
     out.addAll(_hotKeywordSlivers('${_source.displayName}热搜', _source));
