@@ -437,6 +437,8 @@ class SpiderService {
   /// 作废"记忆"和"取消在飞的载入"是两件事。
   void resetScriptCache() {
     _clearScriptSlot();
+    // 换源 ⇒ 还在排队/在飞的载入全部作废（见 [_sessionGeneration]）。
+    _sessionGeneration++;
     AppLog.instance.log('[SpiderService] 换源 ⇒ 作废脚本记忆（端口不动，引擎还在跑），下次请求重新载入');
   }
 
@@ -444,6 +446,7 @@ class SpiderService {
   void resetEngineMemory() {
     _clearScriptSlot();
     _engineSiteTypes.clear();
+    _sessionGeneration++;
     AppLog.instance.log('[SpiderService] 引擎端口 ⇒ $_spiderPort，作废脚本/端口记忆');
   }
 
@@ -996,6 +999,45 @@ class SpiderService {
   ///   源加载失败（与 `AppState._nodeLoadInFlight` 同一类竞态）。
   final Map<String, Future<String?>> _scriptLoadInFlight = {};
 
+  /// 引擎**只有一个槽位**（一个 Node 进程、一份 `sourceModule`）。
+  ///
+  /// ── 为什么要有这把锁（用户 2026-11-01：「切换一个就切换一个引擎，
+  ///    不要它们串」）────────────────────────────────────────────────
+  /// 上面那个 [_scriptLoadInFlight] 是**按脚本地址分桶**的：A 脚本正在
+  /// `loadSource` 时，B 脚本照样能同时进来 `loadSource` —— 引擎里后写的把
+  /// 先写的**顶掉**，两个请求还各自带着"我以为槽位里是我"的 key 继续发，
+  /// 结果就是 A 的页面显示 B 的内容（"串"）。
+  ///
+  /// 用户要的"一个源一个引擎"物理上早就成立（本来就是一个进程），
+  /// 缺的是**写者串行**：这把锁把所有 `loadSource` / drpy `load` 排成一队，
+  /// 同一时刻只有一个在写槽位。
+  Future<void> _loadQueue = Future<void>.value();
+
+  /// 源会话代数：用户换源 / 引擎重启时 +1。
+  ///
+  /// 排队等锁的请求可能是在**换源之前**发起的；轮到它时用户已经切到别的源，
+  /// 它再 `loadSource` 就等于把新源顶掉 —— 又变回"串"。
+  /// 所以每个请求入队时记下代数，真正执行前比对，不一致就**直接放弃**，
+  /// 而不是"排队排到最后把别人覆盖掉"。
+  int _sessionGeneration = 0;
+  int get sessionGeneration => _sessionGeneration;
+
+  /// 把一次"写引擎槽位"的操作排进全局队列。
+  ///
+  /// 队列本身用 Future 链实现（不引入额外依赖）：前一个跑完（无论成败）
+  /// 才轮到下一个；[gate] 保证失败也不会把整条链卡死。
+  Future<T> _enqueueLoad<T>(Future<T> Function() job) {
+    final prev = _loadQueue;
+    final gate = Completer<void>();
+    _loadQueue = gate.future;
+    return prev
+        .catchError((Object _) {})
+        .then((_) => job())
+        .whenComplete(() {
+          if (!gate.isCompleted) gate.complete();
+        });
+  }
+
   /// 主源加载入口（供 `AppState._loadSpiderSource` 调用）。
   ///
   /// drpy 标准源（`api=drpy2.min.js` + `ext=站点.js`）不能直接 loadSource(api)，
@@ -1009,7 +1051,11 @@ class SpiderService {
     }
     _mainDrpyApi = '';
     _mainDrpyExt = '';
-    return NodeJSManager.instance.loadSource(api);
+    // 这条是「载入主源」= 一次换源动作：
+    //   · 先 +1 代数，让所有在排队/在飞的其它脚本载入作废；
+    //   · 再进全局队列，避免和它们同时写同一个槽位。
+    _sessionGeneration++;
+    return _enqueueLoad(() => NodeJSManager.instance.loadSource(api));
   }
 
   /// 确保 drpy 源已载入宿主，返回站点 key。
@@ -1037,11 +1083,15 @@ class SpiderService {
       AppLog.instance.log('[SpiderService] drpy 正在载入，复用同一次流程: $extUrl');
       return playing;
     }
-    final fut = _ensureDrpyScriptInner(
-      api,
-      extUrl,
-      fallback: fallback,
-      type: type,
+    final gen = _sessionGeneration;
+    final fut = _enqueueLoad(
+      () => _ensureDrpyScriptInner(
+        api,
+        extUrl,
+        fallback: fallback,
+        type: type,
+        gen: gen,
+      ),
     );
     _drpyLoadInFlight[extUrl] = fut;
     fut.whenComplete(() {
@@ -1057,7 +1107,16 @@ class SpiderService {
     String extUrl, {
     String fallback = 'drpy',
     int? type,
+    required int gen,
   }) async {
+    // 排队期间换源 ⇒ 作废（drpy 的 `load` 同样会顶掉引擎槽位）
+    if (gen != _sessionGeneration) {
+      AppLog.instance.log(
+        '[SpiderService] 换源了（代数 $gen → $_sessionGeneration），丢弃过期 drpy 载入: $extUrl',
+      );
+      lastError = '已切换线路，本次载入作废';
+      return null;
+    }
     try {
       if (NodeJSManager.instance.managementPort <= 0) {
         final ok = await NodeJSManager.instance.startNodeJS();
@@ -1123,7 +1182,16 @@ class SpiderService {
       AppLog.instance.log('[SpiderService] 脚本正在载入，复用同一次流程: $script');
       return playing;
     }
-    final fut = _ensureNodeScriptInner(script, fallback: fallback, type: type);
+    // 入队前记下代数：排队期间用户换源了，这一趟就该作废
+    final gen = _sessionGeneration;
+    final fut = _enqueueLoad(
+      () => _ensureNodeScriptInner(
+        script,
+        fallback: fallback,
+        type: type,
+        gen: gen,
+      ),
+    );
     _scriptLoadInFlight[script] = fut;
     fut.whenComplete(() {
       if (identical(_scriptLoadInFlight[script], fut)) {
@@ -1154,7 +1222,17 @@ class SpiderService {
     String script, {
     required String fallback,
     int? type,
+    required int gen,
   }) async {
+    // 排队等锁期间用户换源了 ⇒ 这一趟是"上一个源"的残留，绝不能写槽位。
+    // 直接放弃（返回 null 会让调用方报"加载失败"，比顶掉新源好得多）。
+    if (gen != _sessionGeneration) {
+      AppLog.instance.log(
+        '[SpiderService] 换源了（代数 $gen → $_sessionGeneration），丢弃过期载入: $script',
+      );
+      lastError = '已切换线路，本次载入作废';
+      return null;
+    }
     // 命中判定前先对齐：引擎里可能已经被别的路径换成了另一个包
     // （手动加载引擎 / 未来的新入口），不对齐就会「缓存说 A、引擎里是 B」⇒ 串。
     _syncSlotFromEngine();
@@ -1192,6 +1270,16 @@ class SpiderService {
       }
       if (!await NodeJSManager.instance.waitForSpiderPort()) {
         AppLog.instance.w('[SpiderService] 等待 spiderPort 超时: $script');
+        return null;
+      }
+      // 等端口这几秒里也可能被换源 ⇒ 落盘前再比一次代数，
+      // 否则"用户已经切到 B 了，这里又把 A 写回槽位"。
+      if (gen != _sessionGeneration) {
+        AppLog.instance.log(
+          '[SpiderService] 换源了（代数 $gen → $_sessionGeneration），'
+          '放弃写入槽位: $script',
+        );
+        lastError = '已切换线路，本次载入作废';
         return null;
       }
       final (loaded, msg) = await NodeJSManager.instance.loadSource(script);

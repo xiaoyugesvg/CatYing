@@ -689,25 +689,36 @@ class AppState extends GetxController {
         cfgUrlAtRequest,
       );
 
-      // 对应 Swift: 用第一个源设置 currentSpider 并初始化
-      final firstSource = ApiConfig.instance.sourceBeanList.firstOrNull;
-      if (firstSource != null) {
+      // 对应 Swift: 设置 currentSpider 并初始化。
+      //
+      // ── 必须用**用户选的主页源**，不能用 `sourceBeanList.first` ──────
+      // 用户 2026-11-01：「切换一个就切换一个引擎，不要它们串」。
+      // 日志实锤（`app_2026-10-31(10).log`）：
+      //   09:44:44.298248 从 Spider /config 更新了 1 个线路，
+      //                   默认 homeSourceBean=localjs_ljs_4c60df18d7ae
+      //   09:44:44.298267 setCurrentSpider: key=official_aggregate   ← 就是这里
+      //   09:44:47.483594 setCurrentSpider: key=localjs_ljs_4c60df18d7ae
+      // `/config` 下发的站点里第一条是引擎内部的聚合源，这里拿它覆盖
+      // currentSpider ⇒ 用户选的本地 JS 立刻被顶掉、详情页拿错 key ⇒ "串"。
+      final home = ApiConfig.instance.homeSourceBean.value;
+      final target = home ?? ApiConfig.instance.sourceBeanList.firstOrNull;
+      if (target != null) {
         loadingPhase.value = LoadingPhase.initializingSpider;
         // 传**原始 api**（SpiderService 内部再决定走 Node 还是 Python 引擎）
         SpiderService.instance.setCurrentSpider(
-          firstSource.key,
-          firstSource.type,
-          firstSource.api,
-          ext: firstSource.ext,
-          jar: firstSource.jar,
+          target.key,
+          target.type,
+          target.api,
+          ext: target.ext,
+          jar: target.jar,
         );
         // 对应 Swift try? await - 忽略初始化错误
         try {
           await SpiderService.instance.initSpider(
-            firstSource.key,
-            firstSource.type,
-            firstSource.api,
-            ext: firstSource.ext ?? '',
+            target.key,
+            target.type,
+            target.api,
+            ext: target.ext ?? '',
           );
         } catch (e) {
           AppLog.instance.log('[app_state] swallowed: $e');
