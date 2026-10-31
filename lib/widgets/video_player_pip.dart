@@ -44,11 +44,11 @@ class VideoPlayerPip {
   /// iOS 系统 PiP 通道（对应 ios/Runner/PipManager.swift）
   static const MethodChannel _iosChannel = MethodChannel('pip_manager');
 
-  /// AetherEngine（FF 核心）的 PiP 通道（对应 ios/Runner/AetherEngineBridge.swift）。
+  /// KSPlayer（FF 核心）的 PiP 通道（对应 ios/Runner/KSEngine.swift）。
   /// KS 用自带的 sample-buffer 小窗，不走 AVPlayer 的 startPip；
   /// 但 onPipStarted/onPipStopped 事件原生侧仍通过 "pip_manager" 通道名
   /// 回调，与 AV 路径共用下面同一套状态机。
-  static const MethodChannel _aetherChannel = MethodChannel('aether_player');
+  static const MethodChannel _ksChannel = MethodChannel('ks_player');
 
   // ========== 桌面端状态 ==========
   bool _isActive = false;
@@ -63,7 +63,7 @@ class VideoPlayerPip {
 
   // ========== iOS 系统 PiP 状态 ==========
   bool _iosActive = false;
-  /// 当前小窗是否走 AetherPlayer 通道（exitIos 据此分流 stopPip / exitPip）
+  /// 当前小窗是否走 KSPlayer 通道（exitIos 据此分流 stopPip / exitPip）
   bool _iosViaKs = false;
   double _iosLastPosition = 0;
   VoidCallback? _iosOnStopped;
@@ -172,11 +172,11 @@ class VideoPlayerPip {
     }
   }
 
-  /// iOS：进入 AetherPlayer 自带小窗（FF 核心）。
+  /// iOS：进入 KSPlayer 自带小窗（FF 核心）。
   /// 与 [enterIos] 的差异：KS 的 sample-buffer 小窗与前台播放共用**同一个**
   /// 播放器实例（画面被系统小窗接管，不另起 AVPlayer），无需预热。
   /// onStarted/onStopped 回调与 AV 路径共用（原生通过 "pip_manager" 通道名回调）。
-  Future<bool> enterIosAether({
+  Future<bool> enterIosKs({
     required String url,
     Map<String, String>? headers,
     Duration? position,
@@ -190,7 +190,7 @@ class VideoPlayerPip {
     _iosOnStopped = onStopped;
     _iosOnStarted = onStarted;
     try {
-      await _aetherChannel.invokeMethod<void>('enterPip', {
+      await _ksChannel.invokeMethod<void>('enterPip', {
         'url': url,
         'headers': headers ?? const <String, String>{},
         'position': position?.inMilliseconds ?? 0,
@@ -212,7 +212,7 @@ class VideoPlayerPip {
     if (!Platform.isIOS) return;
     try {
       if (_iosViaKs) {
-        await _aetherChannel.invokeMethod<void>('exitPip');
+        await _ksChannel.invokeMethod<void>('exitPip');
       } else {
         await _iosChannel.invokeMethod<void>('stopPip');
       }

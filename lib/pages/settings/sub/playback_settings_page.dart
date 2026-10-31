@@ -98,10 +98,9 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
         ),
         SettingsHelpItem(
           icon: Icons.hd_outlined,
-          title: '方式三：AetherEngine 内核（FFmpeg + VideoToolbox）',
-          body: 'FFmpeg 拆流 + 原生解码，专治 AVPlayer 放不了的高码率 / MKV / '
-              '多音轨片源，支持 HDR / Dolby Vision / Dolby Atmos，也自带小窗。'
-              '4K HDR 卡顿时优先试它。',
+          title: '方式三：KSPlayer 内核（FFmpeg + Metal）',
+          body: 'FFmpeg 解码 + Metal 渲染，专治 AVPlayer 放不了的高码率 / MKV / '
+              '多音轨片源，也自带小窗。4K HDR 卡顿时优先试它。',
         ),
         SettingsHelpItem(
           icon: Icons.memory,
@@ -570,7 +569,7 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
       title: '直播播放器',
       options: const [
         PlayerEngine.avplayer,
-        PlayerEngine.aether,
+        PlayerEngine.ksplayer,
         PlayerEngine.mpv,
       ],
       selected: PlayerPrefs.instance.liveEngine.value,

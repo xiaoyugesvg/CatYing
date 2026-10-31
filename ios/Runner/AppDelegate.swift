@@ -130,20 +130,15 @@ import Vision
       print("[AppDelegate] ❌ 无法获取 AvEngine 的 registrar")
     }
 
-    // 注册全局唯一 AetherEngine（第四播放核心「FF」：FFmpeg demux + VideoToolbox 解码，
-    // MKV/ASS/多音轨全格式 + HDR/Dolby Vision/Dolby Atmos）。
-    //
-    // ⚠️ 2026-11-01：原来是 KSPlayer。换成 AetherEngine 的原因是两者都静态链接
-    //    一整套 FFmpeg（KSPlayer → kingslay/FFmpegKit，AetherEngine → FFmpegBuild），
-    //    同时链接必然 duplicate symbol，所以只能二选一。
-    if let aeRegistrar = engineBridge.pluginRegistry.registrar(forPlugin: "AetherEngineBridge") {
-      AetherEngineBridge.shared.register(messenger: aeRegistrar.messenger())
-      aeRegistrar.register(
-        AetherPlayerViewFactory(messenger: aeRegistrar.messenger()),
-        withId: "aether_player_view"
+    // 注册全局唯一 KSPlayer（第四播放核心「FF」：FFmpeg + Metal，MKV 等全格式）
+    if let ksRegistrar = engineBridge.pluginRegistry.registrar(forPlugin: "KSEngine") {
+      KSEngine.shared.register(messenger: ksRegistrar.messenger())
+      ksRegistrar.register(
+        KSPlayerViewFactory(messenger: ksRegistrar.messenger()),
+        withId: "ks_player_view"
       )
     } else {
-      print("[AppDelegate] ❌ 无法获取 AetherEngineBridge 的 registrar")
+      print("[AppDelegate] ❌ 无法获取 KSEngine 的 registrar")
     }
 
     // 注册 TTS（听书朗读）

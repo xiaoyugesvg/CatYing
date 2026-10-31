@@ -25,7 +25,7 @@ import 'package:tvbox/widgets/playback_surface.dart';
 import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:tvbox/widgets/app_player.dart';
 import 'package:tvbox/widgets/ios_av_player.dart';
-import 'package:tvbox/widgets/aether_player.dart';
+import 'package:tvbox/widgets/ks_player.dart';
 import 'package:tvbox/widgets/mpv_app_player.dart';
 import 'package:tvbox/widgets/video_player.dart';
 import 'package:tvbox/widgets/video_player_pip.dart';
@@ -119,7 +119,7 @@ class _DetailPageState extends State<DetailPage> {
 
   /// 「正在切换内核」：期间播放器区域只渲染"加载中"空壳。
   ///
-  /// iOS 上 AVPlayer 的画面是 `UiKitView`（原生视图），mpv / AetherPlayer 是
+  /// iOS 上 AVPlayer 的画面是 `UiKitView`（原生视图），mpv / KSPlayer 是
   /// Flutter `Texture`；原生视图的移除是异步的，同一帧里换掉会出现
   /// 「有声音没画面」。这个标记让 build 先不挂任何画面，等原生视图退场
   /// （见 `_waitPlatformViewDetach`）再创建新内核。
@@ -526,7 +526,7 @@ class _DetailPageState extends State<DetailPage> {
       }
     } catch (_) {}
     // 🔴 停播放器必须放在 dispose 最前面：后面任何一步抛异常都不允许
-    // 留下"页面没了、声音还在放"。尤其 FF(AetherPlayer) 核心：原生 close
+    // 留下"页面没了、声音还在放"。尤其 FF(KSPlayer) 核心：原生 close
     // 之后还有异步收尾，越早发越好。
     _player?.dispose();
     _player = null;
@@ -665,7 +665,7 @@ class _DetailPageState extends State<DetailPage> {
       _player!.open(AppMedia(url, httpHeaders: headers, start: start));
       return;
     }
-    // 按引擎创建：iOS 默认 IosAvPlayer（与小窗共用 AVPlayer）；AetherPlayer 备用（全格式）；MPV 兜底
+    // 按引擎创建：iOS 默认 IosAvPlayer（与小窗共用 AVPlayer）；KSPlayer 备用（全格式）；MPV 兜底
     final engine = PlayerPrefs.instance.vodEngine.value;
     if (engine == PlayerEngine.mpv) {
       final mpv = MpvAppPlayer(config: const AppConfig(title: 'TVBox'));
@@ -674,8 +674,8 @@ class _DetailPageState extends State<DetailPage> {
         buffer: PlayerPrefs.instance.bufferMode.value,
       );
       _player = mpv;
-    } else if (engine == PlayerEngine.aether && Platform.isIOS) {
-      _player = AetherPlayer(config: const AppConfig(title: 'TVBox'));
+    } else if (engine == PlayerEngine.ksplayer && Platform.isIOS) {
+      _player = KSPlayer(config: const AppConfig(title: 'TVBox'));
     } else if (Platform.isIOS) {
       _player = IosAvPlayer(config: const AppConfig(title: 'TVBox'));
     } else {
@@ -693,7 +693,7 @@ class _DetailPageState extends State<DetailPage> {
   /// 按新偏好立刻重建并从原位置续播，不用等下一集。
   /// ObjectKey(_player) 会让 VideoPlayerWidget 整体 remount，状态干净。
   ///
-  /// ⚠️ 2026-10-19：**必须 await dispose** —— AetherPlayer 的 close 是异步的
+  /// ⚠️ 2026-10-19：**必须 await dispose** —— KSPlayer 的 close 是异步的
   ///   （原生层销毁解码线程、释放 Metal 资源都需要时间），不 await 就创建
   ///   新实例会导致旧引擎还没死透、新引擎就 open，表现为「黑屏但有声音」
   ///   （音频已起、视频层没挂上）。await 后等旧引擎完全退出再重建。
@@ -718,7 +718,7 @@ class _DetailPageState extends State<DetailPage> {
         ? Map<String, String>.from(_controller.playHeaders)
         : const <String, String>{};
     final pos = _player?.state.position ?? Duration.zero;
-    // 先暂停再 dispose：dispose 是异步的（AetherPlayer 要等解码线程退出、
+    // 先暂停再 dispose：dispose 是异步的（KSPlayer 要等解码线程退出、
     // 释放 Metal 资源），期间若继续播放，记录的进度会落后实际位置。
     if (_player?.state.playing == true) {
       await _player?.pause();
@@ -728,7 +728,7 @@ class _DetailPageState extends State<DetailPage> {
     _player = null;
     // 🔴 iOS 换内核"有声音没画面"的根因：
     //   AVPlayer 的画面是 `UiKitView`（原生 AVPlayerLayer），
-    //   mpv / AetherPlayer 的画面是 Flutter `Texture`。iOS 上平台视图的移除是
+    //   mpv / KSPlayer 的画面是 Flutter `Texture`。iOS 上平台视图的移除是
     //   **异步**的 —— 如果同一帧里摘掉原生视图、挂上新纹理，原生视图还留在
     //   视图层级最上层把画面盖住，于是只剩声音；退出播放页重进（整页重建）才恢复。
     //   所以这里先渲染一帧"加载中"空壳，等原生视图真正退场再创建新内核。
@@ -2665,7 +2665,7 @@ class _DetailPageState extends State<DetailPage> {
           startFromHistory: false,
         ));
     if (!mounted) return;
-    // ⚠️ iOS 的 AVPlayer / AetherPlayer 是**全进程共用一个原生播放器**：
+    // ⚠️ iOS 的 AVPlayer / KSPlayer 是**全进程共用一个原生播放器**：
     //    短剧页 open() 时已经把原生实例接管了，返回后本页手上的实例
     //    指向的还是短剧那一集（画面/进度全错）。
     //    这里用原地址 + 离开前的进度重新 open 一次，把播放器拿回来。

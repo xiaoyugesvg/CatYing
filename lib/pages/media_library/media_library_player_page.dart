@@ -12,7 +12,7 @@ import 'package:tvbox/services/player_prefs.dart';
 import 'package:tvbox/services/play_pipeline.dart' show kMovieWebUrlRejected;
 import 'package:tvbox/widgets/app_player.dart';
 import 'package:tvbox/widgets/ios_av_player.dart';
-import 'package:tvbox/widgets/aether_player.dart';
+import 'package:tvbox/widgets/ks_player.dart';
 import 'package:tvbox/widgets/mpv_app_player.dart';
 import 'package:tvbox/widgets/video_player.dart';
 import 'package:tvbox/widgets/playback_surface.dart';
@@ -79,8 +79,8 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
     if (engine == PlayerEngine.mpv) {
       return MpvAppPlayer(config: const AppConfig(title: 'TVBox'));
     }
-    if (engine == PlayerEngine.aether && Platform.isIOS) {
-      return AetherPlayer(config: const AppConfig(title: 'TVBox'));
+    if (engine == PlayerEngine.ksplayer && Platform.isIOS) {
+      return KSPlayer(config: const AppConfig(title: 'TVBox'));
     }
     if (Platform.isIOS) {
       return IosAvPlayer(config: const AppConfig(title: 'TVBox'));
@@ -91,7 +91,7 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
   Future<void> _rebuildPlayer({Duration? start}) async {
     final old = _player;
     if (old != null && _ownsPlayer) {
-      // ⚠️ 2026-10-19：必须 await dispose —— AetherPlayer 的 close 是异步的，
+      // ⚠️ 2026-10-19：必须 await dispose —— KSPlayer 的 close 是异步的，
       //   不 await 就创建新实例会导致旧引擎未死透、新引擎就 open，
       //   表现为「黑屏但有声音」（音频已起、视频层没挂上）。
       await old.dispose();
