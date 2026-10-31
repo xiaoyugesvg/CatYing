@@ -46,7 +46,8 @@ class SourceService {
 
   /// 获取指定源的分类列表和首页推荐 - 对应 Swift getSort
   Future<(List<SortData> sorts, List<Video> homeVideos)> getSort(
-      SourceBean sourceBean) async {
+      SourceBean sourceBean,
+      {String owner = SpiderService.ownerVod}) async {
     final api = sourceBean.api;
     // 对应 Swift: Spider 源不需要检查 api 是否为空
     if (!sourceBean.isSpiderSource && api.isEmpty) {
@@ -54,7 +55,7 @@ class SourceService {
     }
 
     if (sourceBean.isSpiderSource) {
-      return _getSpiderSort(sourceBean);
+      return _getSpiderSort(sourceBean, owner: owner);
     }
 
     // XBPQ 规则源：本地规则 + 抓站，没有可请求的 api 地址
@@ -279,6 +280,7 @@ class SourceService {
     SortData sortData, {
     int page = 1,
     Map<String, String>? filters,
+    String owner = SpiderService.ownerVod,
   }) async {
     final api = sourceBean.api;
     // 对应 Swift: Spider 源不需要检查 api 是否为空
@@ -288,7 +290,7 @@ class SourceService {
 
     if (sourceBean.isSpiderSource) {
       return _getSpiderList(sourceBean, sortData,
-          page: page, filters: filters);
+          page: page, filters: filters, owner: owner);
     }
 
     if (sourceBean.isXbpqSource) {
@@ -567,7 +569,8 @@ class SourceService {
   // ============================================================
 
   /// 获取视频详情 - 对应 Swift getDetail
-  Future<VodInfo?> getDetail(SourceBean sourceBean, String vodId) async {
+  Future<VodInfo?> getDetail(SourceBean sourceBean, String vodId,
+      {String owner = SpiderService.ownerVod}) async {
     final api = sourceBean.api;
     // 对应 Swift: Spider 源不需要检查 api 是否为空
     if (!sourceBean.isSpiderSource && api.isEmpty) {
@@ -575,7 +578,7 @@ class SourceService {
     }
 
     if (sourceBean.isSpiderSource) {
-      return _getSpiderDetail(sourceBean, vodId);
+      return _getSpiderDetail(sourceBean, vodId, owner: owner);
     }
 
     if (sourceBean.isXbpqSource) {
@@ -669,7 +672,8 @@ class SourceService {
   // ============================================================
 
   /// 在指定源中搜索 - 对应 Swift search
-  Future<List<Video>> search(SourceBean sourceBean, String keyword) async {
+  Future<List<Video>> search(SourceBean sourceBean, String keyword,
+      {String owner = SpiderService.ownerVod}) async {
     final api = sourceBean.api;
     // 对应 Swift: Spider 源不需要检查 api 是否为空
     if (!sourceBean.isSpiderSource && api.isEmpty) {
@@ -677,7 +681,7 @@ class SourceService {
     }
 
     if (sourceBean.isSpiderSource) {
-      return _spiderSearch(sourceBean, keyword);
+      return _spiderSearch(sourceBean, keyword, owner: owner);
     }
 
     if (sourceBean.isXbpqSource) {
@@ -730,7 +734,8 @@ class SourceService {
   }
 
   /// 多源并发搜索 - 对应 Swift searchAll
-  Future<List<Video>> searchAll(String keyword) async {
+  Future<List<Video>> searchAll(String keyword,
+      {String owner = SpiderService.ownerVod}) async {
     final sources = ApiConfig.instance.getSearchableSources();
     final validSources =
         sources.where((s) => s.isSupportedInSwift).toList();
@@ -739,8 +744,8 @@ class SourceService {
     final futures = <Future<List<Video>>>[];
 
     for (final source in validSources) {
-      futures
-          .add(search(source, keyword).catchError((_) => <Video>[]));
+      futures.add(
+          search(source, keyword, owner: owner).catchError((_) => <Video>[]));
     }
 
     final results = await Future.wait(futures);
@@ -985,7 +990,9 @@ class SourceService {
   /// 设置当前 Spider 并获取首页内容
   /// 对应 Swift getSpiderSort - 调用 setCurrentSpider 设置全局状态
   Future<(List<SortData>, List<Video>)> _getSpiderSort(
-      SourceBean sourceBean) async {
+      SourceBean sourceBean, {
+    String owner = SpiderService.ownerVod,
+  }) async {
     final spider = SpiderService.instance;
 
     // 对应 Swift: key 去掉 nodejs_ 前缀；脚本路由见下方 api/ext 说明
@@ -1000,18 +1007,18 @@ class SourceService {
 
     // 对应 Swift: setCurrentSpider 设置全局状态（供详情页 getPlayUrl 使用）
     spider.setCurrentSpider(key, sourceBean.type, api,
-        ext: sourceBean.ext, jar: sourceBean.jar);
+        ext: sourceBean.ext, jar: sourceBean.jar, owner: owner);
 
     // 初始化 Spider - 对应 Swift: try await spider.initSpider()
     try {
-      await spider.initSpider(key, sourceBean.type, api, ext: ext);
+      await spider.initSpider(key, sourceBean.type, api, ext: ext, owner: owner);
     } catch (e) {
         AppLog.instance.log('[source_service] swallowed: $e');
       }
 
     // 获取首页内容
-    final result =
-        await spider.getHomeContent(key, sourceBean.type, api, ext: ext);
+    final result = await spider.getHomeContent(key, sourceBean.type, api,
+        ext: ext, owner: owner);
     if (result == null) {
       // 以前这里直接返回"空分类 + 空列表" ⇒ 首页一片空白，用户只知道"啥都没有"，
       // 根本分不清是引擎没起来、脚本没下下来、脚本报错，还是源站挂了
@@ -1066,6 +1073,7 @@ class SourceService {
     SortData sortData, {
     int page = 1,
     Map<String, String>? filters,
+    String owner = SpiderService.ownerVod,
   }) async {
     final spider = SpiderService.instance;
 
@@ -1076,9 +1084,9 @@ class SourceService {
     final api = sourceBean.api;
     final ext = sourceBean.ext ?? '';
 
-    // 对应 Swift: setCurrentSpider 设置全局状态
+    // 对应 Swift: setCurrentSpider 设置全局状态（按归属者分区，不覆盖别人）
     spider.setCurrentSpider(key, sourceBean.type, api,
-        ext: sourceBean.ext, jar: sourceBean.jar);
+        ext: sourceBean.ext, jar: sourceBean.jar, owner: owner);
 
     // 获取分类内容
     final result = await spider.getCategoryContent(
@@ -1087,6 +1095,7 @@ class SourceService {
       page: page,
       filters: filters?.map((k, v) => MapEntry(k, v)),
       ext: ext,
+      owner: owner,
     );
 
     if (result == null) return [];
@@ -1096,8 +1105,8 @@ class SourceService {
 
   /// 获取 Spider 详情
   /// 对应 Swift getSpiderDetail - 调用 setCurrentSpider 设置全局状态
-  Future<VodInfo?> _getSpiderDetail(
-      SourceBean sourceBean, String vodId) async {
+  Future<VodInfo?> _getSpiderDetail(SourceBean sourceBean, String vodId,
+      {String owner = SpiderService.ownerVod}) async {
     final spider = SpiderService.instance;
 
     // 对应 Swift: key 去掉 nodejs_ 前缀；脚本路由见下方 api/ext 说明
@@ -1109,11 +1118,11 @@ class SourceService {
 
     // 对应 Swift: setCurrentSpider 设置全局状态（供详情页 getPlayUrl 使用）
     spider.setCurrentSpider(key, sourceBean.type, api,
-        ext: sourceBean.ext, jar: sourceBean.jar);
+        ext: sourceBean.ext, jar: sourceBean.jar, owner: owner);
 
     // 获取详情 - 对应 Swift: getDetail 只发送 id
-    final result =
-        await spider.getDetail(key, sourceBean.type, api, vodId, ext: ext);
+    final result = await spider.getDetail(key, sourceBean.type, api, vodId,
+        ext: ext, owner: owner);
     if (result == null) return null;
 
     final list = result['list'] as List<dynamic>?;
@@ -1147,8 +1156,8 @@ class SourceService {
 
   /// Spider 搜索 - 对应 Swift spiderSearch
   /// 使用 searchWithSpider 原子操作，避免并发竞态条件
-  Future<List<Video>> _spiderSearch(
-      SourceBean sourceBean, String keyword) async {
+  Future<List<Video>> _spiderSearch(SourceBean sourceBean, String keyword,
+      {String owner = SpiderService.ownerVod}) async {
     final spider = SpiderService.instance;
 
     // 对应 Swift: key 去掉 nodejs_ 前缀；脚本路由见下方 api/ext 说明
@@ -1168,6 +1177,7 @@ class SourceService {
       api: api,
       keyword: keyword,
       ext: ext,
+      owner: owner,
     );
     if (result == null) {
       AppLog.instance.log('[SourceService] _spiderSearch: searchWithSpider 返回 null');

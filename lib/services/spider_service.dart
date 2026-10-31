@@ -437,6 +437,7 @@ class SpiderService {
   /// 作废"记忆"和"取消在飞的载入"是两件事。
   void resetScriptCache() {
     _clearScriptSlot();
+    _cancelHandBack();
     // 换源 ⇒ 还在排队/在飞的载入全部作废（见 [_sessionGeneration]）。
     _sessionGeneration++;
     AppLog.instance.log('[SpiderService] 换源 ⇒ 作废脚本记忆（端口不动，引擎还在跑），下次请求重新载入');
@@ -446,6 +447,7 @@ class SpiderService {
   void resetEngineMemory() {
     _clearScriptSlot();
     _engineSiteTypes.clear();
+    _cancelHandBack();
     _sessionGeneration++;
     AppLog.instance.log('[SpiderService] 引擎端口 ⇒ $_spiderPort，作废脚本/端口记忆');
   }
@@ -1022,6 +1024,75 @@ class SpiderService {
   int _sessionGeneration = 0;
   int get sessionGeneration => _sessionGeneration;
 
+  // ============================================================
+  // 槽位归属者（方案 B，用户 2026-11-01「走 B」）
+  // ============================================================
+  //
+  // 引擎只有一个槽位，但**谁在用**必须说得清。以前只有一个
+  // `_loadedScriptUrl`，它只回答"载入的是哪个脚本"，不回答"这个脚本是谁要的"
+  // ⇒ 短剧页把槽位换成自己的脚本后，影视首页的请求照样往里打，两边互相顶。
+  //
+  // 现在每次载入都登记 owner：
+  //   · 同 owner + 同脚本 ⇒ 命中，不重新载入（不抖）；
+  //   · 不同 owner ⇒ 排队换槽位（不串）；
+  //   · 槽位空闲 [_kHandBackDelay] 后，自动把**影视主源**的脚本装回去，
+  //     这样用户从短剧/海阔回到影视首页时不用再等一次 loadSource。
+
+  /// 影视模块（默认归属者，也是空闲归还的目标）。
+  static const String ownerVod = 'vod';
+
+  /// 短剧模块。
+  static const String ownerDrama = 'drama';
+
+  /// 小程序 / 海阔 / RSS 共用的播放与列表页。
+  static const String ownerMiniApp = 'miniapp';
+
+  /// 阅读模块。
+  static const String ownerReading = 'reading';
+
+  /// 槽位当前属于谁（空 = 不知道 / 已作废）。
+  String _slotOwner = '';
+  String get slotOwner => _slotOwner;
+
+  /// 每个归属者最后一次用的脚本（空闲归还时把 [ownerVod] 的那条装回去）。
+  final Map<String, String> _ownerScript = {};
+
+  Timer? _handBackTimer;
+
+  /// 槽位空闲多久把主源装回去。
+  ///
+  /// 太短会在「影视 ↔ 短剧」来回切时反复 loadSource（每次 0.5~2s，明显卡）；
+  /// 太长又等于没还。8 秒够用户看完一次翻页，也够在切回影视前还完。
+  static const Duration _kHandBackDelay = Duration(seconds: 8);
+
+  /// 登记「这次载入是谁要的」，并安排空闲归还。
+  void _noteSlotOwner(String owner, String script) {
+    _slotOwner = owner;
+    _ownerScript[owner] = script;
+    _handBackTimer?.cancel();
+    _handBackTimer = null;
+    // 影视主源本来就该常驻，不用归还
+    if (owner == ownerVod) return;
+    final primary = _ownerScript[ownerVod];
+    if (primary == null || primary.isEmpty) return;
+    _handBackTimer = Timer(_kHandBackDelay, () {
+      if (_slotOwner == ownerVod) return;
+      if (_slotOwner != owner) return; // 期间又被别人占了，让它自己还
+      AppLog.instance.log('[SpiderService] 槽位空闲 ⇒ 归还主源: $primary');
+      // 归还**不动代数**：它只是把槽位装回主源，不该作废别人在飞的请求。
+      unawaited(
+        _ensureNodeScript(primary, fallback: '', owner: ownerVod),
+      );
+    });
+  }
+
+  /// 取消空闲归还（换源 / 引擎重启时调用）。
+  void _cancelHandBack() {
+    _handBackTimer?.cancel();
+    _handBackTimer = null;
+    _slotOwner = '';
+  }
+
   /// 把一次"写引擎槽位"的操作排进全局队列。
   ///
   /// 队列本身用 Future 链实现（不引入额外依赖）：前一个跑完（无论成败）
@@ -1064,6 +1135,7 @@ class SpiderService {
     String ext, {
     String fallback = 'drpy',
     int? type,
+    String owner = ownerVod,
   }) {
     final extUrl = DrpyService.resolveExt(api, ext);
     if (extUrl.isEmpty) {
@@ -1076,11 +1148,13 @@ class SpiderService {
         _loadedScriptUrl == 'drpy::$extUrl' &&
         _loadedScriptKey.isNotEmpty) {
       _loadedScriptCandidates = [_loadedScriptKey];
+      _noteSlotOwner(owner, 'drpy::$extUrl');
       return Future.value(_loadedScriptKey);
     }
     final playing = _drpyLoadInFlight[extUrl];
     if (playing != null) {
       AppLog.instance.log('[SpiderService] drpy 正在载入，复用同一次流程: $extUrl');
+      _noteSlotOwner(owner, 'drpy::$extUrl');
       return playing;
     }
     final gen = _sessionGeneration;
@@ -1094,6 +1168,12 @@ class SpiderService {
       ),
     );
     _drpyLoadInFlight[extUrl] = fut;
+    fut.then(
+      (k) {
+        if (k != null) _noteSlotOwner(owner, 'drpy::$extUrl');
+      },
+      onError: (Object _) {},
+    );
     fut.whenComplete(() {
       if (identical(_drpyLoadInFlight[extUrl], fut)) {
         _drpyLoadInFlight.remove(extUrl);
@@ -1176,10 +1256,12 @@ class SpiderService {
     String script, {
     required String fallback,
     int? type,
+    String owner = ownerVod,
   }) {
     final playing = _scriptLoadInFlight[script];
     if (playing != null) {
       AppLog.instance.log('[SpiderService] 脚本正在载入，复用同一次流程: $script');
+      _noteSlotOwner(owner, script);
       return playing;
     }
     // 入队前记下代数：排队期间用户换源了，这一趟就该作废
@@ -1193,6 +1275,15 @@ class SpiderService {
       ),
     );
     _scriptLoadInFlight[script] = fut;
+    // 载入成功才登记归属者：失败/作废的那一趟不配占用槽位。
+    // ⚠️ 必须带 onError：`then` 会派生一个新 Future，没人监听时错误会变成
+    //    未捕获异步异常（Flutter 里直接进 zone error）。这里只关心成功值。
+    fut.then(
+      (k) {
+        if (k != null) _noteSlotOwner(owner, script);
+      },
+      onError: (Object _) {},
+    );
     fut.whenComplete(() {
       if (identical(_scriptLoadInFlight[script], fut)) {
         _scriptLoadInFlight.remove(script);
@@ -1339,6 +1430,7 @@ class SpiderService {
     required String action,
     required Map<String, dynamic> nodeArgs,
     required Map<String, dynamic> pyArgs,
+    String owner = ownerVod,
   }) async {
     final script = _scriptUrl(api, ext);
     // 每轮清一次：否则上一次失败的旧原因会粘住（`??=` 会保留它），
@@ -1397,7 +1489,7 @@ class SpiderService {
     // ── drpy 标准源（api=drpy2.min.js + ext=站点.js）────────────
     // 由 drpy_host.js 提供 /config 与 /spider 路由，这里只负责确保它已载入。
     if (isDrpySource(api, ext)) {
-      final k = await _ensureDrpyScript(api, ext, fallback: key, type: type);
+      final k = await _ensureDrpyScript(api, ext, fallback: key, type: type, owner: owner);
       if (k == null) {
         lastError ??= 'drpy 源加载失败：$ext';
         return null;
@@ -1454,7 +1546,7 @@ class SpiderService {
       engineKey = omniKey;
     } else if (script.isNotEmpty && !isCspPlaceholder) {
       // 聚合配置里的脚本源：按需载入脚本，用引擎自报的真实 key
-      final k = await _ensureNodeScript(script, fallback: key, type: type);
+      final k = await _ensureNodeScript(script, fallback: key, type: type, owner: owner);
       if (k == null) {
         lastError ??= '脚本源加载失败: $script';
         return null;
@@ -1486,8 +1578,9 @@ class SpiderService {
               _mainDrpyExt,
               fallback: key,
               type: type,
+              owner: owner,
             )
-          : await _ensureNodeScript(mainScriptUrl, fallback: key, type: type);
+          : await _ensureNodeScript(mainScriptUrl, fallback: key, type: type, owner: owner);
       if (k != null) engineKey = k;
       candidates = List<String>.of(_loadedScriptCandidates);
     } else {
@@ -1507,8 +1600,9 @@ class SpiderService {
                 _mainDrpyExt,
                 fallback: key,
                 type: type,
+                owner: owner,
               )
-            : await _ensureNodeScript(mainScriptUrl, fallback: key, type: type);
+            : await _ensureNodeScript(mainScriptUrl, fallback: key, type: type, owner: owner);
         if (k != null) engineKey = k;
         candidates = List<String>.of(_loadedScriptCandidates);
       } else if (mainScriptUrl.isEmpty) {
@@ -1554,7 +1648,7 @@ class SpiderService {
       _loadedScriptUrl = '';
       _loadedScriptKey = '';
       _loadedScriptCandidates = [];
-      final k = await _ensureNodeScript(script, fallback: key, type: type);
+      final k = await _ensureNodeScript(script, fallback: key, type: type, owner: owner);
       if (k != null) {
         final retry = await _postSpiderWithKeyFallback(
           candidates: List<String>.of(_loadedScriptCandidates),
@@ -1660,13 +1754,14 @@ class SpiderService {
     int type,
     String api, {
     String ext = '',
+    String owner = ownerVod,
   }) async {
     final script = _scriptUrl(api, ext);
     if (script.isNotEmpty && _isPythonScript(script)) return null;
 
     // drpy 标准源：api 是运行时、ext 是站点规则 ⇒ 交给 drpy 宿主
     if (isDrpySource(api, ext)) {
-      final k = await _ensureDrpyScript(api, ext, fallback: key, type: type);
+      final k = await _ensureDrpyScript(api, ext, fallback: key, type: type, owner: owner);
       if (k == null) return null;
       return _postSpiderWithKeyFallback(
         candidates: [k],
@@ -1691,7 +1786,7 @@ class SpiderService {
     } else if (script.isNotEmpty && !script.toLowerCase().startsWith('csp_')) {
       // ⚠️ csp_ 占位源：脚本已随主源驻留引擎，不能当脚本地址去 loadSource
       //    （会 404 白等一次网络往返），直接用配置 key 调引擎即可。
-      final k = await _ensureNodeScript(script, fallback: key, type: type);
+      final k = await _ensureNodeScript(script, fallback: key, type: type, owner: owner);
       if (k != null) engineKey = k;
       candidates = List<String>.of(_loadedScriptCandidates);
     } else if (_needMainScriptRefresh) {
@@ -1702,8 +1797,9 @@ class SpiderService {
               _mainDrpyExt,
               fallback: key,
               type: type,
+              owner: owner,
             )
-          : await _ensureNodeScript(mainScriptUrl, fallback: key, type: type);
+          : await _ensureNodeScript(mainScriptUrl, fallback: key, type: type, owner: owner);
       if (k != null) engineKey = k;
       candidates = List<String>.of(_loadedScriptCandidates);
     }
@@ -1726,6 +1822,7 @@ class SpiderService {
     int type,
     String api, {
     String ext = '',
+    String owner = ownerVod,
   }) {
     return _dispatchScript(
       key: key,
@@ -1735,6 +1832,7 @@ class SpiderService {
       action: 'home',
       nodeArgs: const {},
       pyArgs: const {},
+      owner: owner,
     );
   }
 
@@ -1747,6 +1845,7 @@ class SpiderService {
     int page = 1,
     Map<String, dynamic>? filters,
     String ext = '',
+    String owner = ownerVod,
   }) {
     return _dispatchScript(
       key: key,
@@ -1766,6 +1865,7 @@ class SpiderService {
         'filter': filters != null && filters.isNotEmpty,
         'extend': filters ?? {},
       },
+      owner: owner,
     );
   }
 
@@ -1776,6 +1876,7 @@ class SpiderService {
     String api,
     String id, {
     String ext = '',
+    String owner = ownerVod,
   }) {
     return _dispatchScript(
       key: key,
@@ -1785,6 +1886,7 @@ class SpiderService {
       action: 'detail',
       nodeArgs: <String, dynamic>{'id': id},
       pyArgs: <String, dynamic>{'ids': id},
+      owner: owner,
     );
   }
 
@@ -1796,6 +1898,7 @@ class SpiderService {
     String flag,
     String id, {
     String ext = '',
+    String owner = ownerVod,
   }) async {
     final r = await _dispatchScript(
       key: key,
@@ -1805,6 +1908,7 @@ class SpiderService {
       action: 'play',
       nodeArgs: <String, dynamic>{'flag': flag, 'id': id},
       pyArgs: <String, dynamic>{'flag': flag, 'id': id},
+      owner: owner,
     );
     return _normalizePlayResult(r);
   }
@@ -1852,12 +1956,14 @@ class SpiderService {
     String keyword, {
     int page = 1,
     String ext = '',
+    String owner = ownerVod,
   }) {
     return _dispatchScript(
       key: key,
       type: type,
       api: api,
       ext: ext,
+      owner: owner,
       action: 'search',
       nodeArgs: <String, dynamic>{'wd': keyword, 'page': page},
       pyArgs: <String, dynamic>{'wd': keyword, 'pg': page},
@@ -1878,15 +1984,17 @@ class SpiderService {
     required String keyword,
     int page = 1,
     String ext = '',
+    String owner = ownerVod,
   }) async {
     // 先 init（忽略错误），再 search
     try {
-      await initSpider(spiderKey, spiderType, api, ext: ext);
+      await initSpider(spiderKey, spiderType, api, ext: ext, owner: owner);
     } catch (e) {
       /* ignore */
     }
 
-    return search(spiderKey, spiderType, api, keyword, page: page, ext: ext);
+    return search(spiderKey, spiderType, api, keyword,
+        page: page, ext: ext, owner: owner);
   }
 
   // ============================================================
@@ -1894,11 +2002,19 @@ class SpiderService {
   // 用于非并发场景（如首页加载、详情页）
   // ============================================================
 
-  /// 当前 Spider 会话（原子替换，避免多字段读到不一致组合）。
+  /// 当前 Spider 会话，**按归属者分区**（原子替换，避免多字段读到不一致组合）。
   ///
   /// 必须带上 [ext]：drpy2 脚本源的站点脚本在 ext 里（api 只是运行时），
   /// 详情页拿这个上下文调 getPlayUrl 时少了 ext 就会加载错脚本。
-  ({String key, int type, String api, String ext})? _currentSpider;
+  ///
+  /// ── 为什么从单值改成 Map（用户 2026-11-01「走 B」）──────────────
+  /// 以前是**一个全局变量**：影视首页 setCurrentSpider(A) 之后，短剧页
+  /// 并发 setCurrentSpider(B) ⇒ 详情页 `getCurrentSpiderInfo()` 拿到 B 的
+  /// api/ext，用 B 的上下文去请求 A 的播放地址 ⇒ 404 或"内容串了"。
+  /// 现在各模块写各自的分区，互不覆盖：
+  ///   `setCurrentSpider(..., owner: ownerDrama)` / `getCurrentSpiderInfo(owner: ...)`。
+  final Map<String, ({String key, int type, String api, String ext})>
+      _spiderByOwner = {};
 
   /// 设置当前 Spider 信息 - 对应 Swift setCurrentSpider
   /// 仅用于非并发场景。[api] 传**原始 api**（可能是远端脚本 URL）。
@@ -1908,8 +2024,10 @@ class SpiderService {
     String? api, {
     String? ext,
     String? jar,
+    String owner = ownerVod,
   }) {
-    _currentSpider = (key: key, type: type, api: api ?? '', ext: ext ?? '');
+    _spiderByOwner[owner] =
+        (key: key, type: type, api: api ?? '', ext: ext ?? '');
     // 落一份到持久化仓库：进程被杀 / 会话失效 / 从历史直接进详情时，
     // 详情页可以按源 key 把这个上下文原样恢复（见 play_context_store.dart）。
     PlayContextStore.instance.rememberSpider(
@@ -1920,7 +2038,7 @@ class SpiderService {
       jar: jar ?? '',
     );
     AppLog.instance.log(
-      '[SpiderService] setCurrentSpider: key=$key, type=$type, api=$api, ext=$ext',
+      '[SpiderService] setCurrentSpider[$owner]: key=$key, type=$type, api=$api, ext=$ext',
     );
   }
 
@@ -1930,8 +2048,10 @@ class SpiderService {
   /// 若用户从未经过首页/分类加载（如从历史/收藏直接进 Spider 源详情），
   /// `_currentKey` 为 null，强解包抛空安全异常 → App 崩溃"像重启一样"。
   /// 改为空安全返回：未设置时返回空值，调用方自行降级。
-  ({String key, int type, String api, String ext}) getCurrentSpiderInfo() {
-    final s = _currentSpider;
+  ({String key, int type, String api, String ext}) getCurrentSpiderInfo({
+    String owner = ownerVod,
+  }) {
+    final s = _spiderByOwner[owner];
     return (
       key: s?.key ?? '',
       type: s?.type ?? 0,
@@ -1944,7 +2064,7 @@ class SpiderService {
   /// 关键：必须同时关闭并重建 dio，否则 iOS 后台/锁屏后切回前台时
   /// dio 复用的 socket 已被系统断开，所有请求会静默失败
   void invalidateSession() {
-    _currentSpider = null;
+    _spiderByOwner.clear();
     // 引擎侧已载入的脚本状态也一并作废（Node 可能已被系统回收）
     _loadedScriptUrl = '';
     _loadedScriptKey = '';
