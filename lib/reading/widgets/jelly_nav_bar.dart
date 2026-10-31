@@ -304,9 +304,10 @@ class _JellyNavBarState extends State<JellyNavBar>
           // 是 GPU 主力开销；改用更高不透明度纯色（动效透出可接受，图标仍清晰）。
           // 动画关闭时底层静止，模糊成本低，保留玻璃质感。
           final bgAnim = SettingsService().backgroundAnimation;
+          final barDeco = _barDecoration(isDark);
           final navBody = Container(
             height: JellyNavBar.floatingBarHeight,
-            decoration: _barDecoration(isDark),
+            decoration: barDeco,
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: _floatingTopPad),
               child: pinned
@@ -340,10 +341,13 @@ class _JellyNavBarState extends State<JellyNavBar>
                     ),
             ),
           );
-          // 要不要背景模糊由 FloatingNavSpec.usesBlur 决定：
-          // 玻璃类（macOS/iOS/云母）必须模糊才有质感；澎湃是实色卡片，
-          // 模糊纯属白烧一次全屏高斯。规则只写在那边一处。
-          final useBlur = !bgAnim && FloatingNavSpec.usesBlur(_style);
+          // 要不要背景模糊由 FloatingNavSpec.needsBlur 决定：
+          // 玻璃类（macOS/iOS）必须模糊才有质感；但**栏体本身不够透时
+          // 模糊被完全盖住**（水墨/鸿蒙/云母默认不透明度 0.90~0.95，
+          // 实测开/关模糊只差 0~96 个像素）⇒ 那就别白烧一次全屏高斯。
+          // 用户把不透明度滑杆拉低后会自动开始模糊，功能没砍。
+          final useBlur =
+              !bgAnim && FloatingNavSpec.needsBlur(_style, barDeco);
           return Padding(
             padding: EdgeInsets.fromLTRB(
               horizontalMargin + sidePad,
@@ -366,10 +370,9 @@ class _JellyNavBarState extends State<JellyNavBar>
                 // 每帧重算一次、面积还是整条栏 ⇒ 真机上拖底栏直接掉帧，
                 // 手感"发涩/不顺"。
                 //
-                // 拆开以后：模糊层是个**没有子节点**的静态层（只模糊背景），
-                // 内容层单独一个 RepaintBoundary。滚动只重绘内容层，
-                // 模糊层的栅格可以被合成器直接复用 ⇒ 滑动不再触发模糊。
-                // 视觉输出与拆之前**完全一致**（模糊底 → 半透明底色 → 内容）。
+                // 拆开以后：模糊层只负责模糊背景、内容层单独一个 RepaintBoundary。
+                // 滚动只重绘内容层，模糊层的栅格可以被合成器直接复用 ⇒
+                // 滑动不再触发模糊。
                 child: Stack(
                   children: [
                     if (useBlur)
@@ -377,7 +380,72 @@ class _JellyNavBarState extends State<JellyNavBar>
                         child: RepaintBoundary(
                           child: BackdropFilter(
                             filter: JellyTheme.glassFilter,
-                            // 不要 child：只把背景模糊掉，底色由内容层画
+                            // ── ⚠️ 这个透明 child 不能删（2026-10-31 实测）──
+                            //
+                            // 上一版这里写的是「不要 child：只把背景模糊掉，
+                            // 底色由内容层画」，**注释是错的**：
+                            // `BackdropFilter` 一旦没有 child，整层模糊会被
+                            // 直接丢弃 —— 不是"模糊了但看不见"，是**根本不执行**。
+                            //
+                            // 实测（sigma=20，红/蓝两块拼色，取交界上方 8px
+                            // 的红通道）：无 child ⇒ 255（原封不动）；
+                            // 加一个全透明 child ⇒ 164（交界被摊成渐变）。
+                            // 四种层结构（裸的 / +ClipRRect / +内层
+                            // RepaintBoundary / 两者都有）结果全是 164，
+                            // 说明**只有 child 有无才致命**，ClipRRect 和
+                            // RepaintBoundary 都不影响。
+                            //
+                            // 后果：六种风格从来没模糊过，玻璃全成了"平的
+                            // 半透明色块"—— 用户那句"你看看你写的什么玩意"，
+                            // 一半是配色，另一半就是这个。
+                            child: const ColoredBox(color: Colors.transparent),
+                          ),
+                        ),
+                      ),
+                    // ── 顶部高光（2026-10-31）──────────────────────────
+                    //
+                    // 参考 `abhay572002/glass_liquid_navbar`（MIT）：真实
+                    // iOS 26 液态玻璃在玻璃之上还要再画一层
+                    // **从顶部往下 40% 渐隐的白色**（它的 `_GlassPainter`
+                    // 里那段 specular 渐变，opacity 深色 0.20 / 浅色 0.08）。
+                    // 少了这层，玻璃就是一块"平的半透明色"，怎么调透明度
+                    // 都不像液态 —— 这是原来六种风格"看着假"的主因之一。
+                    if (FloatingNavSpec.usesSpecularHighlight(_style))
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              borderRadius:
+                                  BorderRadius.circular(_floatingRadius),
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.white.withValues(
+                                    alpha: isDark ? 0.20 : 0.08,
+                                  ),
+                                  Colors.white.withValues(alpha: 0),
+                                ],
+                                stops: const [0.0, 0.40],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    // ── 顶部 1px 亮线（云母 Mica 的标志）──────────────
+                    //
+                    // Windows 11 Mica 没有大面积高光，只有一条顶部亮边
+                    // （色值约 rgba(255,255,255,0.09)）。
+                    if (FloatingNavSpec.usesTopHairline(_style))
+                      Positioned(
+                        top: 0,
+                        left: _floatingRadius * 0.6,
+                        right: _floatingRadius * 0.6,
+                        child: IgnorePointer(
+                          child: Container(
+                            height: 1,
+                            color: Colors.white
+                                .withValues(alpha: isDark ? 0.10 : 0.65),
                           ),
                         ),
                       ),
@@ -423,11 +491,16 @@ class _JellyNavBarState extends State<JellyNavBar>
     double width, {
     required bool iconOnly,
     required double iconSize,
+    double? position,
   }) {
     return SizedBox(
       width: width,
       child: _JellyNavItem(
         item: widget.items[index],
+        index: index,
+        // 指示器的**连续**位置（如 2.37 = 正从第 2 项滑向第 3 项）。
+        // 传 null 表示"不参与滑动"（固定端），此时按 isSelected 二值取色。
+        position: position,
         isSelected: index == widget.currentIndex,
         onTap: () => _onItemTap(index),
         onLongPress:
@@ -499,15 +572,26 @@ class _JellyNavBarState extends State<JellyNavBar>
             decoration: BoxDecoration(
               color: indColor,
               borderRadius: BorderRadius.circular(indRadius),
-              // 底部指示条带一点同色发光，和"纯色条"区分开
-              boxShadow: ind == NavIndicator.underline
-                  ? [
-                      BoxShadow(
-                        color: indColor.withValues(alpha: 0.65),
-                        blurRadius: 8,
-                      ),
-                    ]
-                  : null,
+              // ── 光晕层（2026-10-31）────────────────────────────────
+              //
+              // 参考 `abhay572002/glass_liquid_navbar`（MIT）的真实 iOS 26
+              // 液态玻璃实现：它的指示器是**两层** ——
+              //   · 下层 `MaskFilter.blur(15)` 的模糊光晕（alpha 0.1）
+              //   · 上层实心色块（alpha 0.2）
+              //
+              // 原来这里只画了一个纯色块，所以怎么调都"没有液态感"。
+              // Flutter 里用 BoxShadow 做等价效果，比 CustomPaint +
+              // MaskFilter 便宜（不需要每帧新建 Paint/图层）。
+              boxShadow: [
+                BoxShadow(
+                  // 底部指示条（若有风格启用）原本就带较强发光，保留
+                  color: indColor.withValues(
+                    alpha: ind == NavIndicator.underline ? 0.65 : 0.34,
+                  ),
+                  blurRadius: ind == NavIndicator.underline ? 8 : 14,
+                  spreadRadius: ind == NavIndicator.underline ? 0 : 1,
+                ),
+              ],
             ),
           ),
         ),
@@ -540,35 +624,45 @@ class _JellyNavBarState extends State<JellyNavBar>
         final band = SizedBox(
           width: contentWidth,
           height: height,
-          child: Stack(
-            children: [
-              // 选中指示器（弹性滑动 + 弹性缩放）
-              AnimatedBuilder(
-                animation: _controller,
-                builder: (context, _) {
-                  final progress = _curve.transform(_controller.value);
-                  final left = _previousIndex * w +
-                      (widget.currentIndex - _previousIndex) * w * progress;
-                  return _indicator(
+          // 指示器 + 导航项**一起**放进 AnimatedBuilder：
+          // 图标颜色要跟着滑块连续渐变，所以每帧都得重算（项数 5~8，开销可忽略，
+          // 且只在切换的那 300ms 内重建）。
+          child: AnimatedBuilder(
+            animation: _controller,
+            builder: (context, _) {
+              final progress = _curve.transform(_controller.value);
+              // 指示器的**连续**位置（如 2.37 = 正从第 2 项滑向第 3 项）
+              final pos = _previousIndex +
+                  (widget.currentIndex - _previousIndex) * progress;
+              return Stack(
+                children: [
+                  // 选中指示器（弹性滑动 + 弹性缩放）
+                  _indicator(
                     bandHeight: height,
                     itemWidth: w,
                     visible: true,
-                    left: left,
+                    left: pos * w,
                     scale: 0.88 + 0.12 * progress,
-                  );
-                },
-              ),
-              // 导航项（固定宽度，纵向拉伸保证点击区域）
-              Positioned.fill(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (var i = 0; i < count; i++)
-                      _navItemAt(i, w, iconOnly: iconOnly, iconSize: iconSize),
-                  ],
-                ),
-              ),
-            ],
+                  ),
+                  // 导航项（固定宽度，纵向拉伸保证点击区域）
+                  Positioned.fill(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (var i = 0; i < count; i++)
+                          _navItemAt(
+                            i,
+                            w,
+                            iconOnly: iconOnly,
+                            iconSize: iconSize,
+                            position: pos,
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         );
         if (!scrollable) return band;
@@ -625,41 +719,46 @@ class _JellyNavBarState extends State<JellyNavBar>
               final mid = SizedBox(
                 width: midWidth,
                 height: height,
-                child: Stack(
-                  children: [
-                    // 指示器跟着中间内容一起滚（跨段时淡入淡出，不做整条横飞）
-                    AnimatedBuilder(
-                      animation: _controller,
-                      builder: (context, _) {
-                        final progress = _curve.transform(_controller.value);
-                        final prevMid =
-                            (_previousIndex - 1).clamp(0, midCount - 1);
-                        final curMid = (widget.currentIndex - 1).clamp(0, midCount - 1);
-                        final left = prevMid +
-                            (curMid - prevMid) * progress.toDouble();
-                        return _indicator(
+                child: AnimatedBuilder(
+                  animation: _controller,
+                  builder: (context, _) {
+                    final progress = _curve.transform(_controller.value);
+                    final prevMid = (_previousIndex - 1).clamp(0, midCount - 1);
+                    final curMid =
+                        (widget.currentIndex - 1).clamp(0, midCount - 1);
+                    final midPos =
+                        prevMid + (curMid - prevMid) * progress.toDouble();
+                    // midPos 是"中间段内的 0-based 位置"，映射回整条栏的
+                    // 原始索引要 +1（中间段从第 1 项开始）。
+                    // 当前停在固定端时（inMid == false）不参与滑动，传 null 走二值。
+                    final itemPos = inMid ? midPos + 1 : null;
+                    return Stack(
+                      children: [
+                        // 指示器跟着中间内容一起滚（跨段时淡入淡出，不做整条横飞）
+                        _indicator(
                           bandHeight: height,
                           itemWidth: itemWidth,
                           visible: inMid,
-                          left: left * itemWidth,
-                        );
-                      },
-                    ),
-                    Positioned.fill(
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          for (var i = 1; i < n - 1; i++)
-                            _navItemAt(
-                              i,
-                              itemWidth,
-                              iconOnly: iconOnly,
-                              iconSize: iconSize,
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
+                          left: midPos * itemWidth,
+                        ),
+                        Positioned.fill(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              for (var i = 1; i < n - 1; i++)
+                                _navItemAt(
+                                  i,
+                                  itemWidth,
+                                  iconOnly: iconOnly,
+                                  iconSize: iconSize,
+                                  position: itemPos,
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
               );
               return ClipRect(
@@ -718,6 +817,13 @@ class _JellyNavBarState extends State<JellyNavBar>
 /// 果冻导航项组件
 class _JellyNavItem extends StatelessWidget {
   final JellyNavItem item;
+
+  /// 本项在栏里的下标（算连续邻近度要用）
+  final int index;
+
+  /// 指示器的连续位置；null = 固定端，按 [isSelected] 二值取色
+  final double? position;
+
   final bool isSelected;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
@@ -729,27 +835,55 @@ class _JellyNavItem extends StatelessWidget {
 
   const _JellyNavItem({
     required this.item,
+    required this.index,
     required this.isSelected,
     required this.onTap,
     required this.palette,
     required this.style,
+    this.position,
     this.onLongPress,
     this.onSlideUp,
     this.iconOnly = false,
     this.iconSize = 22.0,
   });
 
+  /// 本项与指示器的"邻近度"：1 = 指示器正压在上面，0 = 完全不沾。
+  ///
+  /// 参考 `abhay572002/glass_liquid_navbar`（MIT）的 `_TabItem._proximity`：
+  /// iOS 26 液态玻璃的图标颜色是**跟着滑块连续渐变**的，不是到位才跳变。
+  /// 曲线用 `easeIn`（同样是它那里的写法），滑动前半程颜色变化慢、
+  /// 后半程快，观感更像真实液体。
+  double get _proximity {
+    final pos = position;
+    if (pos == null) return isSelected ? 1.0 : 0.0;
+    final d = (pos - index).abs().clamp(0.0, 1.0);
+    return Curves.easeIn.transform(1.0 - d);
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     // 取色走 FloatingNavSpec —— 与影视/音乐同一套规则，
     // 这样三条栏的"选中/未选中颜色"永远一致（用户要求颜色统一）。
-    final color = FloatingNavSpec.styleContentColor(
+    final onColor = FloatingNavSpec.styleContentColor(
       style,
-      selected: isSelected,
+      selected: true,
       isDark: isDark,
       palette: palette,
     );
+    final offColor = FloatingNavSpec.styleContentColor(
+      style,
+      selected: false,
+      isDark: isDark,
+      palette: palette,
+    );
+    final p = _proximity;
+    // 两端直接返回原色，避免 lerp 在 0/1 处产生微小色差
+    final color = p >= 0.999
+        ? onColor
+        : (p <= 0.001 ? offColor : Color.lerp(offColor, onColor, p)!);
+    // 图标缩放也跟着连续化（原来只有 1.0 / 1.06 两档，滑动时会"啪"一下）
+    final iconScale = 1.0 + 0.06 * p;
 
     return GestureDetector(
       // 上滑手势：唤起批量多选等（书架 tab 用；与长按并存）
@@ -770,7 +904,7 @@ class _JellyNavItem extends StatelessWidget {
         child: Center(
           child: iconOnly
               ? AnimatedScale(
-                  scale: isSelected ? 1.06 : 1.0,
+                  scale: iconScale,
                   duration: const Duration(milliseconds: 180),
                   curve: Curves.easeOut,
                   child: _buildIcon(color),
@@ -785,9 +919,9 @@ class _JellyNavItem extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      // 选中时图标轻微放大（1.06），比"只换颜色"更有反馈
+                      // 选中时图标轻微放大（最多 1.06），跟着滑块连续变化
                       AnimatedScale(
-                        scale: isSelected ? 1.06 : 1.0,
+                        scale: iconScale,
                         duration: const Duration(milliseconds: 180),
                         curve: Curves.easeOut,
                         child: _buildIcon(color),

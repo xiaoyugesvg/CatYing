@@ -52,7 +52,12 @@ enum FloatingNavStyle {
   /// 澎湃：小米 HyperOS 的实色圆角卡片（干净、边界清楚、几乎不透明）
   reverse('reverse', '澎湃'),
 
-  /// 云母：Windows 11 Mica（淡雅底色 + 顶部 1px 亮线 + 底部指示条）
+  /// 云母：Windows 11 Mica（淡雅底色 + 顶部 1px 亮线）
+  ///
+  /// 2026-10-31 用户：「菜单栏风格里面的那个下面的小白点不要，还是那个
+  /// 果冻背景滑动呢」—— 原来这里用 [NavIndicator.underline]（底部一条
+  /// 18×3 的短横线，看着就是"下面一个小白点"）。改成 [NavIndicator.blob]，
+  /// 和「水墨」一样是**跟着选中项滑动的果冻块**。
   solid('solid', '云母 Mica');
 
   const FloatingNavStyle(this.id, this.label);
@@ -217,28 +222,42 @@ class FloatingNavSpec {
   }) {
     switch (style) {
       case FloatingNavStyle.aurora:
-        // 鸿蒙卡片：选中压在**实心主题色胶囊**上，未选中压在淡彩卡片上
+        // 鸿蒙卡片：选中是**淡彩主题色胶囊**（不是 Material 那种实心块）。
+        //
+        // 依据：华为开发者文档《沉浸光感 · 最佳实践》原文 ——
+        // 「底部导航栏从传统的贴底色块变为**悬浮圆角胶囊**」。
+        // 也就是说鸿蒙的选中态是"底 + 图标"同色系的一层淡彩，
+        // 用实心块会变成 Material 3 的样子，反而不像鸿蒙。
         return selected
-            ? _onFill(palette.primary)
-            : (isDark ? Colors.white.withValues(alpha: 0.72) : palette.navUnselected);
+            ? _onTint(isDark, palette)
+            : (isDark
+                ? Colors.white.withValues(alpha: 0.72)
+                : palette.navUnselected);
       case FloatingNavStyle.neon:
         // iOS：选中只是"变成 tint 色"，没有色块 ⇒ 用主题色本身
         return selected
-            ? _legibleAccent(isDark, palette)
+            ? _onTint(isDark, palette)
             : (isDark
                 ? Colors.white.withValues(alpha: 0.56)
                 : palette.navUnselected);
       case FloatingNavStyle.reverse:
-        // 澎湃：选中压在实心主题色胶囊上
+        // 澎湃：选中是**中性浅色胶囊**（像分段控件），图标用主题色。
+        //
+        // HyperOS 的底栏选中态刻意不用彩色块 —— 它靠"中性胶囊 + 彩色图标"
+        // 区分，彩色块是 Material / 鸿蒙的做法。原来这里和鸿蒙一样画实心
+        // 主题色块，结果**两个风格在默认水墨配色下都是同一个黑胶囊**，
+        // 六种风格里三种长得一模一样（用户："你看看你写的什么玩意"）。
         return selected
-            ? _onFill(palette.primary)
+            ? _onTint(isDark, palette)
             : (isDark
                 ? Colors.white.withValues(alpha: 0.64)
                 : palette.navUnselected);
       case FloatingNavStyle.solid:
-        // 云母：选中变成主题色（下面是细指示条，不是色块）
+        // 云母：2026-10-31 指示器从「底部细条」改成「果冻块」（用户要求），
+        // 所以选中图标必须用**压在该色块上的对比色** —— 原来块和图标都是
+        // `_legibleAccent`，细条时无所谓，换成整块后图标会和背景同色看不见。
         return selected
-            ? _legibleAccent(isDark, palette)
+            ? _onFill(_legibleAccent(isDark, palette))
             : (isDark
                 ? Colors.white.withValues(alpha: 0.58)
                 : palette.navUnselected);
@@ -262,6 +281,19 @@ class FloatingNavSpec {
     return p;
   }
 
+  /// 压在**淡色 tint 胶囊**上的图标/文字色（鸿蒙 / iOS / 澎湃）。
+  ///
+  /// 直接拿主题色当文字色，在"同色系淡底"上对比度会掉下来：
+  /// 靛蓝 `0x7379C4` 压在 `primary@16%` 的白底上只有 **3.3:1**，
+  /// 10px 的导航文字会发虚（截图里看着"选中项反而更淡"）。
+  /// 所以浅色下往黑偏 35%（→ 6.2:1），深色下往白偏 35%。
+  static Color _onTint(bool isDark, JellyPalette palette) {
+    final a = _legibleAccent(isDark, palette);
+    return isDark
+        ? Color.lerp(a, Colors.white, 0.35)!
+        : Color.lerp(a, Colors.black, 0.35)!;
+  }
+
   /// 选中指示器底色
   static Color styleIndicatorColor(
     FloatingNavStyle style, {
@@ -273,16 +305,19 @@ class FloatingNavSpec {
         // macOS：选中项是一块**更亮的玻璃**（浅色下更白、深色下提亮）
         return Colors.white.withValues(alpha: isDark ? 0.16 : 0.72);
       case FloatingNavStyle.aurora:
-        // 鸿蒙：实心主题色胶囊
-        return palette.primary.withValues(alpha: 0.92);
+        // 鸿蒙：**淡彩**主题色胶囊（华为文档：「悬浮圆角胶囊」，不是贴底色块）
+        return palette.primary.withValues(alpha: isDark ? 0.30 : 0.16);
       case FloatingNavStyle.neon:
-        // iOS：极淡的主题色胶囊（液态玻璃里的那一层）
-        return palette.primary.withValues(alpha: isDark ? 0.26 : 0.14);
+        // iOS：极淡的主题色胶囊（液态玻璃里的那一层，比鸿蒙更轻）
+        return palette.primary.withValues(alpha: isDark ? 0.24 : 0.12);
       case FloatingNavStyle.reverse:
-        // 澎湃：实心主题色胶囊
-        return palette.primary.withValues(alpha: 0.94);
+        // 澎湃：**中性**浅色胶囊（分段控件那种），不掺主题色。
+        // 这是和鸿蒙拉开距离的关键：鸿蒙彩色、澎湃中性、云母实心。
+        return isDark
+            ? Colors.white.withValues(alpha: 0.14)
+            : Colors.black.withValues(alpha: 0.06);
       case FloatingNavStyle.solid:
-        // 云母：底部细指示条，用主题色
+        // 云母：果冻块，用主题色
         return _legibleAccent(isDark, palette);
       case FloatingNavStyle.ink:
         return isDark ? palette.navSelectedFg : palette.navSelectedBg;
@@ -305,7 +340,7 @@ class FloatingNavSpec {
   //   aurora  鸿蒙     ：卡片圆角 20 + 实心主题色胶囊
   //   neon    iOS      ：完全胶囊 999 + 极淡主题色胶囊
   //   reverse 澎湃     ：圆角 24 + 实心主题色胶囊
-  //   solid   云母Mica ：小圆角 16 + 底部指示条
+  //   solid   云母Mica ：小圆角 16 + 果冻块（2026-10-31 由底部指示条改来）
 
   /// 该风格的胶囊圆角
   static double styleRadius(FloatingNavStyle style) {
@@ -326,26 +361,72 @@ class FloatingNavSpec {
   }
 
   /// 该风格的选中指示器形态
+  ///
+  /// 2026-10-31 起**不再有风格用「底部点 / 底部短线」**：用户明确要
+  /// 「下面的小白点不要，还是那个果冻背景滑动」。
+  /// [NavIndicator.dot] / [NavIndicator.underline] 保留枚举是为了以后能
+  /// 再加回来（持久化 id 不受影响），但当前所有风格都走滑动色块。
   static NavIndicator styleIndicator(FloatingNavStyle style) {
     switch (style) {
       case FloatingNavStyle.ink:
       case FloatingNavStyle.frost:
+      case FloatingNavStyle.solid:
         return NavIndicator.blob;
       case FloatingNavStyle.aurora:
       case FloatingNavStyle.neon:
       case FloatingNavStyle.reverse:
         return NavIndicator.pill;
-      case FloatingNavStyle.solid:
-        return NavIndicator.underline;
     }
   }
 
-  /// 该风格要不要给底栏加背景模糊（BackdropFilter）。
+  /// 该风格**要不要**给底栏加背景模糊（BackdropFilter）。
   ///
   /// 玻璃/云母类都要模糊才有质感；澎湃是实色卡片，模糊纯属白烧一次
   /// 全屏高斯（macOS runner 上尤其明显）。
+  ///
+  /// ⚠️ 这只是"风格允许模糊"，真正上不上还要看栏体透不透 ——
+  /// 见 [needsBlur]。底栏不透明度滑杆拉到 1.0 时，水墨/鸿蒙/云母
+  /// 的底色是 0.90~0.95，模糊层被盖得严严实实，像素几乎不变
+  /// （实测：开/关模糊只差 0~96 个像素，最大色差 23）⇒ 纯浪费。
   static bool usesBlur(FloatingNavStyle style) =>
       style != FloatingNavStyle.reverse;
+
+  /// 装饰里**最不透**的那一层的不透明度（渐变取最大值）。
+  static double maxAlpha(BoxDecoration deco) {
+    double maxOf(Iterable<Color> cs) =>
+        cs.map((c) => c.a).fold<double>(0, (a, b) => a > b ? a : b);
+    final g = deco.gradient;
+    if (g is LinearGradient) return maxOf(g.colors);
+    if (g is RadialGradient) return maxOf(g.colors);
+    if (g is SweepGradient) return maxOf(g.colors);
+    return deco.color?.a ?? 0;
+  }
+
+  /// 这条栏**真的该不该**上模糊。
+  ///
+  /// 判据是"底下能不能透出来"：栏体不透明度 ≥ [blurVisibleBelow] 时
+  /// 模糊结果被完全盖住，开了也看不见，白白每帧跑一次全屏高斯。
+  ///
+  /// 用户把不透明度滑杆拉低（< 0.75）之后水墨/鸿蒙/云母也会自动开始
+  /// 模糊 —— 所以这不是"砍掉功能"，是"只在看得见的时候才算"。
+  static const double blurVisibleBelow = 0.85;
+
+  static bool needsBlur(FloatingNavStyle style, BoxDecoration deco) =>
+      usesBlur(style) && maxAlpha(deco) < blurVisibleBelow;
+
+  /// 要不要在玻璃上加「顶部渐隐高光」（真实液态玻璃的关键一层）。
+  ///
+  /// 只有真玻璃类需要：macOS Dock 玻璃、iOS 26 液态。
+  /// 实色卡片（鸿蒙 / 澎湃）和浅色胶囊（水墨）加了会显得脏。
+  static bool usesSpecularHighlight(FloatingNavStyle style) =>
+      style == FloatingNavStyle.frost || style == FloatingNavStyle.neon;
+
+  /// 要不要画「顶部 1px 亮线」。
+  ///
+  /// Windows 11 Mica 的标志性细节：它没有大面积高光（Mica 是对壁纸取样，
+  /// 不是实时高斯），只有一条顶边亮线。
+  static bool usesTopHairline(FloatingNavStyle style) =>
+      style == FloatingNavStyle.solid;
 
   /// 把整条底栏的底色/渐变按 [opacity] 整体压暗透明度。
   ///
@@ -476,17 +557,26 @@ class FloatingNavSpec {
 
       case FloatingNavStyle.neon:
         // ── iOS 液态玻璃（Liquid Glass Tab Bar）──────────────────
-        // 近乎纯白/纯黑的半透材质 + 一道发丝边，选中只变色不加色块。
+        //
+        // 2026-10-31 按真实实现校准（`abhay572002/glass_liquid_navbar`）：
+        // 它的 `glassColor` 是 `0x08FFFFFF`（**3% 白**）+ `glassBlur 25`
+        // + 一层顶部高光。原来这里是 84% 不透明的白/近黑 ⇒ 太实，
+        // 玻璃感全靠边框撑着，怎么调都不像液态。
+        //
+        // 这里没有直接照抄 3%：底栏背后是真实内容（浅色列表 / 深色封面都
+        // 可能有），3% 在浅底上会让图标彻底看不清。折中到 55%~62%，
+        // 剩下的"通透感"交给 blur + 高光层（见 jelly_nav_bar 的 specular）。
         deco = BoxDecoration(
           borderRadius: radius,
           color: isDark
-              ? const Color(0xFF1C1C1E).withValues(alpha: 0.74)
-              : Colors.white.withValues(alpha: 0.84),
+              ? const Color(0xFF1C1C1E).withValues(alpha: 0.55)
+              : Colors.white.withValues(alpha: 0.62),
           border: Border.all(
+            // 真实实现：深色 15% 白 / 浅色 10% 黑（不是纯白，纯白在浅底上会发灰）
             color: isDark
-                ? Colors.white.withValues(alpha: 0.12)
-                : Colors.white.withValues(alpha: 0.55),
-            width: 0.8,
+                ? Colors.white.withValues(alpha: 0.15)
+                : Colors.black.withValues(alpha: 0.10),
+            width: 1.0,
           ),
         );
         break;
