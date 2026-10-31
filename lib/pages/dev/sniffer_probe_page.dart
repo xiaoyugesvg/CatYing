@@ -5,6 +5,7 @@ import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/rex/rex_player_page.dart';
 import 'package:tvbox/services/media_resolver.dart';
 import 'package:tvbox/services/media_sniff_service.dart';
+import 'package:tvbox/services/media_sniffer.dart';
 import 'package:tvbox/services/parse_lines.dart';
 import 'package:tvbox/services/platform_domains.dart';
 import 'package:tvbox/widgets/app_toast.dart';
@@ -54,6 +55,70 @@ class _SnifferProbePageState extends State<SnifferProbePage> {
   void dispose() {
     _urlCtrl.dispose();
     super.dispose();
+  }
+
+  // ============================================================
+  // 一键播放：嗅探 → 拿到地址 → 直接进播放器
+  // ============================================================
+  Future<void> _sniffAndPlay() async {
+    final url = _urlCtrl.text.trim();
+    if (url.isEmpty) {
+      AppToast.show('先填链接', '');
+      return;
+    }
+    if (_sniffRunning || _parseRunning) return;
+
+    setState(() {
+      _sniffRunning = true;
+      _sniff = null;
+      _showLogs = false;
+      _sniffStatus = '准备嗅探…';
+    });
+
+    try {
+      // ① 先嗅探。探针页的存在意义就是验证嗅探，所以先让它单独跑，
+      //    抓到什么能完整打出来（下面照样会展示候选 / iframe / 事件）。
+      final r = await MediaSniffService.instance.sniffDetailed(
+        url,
+        budget: _sniffBudget,
+        onProgress: (m) {
+          if (mounted) setState(() => _sniffStatus = m);
+        },
+      );
+      if (!mounted) return;
+      setState(() {
+        _sniff = r;
+        if (r.ok) _sniffStatus = '嗅探成功，正在起播放器…';
+      });
+      if (r.best != null && MediaSniffer.isMediaUrl(r.best!)) {
+        _play(r.best!);
+        return;
+      }
+
+      // ② 嗅探没出 → 退回完整链路（抓页面 + 解析线路），
+      //    否则这个按钮就叫「点击播放」却放不出东西，名不副实。
+      setState(() => _sniffStatus = '嗅探没出地址，改走完整链路（抓页面 + 线路）…');
+      final found = await MediaResolver.instance.resolve(
+        url,
+        onProgress: (m) {
+          if (mounted) setState(() => _parseStatus = m);
+        },
+      );
+      if (!mounted) return;
+      setState(() {
+        _parseResult = found;
+        _parseStatus = found == null ? '完整链路也没出直链' : '完整链路拿到地址';
+      });
+      if (found != null && MediaSniffer.isMediaUrl(found)) {
+        _play(found);
+      } else {
+        setState(() => _sniffStatus = '嗅探和完整链路都没拿到可播地址');
+      }
+    } catch (e) {
+      if (mounted) setState(() => _sniffStatus = '播放失败: $e');
+    } finally {
+      if (mounted) setState(() => _sniffRunning = false);
+    }
   }
 
   // ============================================================
@@ -218,12 +283,19 @@ class _SnifferProbePageState extends State<SnifferProbePage> {
             runSpacing: 8,
             children: [
               FilledButton.icon(
-                onPressed: _parseRunning ? null : _testParse,
+                onPressed:
+                    (_sniffRunning || _parseRunning) ? null : _sniffAndPlay,
+                icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                label: const Text('点击播放'),
+              ),
+              FilledButton.tonalIcon(
+                onPressed: (_sniffRunning || _parseRunning) ? null : _testParse,
                 icon: const Icon(Icons.link_rounded, size: 18),
                 label: const Text('解析测试'),
               ),
-              FilledButton.tonalIcon(
-                onPressed: _sniffRunning ? null : _startSniff,
+              OutlinedButton.icon(
+                onPressed:
+                    (_sniffRunning || _parseRunning) ? null : _startSniff,
                 icon: const Icon(Icons.travel_explore_rounded, size: 18),
                 label: const Text('嗅探测试'),
               ),
@@ -262,8 +334,8 @@ class _SnifferProbePageState extends State<SnifferProbePage> {
           ],
           const SizedBox(height: 2),
           Text(
-            '「解析测试」= 完整链路（抓页面 → 线路 → 嗅探兜底），跟真实播放一致；'
-            '「嗅探测试」= 只看嗅探抓到什么，顺 iframe 最多跟 3 层。',
+            '「点击播放」= 嗅探 → 拿到地址直接进播放器（嗅不到再退回完整链路）；'
+            '「解析测试」= 只走完整链路；「嗅探测试」= 只看嗅探抓到什么，顺 iframe 最多跟 3 层。',
             style: TextStyle(color: AppTheme.textTertiary, fontSize: 11),
           ),
         ],
