@@ -44,6 +44,19 @@ class NowPlayingService {
 
   bool _started = false;
 
+  /// 本次进程内**是否真的播放过**（用户按过播放）。
+  ///
+  /// 为什么需要（用户 2026-10-31：「我明明没有播放但是控制中心和锁屏界面显示播放」）：
+  /// 冷启动会恢复上次队列（日志：`已恢复上次队列: 88 首，当前第 1 首《7 Years》（未自动播放）`），
+  /// 于是 `currentSong != null` 但 `isPlaying == false`。原实现照样往下推
+  /// `update` ⇒ 原生写 `nowPlayingInfo` + 把 `AVAudioSession` 切成独占并 `setActive(true)`
+  /// ⇒ iOS 认定本 App 是 Now Playing 所有者 ⇒ 锁屏/控制中心挂出一张
+  /// 「看起来在播、按了没反应」的幽灵卡片。
+  ///
+  /// 所以：**从没真正播放过，就一个字都不推给系统**。
+  /// 用户按过播放之后再暂停，照常推 paused（那是正确状态，不是幽灵）。
+  bool _hasPlayed = false;
+
   /// 上一次成功推送的歌曲标识 —— 用来判断"换歌了"（换歌才重新下载封面）
   String? _lastSongKey;
 
@@ -107,10 +120,25 @@ class NowPlayingService {
   Future<void> _push({required bool forceArtwork}) async {
     final p = MusicPlayerManager.instance;
     final song = p.currentSong;
+    // 只要这一瞬间真的在播，闸门就永久打开（不依赖哪个监听先触发）
+    final playing = p.isPlaying.value;
+    if (playing) _hasPlayed = true;
 
     if (song == null) {
       await _invoke('clear');
       _lastSongKey = null;
+      return;
+    }
+
+    // 有歌、但从没真正播放过（冷启动恢复队列 / 只是选了一首没按播放）：
+    // 不要向系统登记任何 Now Playing 信息，否则锁屏/控制中心会出现
+    // 「没播放却显示在播放」的幽灵卡片（见 [_hasPlayed] 的说明）。
+    if (!playing && !_hasPlayed) {
+      if (_lastSongKey != null) {
+        // 之前推过（例如刚暂停又清空）：显式撤掉，别留在系统里
+        await _invoke('clear');
+        _lastSongKey = null;
+      }
       return;
     }
 
@@ -124,7 +152,7 @@ class NowPlayingService {
       'album': song.album,
       'duration': p.duration.value.inMilliseconds / 1000.0,
       'position': p.position.value.inMilliseconds / 1000.0,
-      'playing': p.isPlaying.value,
+      'playing': playing,
     };
 
     // 封面：换歌时重新取（同一首歌用缓存，不再下载/编码）

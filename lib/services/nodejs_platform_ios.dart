@@ -164,6 +164,13 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
   @override
   int get spiderPort => _spiderPort;
 
+  /// 引擎槽位里当前驻留的源标识（与调用方传入 `loadSource` 的字符串一致）。
+  ///
+  /// 只在 `_sendLoadCommandToNodeJS` **成功返回**那一刻写，见那里的注释。
+  String _loadedScriptId = '';
+  @override
+  String get loadedScriptId => _loadedScriptId;
+
   /// 初始化：注册 Swift → Dart callback
   void initialize() {
     _channel.setMethodCallHandler((MethodCall call) async {
@@ -260,8 +267,25 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
 
   @override
   Future<bool> startNodeJS() async {
-    AppLog.instance.log('IOSNodeJS startNodeJS 开始 (isRunning=$_isRunning)');
-    if (_isRunning) return true;
+    AppLog.instance.log(
+      'IOSNodeJS startNodeJS 开始 (isRunning=$_isRunning, spiderPort=$_spiderPort)',
+    );
+    // 🔴 2026-10-31（用户：「本地JS和订阅还是引擎冲突吗」，日志实证）：
+    // 原来这里只判 `_isRunning` 就 `return true` —— 于是出现
+    //   `_isRunning=true` 但 `_spiderPort=0` 的死局：
+    //   · 调用方以为「Node 已就绪」⇒ 直接 `waitForSpiderPort()` ⇒ 干等 60s 超时
+    //   · 本地 JS / 订阅 JS 全部加载不出来，看起来像「引擎冲突」
+    //   （app_2026-10-31.log：17:49:22 setCurrentSpider → 17:49:23 端口超时）
+    //
+    // 但**不能**因为端口丢了就再调一次 Swift `startNodeJS`：
+    //   iOS NodeMobile 是 embed library，第二次 `node_start` 会卡死在 V8
+    //   二次初始化（见 [deleteSource] 的注释，这条路径被删过两次）。
+    // 唯一安全的恢复方式是「让引擎自己重新 listen」：管理端口还在就重发一次
+    // `/source/loadPath`，新 server 起来后端口会被推回来（见 [_recoverSpiderPort]）。
+    if (_isRunning) {
+      if (_spiderPort > 0) return true;
+      return _recoverSpiderPort();
+    }
 
     _isNodeReady = false;
     _spiderPort = 0;
@@ -327,6 +351,51 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
     }
   }
 
+  /// Node 进程活着、但 spider 端口丢了 —— 用管理端口「重放一次载入」把端口捞回来。
+  ///
+  /// 触发场景（`app_2026-10-31.log`）：换源 / 端口回调丢失 / 引擎重启后原生没推回
+  /// 端口，`_spiderPort` 归零而 `_isRunning` 仍为 true。此时**绝不能**再
+  /// `node_start`（V8 二次初始化会卡死），只能让引擎自己重新 listen：
+  /// 发一次 `/source/loadPath`，`catServerFactory` 会 `listen(0)` 拿到新端口，
+  /// [_sendLoadCommandToNodeJS] 再从 200 响应里直接对齐。
+  ///
+  /// 返回 false 时调用方应当立刻报错，**不要**再 `waitForSpiderPort()` 干等 60s。
+  Future<bool> _recoverSpiderPort() async {
+    if (_managementPort <= 0) {
+      AppLog.instance.w(
+        '[IOSNodeJS] Node 在跑但 spiderPort=0，管理端口也没了'
+        '（$_managementPort）—— 无法自愈，需重启 App',
+      );
+      return false;
+    }
+    // 没有「上次载入的源」时退回共享源目录（与
+    // `reloadSourceViaManagementPort` 的兜底保持一致）
+    final path = _lastSourceCachePath ?? await getDocumentsSourcePath();
+    // 目录里没有 index.js 必然 500 —— 日志里
+    // `Cannot find module .../cache_xxx/index.js` 就是这个，先挡掉。
+    if (!await File('$path/index.js').exists()) {
+      AppLog.instance.w('[IOSNodeJS] 端口恢复跳过：$path 下没有 index.js');
+      return false;
+    }
+    AppLog.instance.log('[IOSNodeJS] 尝试用管理端口恢复 spider 端口: $path');
+    final (ok, msg) = await _sendLoadCommandToNodeJS(path);
+    if (!ok) {
+      AppLog.instance.w('[IOSNodeJS] 端口恢复失败: $msg');
+      return false;
+    }
+    // 响应里没带端口时给原生回调一小段（最多 2s）——
+    // 不要用 60s 的 waitForSpiderPort，那正是「卡一分钟」的来源。
+    for (var i = 0; i < 10 && _spiderPort <= 0; i++) {
+      await Future.delayed(const Duration(milliseconds: 200));
+    }
+    if (_spiderPort <= 0) {
+      AppLog.instance.w('[IOSNodeJS] 端口恢复失败：loadPath 成功但端口仍未回来');
+      return false;
+    }
+    AppLog.instance.log('[IOSNodeJS] 端口恢复成功: $_spiderPort');
+    return true;
+  }
+
   @override
   void stopNodeJS() {
     if (!_isRunning) return;
@@ -335,6 +404,8 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
     _nativeServerPort = 0;
     _spiderPort = 0;
     _managementPort = 0;
+    // 进程都没了，槽位里"是谁"自然作废
+    _loadedScriptId = '';
     onNodeReadyChanged.value = false;
     onManagementPortChanged.value = 0;
     onSpiderPortChanged.value = 0;
@@ -446,7 +517,9 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
     // 这里解析成真实文件并直接载入 Node 槽位，不再走网络下载分支。
     final localPath = await _resolveLocalJsPath(normalizedUrl);
     if (localPath != null) {
-      return _loadLocalJsFile(localPath);
+      // scriptId 用**调用方原始字符串**（`ljs_xxx.js` 这种相对标识），
+      // 不是解析后的绝对路径 —— 上层 `_ensureNodeScript` 比较的就是它。
+      return _loadLocalJsFile(localPath, scriptId: urlString);
     }
 
     final uri = Uri.tryParse(normalizedUrl);
@@ -466,8 +539,15 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
 
     // 每个源地址一个独立缓存目录（见 [_cacheDirFor]）：命中缓存就不再下载，
     // 不同订阅/程序源之间也不会互相覆盖。
+    //
+    // 🔴 2026-10-31：这里**不再**把 `_lastSourceCachePath` 指过来。
+    //   原来赋值发生在「下载/写盘之前」，于是下载失败（401 / 断流 / 空文件）后
+    //   `_lastSourceCachePath` 指向一个**没有 index.js 的空目录**，
+    //   之后 `reloadSourceViaManagementPort` / [_recoverSpiderPort] 一直去
+    //   reload 它 ⇒ `/source/loadPath` 500 `Cannot find module .../cache_xxx/index.js`
+    //   ⇒ 进 `recover_wait_10s` 6×10s 长重试（日志 00:19:28 / 09:44:38 各一次）。
+    //   现在改为「Node 真的接受并载入成功之后」才记（见 [_sendLoadCommandToNodeJS]）。
     final sourcePath = await _cacheDirFor(normalizedUrl);
-    _lastSourceCachePath = sourcePath;
     final indexJSPath = '$sourcePath/index.js';
     final indexMd5Path = '$sourcePath/index.js.md5';
     final configJSPath = '$sourcePath/index.config.js';
@@ -501,7 +581,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       // 后台异步执行：若发现源已更新, 后台重新下载并替换。
       AppLog.instance.log('[IOSNodeJS] 本地缓存源存在, 直接使用（后台异步校验更新）');
       _refreshSourceInBackground(normalizedUrl, sourcePath);
-      return await _sendLoadCommandToNodeJS(sourcePath);
+      return await _sendLoadCommandToNodeJS(sourcePath, scriptId: urlString);
     }
 
     try {
@@ -560,7 +640,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
           ).writeAsString('module.exports = { color: [] };');
         }
 
-        return await _sendLoadCommandToNodeJS(sourcePath);
+        return await _sendLoadCommandToNodeJS(sourcePath, scriptId: urlString);
       }
       return (false, '下载源文件失败 (状态码: ${jsResponse.statusCode})');
     } on DioException catch (e) {
@@ -572,6 +652,8 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
   Future<bool> deleteSource() async {
     final sourcePath = await getDocumentsSourcePath();
     _lastSourceCachePath = null;
+    // 源文件都删了，槽位里那份不再可信（Node 若还活着，它内存里那份是旧代码）
+    _loadedScriptId = '';
     final dir = Directory(sourcePath);
     if (await dir.exists()) {
       try {
@@ -638,13 +720,17 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
   }
 
   /// 把本地 .js 复制进独立缓存目录（index.js）后载入 Node 槽位。
-  Future<(bool success, String? message)> _loadLocalJsFile(String path) async {
+  Future<(bool success, String? message)> _loadLocalJsFile(
+    String path, {
+    String? scriptId,
+  }) async {
     try {
       final bytes = await File(path).readAsBytes();
       if (bytes.isEmpty) return (false, '本地脚本为空: $path');
       _sourceLoadGeneration++;
       final sourcePath = await _cacheDirFor('localjs:$path');
-      _lastSourceCachePath = sourcePath;
+      // 不在这里记 `_lastSourceCachePath`：统一由 [_sendLoadCommandToNodeJS]
+      // 在 Node 真的载入成功后记（见那里的注释）。
       final indexJSPath = '$sourcePath/index.js';
       final configJSPath = '$sourcePath/index.config.js';
       await File(indexJSPath).writeAsBytes(bytes, flush: true);
@@ -666,15 +752,18 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
         'name: ${jsonEncode(baseName)}, color: [] };\n',
       );
       AppLog.instance.log('[IOSNodeJS] 载入本地 JS 源: $path → $sourcePath');
-      return await _sendLoadCommandToNodeJS(sourcePath);
+      return await _sendLoadCommandToNodeJS(sourcePath, scriptId: scriptId);
     } catch (e) {
       return (false, '本地脚本载入失败: $e');
     }
   }
 
   Future<(bool success, String? message)> _sendLoadCommandToNodeJS(
-    String path,
-  ) async {
+    String path, {
+    /// 本次载入对应的**源标识**（调用方传进来的原始字符串）。
+    /// 传 null 表示"重放已有槽位"（端口恢复），此时不要动 [_loadedScriptId]。
+    String? scriptId,
+  }) async {
     if (_managementPort <= 0) {
       return (false, 'Management 端口未就绪，请先启动 Node.js');
     }
@@ -744,6 +833,12 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
         _spiderPort = newPort;
         onSpiderPortChanged.value = newPort;
       }
+      // 只有 Node **真的接受并载入**了，才把它记成「上一次载入的源」——
+      // 端口恢复 / 管理端口重载都靠这个路径，记错就会去 reload 一个空目录。
+      _lastSourceCachePath = path;
+      // 槽位的唯一真源：上层（SpiderService）每次判定前对齐这里，
+      // 就不会出现"缓存说 A、引擎里是 B"⇒ 请求带 A 的 key 打 B 的服务。
+      if (scriptId != null) _loadedScriptId = scriptId;
       return (true, '源加载成功');
     } on DioException catch (e) {
       return (false, '加载请求失败: ${e.message}');

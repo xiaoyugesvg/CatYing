@@ -601,6 +601,14 @@ class AppState extends GetxController {
         SpiderService.instance.isScriptLoaded(spiderSource.api)) {
       AppLog.instance.log('[AppState] 源已在本次会话加载, 跳过下载阶段');
       loadingPhase.value = LoadingPhase.waitingSpiderPort;
+      // 🔴 2026-10-31：端口可能已经丢了（引擎被后台回收 / 换源时归零），
+      //   而这里原来直接 `waitForSpiderPort()` ⇒ 干等 60s 才失败
+      //   （用户日志 17:48:23 → 17:49:23 正是这一段，期间本地 JS 和订阅都出不来）。
+      //   `startNodeJS()` 现在会在 `isRunning && spiderPort==0` 时走管理端口恢复，
+      //   失败也会立刻返回，不再白等。
+      if (NodeJSManager.instance.spiderPort <= 0) {
+        await NodeJSManager.instance.startNodeJS();
+      }
       final portReady = await NodeJSManager.instance.waitForSpiderPort();
       if (!portReady) {
         loadingPhase.value = LoadingPhase.failed;

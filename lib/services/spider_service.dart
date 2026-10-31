@@ -458,6 +458,38 @@ class SpiderService {
     mainScriptUrl = '';
   }
 
+  /// 把 Dart 这份「槽位里是谁」与**引擎侧唯一真源**对齐。
+  ///
+  /// ── 为什么需要（用户 2026-10-31：「不要再串了」）────────────────
+  /// Node 是单槽位，但"现在驻留的是谁"原先有两份记录：引擎里的
+  /// `sourceModule`，和这里的 [_loadedScriptUrl]。两份一旦不一致，
+  /// 请求就会带着 A 的 key 打到 B 的服务上 —— 404，或者「切了源内容没变 /
+  /// 全是另一个源的内容」，这就是用户说的"串"。
+  ///
+  /// 造成不一致的路径是**绕开 [_ensureNodeScript] 直接换槽位**：
+  /// `AppState.manualLoadNodeEngine` 直接调 `NodeJSManager.loadSource()`，
+  /// 换了槽位却没人更新这里。现在引擎侧会把"载入成功的源标识"记下来
+  /// （`NodeJSPlatform.loadedScriptId`），每次判定前对齐一次即可根治。
+  ///
+  /// 只在**引擎明确报出一个不同的 id** 时纠正，两种例外保持原样：
+  ///   · 引擎返回空串（还没载入 / 平台不支持）= 不知道，保留 Dart 侧记录；
+  ///   · 当前记录是 drpy 标记（`drpy::<ext>`）= drpy 宿主不走 `loadSource`，
+  ///     引擎侧看到的还是上一个 catvod 包，据此纠正会误伤 drpy 的缓存命中。
+  void _syncSlotFromEngine() {
+    final resident = NodeJSManager.instance.loadedScriptId;
+    if (resident.isEmpty) return;
+    if (_loadedScriptUrl == resident) return;
+    if (_loadedScriptUrl.startsWith('drpy::')) return;
+    AppLog.instance.log(
+      '[SpiderService] 槽位对齐（引擎侧为准）: '
+      '"$_loadedScriptUrl" → "$resident"',
+    );
+    _loadedScriptUrl = resident;
+    // key / 候选都属于**另一个包**，必须重问，不能沿用
+    _loadedScriptKey = '';
+    _loadedScriptCandidates = [];
+  }
+
   /// 当前已载入 Node 引擎的脚本地址 + 该脚本在引擎里的真实站点 key
   String _loadedScriptUrl = '';
   String _loadedScriptKey = '';
@@ -532,6 +564,8 @@ class SpiderService {
   bool isScriptLoaded(String url) {
     final u = url.trim();
     if (u.isEmpty) return false;
+    // 判定前先和引擎对齐一次，别拿失真的缓存去回答"已载入了吗"
+    _syncSlotFromEngine();
     if (_loadedScriptUrl == u) return true;
     // drpy：槽位里驻留的是"运行时 + 站点规则"，主源登记的是运行时地址。
     // 还要确认它没被 CatVod 整包源顶替（_loadedScriptUrl 会变）。
@@ -1114,6 +1148,9 @@ class SpiderService {
     required String fallback,
     int? type,
   }) async {
+    // 命中判定前先对齐：引擎里可能已经被别的路径换成了另一个包
+    // （手动加载引擎 / 未来的新入口），不对齐就会「缓存说 A、引擎里是 B」⇒ 串。
+    _syncSlotFromEngine();
     if (_loadedScriptUrl == script) {
       if (_loadedScriptKey.isNotEmpty) {
         // 缓存命中：候选就按"上次命中的那个 key"起步（404 时会自动作废重问）
@@ -1212,6 +1249,10 @@ class SpiderService {
     // 每轮清一次：否则上一次失败的旧原因会粘住（`??=` 会保留它），
     // 让用户看到与本次无关的错误。
     lastError = null;
+    // 下面 `_needMainScriptRefresh` / `_ensureNodeScript` 的判定全依赖
+    // "槽位里现在是谁"，先和引擎侧唯一真源对齐一次，避免带着 A 的 key
+    // 打到 B 的服务上（"串"）。
+    _syncSlotFromEngine();
 
     // ── Python 引擎（.py）────────────────────────────────────
     if (script.isNotEmpty && _isPythonScript(script)) {

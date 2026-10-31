@@ -6,6 +6,8 @@ import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:tvbox/pages/settings/sub/settings_shared.dart';
+// 解析 / 嗅探测试页（独立测试入口）
+import 'package:tvbox/pages/dev/sniffer_probe_page.dart';
 
 /// 设置 → 关于
 ///
@@ -33,6 +35,13 @@ class AboutSettingsPage extends StatelessWidget {
                   title: '站点数量',
                   value: '${ApiConfig.instance.sourceBeanList.length}',
                 )),
+            // 解析 / 嗅探测试入口（独立测试页，验证 OK 再并入正式播放）
+            SettingsRow(
+              icon: Icons.science_outlined,
+              title: '解析 / 嗅探测试',
+              value: '',
+              onTap: () => Get.to(() => const SnifferProbePage()),
+            ),
             SettingsRow(
               icon: Icons.person_outline,
               title: '关于版本',

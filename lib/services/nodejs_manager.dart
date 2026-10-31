@@ -113,6 +113,12 @@ class NodeJSManager {
   // ============================================================
 
   bool get isRunning => _platform.isRunning;
+
+  /// 引擎槽位里**当前驻留的源标识**（见 `NodeJSPlatform.loadedScriptId`）。
+  ///
+  /// 上层用它对齐"缓存说已载入"和"引擎里到底是谁"—— 两者不一致就是
+  /// 「切了源内容没变 / 全是另一个源的内容」的根因。
+  String get loadedScriptId => _platform.loadedScriptId;
   bool get isNodeReady => _platform.isNodeReady;
   int get managementPort => _platform.managementPort;
   int get spiderPort => _platform.spiderPort;

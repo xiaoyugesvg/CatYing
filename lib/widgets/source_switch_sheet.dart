@@ -47,6 +47,11 @@ class SourceSwitchSheet extends StatefulWidget {
 ///
 /// 2026-10-29 由「本地 PY / 订阅」两档扩成四档：订阅线路 + 三族本地源
 /// （本地爬虫 / 本地JS / XBPQ）。三族本地源**只在导入过**时才出现。
+///
+/// 2026-10-31：本地JS 曾经并进 [subscription] 分组试过一版，**已回退** ——
+/// 用户：「本地JS 就不合并订阅行不」。合并本来只是展示层的排序，
+/// 与"切源不串"没有关系（那是 `SpiderService._syncSlotFromEngine` 解决的），
+/// 所以独立成档更清楚。
 enum _SrcGroup {
   subscription('订阅'),
   localPy('本地PY'),
@@ -601,6 +606,13 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
     ];
   }
 
+  /// 这条源是不是「本地导入」的（PY / JS / XBPQ 三族）。
+  ///
+  /// 用来决定挂哪种菜单（本地源有重命名/删除，订阅线路没有）。
+  /// 逐条判断而不是按"当前 tab"判断 —— 以后哪个 tab 里混进异族源都不会漏。
+  static bool _isLocalBean(SourceBean s) =>
+      s.isLocalPySource || s.isLocalJsSource || s.isXbpqSource;
+
   /// 选中源属于哪个分类
   _SrcGroup _groupOfKey(String key) {
     if (key.startsWith('localpy_')) return _SrcGroup.localPy;
@@ -689,9 +701,8 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   /// 菜单统一收到条目右侧的 ⋮ 按钮，避免和长按拖动抢手势。
   Widget _buildSourceList(
     List<SourceBean> list,
-    String? selectedKey, {
-    required bool isLocal,
-  }) {
+    String? selectedKey,
+  ) {
     Widget itemOf(SourceBean source, Widget child) {
       return DragTarget<String>(
         onWillAcceptWithDetails: (d) => d.data != source.key,
@@ -708,8 +719,9 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
             api: source.api,
             selected: source.key == selectedKey,
             onTap: () => _selectSource(source),
-            onMenu: () =>
-                isLocal ? _localSourceMenu(source) : _sourceMenu(source),
+            onMenu: () => _isLocalBean(source)
+                ? _localSourceMenu(source)
+                : _sourceMenu(source),
           ),
         );
 
@@ -720,8 +732,9 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
             api: source.api,
             selected: source.key == selectedKey,
             onTap: () => _selectSource(source),
-            onMenu: () =>
-                isLocal ? _localSourceMenu(source) : _sourceMenu(source),
+            onMenu: () => _isLocalBean(source)
+                ? _localSourceMenu(source)
+                : _sourceMenu(source),
           ),
         );
 
@@ -809,13 +822,11 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
     // 2026-10-29：三族各有独立开关，不能一律去开「本地爬虫」。
     if (source.isLocalPySource && !ApiConfig.instance.localSourcesEnabled.value) {
       await ApiConfig.instance.setLocalSourcesEnabled(true);
-    } else if (source.isLocalJsSource &&
-        !ApiConfig.instance.localJsEnabled.value) {
-      await ApiConfig.instance.setLocalJsEnabled(true);
     } else if (source.isXbpqSource &&
         !ApiConfig.instance.localXbpqEnabled.value) {
       await ApiConfig.instance.setLocalXbpqEnabled(true);
     }
+    // 本地 JS 没有开关（2026-10-31，导入即启用），这里不需要再"顺手打开"。
     await ApiConfig.instance.setHomeSource(source);
     if (!mounted) return;
     Navigator.of(context).pop(true);
@@ -1016,11 +1027,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                       ),
                     );
                   }
-                  return _buildSourceList(
-                    list,
-                    selectedKey,
-                    isLocal: isLocal,
-                  );
+                  return _buildSourceList(list, selectedKey);
                 }),
               ),
             ],

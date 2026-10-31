@@ -148,8 +148,14 @@ import UIKit
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         // ⚠️ 有歌在播就必须把音频会话切到「独占」模式，否则控制中心/锁屏
         //    根本不会显示这份元数据（根因见 BackgroundAudio.exclusiveMode）
-        syncSessionMode(exclusive: true)
-        if let playing = args["playing"] as? Bool {
+        //
+        // 🔴 2026-10-31（用户：「我明明没有播放但是控制中心和锁屏界面显示播放」）：
+        //    原来这里**无条件** `exclusive: true` —— 暂停态也抢独占，等于告诉
+        //    iOS「我是当前音频 App」：锁屏/控制中心会挂出一张看起来在播的卡片，
+        //    并且会把别的 App 的声音掐掉。现在只有 playing == true 才独占。
+        let playing = (args["playing"] as? Bool) ?? false
+        syncSessionMode(exclusive: playing)
+        if args["playing"] != nil {
             setPlaybackState(playing)
         }
     }

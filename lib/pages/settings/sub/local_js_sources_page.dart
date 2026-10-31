@@ -688,12 +688,8 @@ class _LocalJsSourcesPageState extends State<LocalJsSourcesPage> {
 
   Future<void> _select(LocalJsSource src) async {
     final bean = src.toSourceBean();
-    // 用户在管理页明确点了某个本地源 ⇒ 顺手把**本地JS**那一族的开关打开，
-    // 否则主页源会被订阅线路覆盖（用户 2026-10-18 的开关语义）。
-    // 2026-10-29：三族各有独立开关，这里不能再去开「本地爬虫」。
-    if (!ApiConfig.instance.localJsEnabled.value) {
-      await ApiConfig.instance.setLocalJsEnabled(true);
-    }
+    // 2026-10-31：本地 JS 不再有开关（导入即启用，见
+    // `ApiConfig.localJsAlwaysEnabled`），这里不需要再顺手打开什么。
     await ApiConfig.instance.setHomeSource(bean);
     await LocalJsSources.instance.bumpUsage(src.key);
     if (mounted) setState(() {});

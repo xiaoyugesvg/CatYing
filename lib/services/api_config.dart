@@ -85,13 +85,17 @@ class ApiConfig extends GetxController {
   /// 保存开关的 prefs 键
   static const String _kLocalSourcesEnabled = 'local_sources_enabled_v1';
 
-  /// 「本地 JS 源」总开关（用户 2026-10-29：三族本地源各自一个开关）。
+  /// 「本地 JS 源」—— **没有开关**（2026-10-31 用户决定）。
   ///
-  /// 默认 false，语义与 [localSourcesEnabled] 完全一致，只是管的是
-  /// `localjs_` 那一族。三族分开是必要的 —— 用户可能只想跑 PY 源，
-  /// 不想让一堆 JS 源把源面板和搜索撑爆。
-  final localJsEnabled = false.obs;
-  static const String _kLocalJsEnabled = 'local_js_enabled_v1';
+  /// 原来它和三族里其它两族一样有独立开关（`local_js_enabled_v1`），
+  /// 用户后来的要求是「不留了，本地源加个视觉标记」：本地 JS 已经并进
+  /// 源切换面板的**订阅分类**里（排在订阅线路前面），再留一个开关只会让
+  /// 用户看到「最前面那几条凭空消失」。导入即启用。
+  ///
+  /// 因此这里只保留一个**常量 true**，让 [isLocalSourceEnabled] 的调用方
+  /// 与另外两族保持同一套写法；老用户 prefs 里的 `local_js_enabled_v1`
+  /// 不再读取（无害残留，不需要迁移）。
+  static const bool localJsAlwaysEnabled = true;
 
   /// 「XBPQ 规则源」总开关。
   ///
@@ -116,7 +120,8 @@ class ApiConfig extends GetxController {
       return localSourcesEnabled.value;
     }
     if (s.key.startsWith(SourceBean.localJsKeyPrefix)) {
-      return localJsEnabled.value;
+      // 本地 JS 没有开关（见 [localJsAlwaysEnabled]）：导入即参与
+      return localJsAlwaysEnabled;
     }
     if (s.key.startsWith(SourceBean.xbpqKeyPrefix)) {
       return localXbpqEnabled.value;
@@ -386,7 +391,6 @@ class ApiConfig extends GetxController {
     // ── ① 开关口径：每次都同步一次（默认关），保证冷启动 / 切订阅时一致 ──
     if (prefs != null) {
       localSourcesEnabled.value = prefs.getBool(_kLocalSourcesEnabled) ?? false;
-      localJsEnabled.value = prefs.getBool(_kLocalJsEnabled) ?? false;
       localXbpqEnabled.value = prefs.getBool(_kLocalXbpqEnabled) ?? false;
     }
 
@@ -489,19 +493,6 @@ class ApiConfig extends GetxController {
     } catch (e) {
       AppLog.instance.w('[ApiConfig] 本地源注册失败: $e');
     }
-  }
-
-  /// 「本地 JS 源」总开关（2026-10-29）。
-  ///
-  /// JS 源是按需载入的，没有"注册"这一步 —— 开开关只需刷清单，
-  /// 用户切到某个 JS 源时 `NodeJSManager.loadSource` 会自己把文件载进 Node。
-  Future<void> setLocalJsEnabled(bool value) async {
-    if (localJsEnabled.value == value) return;
-    localJsEnabled.value = value;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_kLocalJsEnabled, value);
-    PrefsMirror.snapshotSoon();
-    await reloadLocalVideoSources();
   }
 
   /// 「XBPQ 规则源」总开关（2026-10-29）。
