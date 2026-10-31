@@ -44,12 +44,48 @@ String sanitizePlayUrl(String raw) {
 
   if (!s.contains('|')) return original;
   final parts = s.split('|');
-  for (var i = parts.length - 1; i >= 0; i--) {
-    final p = parts[i].trim();
-    if (p.startsWith('http://') || p.startsWith('https://')) return p;
+
+  /// 从右往左找第一段"能当真实地址用"的片段。
+  String? pickAddress() {
+    for (var i = parts.length - 1; i >= 0; i--) {
+      final p = parts[i].trim();
+      if (p.startsWith('http://') || p.startsWith('https://')) return p;
+      // ── 2026-10-31 补：第三段**单独**被百分号编码的情况 ────────────
+      // 用户日志实测（09:45:14）：
+      //   tencent|54e33584…|https%3A%2F%2Fv.qq.com%2Fx%2Fcover%2F…html
+      // 整串是真竖线、只有第三段编码 —— 上面那个 `if (!s.contains('|'))`
+      // 的解码分支根本进不去，三段又都不以字面 `http(s)://` 开头，
+      // 于是循环跑完返回**带竖线的原始串**，后面一路连锁失败：
+      //   PlayPipeline 的 Uri.parse 抛异常 ⇒ 判成网页 ⇒
+      //   controller._sniffPageForMedia 第一行 `!startsWith('http')` ⇒ 立刻 null
+      //   （日志里「尝试嗅探解析」到「不播网页」只隔 0.29 毫秒，就是这个）。
+      if (p.toLowerCase().contains('%3a%2f%2f')) {
+        try {
+          final decoded = Uri.decodeComponent(p);
+          if (decoded.startsWith('http://') || decoded.startsWith('https://')) {
+            return decoded;
+          }
+        } catch (_) {
+          // 解不开就当这段不是地址，继续往前找
+        }
+      }
+    }
+    return null;
   }
+
+  final found = pickAddress();
   // 找不到真实地址：返回原始串（调用方会按"格式不对"提示，而不是乱猜）
-  return original;
+  if (found == null) return original;
+
+  // ── 2026-10-31 修：正常地址的 query 里带 `|` 会被截断 ────────────────
+  // `https://cdn.a.com/v?u=a|b` 拆开后第一段本身就以 https 开头，
+  // 旧实现直接返回它 ⇒ `?u=a`，后半截没了（签名类地址会直接播不了）。
+  // 判据：整串本身就是 http(s) 地址、且挑出来的"真地址"就是第一段
+  // ⇒ 这是**同一个地址**里带的竖线，不是 `名字|token|地址` 包裹格式。
+  if (s.startsWith('http://') || s.startsWith('https://')) {
+    if (found == parts.first.trim()) return original;
+  }
+  return found;
 }
 
 /// 规范化后是否 http(s) 地址。

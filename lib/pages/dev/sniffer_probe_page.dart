@@ -112,7 +112,12 @@ class _SnifferProbePageState extends State<SnifferProbePage> {
       if (!mounted) return;
       setState(() {
         _parseResult = r;
-        _parseStatus = r == null ? '未解析出直链（线路没覆盖这条）' : '解析成功';
+        // 这里只跑 HTTP 解析（抓页面 + 线路），**不含嗅探兜底** —— 所以
+        // 失败不等于真实播放会失败，得把这句话说出来，否则用户会误判
+        // （2026-10-31 用户就是拿着这句「未解析出直链」来问的）。
+        _parseStatus = r == null
+            ? 'HTTP 解析未出直链（真实播放还会用嗅探兜底，也可点「嗅探测试」单独看）'
+            : '解析成功';
       });
     } catch (e) {
       if (mounted) setState(() => _parseStatus = '解析异常: $e');
