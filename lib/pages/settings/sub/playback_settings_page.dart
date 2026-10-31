@@ -103,6 +103,13 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
               '多音轨片源，也自带小窗。4K HDR 卡顿时优先试它。',
         ),
         SettingsHelpItem(
+          icon: Icons.hdr_on_outlined,
+          title: '方式四：AetherEngine 内核（HDR / 杜比）',
+          body: 'FFmpeg 拆流 + 原生解码，除全格式外还支持 HDR、Dolby Vision、'
+              'Dolby Atmos。片源带 HDR/杜比、或 KSPlayer 出画发灰发暗时优先试它。'
+              '注意它和 KSPlayer 各带一套 FFmpeg，哪个内核真正生效要看你选的这个。',
+        ),
+        SettingsHelpItem(
           icon: Icons.memory,
           title: '硬件加速 / 视频解码怎么选',
           body: '「硬件加速」开着用 GPU 解码，省电、发热低，绝大多数片源都该开。'

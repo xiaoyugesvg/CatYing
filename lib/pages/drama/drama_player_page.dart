@@ -18,6 +18,7 @@ import 'package:tvbox/services/play_pipeline.dart' show kMovieWebUrlRejected;
 import 'package:tvbox/widgets/app_player.dart';
 import 'package:tvbox/widgets/ios_av_player.dart';
 import 'package:tvbox/widgets/ks_player.dart';
+import 'package:tvbox/widgets/aether_player.dart';
 import 'package:tvbox/widgets/mpv_app_player.dart';
 import 'package:tvbox/pages/detail/controller.dart';
 import 'package:tvbox/widgets/playback_surface.dart';
@@ -315,6 +316,9 @@ class _DramaPlayerPageState extends State<DramaPlayerPage> {
     }
     if (engine == PlayerEngine.ksplayer && Platform.isIOS) {
       return KSPlayer(config: const AppConfig(title: '短剧'));
+    }
+    if (engine == PlayerEngine.aether && Platform.isIOS) {
+      return AetherPlayer(config: const AppConfig(title: '短剧'));
     }
     if (Platform.isIOS) {
       return IosAvPlayer(config: const AppConfig(title: '短剧'));
@@ -691,6 +695,7 @@ class _DramaPlayerPageState extends State<DramaPlayerPage> {
     return switch (PlayerPrefs.instance.vodEngine.value) {
       PlayerEngine.mpv => 'MPV',
       PlayerEngine.ksplayer => 'KS',
+      PlayerEngine.aether => 'AE',
       _ => 'AV',
     };
   }
@@ -995,6 +1000,7 @@ class _DramaPlayerPageState extends State<DramaPlayerPage> {
               PlayerEngine.avplayer,
               PlayerEngine.mpv,
               PlayerEngine.ksplayer,
+              PlayerEngine.aether,
             ])
               ListTile(
                 dense: true,
@@ -1002,6 +1008,7 @@ class _DramaPlayerPageState extends State<DramaPlayerPage> {
                   switch (e) {
                     PlayerEngine.mpv => 'MPV（兼容性最好）',
                     PlayerEngine.ksplayer => 'KSPlayer（硬解）',
+                    PlayerEngine.aether => 'Aether（HDR / DV / Atmos）',
                     _ => 'AVPlayer（系统默认）',
                   },
                   style: TextStyle(

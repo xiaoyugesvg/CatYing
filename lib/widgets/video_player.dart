@@ -5675,6 +5675,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       final shortLabel = switch (current) {
         PlayerEngine.avplayer => 'AV',
         PlayerEngine.ksplayer => 'FF',
+        PlayerEngine.aether => 'AE',
         PlayerEngine.mpv => 'MPV',
       };
       return _iconButton(
