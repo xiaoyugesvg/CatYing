@@ -40,8 +40,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── 轻量静态检查（ubuntu runner，≈10 秒，不吃 macOS 的 10 倍额度）──────
+  # 只查一类问题：Swift 闭包与 ObjC block 的 throwing 不匹配。
+  #
+  # 2026-10-31 的真实教训：BackgroundAudio.setExclusive 里把两个 throwing
+  # 调用直接写进了 TvBoxTryCatch 的闭包 ⇒ 闭包被推断成 () throws -> Void，
+  # 与 ObjC 的 void (^)(void) 不匹配，CI 要等到 Xcode 构建阶段才炸。
+  # 这类错误在 Windows 上**永远发现不了**（本地编不了 iOS），
+  # 一次失败 = 4~5 分钟构建 + 10 倍 macOS 额度，所以必须在这里提前拦。
+  lint-swift-bridge:
+    name: Swift/ObjC 桥接静态检查
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Check throwing closure vs ObjC block
+        run: python3 tool/check_swift_objc_bridge.py
+
   build-ios-trollstore:
     name: Build Runner.app + NodeMobile + ldid → IPA
+    # 桥接检查不过就不必烧 macOS 额度了
+    needs: lint-swift-bridge
     # macos-14 已弃用（2026-11-02 下线）；macos-15-intel（x64）能跑但 Xcode 编译
     # 明显更慢（实测 16 分钟还没编完）。这里用 **macos-15（arm64）**：
     #   · 受支持的标准镜像，容量充足
