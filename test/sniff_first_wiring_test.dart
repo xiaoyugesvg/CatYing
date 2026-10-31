@@ -185,8 +185,7 @@ void main() {
       );
     });
 
-    test('解析站自己报错要提前收工（别把预算白等满）', () {
-      final code = _stripComments(_read('lib/services/media_sniff_service.dart'));
+    test('解析站自己报错要提前收工（别把预算白等满）', () {      final code = _stripComments(_read('lib/services/media_sniff_service.dart'));
       expect(code.contains('Future<bool> _siteError('), isTrue);
       expect(
         code.contains('_siteError(c)'),
@@ -203,6 +202,31 @@ void main() {
         RegExp(r'/\s*404\s*/\.test').hasMatch(code),
         isFalse,
         reason: '不许只凭「404」字样判定错误页 —— 会把正常页面误杀',
+      );
+    });
+
+    test('主文档加载失败必须记下来（不能静默 0 候选）', () {
+      final code = _stripComments(_read('lib/services/media_sniff_service.dart'));
+      // 2026-10-31 实测：bd.jx.cn 那条链的第 4 层压根没加载起来，
+      // 而日志里只写「被跳转到 jiexi.bot.cd/jx/」+「0 候选」，
+      // 看的人（包括我）都以为是重定向，排查方向整个带偏。
+      expect(
+        code.contains('onWebResourceError'),
+        isTrue,
+        reason: '没有这个回调 ⇒ 某一层 TLS 失败 / 被拦时完全静默，'
+            '和「页面没地址」长得一模一样',
+      );
+      expect(code.contains('_lastMainFrameError'), isTrue);
+      expect(
+        code.contains('这一层没加载起来'),
+        isTrue,
+        reason: '落地地址等于**上一层**地址时要说「没加载起来」，'
+            '不能说「被跳转」—— 两件事的排查方向完全不同',
+      );
+      expect(
+        code.contains('prevUrl'),
+        isTrue,
+        reason: '要判「还停在上一层」就必须知道上一层是哪个地址',
       );
     });
   });

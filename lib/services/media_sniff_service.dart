@@ -183,6 +183,12 @@ class MediaSniffService {
   static const Duration _lastHopCap = Duration(seconds: 16);
 
   WebViewController? _controller;
+
+  /// 最近一次**主文档**加载失败的原因（`onWebResourceError` / `onHttpError` 写入）。
+  ///
+  /// 每层开始前清空。用它把"静默失败"变成分层诊断里的一行字 ——
+  /// 没有它的时候，某一层加载失败看起来和"页面没地址"一模一样。
+  String _lastMainFrameError = '';
   OverlayEntry? _entry;
 
   /// 每次嗅探换一个新的收集器，避免上一集的地址污染这一集
@@ -280,21 +286,33 @@ class MediaSniffService {
     /// 顺手读一次 `currentUrl()` —— 这是**最有价值的一条诊断**：
     /// `jx.php` 不带 Referer 时会 302 回 `jiexi/`，落地地址和请求地址不一样。
     /// 以前这条线索完全看不到，只能靠 curl 手打才发现。
+    ///
+    /// [prevUrl] 是**上一层**请求的地址。落地地址等于它 ⇒ 说明这一层压根
+    /// 没导航过去（TLS 失败 / 被拦 / 超时），而不是"被跳转"。
+    /// 2026-10-31 实测 `bd.jx.cn` 第 4 层：日志写成「被跳转到
+    /// jiexi.bot.cd/jx/」，看的人（包括我）都以为是重定向，其实是没加载起来。
     Future<void> recordHop({
       required int index,
       required String url,
       required Duration elapsed,
       required String note,
+      String? prevUrl,
     }) async {
       String? landed;
       try {
         landed = await c.currentUrl();
       } catch (_) {}
       var n = note;
-      if (landed != null &&
-          landed.isNotEmpty &&
-          !_sameTarget(landed, url)) {
-        n = '被跳转到 ${_shorten(landed)}（$note）';
+      if (landed != null && landed.isNotEmpty && !_sameTarget(landed, url)) {
+        if (prevUrl != null && _sameTarget(landed, prevUrl)) {
+          final why =
+              _lastMainFrameError.isEmpty ? '' : '：$_lastMainFrameError';
+          n = '这一层没加载起来，还停在上一层$why（$note）';
+        } else {
+          n = '被跳转到 ${_shorten(landed)}（$note）';
+        }
+      } else if (_lastMainFrameError.isNotEmpty && note == '加载失败') {
+        n = '加载失败：$_lastMainFrameError';
       }
       hops.add(
         SniffHop(
@@ -309,6 +327,8 @@ class MediaSniffService {
       );
     }
 
+    // 上一层请求的地址（用来区分「被重定向」和「压根没导航过去」）
+    var prevTarget = '';
     try {
       for (var hop = 0; hop < _maxHops; hop++) {
         if (target.isEmpty || DateTime.now().isAfter(deadline)) break;
@@ -321,12 +341,17 @@ class MediaSniffService {
         );
         AppLog.instance.log('[Sniff] 第 ${hop + 1} 层: $target');
 
+        final prev = prevTarget.isEmpty ? null : prevTarget;
+        prevTarget = target;
+        _lastMainFrameError = '';
+
         if (!await _load(c, target, headers, viaLocation: hop > 0)) {
           await recordHop(
             index: hop + 1,
             url: target,
             elapsed: Duration.zero,
             note: '加载失败',
+            prevUrl: prev,
           );
           break;
         }
@@ -343,6 +368,15 @@ class MediaSniffService {
         try {
           while (DateTime.now().isBefore(hopDeadline)) {
             if (_cancelRequested) break;
+            // 主文档压根没加载起来（TLS 失败 / 被拦 / 超时）⇒ 再等也是白等。
+            // 实测 `bd.jx.cn` 第 4 层就是这个样子：15 秒等下来 0 候选，
+            // 日志里却看不出"页面根本没加载"。
+            if (_lastMainFrameError.isNotEmpty && collector.count == 0) {
+              AppLog.instance.log(
+                '[Sniff] 第 ${hop + 1} 层主文档加载失败，提前收工：$_lastMainFrameError',
+              );
+              break;
+            }
             await _inject(c);
             final b = collector.best;
             if (warm && b != null && b.isMedia) {
@@ -420,6 +454,7 @@ class MediaSniffService {
           url: target,
           elapsed: elapsed,
           note: note,
+          prevUrl: prev,
         );
         // 没命中才自检：命中了说明一切正常，没必要再探
         if (best == null) await _probeEnv(c, hop + 1);
@@ -666,6 +701,29 @@ class MediaSniffService {
         },
         onPageFinished: (_) {
           unawaited(_inject(c));
+        },
+        // ── 🔴 主文档加载失败必须记下来（2026-10-31 补）──────────────
+        //
+        // 原来**没有**这两个回调 ⇒ 某一层导航失败时完全静默：
+        // 日志里只剩「0 候选」，看不出是「页面没加载起来」还是
+        // 「页面加载了但没地址」。实测 `bd.jx.cn` 那条链的第 4 层
+        // （`https://123.129.229.14:4433`）就是这样 —— 日志显示
+        // `frames:1 / jq:function / cj:undefined`，其实人还停在第 3 层，
+        // 而分层诊断却写成「被跳转到 jiexi.bot.cd/jx/」，把排查带偏了。
+        onWebResourceError: (e) {
+          // 子资源（图片/广告）失败是常态，只关心主文档
+          if (e.isForMainFrame == false) return;
+          _lastMainFrameError = '${e.description}（${e.errorCode}）';
+          AppLog.instance.w(
+            '[Sniff] 主文档加载失败：$_lastMainFrameError → ${e.url}',
+          );
+        },
+        onHttpError: (e) {
+          final r = e.response;
+          if (r == null || r.statusCode == null) return;
+          if (r.statusCode! < 400) return;
+          _lastMainFrameError = 'HTTP ${r.statusCode}';
+          AppLog.instance.w('[Sniff] 主文档 HTTP ${r.statusCode}');
         },
       ));
 
