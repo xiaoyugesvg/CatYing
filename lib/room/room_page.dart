@@ -9,7 +9,6 @@ import 'package:tvbox/services/player_prefs.dart';
 import 'package:tvbox/widgets/app_player.dart';
 import 'package:tvbox/widgets/ios_av_player.dart';
 import 'package:tvbox/widgets/ks_player.dart';
-import 'package:tvbox/widgets/aether_player.dart';
 import 'package:tvbox/widgets/mpv_app_player.dart';
 import 'package:tvbox/widgets/video_player.dart';
 import 'package:tvbox/widgets/live_danmu.dart';
@@ -172,9 +171,6 @@ class _RoomPageState extends State<RoomPage> {
     }
     if (engine == PlayerEngine.ksplayer && Platform.isIOS) {
       return KSPlayer(config: const AppConfig(title: '房间'));
-    }
-    if (engine == PlayerEngine.aether && Platform.isIOS) {
-      return AetherPlayer(config: const AppConfig(title: '房间'));
     }
     if (Platform.isIOS) {
       return IosAvPlayer(config: const AppConfig(title: '房间'));

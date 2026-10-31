@@ -130,23 +130,6 @@ import Vision
       print("[AppDelegate] ❌ 无法获取 AvEngine 的 registrar")
     }
 
-    // 注册全局唯一 AetherEngine（第五播放核心「AE」：FFmpeg demux + VideoToolbox 解码）。
-    //
-    // ⚠️ 2026-11-01：与 KSPlayer **并存**（用户要求）。
-    //    两者各带一整套 FFmpeg（KSPlayer→kingslay/FFmpegKit，AetherEngine→FFmpegBuild），
-    //    同名 C 符号在链接期由**先被拉取**的那套满足；AetherEngine 侧用的是 FFmpeg 8.1、
-    //    KSPlayer 侧是 6.x，若真出现 duplicate symbol 或运行时行为异常，
-    //    排查入口就是这两个内核谁被链接进去 —— 详见 AetherEngineBridge.swift 顶部注释。
-    if let aeRegistrar = engineBridge.pluginRegistry.registrar(forPlugin: "AetherEngineBridge") {
-      AetherEngineBridge.shared.register(messenger: aeRegistrar.messenger())
-      aeRegistrar.register(
-        AetherPlayerViewFactory(messenger: aeRegistrar.messenger()),
-        withId: "aether_player_view"
-      )
-    } else {
-      print("[AppDelegate] ❌ 无法获取 AetherEngineBridge 的 registrar")
-    }
-
     // 注册全局唯一 KSPlayer（第四播放核心「FF」：FFmpeg + Metal，MKV 等全格式）
     if let ksRegistrar = engineBridge.pluginRegistry.registrar(forPlugin: "KSEngine") {
       KSEngine.shared.register(messenger: ksRegistrar.messenger())

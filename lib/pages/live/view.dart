@@ -624,7 +624,6 @@ class _LivePageState extends State<LivePage> {
                   switch (engine) {
                     PlayerEngine.avplayer => '系统内核，HLS/MP4 兼容性好',
                     PlayerEngine.ksplayer => 'FFmpeg 内核，MKV 等全格式兼容',
-                    PlayerEngine.aether => 'Aether 内核（直播暂未接入）',
                     _ => '支持 flv/ts/rtmp 等更多直播流',
                   },
                   style: TextStyle(
@@ -1831,9 +1830,6 @@ class _LivePageState extends State<LivePage> {
                               switch (PlayerPrefs.instance.liveEngine.value) {
                                 PlayerEngine.avplayer => 'AV',
                                 PlayerEngine.ksplayer => 'FF',
-                                // 直播页暂未接入 Aether（DVR/时移逻辑未验证），
-                                // 但枚举穷尽性必须覆盖
-                                PlayerEngine.aether => 'AE',
                                 PlayerEngine.mpv => 'MPV',
                               },
                               style: const TextStyle(

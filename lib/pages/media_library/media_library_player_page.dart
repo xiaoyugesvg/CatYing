@@ -13,7 +13,6 @@ import 'package:tvbox/services/play_pipeline.dart' show kMovieWebUrlRejected;
 import 'package:tvbox/widgets/app_player.dart';
 import 'package:tvbox/widgets/ios_av_player.dart';
 import 'package:tvbox/widgets/ks_player.dart';
-import 'package:tvbox/widgets/aether_player.dart';
 import 'package:tvbox/widgets/mpv_app_player.dart';
 import 'package:tvbox/widgets/video_player.dart';
 import 'package:tvbox/widgets/playback_surface.dart';
@@ -82,9 +81,6 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
     }
     if (engine == PlayerEngine.ksplayer && Platform.isIOS) {
       return KSPlayer(config: const AppConfig(title: 'TVBox'));
-    }
-    if (engine == PlayerEngine.aether && Platform.isIOS) {
-      return AetherPlayer(config: const AppConfig(title: 'TVBox'));
     }
     if (Platform.isIOS) {
       return IosAvPlayer(config: const AppConfig(title: 'TVBox'));

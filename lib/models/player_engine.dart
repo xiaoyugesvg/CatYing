@@ -16,15 +16,7 @@ enum PlayerEngine {
   mpv(1, 'MPV播放器'),
   /// KSPlayer 内核（FFmpeg + Metal），iOS 第四核心「FF」：
   /// AVPlayer 吃不下的格式（MKV/ASS/多音轨等）全兼容，并自带小窗
-  ksplayer(3, 'KSPlayer播放器'),
-  /// AetherEngine 内核（FFmpeg demux + VideoToolbox 解码），iOS 第五核心「AE」：
-  /// 与 KSPlayer 并存（用户 2026-11-01 要求）。HDR / Dolby Vision / Dolby Atmos
-  /// 原生支持，自带小窗。
-  ///
-  /// ⚠️ 两个 FF 内核各带一整套 FFmpeg（KSPlayer→FFmpegKit 6.x，
-  /// AetherEngine→FFmpegBuild 8.1），同名 C 符号在链接期只能有一套生效。
-  /// 真机验证前不要假设两个内核都能正常出画。
-  aether(4, 'Aether播放器');
+  ksplayer(3, 'KSPlayer播放器');
 
   final int value;
   final String title;
@@ -56,7 +48,6 @@ enum PlayerEngine {
   ///
   /// - Apple（iOS / macOS）：avplayer 为默认主内核（与系统小窗共用同一 AVPlayer），
   ///   ksplayer（KSPlayer/FFmpeg）为 iOS 备选内核（MKV 等全格式 + 自带小窗），
-  ///   aether（AetherEngine/FFmpeg）为 iOS 第五内核（HDR/DV/Atmos + 自带小窗），
   ///   mpv（media_kit_libs_ios_video）为备用内核（支持 flv/ts/rtmp 等 AVPlayer
   ///   不支持的直播格式；默认不启用，用户在设置里切换）。
   /// - Android：mpv（无 AVPlayer）。
@@ -66,7 +57,6 @@ enum PlayerEngine {
       return const [
         PlayerEngine.avplayer,
         PlayerEngine.ksplayer,
-        PlayerEngine.aether,
         PlayerEngine.mpv,
       ];
     }

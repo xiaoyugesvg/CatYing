@@ -26,7 +26,6 @@ import 'package:tvbox/widgets/common_widgets.dart';
 import 'package:tvbox/widgets/app_player.dart';
 import 'package:tvbox/widgets/ios_av_player.dart';
 import 'package:tvbox/widgets/ks_player.dart';
-import 'package:tvbox/widgets/aether_player.dart';
 import 'package:tvbox/widgets/mpv_app_player.dart';
 import 'package:tvbox/widgets/video_player.dart';
 import 'package:tvbox/widgets/video_player_pip.dart';
@@ -677,8 +676,6 @@ class _DetailPageState extends State<DetailPage> {
       _player = mpv;
     } else if (engine == PlayerEngine.ksplayer && Platform.isIOS) {
       _player = KSPlayer(config: const AppConfig(title: 'TVBox'));
-    } else if (engine == PlayerEngine.aether && Platform.isIOS) {
-      _player = AetherPlayer(config: const AppConfig(title: 'TVBox'));
     } else if (Platform.isIOS) {
       _player = IosAvPlayer(config: const AppConfig(title: 'TVBox'));
     } else {
