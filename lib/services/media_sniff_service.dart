@@ -47,12 +47,70 @@ import 'package:tvbox/services/webview_sniffer.dart';
 import 'package:tvbox/widgets/video_player_pip.dart';
 
 /// 一次嗅探的完整结果（探针页要展示"抓到了什么"，所以不能只回首选）
+/// 一层 iframe 的跟帧结果 —— 失败时用来回答「到底卡在哪一层」。
+///
+/// 为什么需要：嗅探失败原来只有一句「候选 0 条，跟过 2 个 iframe」，
+/// 看不出是**加载失败**、**被 302 带走**、还是**页面里压根没有 iframe**。
+/// 实测 `jx.muiu.site` 那条链时，只能靠 curl 一层层手打才定位到
+/// 「`jx.php` 不带 Referer 会 302 回 `jiexi/`」—— 页面自己给不出任何线索。
+class SniffHop {
+  const SniffHop({
+    required this.index,
+    required this.url,
+    required this.elapsed,
+    required this.candidateCount,
+    required this.frameCount,
+    this.landedUrl,
+    this.note = '',
+  });
+
+  /// 第几层（从 1 开始）
+  final int index;
+
+  /// 这一层请求的地址
+  final String url;
+
+  /// 这一层实际停留的地址（和 [url] 不同 ⇒ 被跳转了）
+  final String? landedUrl;
+
+  /// 这一层等了多久
+  final Duration elapsed;
+
+  /// 这一层结束时累计的候选数
+  final int candidateCount;
+
+  /// 这一层结束时累计的 iframe 数
+  final int frameCount;
+
+  /// 一句话结论（加载失败 / 提前跟下一层 / 等满时间片 / 跳转到…）
+  final String note;
+
+  /// 是否发生了跳转（302 / JS 重定向）
+  bool get redirected {
+    final l = landedUrl;
+    if (l == null || l.isEmpty) return false;
+    return !_sameTarget(l, url);
+  }
+}
+
+/// 两个 URL 是不是「同一个页面」（忽略 query 里的随机参数）
+bool _sameTarget(String a, String b) {
+  try {
+    final ua = Uri.parse(a);
+    final ub = Uri.parse(b);
+    return ua.host == ub.host && ua.path == ub.path;
+  } catch (_) {
+    return a == b;
+  }
+}
+
 class SniffResult {
   const SniffResult({
     this.best,
     this.candidates = const [],
     this.frames = const [],
     this.logs = const [],
+    this.hops = const [],
   });
 
   /// 首选媒体地址（null = 没嗅到）
@@ -66,6 +124,9 @@ class SniffResult {
 
   /// 原始事件日志（新的在前）
   final List<String> logs;
+
+  /// 每一层的跟帧结果（按顺序）—— 失败定位用
+  final List<SniffHop> hops;
 
   bool get ok => best != null && best!.isNotEmpty;
 }
@@ -196,8 +257,43 @@ class MediaSniffService {
 
     final deadline = DateTime.now().add(budget);
     final visited = <String>{};
+    final hops = <SniffHop>[];
     var target = url;
     String? best;
+
+    /// 记一层的结果（各个 break 点共用）。
+    ///
+    /// 顺手读一次 `currentUrl()` —— 这是**最有价值的一条诊断**：
+    /// `jx.php` 不带 Referer 时会 302 回 `jiexi/`，落地地址和请求地址不一样。
+    /// 以前这条线索完全看不到，只能靠 curl 手打才发现。
+    Future<void> recordHop({
+      required int index,
+      required String url,
+      required Duration elapsed,
+      required String note,
+    }) async {
+      String? landed;
+      try {
+        landed = await c.currentUrl();
+      } catch (_) {}
+      var n = note;
+      if (landed != null &&
+          landed.isNotEmpty &&
+          !_sameTarget(landed, url)) {
+        n = '被跳转到 ${_shorten(landed)}（$note）';
+      }
+      hops.add(
+        SniffHop(
+          index: index,
+          url: url,
+          landedUrl: landed,
+          elapsed: elapsed,
+          candidateCount: collector.count,
+          frameCount: collector.frames.length,
+          note: n,
+        ),
+      );
+    }
 
     try {
       for (var hop = 0; hop < _maxHops; hop++) {
@@ -211,12 +307,22 @@ class MediaSniffService {
         );
         AppLog.instance.log('[Sniff] 第 ${hop + 1} 层: $target');
 
-        if (!await _load(c, target, headers, viaLocation: hop > 0)) break;
+        if (!await _load(c, target, headers, viaLocation: hop > 0)) {
+          await recordHop(
+            index: hop + 1,
+            url: target,
+            elapsed: Duration.zero,
+            note: '加载失败',
+          );
+          break;
+        }
 
         final hopDeadline = _hopDeadline(deadline);
         final hopStarted = DateTime.now();
         var warm = false;
         var nudged = false;
+        var hit = false;
+        var earlyHop = false;
         final warmTimer = Timer(_warmup, () => warm = true);
         try {
           while (DateTime.now().isBefore(hopDeadline)) {
@@ -225,6 +331,7 @@ class MediaSniffService {
             final b = collector.best;
             if (warm && b != null && b.isMedia) {
               best = b.url;
+              hit = true;
               break;
             }
             // 页面可能要「用户点一下播放」才去取流 —— 隐形 WebView 里没人点，
@@ -240,6 +347,7 @@ class MediaSniffService {
                 collector.count == 0 &&
                 collector.nextFrame(visited) != null) {
               AppLog.instance.log('[Sniff] 本层无候选但露出 iframe，提前跟下一层');
+              earlyHop = true;
               break;
             }
             await Future<void>.delayed(const Duration(milliseconds: 300));
@@ -247,10 +355,27 @@ class MediaSniffService {
         } finally {
           warmTimer.cancel();
         }
-        if (best != null) break;
 
-        // 这一层没有媒体地址 → 顺着 iframe 再下一层
-        final next = collector.nextFrame(visited);
+        final elapsed = DateTime.now().difference(hopStarted);
+        final next = hit ? null : collector.nextFrame(visited);
+        final String note;
+        if (hit) {
+          note = '命中地址';
+        } else if (earlyHop) {
+          note = '露出 iframe，提前跟下一层';
+        } else if (next == null) {
+          note = '没有可跟的 iframe（页面里没有 / 都跟过了）';
+        } else {
+          note = '等满 ${elapsed.inSeconds}s，继续下一层';
+        }
+        await recordHop(
+          index: hop + 1,
+          url: target,
+          elapsed: elapsed,
+          note: note,
+        );
+
+        if (best != null) break;
         if (next == null) break;
         AppLog.instance.log('[Sniff] 跟到下一层: $next');
         target = next;
@@ -272,15 +397,32 @@ class MediaSniffService {
     } else {
       AppLog.instance.log(
         '[Sniff] 未嗅到媒体地址（候选 ${collector.count} 条，'
-        '跟过 ${collector.frames.length} 个 iframe）: $url',
+        '跟过 ${collector.frames.length} 个 iframe，${hops.length} 层）: $url',
       );
+      for (final h in hops) {
+        AppLog.instance.log(
+          '[Sniff]   ${h.index}. ${_shorten(h.url)} → ${h.note}',
+        );
+      }
     }
     return SniffResult(
       best: best,
       candidates: collector.sorted,
       frames: collector.frames,
       logs: collector.logs,
+      hops: hops,
     );
+  }
+
+  /// 日志 / 界面里用的短地址（去掉 query，太长只看前缀）
+  static String _shorten(String u) {
+    try {
+      final p = Uri.parse(u);
+      final s = '${p.host}${p.path}';
+      return s.length <= 60 ? s : '${s.substring(0, 57)}…';
+    } catch (_) {
+      return u.length <= 60 ? u : '${u.substring(0, 57)}…';
+    }
   }
 
   /// 每一层的时间片：最多 [_hopCap]，且不超过剩余预算

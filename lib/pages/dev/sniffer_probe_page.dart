@@ -398,6 +398,16 @@ class _SnifferProbePageState extends State<SnifferProbePage> {
             ],
             const SizedBox(height: 6),
           ],
+          // 分层诊断放最前面：失败时第一眼要看到「卡在哪一层」，
+          // 而不是先滚过一串候选和 iframe。
+          if (r.hops.isNotEmpty) ...[
+            _sectionTitle('分层诊断（${r.hops.length} 层）'),
+            for (final h in r.hops) ...[
+              _HopCard(hop: h),
+              const SizedBox(height: 8),
+            ],
+            const SizedBox(height: 6),
+          ],
           if (r.frames.isNotEmpty) ...[
             _sectionTitle('跟过的 iframe（${r.frames.length}）'),
             for (final f in r.frames) ...[
@@ -480,6 +490,99 @@ class _SnifferProbePageState extends State<SnifferProbePage> {
 /// 一条地址卡片：徽标 + 地址 + 说明 + 播放 / 复制。
 ///
 /// `placeholder` = 这条不是地址（比如"解析失败"的原因文字），不显示播放/复制。
+/// 一层跟帧的结果 —— 失败时回答「卡在哪一层、为什么卡」。
+///
+/// 比「候选 0 条，跟过 2 个 iframe」有用得多：能看出这层是加载失败、
+/// 被 302 带走、还是页面里根本没有 iframe。`jx.php` 那个坑就是被 302
+/// 带回上一页，没有这张卡的话只能靠 curl 一层层手打才发现。
+class _HopCard extends StatelessWidget {
+  const _HopCard({required this.hop});
+
+  final SniffHop hop;
+
+  /// 被跳转 = 关键异常（多半是被防盗链打回去了），必须显眼
+  static const _warn = Color(0xFFE5534B);
+
+  @override
+  Widget build(BuildContext context) {
+    final warn = hop.redirected;
+    final secs = (hop.elapsed.inMilliseconds / 1000).toStringAsFixed(1);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundTertiary,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: warn ? _warn : AppTheme.textTertiary,
+          width: warn ? 1.2 : 0.8,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 18,
+                height: 18,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: warn ? _warn : AppTheme.textTertiary,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Text(
+                  '${hop.index}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  hop.url,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                '${secs}s',
+                style: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: 11,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            hop.note,
+            style: TextStyle(
+              color: warn ? _warn : AppTheme.textSecondary,
+              fontSize: 11,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '累计 ${hop.candidateCount} 候选 · ${hop.frameCount} iframe',
+            style: TextStyle(color: AppTheme.textTertiary, fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ResultCard extends StatelessWidget {
   const _ResultCard({
     required this.url,

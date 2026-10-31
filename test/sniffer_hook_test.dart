@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:tvbox/services/media_sniff_service.dart';
 import 'package:tvbox/services/sniffer_hook_js.dart';
 import 'package:tvbox/services/webview_sniffer.dart';
 
@@ -123,6 +124,59 @@ void main() {
       c.add('https://x.com/a.m3u8', kind: 'frame', via: 'frame');
       expect(c.count, 0);
       expect(c.frames, hasLength(1));
+    });
+  });
+
+  group('分层诊断（SniffHop）', () {
+    SniffHop hop({
+      required String url,
+      String? landed,
+      int index = 1,
+      String note = '',
+    }) =>
+        SniffHop(
+          index: index,
+          url: url,
+          landedUrl: landed,
+          elapsed: const Duration(seconds: 4),
+          candidateCount: 0,
+          frameCount: 2,
+          note: note,
+        );
+
+    test('落地地址和请求地址不同 ⇒ 判定为被跳转', () {
+      // 实测 ckplayer.vip/jx.php 不带 Referer 就是这种情况：
+      // 请求 jx.php，落地在 jiexi/ —— 跟帧循环原地打转。
+      final h = hop(
+        url: 'https://www.ckplayer.vip/jx.php?url=x',
+        landed: 'https://www.ckplayer.vip/jiexi/?url=x',
+      );
+      expect(h.redirected, isTrue);
+    });
+
+    test('只有 query 不同不算跳转（解析链每层都带不同的 url= 参数）', () {
+      final h = hop(
+        url: 'https://a.com/jiexi/?url=https%3A%2F%2Fv.qq.com%2F1',
+        landed: 'https://a.com/jiexi/?url=https%3A%2F%2Fv.qq.com%2F2',
+      );
+      expect(h.redirected, isFalse,
+          reason: 'query 变了就报「被跳转」会满屏假警报，真问题反而被淹掉');
+    });
+
+    test('落地地址未知 ⇒ 不判定为跳转', () {
+      expect(hop(url: 'https://a.com/x', landed: null).redirected, isFalse);
+      expect(hop(url: 'https://a.com/x', landed: '').redirected, isFalse);
+    });
+
+    test('路径不同要报（/jx.php → / 也算换了页面）', () {
+      expect(
+        hop(url: 'https://a.com/jx.php', landed: 'https://a.com/').redirected,
+        isTrue,
+      );
+    });
+
+    test('SniffResult 默认没有分层（没跑过嗅探时界面不该画空壳）', () {
+      expect(const SniffResult().hops, isEmpty);
     });
   });
 }
