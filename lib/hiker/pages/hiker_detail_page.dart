@@ -805,13 +805,25 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
   }
 
   /// 进原生播放器
-  Future<void> _pushPlayer(String url, Map<String, String> headers) {
+  ///
+  /// [sourcePageUrl] = 这条直链是从哪个网页地址嗅探来的。传了播放页底栏
+  /// 才会出现「线路」按钮（换一条解析线路 = 换个前缀重新嗅探）——
+  /// 用户 2026-10-31：「播放器下面没有切换线路的按钮吗？不管是默认详情
+  /// 里面的还是纯竖屏的播放器呢」。
+  Future<void> _pushPlayer(
+    String url,
+    Map<String, String> headers, {
+    String? sourcePageUrl,
+    Map<String, String>? sourceHeaders,
+  }) {
     return Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => MiniAppPlayerPage(
           url: url,
           title: widget.item.title,
           headers: headers.isEmpty ? null : headers,
+          sourcePageUrl: sourcePageUrl,
+          sourceHeaders: sourceHeaders ?? (headers.isEmpty ? null : headers),
         ),
       ),
     );
@@ -868,7 +880,13 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
         return false;
       }
       AppLog.instance.log('[Hiker] 嗅探命中，进原生播放器: $trimmed');
-      await _pushPlayer(trimmed, headers);
+      // 把原始网页地址一起带进去 ⇒ 播放页底栏可以「换一条线路」重嗅
+      await _pushPlayer(
+        trimmed,
+        headers,
+        sourcePageUrl: pageUrl,
+        sourceHeaders: headers,
+      );
       return true;
     } catch (e) {
       AppLog.instance.w('[Hiker] 嗅探异常: $e');

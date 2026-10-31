@@ -130,9 +130,18 @@ class _RssArticlePageState extends State<RssArticlePage> {
     if (!mounted) return;
 
     // 之前这里把网页地址直接塞 MiniAppPlayerPage 会黑屏（2026-10-28 审计 P1-2）。
-    Future<void> goPlayer(String u) => Navigator.of(context).push(
+    // [srcPage] = 这条直链是从哪个网页嗅探来的 ⇒ 播放页底栏才有「线路」按钮
+    // （用户 2026-10-31：「播放器下面没有切换线路的按钮吗」）。
+    Future<void> goPlayer(String u, {String? srcPage}) =>
+        Navigator.of(context).push(
           MaterialPageRoute<void>(
-            builder: (_) => MiniAppPlayerPage(url: u, title: title, headers: headers),
+            builder: (_) => MiniAppPlayerPage(
+              url: u,
+              title: title,
+              headers: headers,
+              sourcePageUrl: srcPage,
+              sourceHeaders: headers,
+            ),
           ),
         );
 
@@ -162,7 +171,7 @@ class _RssArticlePageState extends State<RssArticlePage> {
     }
     if (sniffed.isNotEmpty) {
       AppLog.instance.log('[RSS] 嗅探命中，进原生播放器: $sniffed');
-      await goPlayer(sniffed);
+      await goPlayer(sniffed, srcPage: pageUrl);
       return;
     }
 

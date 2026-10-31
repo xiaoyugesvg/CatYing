@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/music/models/models.dart';
 import 'package:tvbox/music/theme/music_theme.dart';
 

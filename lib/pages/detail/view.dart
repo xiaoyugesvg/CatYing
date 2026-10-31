@@ -35,6 +35,8 @@ import 'package:tvbox/pages/search/controller.dart' show TvSearchController;
 import 'package:tvbox/pages/detail/controller.dart';
 import 'package:tvbox/pages/detail/episode_list.dart';
 import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/parse_line_sheet.dart';
+import 'package:tvbox/services/parse_lines.dart';
 import 'package:tvbox/webhome/webhtv_playback_sync_service.dart';
 
 /// 详情页 - 对应 Swift DetailView
@@ -1147,6 +1149,9 @@ class _DetailPageState extends State<DetailPage> {
       key: ObjectKey(_player),
       player: _player,
       onEngineChanged: _onEngineHotSwap,
+      // 切换解析线路：播放器只负责发信号，弹层 + 重新嗅探由本页做
+      // （只有这一层还留着「原始播放页地址」）。
+      onSwitchParseLine: _openParseLineSheet,
       // 字幕选择接力：重建（含热切换）后按 matchKey 还原同一条字幕
       subtitleChoice: _subtitleChoice,
       onSubtitleChoiceChanged: (c) => _subtitleChoice = c,
@@ -2381,6 +2386,20 @@ class _DetailPageState extends State<DetailPage> {
 
   // MARK: - 播放线路 / 清晰度 / 选集（统一在 _buildPlaybackCard 内渲染）
 
+  /// 弹出「切换解析线路」并重解当前集。
+  ///
+  /// 两个入口共用：播放器底栏的「线路」按钮、播放源卡片里的「解析线路」段。
+  /// 换完线路 `retryCurrentEpisode()` 会重走一遍取址 → 嗅探，播放器热替换地址。
+  Future<void> _openParseLineSheet() async {
+    final picked = await showParseLineSheet(context);
+    if (picked == null || !mounted) return;
+    if (picked == ParseLineStore.instance.selectedId) {
+      AppToast.message('已经是这条线路了');
+      return;
+    }
+    await _controller.switchParseLine(picked);
+  }
+
   /// 播放线路 + 选集播放 —— 合并成一张独立卡片（三段式底部）
   /// （清晰度选择已按用户要求移除：HLS 解析仍自动进行，默认档位直接播放）
   Widget _buildPlaybackCard() {
@@ -2433,6 +2452,42 @@ class _DetailPageState extends State<DetailPage> {
                 ),
               ),
             ],
+            // ── 解析线路（用户 2026-10-31）────────────────────────────
+            // 「解析站不行就是我自己切换线路来」。这里**不列全部**线路：
+            // 订阅里动辄 50+ 条，全铺开会把卡片撑爆，也会盖掉下面的合集。
+            // 只显示当前这条 + 一个「换一条」，点开是共享的线路弹层。
+            const SizedBox(height: AppTheme.spacingMD),
+            Divider(height: 1, color: AppTheme.borderLight),
+            const SizedBox(height: AppTheme.spacingMD),
+            const SectionHeader(
+              title: '解析线路',
+              icon: Icons.alt_route_rounded,
+            ),
+            const SizedBox(height: AppTheme.spacingSM),
+            AnimatedBuilder(
+              animation: ParseLineStore.instance,
+              builder: (_, __) {
+                final store = ParseLineStore.instance;
+                final name = store.selectedName;
+                return Row(
+                  children: [
+                    Flexible(
+                      child: _PillChip(
+                        title: name,
+                        isSelected: true,
+                        onTap: _openParseLineSheet,
+                      ),
+                    ),
+                    const SizedBox(width: AppTheme.spacingSM),
+                    _PillChip(
+                      title: '换一条',
+                      isSelected: false,
+                      onTap: _openParseLineSheet,
+                    ),
+                  ],
+                );
+              },
+            ),
             if (hasEpisodes) ...[
               const SizedBox(height: AppTheme.spacingMD),
               Divider(height: 1, color: AppTheme.borderLight),

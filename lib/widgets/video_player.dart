@@ -152,6 +152,17 @@ class VideoPlayerWidget extends StatefulWidget {
   /// 不传则走旧行为 —— 仅保存偏好，下一集或重新播放才生效。
   final ValueChanged<PlayerEngine>? onEngineChanged;
 
+  /// 点底栏「线路」按钮时的回调（**父级**负责弹层 + 重新解析 + 换地址）。
+  ///
+  /// 为什么不在这里直接弹 [showParseLineSheet]：
+  ///   · 播放器只拿到**最终直链**，不知道这条链是从哪个网页解析来的；
+  ///   · 「换线路 = 拿原网页地址重新套一条前缀再嗅探」，必须由持有原始
+  ///     播放地址的那一层（详情页 controller / 海阔 / RSS）来做；
+  ///   · 换完地址要热替换 `url`，那也是父级 rebuild 的职责。
+  ///
+  /// 传了才显示按钮。普通本地文件 / 直链播放（没有解析环节）不传。
+  final VoidCallback? onSwitchParseLine;
+
   /// 用户已选的字幕（跨引擎热切换接力用）。
   /// null = 尚未选择 → 保持内核默认（mpv 会自动选默认轨）。
   final SubtitleChoice? subtitleChoice;
@@ -204,6 +215,7 @@ class VideoPlayerWidget extends StatefulWidget {
     this.onSetSkipIntro,
     this.onSetSkipOutro,
     this.onEngineChanged,
+    this.onSwitchParseLine,
     this.subtitleChoice,
     this.onSubtitleChoiceChanged,
   });
@@ -3994,6 +4006,19 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                 onTap: () {
                                   _scheduleHideControls();
                                   setState(() => _showEpisodeSheet = true);
+                                },
+                              ),
+                            // 切换解析线路（用户 2026-10-31）：
+                            // 「解析站不行就是我自己切换线路」—— 放在选集旁边，
+                            // 因为两者都是"换个地方拿地址"。父级没传回调就不显示。
+                            if (widget.onSwitchParseLine != null)
+                              _iconButton(
+                                icon: Icons.alt_route_rounded,
+                                size: 21,
+                                width: 36,
+                                onTap: () {
+                                  _scheduleHideControls();
+                                  widget.onSwitchParseLine!.call();
                                 },
                               ),
                             // 弹幕开关 / 播放器核心切换：**2026-10-14 已移到顶栏**

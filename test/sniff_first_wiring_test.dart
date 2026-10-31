@@ -230,4 +230,157 @@ void main() {
       );
     });
   });
+
+  // ── 2026-10-31 用户：「播放器下面没有切换线路的按钮吗？不管是默认详情
+  //    里面的还是纯竖屏的播放器呢」
+  //
+  // 「线路」在本 App 里 = **解析线路**（`jx.xx/?url=…` 那个前缀），不是 CMS
+  // 播放源。因为 `_platformSniffLines = 1`（只试当前这一条），失败后必须让
+  // 用户自己换 —— 没有这个入口，`_platformSniffLines = 1` 就等于「一旦选的
+  // 那条挂了，这集永远播不了」。
+  group('切换解析线路的入口必须存在', () {
+    test('共享弹层导出 showParseLineSheet，且能区分「取消」和「自动」', () {
+      final src = _stripComments(_read('lib/widgets/parse_line_sheet.dart'));
+      expect(
+        src.contains('Future<String?> showParseLineSheet('),
+        isTrue,
+        reason: '返回 String? 是刻意的：null = 取消，\'\' = 自动（不套线路），'
+            '其它 = 线路 id。用 String 就分不出「取消」和「选了自动」',
+      );
+      expect(
+        src.contains("Navigator.of(context).pop('')"),
+        isTrue,
+        reason: '「自动」这一项必须回空串，否则选自动会被当成取消',
+      );
+      expect(
+        src.contains('ensureSyncedFromConfig'),
+        isTrue,
+        reason: '没打开过设置页时订阅线路是空的，弹层必须先自己懒同步一次',
+      );
+    });
+
+    test('详情页把 onSwitchParseLine 传给播放器', () {
+      final src = _stripComments(_read('lib/pages/detail/view.dart'));
+      expect(
+        src.contains('onSwitchParseLine:'),
+        isTrue,
+        reason: '不传回调，播放器底栏就不会出现「线路」按钮',
+      );
+      expect(
+        src.contains('_openParseLineSheet'),
+        isTrue,
+        reason: '弹层 + 重新解析的实现在详情页（只有这层还留着原始播放页地址）',
+      );
+    });
+
+    test('详情页「播放源」卡片里有「解析线路」段', () {
+      final src = _stripComments(_read('lib/pages/detail/view.dart'));
+      expect(
+        src.contains("title: '解析线路'"),
+        isTrue,
+        reason: '用户 2026-10-31：要能在**详情页里**直接换，不用先点开播放器',
+      );
+      expect(
+        src.contains('AnimatedBuilder('),
+        isTrue,
+        reason: '线路名来自 ParseLineStore（ChangeNotifier），不监听就换完不刷新',
+      );
+    });
+
+    test('切换线路必须清解析缓存，否则换了跟没换一样', () {
+      final src = _stripComments(_read('lib/pages/detail/controller.dart'));
+      final i = src.indexOf('switchParseLine');
+      expect(i, greaterThan(-1), reason: 'controller 没有 switchParseLine');
+      final body = src.substring(i, i + 1400);
+      expect(
+        body.contains('setSelected'),
+        isTrue,
+        reason: '不落盘 ⇒ 下一集又用回旧线路',
+      );
+      expect(
+        body.contains('clearCache'),
+        isTrue,
+        reason: 'MediaResolver 缓存 key 是**页面地址**，换线路后页面地址没变，'
+            '不清缓存会直接把上一条线路的结果还回来',
+      );
+      expect(
+        body.contains('retryCurrentEpisode'),
+        isTrue,
+        reason: '不清空重解，用户点了「换一条」画面不会有任何变化',
+      );
+    });
+
+    test('竖屏播放器底栏有「线路」按钮，且父级不传就不显示', () {
+      final src = _stripComments(_read('lib/widgets/video_player.dart'));
+      expect(
+        src.contains('final VoidCallback? onSwitchParseLine;'),
+        isTrue,
+        reason: '播放器只拿到最终直链，不知道原始网页地址 —— '
+            '所以只能发信号，重新解析交给父级',
+      );
+      expect(
+        src.contains('widget.onSwitchParseLine != null'),
+        isTrue,
+        reason: '直链 / 本地文件播放没有解析环节，硬显示一个按钮点了没用',
+      );
+      expect(
+        src.contains('Icons.alt_route_rounded'),
+        isTrue,
+        reason: '底栏按钮图标',
+      );
+    });
+
+    // 海阔 / RSS / 小程序共用 `MiniAppPlayerPage`。这三端原来把「原始网页
+    // 地址」丢在了页面外面，进播放页后就没有"线路"这个概念了 —— 于是
+    // 「探针页能换线路、海阔里不能」。
+    const sharedPlayer = 'lib/miniapp/pages/mini_app_player_page.dart';
+
+    test('共用播放页收得下原始网页地址，并自己重新嗅探', () {
+      final src = _stripComments(_read(sharedPlayer));
+      expect(
+        src.contains('final String? sourcePageUrl;'),
+        isTrue,
+        reason: '没有原始网页地址就没法「换个前缀重新嗅探」',
+      );
+      expect(
+        src.contains('Future<void> _switchParseLine('),
+        isTrue,
+        reason: '换线路的实现必须在播放页里，否则三端各写一遍',
+      );
+      final i = src.indexOf('Future<void> _switchParseLine(');
+      final body = src.substring(i, i + 1800);
+      expect(
+        body.contains('clearCache'),
+        isTrue,
+        reason: '解析缓存 key 是页面地址，换线路后地址没变 ⇒ 不清就返回旧结果',
+      );
+      expect(
+        body.contains('sniffFirst: true'),
+        isTrue,
+        reason: '重新嗅探必须还是「嗅探优先」，否则又和探针页不是同一条路',
+      );
+      expect(
+        body.contains('_url = direct'),
+        isTrue,
+        reason: '拿到新地址要热替换，否则画面还是旧线路那条',
+      );
+    });
+
+    test('海阔 / RSS / 小程序把原始网页地址带进播放页', () {
+      const cases = <String, String>{
+        'lib/hiker/pages/hiker_detail_page.dart': 'sourcePageUrl: pageUrl',
+        'lib/rss/pages/rss_article_page.dart': 'srcPage: pageUrl',
+        'lib/miniapp/services/ant_bridge.dart': 'sourcePageUrl: resolution.url',
+      };
+      cases.forEach((file, needle) {
+        final src = _stripComments(_read(file));
+        expect(
+          src.contains(needle),
+          isTrue,
+          reason: '$file 没把原始网页地址传进播放页 ⇒ 播放器底栏不会出现'
+              '「线路」按钮，用户只能退出去重进',
+        );
+      });
+    });
+  });
 }

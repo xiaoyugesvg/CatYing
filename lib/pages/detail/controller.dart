@@ -850,6 +850,31 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     AppToast.message('没有其它可用的播放线路');
   }
 
+  /// 切换**解析线路**（`jx.xx/?url=…` 那个前缀）并重解当前集。
+  ///
+  /// ── 用户 2026-10-31 ────────────────────────────────────────────
+  /// 「切换线路就是切换前缀，解析站不行那就是我自己切换线路来」。
+  ///
+  /// 所以这里**只做三件事**，不自动连着试别的线路：
+  ///   1. 记下用户选的这条（[ParseLineStore.setSelected]，落盘）；
+  ///   2. 清掉 [MediaResolver] 的地址缓存 —— 缓存 key 是**页面地址**，
+  ///      换线路后页面地址没变，不清就会直接把上一条线路的结果还回来，
+  ///      表现是「换了线路跟没换一样」；
+  ///   3. 重解当前集（[retryCurrentEpisode] 会重走 `_startPlayback`
+  ///      → `_sniffPageForMedia`，于是用新线路重新嗅探）。
+  Future<void> switchParseLine(String id) async {
+    try {
+      await ParseLineStore.instance.setSelected(id);
+    } catch (e) {
+      AppLog.instance.w('[Play] 保存解析线路失败: $e');
+    }
+    MediaResolver.instance.clearCache();
+    final name = id.isEmpty ? '自动' : (ParseLineStore.instance.selected?.name ?? id);
+    AppLog.instance.log('[Play] 用户切换解析线路 → $name，重新解析当前集');
+    AppToast.message('已切到「$name」，重新解析中…');
+    retryCurrentEpisode();
+  }
+
   bool playNext() {
     final info = vodInfo.value;
     if (info == null) return false;

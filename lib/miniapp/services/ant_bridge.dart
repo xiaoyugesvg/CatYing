@@ -1105,7 +1105,12 @@ class AntBridge {
           AppLog.instance
               .log('[AntBridge] player.open 网页嗅探命中，转原生播放器: $direct');
           Get.to(() => MiniAppPlayerPage(
-              url: direct, title: title, headers: headers));
+              url: direct,
+              title: title,
+              headers: headers,
+              // 带原始网页地址 ⇒ 播放页底栏能「换一条解析线路」重嗅
+              sourcePageUrl: resolution.url,
+              sourceHeaders: headers));
           return {
             'route': 'player',
             'url': direct,

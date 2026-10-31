@@ -3,22 +3,45 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/media_resolver.dart';
+import 'package:tvbox/services/parse_lines.dart';
+import 'package:tvbox/widgets/app_toast.dart';
+import 'package:tvbox/widgets/parse_line_sheet.dart';
 import 'package:tvbox/widgets/video_player.dart';
 
 /// URL 直播放页（ant.player.open 用）。
 ///
 /// 复用项目播放器内核（media_kit/libmpv + 弹幕 + PiP），
 /// 黑底全屏，进页即播。带取流请求头（source.play 返回的 header 原样透传）。
+///
+/// ── 也是海阔 / RSS / 小程序的**共用播放页**（2026-10-31）──────────
+/// 这三端都是「原始网页地址 → 嗅探出直链 → 进这里播」。进了本页之后
+/// 原始地址就丢了，用户想「换一条解析线路」没入口 —— 用户原话：
+/// 「播放器下面没有切换线路的按钮吗？不管是默认详情里面的还是纯竖屏的
+/// 播放器呢」。所以本页收一个 [sourcePageUrl]：传了就在底栏出「线路」
+/// 按钮，换完自己重新嗅探并热替换地址。
 class MiniAppPlayerPage extends StatefulWidget {
   final String url;
   final String title;
   final Map<String, String>? headers;
+
+  /// 这条 [url] 是从哪个**网页地址**嗅探出来的（没有解析环节就传 null）。
+  ///
+  /// 传了才显示「切换线路」按钮 —— 直链 / TG 取流 / 本地文件没有"线路"
+  /// 这个概念，硬给一个按钮点了也没用。
+  final String? sourcePageUrl;
+
+  /// 重新嗅探 [sourcePageUrl] 时带的请求头（一般是源站要求的 Referer/UA）。
+  final Map<String, String>? sourceHeaders;
 
   const MiniAppPlayerPage({
     super.key,
     required this.url,
     this.title = '',
     this.headers,
+    this.sourcePageUrl,
+    this.sourceHeaders,
   });
 
   @override
@@ -32,8 +55,14 @@ class _MiniAppPlayerPageState extends State<MiniAppPlayerPage> {
   /// TG 播放失败的具体原因（null = 探测通过 / 非 TG 不探测）
   String? _probeError;
 
+  /// 当前实际在播的地址（换线路后会变）
+  late String _url = widget.url;
+
+  /// 换线路重新嗅探中
+  bool _switching = false;
+
   /// 是不是 TG 源的取流地址（本机回环 `/tg/…` 或远程 `…/tg/…`）
-  bool get _isTg => widget.url.contains('/tg/');
+  bool get _isTg => _url.contains('/tg/');
 
   @override
   void initState() {
@@ -55,7 +84,7 @@ class _MiniAppPlayerPageState extends State<MiniAppPlayerPage> {
     String? err;
     try {
       final r = await Dio().get(
-        widget.url,
+        _url,
         options: Options(
           responseType: ResponseType.bytes,
           headers: const {'Range': 'bytes=0-1'},
@@ -113,18 +142,81 @@ class _MiniAppPlayerPageState extends State<MiniAppPlayerPage> {
     );
   }
 
+  // ============================================================
+  // 切换解析线路（海阔 / RSS / 小程序共用）
+  // ============================================================
+
+  /// 弹线路列表 → 换线路 → 拿原始网页地址重新嗅探 → 热替换地址。
+  ///
+  /// 为什么必须回到**原始网页地址**重解：解析线路就是个前缀
+  /// （`jx.xx/?url=<原始地址>`），手上这条 m3u8 是上一条前缀的产物，
+  /// 拿它套新前缀没有意义。
+  Future<void> _switchParseLine() async {
+    final page = (widget.sourcePageUrl ?? '').trim();
+    if (page.isEmpty || _switching) return;
+    final picked = await showParseLineSheet(context);
+    if (picked == null || !mounted) return;
+    if (picked == ParseLineStore.instance.selectedId) {
+      AppToast.message('已经是这条线路了');
+      return;
+    }
+
+    setState(() => _switching = true);
+    try {
+      await ParseLineStore.instance.setSelected(picked);
+      // 缓存 key 是页面地址，换线路后地址没变 —— 不清就把旧线路结果还回来
+      MediaResolver.instance.clearCache();
+      final name =
+          picked.isEmpty ? '自动' : (ParseLineStore.instance.selected?.name ?? picked);
+      AppLog.instance.log('[Player] 切换解析线路 → $name，重新嗅探 $page');
+      AppToast.message('已切到「$name」，重新嗅探中…');
+
+      final found = await MediaResolver.instance.resolve(
+        page,
+        headers: widget.sourceHeaders ?? const {},
+        sniffFirst: true,
+      );
+      if (!mounted) return;
+      final direct = (found ?? '').trim();
+      if (direct.isEmpty) {
+        AppToast.message('这条线路没抓到地址，换一条试试');
+        return;
+      }
+      setState(() {
+        _url = direct;
+        _probeError = null;
+      });
+    } catch (e) {
+      AppLog.instance.w('[Player] 换线路失败: $e');
+      if (mounted) AppToast.message('换线路失败：$e');
+    } finally {
+      if (mounted) setState(() => _switching = false);
+    }
+  }
+
   Widget _buildBody() {
-    if (_probing) {
-      return const Center(
-        child: CircularProgressIndicator(color: Colors.white70),
+    if (_probing || _switching) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(color: Colors.white70),
+            if (_switching) ...[
+              const SizedBox(height: 14),
+              const Text('正在用新线路重新嗅探…',
+                  style: TextStyle(color: Colors.white54, fontSize: 13)),
+            ],
+          ],
+        ),
       );
     }
     if (_probeError != null) {
       return _error(_probeError!);
     }
     return VideoPlayerWidget(
-      key: ValueKey('ant_player_${widget.url}'),
-      url: widget.url,
+      // key 带上地址：换线路后地址变了 ⇒ 整体 remount，内核干净重开
+      key: ValueKey('ant_player_$_url'),
+      url: _url,
       videoTitle: widget.title.isEmpty ? '播放' : widget.title,
       headers: widget.headers,
       // TG 源每个分片都要回一趟 Telegram 机房，首块+缓冲延迟天然比 CDN 高。
@@ -133,6 +225,9 @@ class _MiniAppPlayerPageState extends State<MiniAppPlayerPage> {
       // 顶栏返回键由播放器自带、且**无条件显示**；不传 onBack 时点了
       // 什么都不会发生（只能靠系统手势退出）—— 2026-10-15 修复。
       onBack: () => Navigator.of(context).maybePop(),
+      // 有原始网页地址才有"线路"可换
+      onSwitchParseLine:
+          (widget.sourcePageUrl ?? '').trim().isEmpty ? null : _switchParseLine,
     );
   }
 

@@ -719,11 +719,13 @@ class MediaSniffService {
           );
         },
         onHttpError: (e) {
+          // `e.response` 可空、`response.statusCode` 不可空 —— 只判前者。
           final r = e.response;
-          if (r == null || r.statusCode == null) return;
-          if (r.statusCode! < 400) return;
-          _lastMainFrameError = 'HTTP ${r.statusCode}';
-          AppLog.instance.w('[Sniff] 主文档 HTTP ${r.statusCode}');
+          if (r == null) return;
+          final code = r.statusCode;
+          if (code < 400) return;
+          _lastMainFrameError = 'HTTP $code';
+          AppLog.instance.w('[Sniff] 主文档 HTTP $code');
         },
       ));
 
