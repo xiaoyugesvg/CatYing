@@ -101,10 +101,17 @@ class _SnifferProbePageState extends State<SnifferProbePage> {
     try {
       final r = await MediaResolver.instance.resolve(
         url,
-        // 这里是「解析测试」：**只测 HTTP 解析**（抓页面 + 线路）。
-        // 关掉嗅探兜底，才能和下面的「嗅探测试」分开比 —— 否则一个失败会
-        // 悄悄被另一个救回来，看不出到底是哪条路通了。
-        allowSniff: false,
+        // ── 2026-10-31 改：这里跑**完整链路**（抓页面 → 线路 → 嗅探兜底）──
+        //
+        // 上一版为了让两种测试可比，这里关掉了嗅探兜底。结果用户拿
+        // `jx.muiu.site/?url=v.qq.com/...` 一点，3.8 秒就「解析失败」——
+        // 而这条地址在电脑浏览器里是**能播的、猫爪也能抓到媒体**。
+        // 原因是它必须执行页面 JS，纯 HTTP 抓 HTML 永远空手。
+        //
+        // 「解析测试」该回答的问题是「**真实播放能不能出地址**」，所以
+        // 它必须和播放链路一致（`allowSniff` 默认就是 true）。想知道
+        // 是哪一步通的，看上面那行状态文字（会显示"改用浏览器嗅探…"）。
+        // 只想单独看嗅探抓到了什么，用「嗅探测试」。
         onProgress: (m) {
           if (mounted) setState(() => _parseStatus = m);
         },
@@ -112,11 +119,8 @@ class _SnifferProbePageState extends State<SnifferProbePage> {
       if (!mounted) return;
       setState(() {
         _parseResult = r;
-        // 这里只跑 HTTP 解析（抓页面 + 线路），**不含嗅探兜底** —— 所以
-        // 失败不等于真实播放会失败，得把这句话说出来，否则用户会误判
-        // （2026-10-31 用户就是拿着这句「未解析出直链」来问的）。
         _parseStatus = r == null
-            ? 'HTTP 解析未出直链（真实播放还会用嗅探兜底，也可点「嗅探测试」单独看）'
+            ? '完整链路也没出直链（抓页面 + 线路 + 嗅探都试过了）'
             : '解析成功';
       });
     } catch (e) {
@@ -338,7 +342,8 @@ class _SnifferProbePageState extends State<SnifferProbePage> {
                     ],
                     const SizedBox(height: 2),
                     Text(
-                      '平台链接建议用「解析测试」；普通播放页用「嗅探测试」。'
+                      '「解析测试」= 完整链路（抓页面 → 线路 → 嗅探兜底），'
+                      '跟真实播放一致；「嗅探测试」= 只看嗅探抓到什么。'
                       '嗅探会在页面加载后等 ${_warmup.inSeconds}s 再计时。',
                       style: TextStyle(
                           color: AppTheme.textTertiary, fontSize: 11),
