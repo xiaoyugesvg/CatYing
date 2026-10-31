@@ -79,8 +79,7 @@ void main() {
     });
   });
 
-  group('嗅探预算够跟完 4 层', () {
-    test('_sniffReserve 覆盖 _maxHops × 每层最少时间', () {
+  group('嗅探预算够跟完 4 层', () {    test('_sniffReserve 覆盖 _maxHops × 每层最少时间', () {
       final resolver = _read('lib/services/media_resolver.dart');
       final sniffer = _read('lib/services/media_sniff_service.dart');
 
@@ -124,6 +123,86 @@ void main() {
         greaterThan(reserve),
         reason: '总预算 $total s 必须大于嗅探预留 $reserve s，'
             '否则嗅探优先跑完就没有 HTTP 兜底的余量了',
+      );
+    });
+  });
+
+  // ── 2026-10-31 用户：「这个就是正常嗅探视频不行吗？只是多了个解析线路的前缀」
+  //
+  // 对 —— 就是「前缀 + 正常嗅探」，代码里没有任何按层级写死的逻辑。
+  // 但实测 `bd.jx.cn` 那条链**正好 4 层**，卡在原来的上限边界上：
+  //   bd.jx.cn → jiexi.bot.cd/ → jiexi.bot.cd/jx/（Go WASM）→ 123.129.229.14:4433
+  // 中间多一个中转页就整条废掉，所以下面三条必须钉住。
+  group('长链路不能被上限砍断', () {
+    test('平台页只试用户当前这一条线路（不替他连着试好几条）', () {
+      final resolver = _read('lib/services/media_resolver.dart');
+      final n = int.parse(
+        RegExp(r'static const int _platformSniffLines = (\d+);')
+            .firstMatch(resolver)!
+            .group(1)!,
+      );
+      expect(
+        n,
+        1,
+        reason: '用户 2026-10-31：「那么多线路你一个个弄吗，切换线路就是切换前缀，'
+            '解析站不行那就是我自己切换线路」。自动试 $n 条 = 让他干等几十秒，'
+            '还替他做了决定',
+      );
+    });
+
+    test('层数上限留了余量（实测那条链正好 4 层）', () {
+      final sniffer = _read('lib/services/media_sniff_service.dart');
+      final maxHops = int.parse(
+        RegExp(r'static const int _maxHops = (\d+);')
+            .firstMatch(sniffer)!
+            .group(1)!,
+      );
+      expect(
+        maxHops,
+        greaterThanOrEqualTo(5),
+        reason: '上限 $maxHops 层：bd.jx.cn 那条链就是 4 层，正好等于上限'
+            '等于「中间多一个中转页就废」，必须留余量',
+      );
+    });
+
+    test('最后一层时间片能放宽（WASM / 混淆播放器 10s 差一口气）', () {
+      final code = _stripComments(_read('lib/services/media_sniff_service.dart'));
+      expect(
+        code.contains('var hopDeadline'),
+        isTrue,
+        reason: '时间片写成 final 就没法在「发现没有下一层」时放宽，'
+            '最后一层永远只有 _hopCap',
+      );
+      final cap = int.parse(
+        RegExp(r'static const Duration _lastHopCap = Duration\(seconds: (\d+)\);')
+            .firstMatch(code)!
+            .group(1)!,
+      );
+      expect(
+        cap,
+        greaterThanOrEqualTo(12),
+        reason: '最后一层上限 ${cap}s 比中转层还短，等于没放宽',
+      );
+    });
+
+    test('解析站自己报错要提前收工（别把预算白等满）', () {
+      final code = _stripComments(_read('lib/services/media_sniff_service.dart'));
+      expect(code.contains('Future<bool> _siteError('), isTrue);
+      expect(
+        code.contains('_siteError(c)'),
+        isTrue,
+        reason: '定义了但没调用，等于没写',
+      );
+      // 只认「明确是错误页」的措辞，不认裸 404（正常页面里也常有 404 字样）
+      expect(
+        code.contains('/请求上游'),
+        isTrue,
+        reason: '实测 api.php 上游挂掉时页面显示「请求上游解析接口失败」',
+      );
+      expect(
+        RegExp(r'/\s*404\s*/\.test').hasMatch(code),
+        isFalse,
+        reason: '不许只凭「404」字样判定错误页 —— 会把正常页面误杀',
       );
     });
   });

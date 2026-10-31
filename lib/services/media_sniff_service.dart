@@ -150,7 +150,12 @@ class MediaSniffService {
   /// 4 层是实测出来的：`jx.muiu.site` → `ckplayer.vip/jiexi/` →
   /// `ckplayer.vip/jx.php` → `api-api.789jiexi.net`（真正出地址的那层）。
   /// 原来 3 层够不到最后一跳，日志里表现为「跟过 2 个 iframe 就放弃」。
-  static const int _maxHops = 4;
+  ///
+  /// 2026-10-31 提到 6：用户给的 `bd.jx.cn` 那条链**正好**是 4 层
+  /// （`bd.jx.cn` → `jiexi.bot.cd/` → `jiexi.bot.cd/jx/` → `123.129.229.14:4433`），
+  /// 卡在上限边界上 —— 中间只要多一个中转页就整条废掉。多给两层不花时间：
+  /// 链子短的时候循环会因为「没有可跟的 iframe」立刻退出，不存在白等。
+  static const int _maxHops = 6;
 
   /// 每一层最少给的时间（不然刚加载完就换层，等于白跳）
   static const Duration _minHop = Duration(seconds: 3);
@@ -162,6 +167,20 @@ class MediaSniffService {
   /// 差 1.8 秒整条链就废了。层数是我们自己假想的上限，真实链子常常只有 2 层，
   /// 平摊等于把预算浪费在根本不存在的层上。
   static const Duration _hopCap = Duration(seconds: 10);
+
+  /// 确认是**最后一层**时，时间片放宽到这里。
+  ///
+  /// 怎么判断"最后一层"：本层已经没有可跟的 iframe，却还一条候选都没有 ——
+  /// 说明地址只能从这一页里出来，再没有下一层可以兜底了，此时把时间给足。
+  ///
+  /// 为什么 10s 不够（2026-10-31 实测 `bd.jx.cn` 那条链的最后一层
+  /// `https://123.129.229.14:4433`）：
+  ///   · 页面要跑 `global.min.js` + 394KB 混淆过的 `khd_play.js`；
+  ///   · 播放器是 Artplayer，地址放在实例上（`window.stray.ad.url`），
+  ///     必须等它 `new` 出来才有；
+  ///   · 前面的中转层还要先跑一个 437KB base64 内嵌的 Go WASM 才能拼出这一层的地址。
+  /// 这类页面 10s 经常差一口气，放宽到 16s 才稳。
+  static const Duration _lastHopCap = Duration(seconds: 16);
 
   WebViewController? _controller;
   OverlayEntry? _entry;
@@ -312,12 +331,14 @@ class MediaSniffService {
           break;
         }
 
-        final hopDeadline = _hopDeadline(deadline);
+        var hopDeadline = _hopDeadline(deadline);
         final hopStarted = DateTime.now();
         var warm = false;
         var nudged = false;
         var hit = false;
         var earlyHop = false;
+        var siteDead = false;
+        var stretched = false;
         final warmTimer = Timer(_warmup, () => warm = true);
         try {
           while (DateTime.now().isBefore(hopDeadline)) {
@@ -335,15 +356,44 @@ class MediaSniffService {
               nudged = true;
               await _nudge(c);
             }
+            // 解析站**自己**报错（上游挂了 / 视频不存在）⇒ 地址永远不会出现，
+            // 继续等就是白等。提前收工，让上层立刻换下一条线路。
+            // 2026-10-31 实测：`api-api.789jiexi.net` 上游挂了以后，`api.php`
+            // 对所有视频都回 `{"code":404,"msg":"请求上游解析接口失败"}`，
+            // 页面走 `TheError()` —— 播放器根本不建，`stray.ad` / `<video>`
+            // 一个都没有。这种情况下 25s 和 2s 的结果完全一样。
+            if (warm && !siteDead && collector.count == 0) {
+              siteDead = await _siteError(c);
+              if (siteDead) {
+                AppLog.instance
+                    .log('[Sniff] 第 ${hop + 1} 层是解析站自己的错误页（上游不可用），提前收工');
+                break;
+              }
+            }
             // 本层已经暴露出可跟的 iframe，自己却一条候选都没有
             // → 别把 [_hopCap] 白等完，省下的时间留给下一层。
             // 实测 `jx.muiu.site` 就是这种壳页：地址在 iframe 里，主 frame 永远等不到。
-            if (DateTime.now().difference(hopStarted) >= _minHop &&
-                collector.count == 0 &&
-                collector.nextFrame(visited) != null) {
-              AppLog.instance.log('[Sniff] 本层无候选但露出 iframe，提前跟下一层');
-              earlyHop = true;
-              break;
+            // 反过来：**没有**可跟的 iframe 却还没候选 ⇒ 这就是最后一层，
+            // 放宽到 [_lastHopCap]（WASM / 混淆播放器这类页面 10s 差一口气）。
+            if (collector.count == 0 &&
+                DateTime.now().difference(hopStarted) >= _minHop) {
+              if (collector.nextFrame(visited) != null) {
+                AppLog.instance.log('[Sniff] 本层无候选但露出 iframe，提前跟下一层');
+                earlyHop = true;
+                break;
+              }
+              if (!stretched) {
+                stretched = true;
+                final hard = DateTime.now().add(_lastHopCap);
+                if (hard.isBefore(deadline)) {
+                  hopDeadline = hard;
+                } else {
+                  hopDeadline = deadline;
+                }
+                AppLog.instance.log(
+                  '[Sniff] 第 ${hop + 1} 层没有下一层可跟，时间片放宽到最后一层上限',
+                );
+              }
             }
             await Future<void>.delayed(const Duration(milliseconds: 300));
           }
@@ -356,6 +406,8 @@ class MediaSniffService {
         final String note;
         if (hit) {
           note = '命中地址';
+        } else if (siteDead) {
+          note = '解析站自己报错（上游不可用，换线路）';
         } else if (earlyHop) {
           note = '露出 iframe，提前跟下一层';
         } else if (next == null) {
@@ -475,6 +527,40 @@ class MediaSniffService {
       return true;
     } catch (e) {
       AppLog.instance.log('[Sniff] 加载失败 $url: $e');
+      return false;
+    }
+  }
+
+  /// 页面是不是「解析站**自己**的错误页」。
+  ///
+  /// ── 为什么要判这个（2026-10-31 实测）──────────────────────────
+  /// `api-api.789jiexi.net` 的上游挂掉以后，`api.php` 对**任何**视频都返回
+  /// `{"code":404,"msg":"请求上游解析接口失败"}`（本地 node 复现：用户那一集、
+  /// 腾讯另一部、爱奇艺对照组，三条全一样，各重试 4 次）。
+  ///
+  /// 页面拿到非 200 就走 `TheError()`：播放器根本不建，`stray.ad` 不存在，
+  /// `<video>` 也不存在 ⇒ **地址永远不会出现**。这时候把 [_hopCap] 等满
+  /// 和等 2 秒的结果完全一样，区别只是用户多等 23 秒。
+  ///
+  /// 识别出来就提前收工，让上层立刻换下一条线路 —— 这是用户唯一能感知到的
+  /// 修复：一条死线路 25s → 3s，三条线路加起来反而更快，而且能落到能用的那条。
+  ///
+  /// ⚠️ 只认「明确是错误页」的措辞，不认裸 `404`（正常页面里也常有 404 字样）。
+  Future<bool> _siteError(WebViewController c) async {
+    try {
+      final raw = await c.runJavaScriptReturningResult(
+        '(function(){try{'
+        'var el=document.getElementById("error");'
+        'if(el){var st=getComputedStyle(el);'
+        'if(st.display!=="none"&&st.visibility!=="hidden"&&el.offsetHeight>0)return "1";}'
+        'var t=((document.body&&document.body.innerText)||"").slice(0,3000);'
+        'if(!t)return "0";'
+        'if(/请求上游|解析失败|解析接口失败|暂时无法播放|该视频不存在|视频已失效|解析出错/.test(t))return "1";'
+        'return "0";}catch(e){return "0";}})()',
+      );
+      return raw.toString().contains('1');
+    } catch (_) {
+      // 页面正在导航时求值会抛错 —— 当作"不是错误页"，交给正常流程
       return false;
     }
   }

@@ -67,7 +67,9 @@ class MediaResolver {
   ///
   /// 35s 只是**上限**：命中就立刻返回（szctv 那种 3.2s 就出地址），
   /// 只有全链路都空手时才等满，期间有 [_resolveHint] 一路显示进度。
-  static const Duration defaultBudget = Duration(seconds: 35);
+  ///
+  /// 38 = [_sniffReserve] 28 + HTTP 兜底 10（≥ [_minHttpBudget] 8）。
+  static const Duration defaultBudget = Duration(seconds: 38);
 
   /// 单次 HTTP 超时上限
   static const Duration _requestTimeout = Duration(seconds: 8);
@@ -77,7 +79,11 @@ class MediaResolver {
   /// 25s = 前 3 层实测 12s + 第 4 层解密建播放器 5s + 抗抖动余量。
   /// 12s（最早）只够走 2~3 层，20s 在 4 层链上只剩 3s 余量 ——
   /// 日志里两次都是「第 4 层刚加载就被砍」。
-  static const Duration _sniffReserve = Duration(seconds: 25);
+  ///
+  /// 28s（2026-10-31）：`bd.jx.cn` 那条链的第 4 层是裸 IP 上的 WASM 播放器
+  /// （394KB 混淆脚本 + Artplayer），10s 时间片差一口气。层数上限也从 4 提到 6
+  /// （见 `MediaSniffService._maxHops`），6 × 3s 中转 + 最后一层 10s 刚好 28s。
+  static const Duration _sniffReserve = Duration(seconds: 28);
 
   /// HTTP 阶段至少给这么多，否则一条线路都试不完就去嗅探，得不偿失
   static const Duration _minHttpBudget = Duration(seconds: 8);
@@ -91,23 +97,24 @@ class MediaResolver {
   /// 而线路页本身还可能是 2~4 层 iframe。30s 会卡在「线路刚套好、
   /// 嗅探刚到第 3 层」的位置 —— 和之前 12s 砍断第 4 层是同一个毛病。
   ///
-  /// 50s 只是上限：命中的情况一般 5~15s 就出（线路页通常 1~2 层），
-  /// 只有「三条线路全都不认」时才等满，期间界面一路显示在试哪条。
-  /// 50 = 第一条 25s + 后两条各 8s + HTTP 兜底 9s。
-  static const Duration _platformBudget = Duration(seconds: 50);
+  /// 50s 只是上限：命中的情况一般 5~15s 就出（线路页通常 1~2 层）。
+  /// 40 = 唯一那条线路 28s + HTTP 兜底 12s。
+  static const Duration _platformBudget = Duration(seconds: 40);
 
-  /// 平台页最多用「嗅探」试几条解析线路。
+  /// 平台页**只用当前这一条**解析线路嗅探，不再自动连着试好几条。
   ///
-  /// 一条不够：不同线路认的平台不一样（有的只做腾讯、有的只做B站），
-  /// 只试第一条等于碰运气。也不能全试：订阅里 50+ 条线路 × 每条几秒 =
-  /// 几分钟，用户早返回了。3 条是「覆盖率」和「等待时间」的折中。
-  static const int _platformSniffLines = 3;
-
-  /// 平台页第 2 条及之后每条线路的嗅探预算。
+  /// ── 为什么改成 1（2026-10-31 用户）────────────────────────────
+  /// 用户原话：「那么多线路你一个个弄吗，切换线路就是切换前缀，解析站不行
+  /// 那就是我自己切换线路，直接嗅探这个加了前缀的页面里面的视频不就完了么」。
   ///
-  /// 第一条吃满 [_sniffReserve]（25s，4 层链要这么久），后面的给 8s ——
-  /// 线路页通常只有 1~2 层，8s 够；再多就把总预算吃光了。
-  static const Duration _platformHopBudget = Duration(seconds: 8);
+  /// 他是对的。自动连着试 3 条线路的真实代价：
+  ///   · 用户坐在那里等 40~50 秒，还不知道在等什么；
+  ///   · 试的第 2、3 条**不是用户选的**，等于 App 替他做决定；
+  ///   · 而"换线路"本来就是用户自己的操作（播放页就有线路切换），
+  ///     一次只试一条、失败立刻返回，用户换一下比等 50 秒快得多。
+  ///
+  /// 顺序仍然是 [ParseLineStore.attemptOrder]：用户选中的那条排最前。
+  static const int _platformSniffLines = 1;
 
   /// 页面 → 媒体地址 缓存（按集缓存，重进不再解析）
   final Map<String, String> _cache = {};
@@ -144,11 +151,10 @@ class MediaResolver {
     return all.first;
   }
 
-  /// 同上，但平台页会给出**多条**候选（每条线路一个）。
+  /// 同上，但平台页会把地址**套上解析线路前缀**再返回。
   ///
-  /// 为什么不能只给一条：不同线路认的平台不一样（有的只做腾讯、有的只做B站、
-  /// 有的只做爱奇艺），只看第一条就是碰运气。也不能全给：56 条线路 × 每条
-  /// 几秒 = 几分钟，用户早就返回了。取前 [_platformSniffLines] 条。
+  /// 只取当前这一条（[_platformSniffLines] = 1）：线路由用户自己切，
+  /// 解析站不行就换一条，不该由 App 连着试好几条让他干等。
   Future<List<SniffTarget>> sniffTargetsFor(
     String pageUrl, {
     Map<String, String> headers = const {},
@@ -170,8 +176,7 @@ class MediaResolver {
     }
     final picked = lines.take(_platformSniffLines).toList();
     AppLog.instance.log(
-      '[Resolve] 平台页先套 ${picked.length} 条线路再嗅探：'
-      '${picked.map((e) => e.name).join(' / ')}',
+      '[Resolve] 平台页先套线路再嗅探：${picked.map((e) => e.name).join(' / ')}',
     );
     return [
       for (final line in picked)
@@ -282,11 +287,8 @@ class MediaResolver {
       // ⚠️ 关键：平台页不能直接嗅探平台页本身（SPA + 会员校验 + DRM，
       // 一定 0 候选），要先把地址套上解析线路，嗅探「线路页」。
       final targets = await sniffTargetsFor(pageUrl, headers: headers);
-      var first = true;
       for (final target in targets) {
-        // 第一条吃满预算，后面的用短预算（平台页可能给到 3 条线路）
-        var budgetForTarget = first ? sniffBudget : _platformHopBudget;
-        first = false;
+        var budgetForTarget = sniffBudget;
         final left = totalBudget - DateTime.now().difference(startedAt);
         if (left < _minSniffBudget) {
           AppLog.instance.log('[Resolve] 预算不足，剩下的线路不再嗅探');
