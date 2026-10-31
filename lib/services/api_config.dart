@@ -437,7 +437,7 @@ class ApiConfig extends GetxController {
       final cur = homeSourceBean.value;
       if (cur != null && _isLocalSourceKey(cur.key)) {
         if (!isLocalSourceEnabled(cur)) {
-          homeSourceBean.value = sourceBeanList.firstOrNull;
+          _adoptHomeSource(sourceBeanList.firstOrNull);
           await prefs?.remove(_kLocalHomeApi);
           AppLog.instance.log('[ApiConfig] 本地源开关已关闭，主页源切回订阅线路');
         } else {
@@ -452,8 +452,9 @@ class ApiConfig extends GetxController {
             // 删掉的是当前本地源：**只在启用中的本地源里**挑一个，
             // 避免落到被「本地爬虫」总开关关掉的源上（那样主页源等于不可用）。
             final enabledLocal = list.where(isLocalSourceEnabled).toList();
-            homeSourceBean.value =
-                enabledLocal.firstOrNull ?? sourceBeanList.firstOrNull;
+            _adoptHomeSource(
+              enabledLocal.firstOrNull ?? sourceBeanList.firstOrNull,
+            );
             // 「全局锁定本地源」的键也要清掉，否则下次恢复会指向已删除的 key
             await prefs?.remove(_kLocalHomeApi);
             AppLog.instance.log(
@@ -461,7 +462,7 @@ class ApiConfig extends GetxController {
               '${homeSourceBean.value?.key ?? '(空)'}',
             );
           } else if (updated.name != cur.name) {
-            homeSourceBean.value = updated;
+            _adoptHomeSource(updated);
           }
         }
       }
@@ -529,6 +530,29 @@ class ApiConfig extends GetxController {
   static const String _kLocalHomeApi = 'local_home_api';
 
   String get _homeScopeKey => configUrl.value.trim();
+
+  /// 配置解析期改主页源的**唯一**入口。
+  ///
+  /// ── 为什么不能直接赋值（2026-10-31）────────────────────────────
+  /// 用户：「猫源脚本和本地 JS 订阅串这个解决了吗？」
+  ///
+  /// 10-30 那轮只在 [setHomeSource] 里加了 `resetScriptCache()`，覆盖的是
+  /// **用户手动换源**；**切换订阅**走的是另一条路：
+  ///   `loadConfigs → _parseConfig → _restoreHomeSource → 直接赋值 homeSourceBean`
+  /// 这条路把主页源换掉了却不清脚本槽位 ⇒ 引擎里驻留的还是上一个订阅（或
+  /// 本地 JS）的脚本，而槽位记忆说"已载入" ⇒ 跳过 `loadSource` ⇒ 新订阅的
+  /// 页面显示的全是旧源内容。这正是「订阅里全是本地 JS 的内容」的来源，
+  /// 也是 10-30 待办里「仍有残留，需日志定位」那条。
+  ///
+  /// 配置解析期不该落盘（正在解析中），所以不复用 [setHomeSource]；
+  /// 但「换源必须作废脚本记忆」这条不变 —— 两者只在"要不要落盘"上不同。
+  void _adoptHomeSource(SourceBean? source) {
+    final changed = homeSourceBean.value?.key != source?.key;
+    homeSourceBean.value = source;
+    if (changed) {
+      SpiderService.instance.resetScriptCache();
+    }
+  }
 
   /// 设置主页源
   Future<void> setHomeSource(SourceBean source) async {
@@ -1217,8 +1241,10 @@ class ApiConfig extends GetxController {
             localVideoSources
                 .any((s) => s.key == restored.key && isLocalSourceEnabled(s)));
     if (!restoredValid) {
-      homeSourceBean.value = newSources.firstOrNull ??
-          localVideoSources.firstWhereOrNull(isLocalSourceEnabled);
+      _adoptHomeSource(
+        newSources.firstOrNull ??
+            localVideoSources.firstWhereOrNull(isLocalSourceEnabled),
+      );
     }
 
     AppLog.instance.log(
@@ -1638,7 +1664,7 @@ class ApiConfig extends GetxController {
               localVideoSources
                   .any((s) => s.key == curKey && isLocalSourceEnabled(s)));
       if (!curInList) {
-        homeSourceBean.value = sources.firstOrNull;
+        _adoptHomeSource(sources.firstOrNull);
       }
       if (isSingleScriptSpider.value) {
         AppLog.instance.log(
@@ -1679,7 +1705,7 @@ class ApiConfig extends GetxController {
             .where((s) => s.key == localKey && isLocalSourceEnabled(s))
             .firstOrNull;
         if (local != null) {
-          homeSourceBean.value = local;
+          _adoptHomeSource(local);
           return;
         }
       }
@@ -1699,7 +1725,7 @@ class ApiConfig extends GetxController {
       if (saved != null) {
         final found = sources.where((s) => s.key == saved).firstOrNull;
         if (found != null) {
-          homeSourceBean.value = found;
+          _adoptHomeSource(found);
           return;
         }
         // 本地 Python / JS 源不在订阅线路表里，单独找一次（对应开关打开时才认）
@@ -1707,7 +1733,7 @@ class ApiConfig extends GetxController {
             .where((s) => s.key == saved && isLocalSourceEnabled(s))
             .firstOrNull;
         if (local != null) {
-          homeSourceBean.value = local;
+          _adoptHomeSource(local);
           return;
         }
       }
