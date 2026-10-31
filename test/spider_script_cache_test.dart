@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:tvbox/services/nodejs_manager.dart';
 import 'package:tvbox/services/spider_service.dart';
 
 /// 「换源后脚本槽位记忆」的回归测试（2026-10-30）。
@@ -113,6 +114,27 @@ void main() {
         body.contains('resetScriptCache()'),
         isTrue,
         reason: '_adoptHomeSource 换完主页源却没作废脚本槽位 ⇒ 又会出现「串」',
+      );
+    });
+  });
+
+  group('纯查询不能有副作用', () {
+    test('isScriptLoaded 不该顺手把 Node 引擎拉起来', () {
+      // 背景：4923048 为了对齐槽位，在 isScriptLoaded 里调了
+      // _syncSlotFromEngine()，而它直接取 `NodeJSManager.instance` ——
+      // 那是懒加载单例，构造里会 initialize 平台通道。
+      // 后果：查一次「载入了吗」= 拉起整个 Node 引擎（几百 MB + 端口），
+      // 在没有 WidgetsBinding 的环境里还会直接抛断言（本文件 3 条用例全红）。
+      if (NodeJSManager.existing != null) {
+        // 本进程里引擎已经被别的用例建起来了，这条没法验
+        return;
+      }
+      SpiderService.instance.isScriptLoaded('https://example.com/a.js');
+      expect(
+        NodeJSManager.existing,
+        isNull,
+        reason: 'isScriptLoaded 是热路径（每次页面请求都问），'
+            '它只能读引擎状态，不能创建引擎',
       );
     });
   });

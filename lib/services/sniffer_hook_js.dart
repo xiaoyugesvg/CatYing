@@ -56,6 +56,46 @@ const String kSnifferHookJs = r'''
     }
   }
 
+  // ── 响应体层（2026-10-31 新增）──────────────────────────────────
+  //
+  // 解析接口的**主流形态**是把地址塞在 JSON 响应体里：
+  //   GET api.php?tp=checkPlay&url=<原页面>
+  //   → {"success":1,"type":"hls","url":"https://x/Cache/tx1080/xxx.m3u8"}
+  // 请求 URL 里一个媒体特征都没有，content-type 还是 application/json
+  // ⇒ 只读 URL + content-type 的话**一条都抓不到**。
+  // 实测 jx.muiu.site 的 api.php 就长这样（这条返回 type:"jx"，
+  // 但同一套逻辑返回 type:"hls" 时地址就在 url 字段里）。
+  var BODY_MAX = 262144;   // 256KB：再大就不像"地址清单"，多半是 m3u8 正文或图片
+  var TEXT_RE = /https?:\/\/[^\s"'<>\\]+/g;
+
+  /// 从一段文本里扫媒体地址。JSON 里斜杠常被转义成 `\/`，先还原再扫。
+  function scanText(s, via) {
+    try {
+      if (!s) return;
+      var t = s.indexOf('\\/') !== -1 ? s.replace(/\\\//g, '/') : s;
+      TEXT_RE.lastIndex = 0;
+      var m;
+      while ((m = TEXT_RE.exec(t)) !== null) {
+        maybe(m[0].replace(/[),.;\]]+$/, ''), '', via);
+      }
+    } catch (e) {}
+  }
+
+  /// XHR 的响应体（blob / arraybuffer 读不到，直接放弃）
+  function scanXhrBody(xhr) {
+    try {
+      var t = xhr.responseType;
+      if (t && t !== 'text' && t !== 'json') return;
+      var s = '';
+      try { s = xhr.responseText || ''; } catch (e) { return; }
+      if (!s && t === 'json') {
+        try { if (xhr.response) s = JSON.stringify(xhr.response); } catch (e) {}
+      }
+      if (!s || s.length > BODY_MAX) return;
+      scanText(s, 'xhr-body');
+    } catch (e) {}
+  }
+
   // ── ② 变量层（2026-10-31 新增，实测必需）──────────────────────────
   //
   // 有的播放器**根本不发请求**也能拿到地址：它把解密后的地址存在 JS 变量里，
@@ -66,7 +106,11 @@ const String kSnifferHookJs = r'''
   // 所以必须额外读"播放器对象里的 url"，光钩 XHR/fetch 永远拿不到。
   var VAR_NAMES = [
     'config', 'art', 'artplayer', 'player', 'videoObject', 'hls',
-    'stray', 'myPlayer', 'dp', 'playerObj', 'videojs', 'dplayer'
+    'stray', 'myPlayer', 'dp', 'playerObj', 'videojs', 'dplayer',
+    // 2026-10-31 补：xyplay（MUAO 系解析站的播放器，实测 jx.miuu.site）。
+    // 它把地址存成实例属性 `xyplay.url`（checkUrl 成功后赋值），
+    // 不在这张表里就永远扫不到 —— 而它恰恰是这条链的源头。
+    'xyplay'
   ];
   var URL_KEYS = ['url', 'src', 'file', 'playUrl', 'videoUrl', 'currentSrc', 'm3u8', 'hlsUrl'];
 
@@ -165,6 +209,8 @@ const String kSnifferHookJs = r'''
             var ct = '';
             try { ct = self.getResponseHeader('content-type') || ''; } catch (e) {}
             maybe(self.responseURL || self.__catUrl, ct, 'xhr');
+            // 地址常只在响应体里（api.php → JSON），不看 body 等于没钩
+            scanXhrBody(self);
           } catch (e) {}
         });
       } catch (e) {}
@@ -182,6 +228,15 @@ const String kSnifferHookJs = r'''
             var ct = '';
             try { ct = (resp.headers && resp.headers.get('content-type')) || ''; } catch (e) {}
             maybe(resp.url, ct, 'fetch');
+            // 同 XHR：接口把地址放 JSON 里时，只有读 body 才抓得到。
+            // 只对"可能是地址清单"的类型 clone，视频/图片 body 不碰（clone 会整段缓冲）。
+            if (/json|text|javascript|mpegurl/i.test(ct)) {
+              try {
+                resp.clone().text().then(function (t) {
+                  if (t && t.length <= BODY_MAX) scanText(t, 'fetch-body');
+                }).catch(function () {});
+              } catch (e) {}
+            }
           } catch (e) {}
           return resp;
         });

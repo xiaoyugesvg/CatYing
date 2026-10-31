@@ -89,7 +89,12 @@ class MediaSniffService {
   /// 实测那条链是：`jx.muiu.site` → `ckplayer.vip/jiexi` → `jx.php` →
   /// `789jiexi.net/jiexi.php`（这一层才出地址）。3 层够覆盖常见壳站，
   /// 再多基本是广告跳转了。
-  static const int _maxHops = 3;
+  /// 最多顺几层 iframe。
+  ///
+  /// 4 层是实测出来的：`jx.muiu.site` → `ckplayer.vip/jiexi/` →
+  /// `ckplayer.vip/jx.php` → `api-api.789jiexi.net`（真正出地址的那层）。
+  /// 原来 3 层够不到最后一跳，日志里表现为「跟过 2 个 iframe 就放弃」。
+  static const int _maxHops = 4;
 
   /// 每一层最少给的时间（不然刚加载完就换层，等于白跳）
   static const Duration _minHop = Duration(seconds: 3);
@@ -206,7 +211,7 @@ class MediaSniffService {
         );
         AppLog.instance.log('[Sniff] 第 ${hop + 1} 层: $target');
 
-        if (!await _load(c, target, headers)) break;
+        if (!await _load(c, target, headers, viaLocation: hop > 0)) break;
 
         final hopDeadline = _hopDeadline(deadline);
         final hopStarted = DateTime.now();
@@ -285,11 +290,38 @@ class MediaSniffService {
     return DateTime.now().add(_hopCap < left ? _hopCap : left);
   }
 
+  /// 加载一层页面。
+  ///
+  /// [viaLocation] 为 true 时用 `location.href` 跳转而不是 `loadRequest`，
+  /// 这是**故意**的：
+  ///
+  /// 解析链靠 Referer 防直连。实测 `ckplayer.vip/jx.php`：
+  ///   · 不带 Referer → `302` 回 `jiexi/?url=…`（而它已经在 visited 里）
+  ///     ⇒ 跟帧循环原地打转，永远走不到真正出地址的 `789jiexi`
+  ///   · 带任意 Referer → `200` + 759B，里面就是真 iframe
+  ///
+  /// 而 iOS 的 WKWebView 会**忽略** URLRequest 里自定义的 `Referer` header，
+  /// 所以 `loadRequest(headers: {'Referer': …})` 在这条路上是无效的。
+  /// `location.href` 是浏览器原生导航，Referer 由浏览器自动填成当前页面，
+  /// 既符合真实用户行为，也绕开了上面那个限制。
   Future<bool> _load(
     WebViewController c,
     String url,
-    Map<String, String> headers,
-  ) async {
+    Map<String, String> headers, {
+    bool viaLocation = false,
+  }) async {
+    if (viaLocation) {
+      try {
+        // jsonEncode 保证引号 / 反斜杠被正确转义，避免拼出坏 JS
+        await c.runJavaScript('window.location.href = ${jsonEncode(url)};');
+        // 给导航一点时间真正开始，否则下面第一轮注入还打在旧文档上
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+        return true;
+      } catch (e) {
+        AppLog.instance.log('[Sniff] 跳转失败 $url: $e');
+        return false;
+      }
+    }
     final h = <String, String>{
       for (final e in headers.entries)
         if (e.key.trim().isNotEmpty && e.value.trim().isNotEmpty)

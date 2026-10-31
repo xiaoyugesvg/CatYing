@@ -34,8 +34,20 @@ import 'package:tvbox/services/nodejs_platform.dart';
 import 'package:tvbox/services/nodejs_platform_ios.dart';
 
 class NodeJSManager {
-  static final NodeJSManager _instance = NodeJSManager._internal();
-  static NodeJSManager get instance => _instance;
+  static NodeJSManager? _created;
+
+  static NodeJSManager get instance => _created ??= NodeJSManager._internal();
+
+  /// 已经创建过的实例；**没创建过返回 null，不会触发创建**。
+  ///
+  /// 为什么需要：`SpiderService.isScriptLoaded` 是热路径（每次页面请求都问
+  /// "槽位里驻留的是谁"），它要读 [loadedScriptId] 来对齐槽位。但单例构造里
+  /// 会调 `IOSNodeJSPlatform.initialize()` → `setMethodCallHandler`，
+  /// 于是「查一下状态」变成了「把整个 Node 引擎拉起来」：
+  ///   · 运行时：几百 MB 内存 + 端口占用，而且可能在用户还没进影视模块时发生；
+  ///   · 测试里：没有 WidgetsBinding 时直接抛断言，3 条用例全红。
+  /// 纯查询路径一律走这个，只有真的要启动/操作引擎时才用 [instance]。
+  static NodeJSManager? get existing => _created;
 
   // ============================================================
   // 平台实现

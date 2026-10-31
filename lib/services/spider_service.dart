@@ -476,7 +476,14 @@ class SpiderService {
   ///   · 当前记录是 drpy 标记（`drpy::<ext>`）= drpy 宿主不走 `loadSource`，
   ///     引擎侧看到的还是上一个 catvod 包，据此纠正会误伤 drpy 的缓存命中。
   void _syncSlotFromEngine() {
-    final resident = NodeJSManager.instance.loadedScriptId;
+    // 引擎从没起过 ⇒ 谈不上"槽位里驻留了谁"，直接返回。
+    //
+    // 绝不能为了读一下状态就去拿 `NodeJSManager.instance`：那是懒加载单例，
+    // 构造里会 initialize 平台通道 —— 等于「查一次缓存」把整个 Node 引擎拉起来
+    // （几百 MB + 端口），在没有 WidgetsBinding 的测试里还会直接抛断言。
+    final mgr = NodeJSManager.existing;
+    if (mgr == null) return;
+    final resident = mgr.loadedScriptId;
     if (resident.isEmpty) return;
     if (_loadedScriptUrl == resident) return;
     if (_loadedScriptUrl.startsWith('drpy::')) return;
