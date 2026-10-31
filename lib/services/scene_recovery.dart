@@ -46,12 +46,25 @@ class SceneRecovery {
     if (url.isEmpty) {
       url = SpiderService.instance.mainScriptUrl.trim();
     }
-    if (url.isEmpty) return false;
+    if (url.isEmpty) {
+      // 以前这里静默 return false —— 日志里完全看不出来「为什么没去重下」，
+      // 只能看到 reload 失败后直接进入 60 秒长重试。现在把原因写下来。
+      AppLog.instance.w(
+        '[SceneRecovery] 想重新下载源，但拿不到地址：'
+        '当前线路清单里没有 JS 源，SpiderService.mainScriptUrl 也是空的',
+      );
+      return false;
+    }
     AppLog.instance
         .log('[SceneRecovery] reload 失败 → 强制重新下载源: $url');
     final (ok, msg) = await NodeJSManager.instance.redownloadSource(url);
     AppLog.instance.log(
         '[SceneRecovery] 重新下载源${ok ? "成功" : "失败"}: ${msg ?? ""}');
+    if (ok) {
+      // 重新下载成功后缓存目录里有 index.js 了 —— 清掉「缓存丢失」标记，
+      // 否则后面「跳过 60 秒长重试」的判断会用到过期的值。
+      NodeJSManager.instance.clearSourceCacheMissing();
+    }
     return ok;
   }
 
@@ -219,6 +232,31 @@ class SceneRecovery {
     }
 
     // **第四关**: 兜底 _recoverSpiderService (2026-07-08: 6×10s=60s 长重试)
+    //
+    // 但**源缓存目录整个丢了**（`index.js` 不存在）时，spiderPort 永远回不来：
+    // 每次 reload 都是同一个 `Cannot find module`。这时候再等 60 秒纯粹是
+    // 让用户干等（`app_2026-10-31(10).log` 里连等 3 轮 = 3 分钟）。
+    // 直接判失败，文案指向「重新选源」这个唯一有效的动作。
+    if (NodeJSManager.instance.sourceCacheMissing) {
+      AppLog.instance.sceneStep(
+        cid,
+        'recover_skip_missing_source',
+        level: LogLevel.warn,
+        fields: {
+          'reason': '源缓存目录里没有 index.js，6×10s 长重试不可能成功',
+        },
+      );
+      setFailed('源文件已丢失（缓存目录里没有 index.js），'
+          '请到「设置 → 线路」重新选一个源');
+      AppLog.instance.sceneEnd(
+        cid,
+        'recover_fail',
+        elapsedMs: DateTime.now().difference(startAt).inMilliseconds,
+        ok: false,
+        fields: {'path': 'missing_source_cache'},
+      );
+      return;
+    }
     AppLog.instance.sceneStep(cid, 'recover_start',
         fields: {'reason': 'verify+reload 都失败, 走兜底 6×10s=60s 长重试'});
     final recoverStart = DateTime.now();

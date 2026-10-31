@@ -520,6 +520,19 @@ class NodeJSManager {
     }
   }
 
+  /// 上一次 reload 失败是不是因为**源缓存目录里没有 index.js**。
+  ///
+  /// 这个标志存在的唯一理由：那种失败**重试多少次都不会好**，上层
+  /// （[SceneRecovery]）看到它就该跳过 6×10s 长重试，直接报错让用户重新选源。
+  /// 日志实证（`app_2026-10-31(10).log`）：连着 3 次前台恢复，每次
+  /// `/source/loadPath` 500 `Cannot find module .../cache_xxx/index.js`，
+  /// 每次白等 60 秒，用户看到的只有「源加载失败」。
+  bool _sourceCacheMissing = false;
+  bool get sourceCacheMissing => _sourceCacheMissing;
+
+  /// 重新下载源成功后由上层清掉「缓存丢失」标记。
+  void clearSourceCacheMissing() => _sourceCacheMissing = false;
+
   Future<bool> reloadSourceViaManagementPort(int port) async {
     if (port <= 0) {
       AppLog.instance.reload('skip', port: port, ok: false, error: 'port <= 0');
@@ -531,6 +544,27 @@ class NodeJSManager {
       final sourcePath =
           await _platform.getLastSourceCachePath() ??
           await getDocumentsSourcePath();
+      // ⚠️ 先判入口文件在不在：不在 ⇒ Node 必然 500 `Cannot find module`，
+      //    重试 100 次也一样。放在这里挡掉，把「缓存丢了」这个**真实原因**
+      //    写进日志，而不是让上层傻等 60 秒再报一句含糊的「源加载失败」。
+      //    `_recoverSpiderPort` 早就有这个判断，但本函数没有 —— 而日志里
+      //    走的就是本函数。
+      if (!await File('$sourcePath/index.js').exists()) {
+        _sourceCacheMissing = true;
+        AppLog.instance.w(
+          '[NodeJS] 源缓存已丢失：$sourcePath/index.js 不存在，跳过 reload'
+          '（重试不会成功，需要重新下载源）',
+        );
+        AppLog.instance.reload(
+          'skip',
+          port: port,
+          ok: false,
+          fields: {'sourcePath': sourcePath},
+          error: 'index.js 不存在（源缓存已丢失）',
+        );
+        return false;
+      }
+      _sourceCacheMissing = false;
       AppLog.instance.reload(
         'start',
         port: port,
