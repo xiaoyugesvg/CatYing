@@ -38,14 +38,25 @@ class MediaResolver {
   MediaResolver._();
   static final MediaResolver instance = MediaResolver._();
 
-  /// 默认总预算：足够跑完 3 轮 + 若干条解析线路，又不至于让用户干等
-  static const Duration defaultBudget = Duration(seconds: 22);
+  /// 默认总预算：HTTP 阶段跑完 + 嗅探兜底还能顺 4 层 iframe。
+  ///
+  /// 为什么从 22s 提到 30s：嗅探兜底最多能跟 4 层（`MediaSniffService._maxHops`），
+  /// 实测 `jx.muiu.site` 那条链每层要 3.1s（提前跟）到 10s（等满时间片），
+  /// 四层合计 12.3~19.3s。原来只留 12s，第 4 层刚开始就被总预算砍断
+  /// —— 日志里表现为「第 4 层 0.5s 就结束、0 候选」。
+  ///
+  /// 30s 只是**上限**：命中就立刻返回（szctv 那种 3.2s 就出地址），
+  /// 只有全链路都空手时才等满，期间有 [_resolveHint] 一路显示进度。
+  static const Duration defaultBudget = Duration(seconds: 30);
 
   /// 单次 HTTP 超时上限
   static const Duration _requestTimeout = Duration(seconds: 8);
 
   /// 给「嗅探兜底」预留的预算上限（HTTP 阶段最多用到 `budget - 这个值`）
-  static const Duration _sniffReserve = Duration(seconds: 12);
+  ///
+  /// 20s = 4 层 × 每层 5s 的保守估计。原来 12s 只够走 2~3 层，
+  /// 而真正出地址的层往往在第 4 层（`api-api.789jiexi.net` 那种）。
+  static const Duration _sniffReserve = Duration(seconds: 20);
 
   /// HTTP 阶段至少给这么多，否则一条线路都试不完就去嗅探，得不偿失
   static const Duration _minHttpBudget = Duration(seconds: 8);
@@ -69,13 +80,23 @@ class MediaResolver {
   /// [onProgress] 可选：把"正在试第几条线路"回给调用方，用于界面上的
   /// 一行小字提示（不弹窗、不遮画面）。
   ///
-  /// [allowSniff] 是否允许**最后**用隐形 WebView 嗅探兜底。
+  /// [allowSniff] 是否允许用隐形 WebView 嗅探。
   /// 「解析测试」页传 false，让"解析"和"嗅探"两种测试保持独立可比。
+  ///
+  /// [sniffFirst] **嗅探优先**：先用真浏览器把页面跑起来抓，抓不到再退回
+  /// HTTP 抓页面 + 解析线路。影视模块 / 海阔 / RSS 都该传 true。
+  ///
+  /// 为什么顺序很关键（用户 2026-10-31：「影视模块现在的解析线路和嗅探
+  /// 完全不是现在测试的这种」）：原来是「HTTP 先吃 10s，嗅探只吃剩下的
+  /// 12s」，而实测 `jx.muiu.site` 那条链要 4 层、12~19s —— 第 4 层刚开始
+  /// 就被总预算砍断。探针页之所以能成功，就因为它把嗅探放在第一位。
+  /// 两条路必须是同一条，否则「测试页能播、正片播不了」永远对不上。
   Future<String?> resolve(
     String pageUrl, {
     Map<String, String> headers = const {},
     Duration budget = defaultBudget,
     bool allowSniff = true,
+    bool sniffFirst = false,
     void Function(String message)? onProgress,
   }) {
     final url = pageUrl.trim();
@@ -97,6 +118,7 @@ class MediaResolver {
       headers: headers,
       budget: budget,
       allowSniff: allowSniff,
+      sniffFirst: sniffFirst,
       onProgress: onProgress,
     );
     _inflight[url] = task;
@@ -108,20 +130,52 @@ class MediaResolver {
     required Map<String, String> headers,
     required Duration budget,
     required bool allowSniff,
+    required bool sniffFirst,
     void Function(String message)? onProgress,
   }) async {
     final startedAt = DateTime.now();
+    // 嗅探优先跑过之后，后面的 HTTP 流程不该再重复嗅探一次
+    var sniffAllowed = allowSniff;
+
+    // ── 嗅探优先：和探针页「点击播放」完全同一条路径 ──────────────
+    if (sniffFirst && allowSniff) {
+      final sniffBudget = budget < _sniffReserve ? budget : _sniffReserve;
+      onProgress?.call('正在页面里嗅探播放地址…');
+      AppLog.instance.log(
+        '[Resolve] 嗅探优先，预算 ${sniffBudget.inSeconds}s（和探针页同一条路）',
+      );
+      try {
+        final sniffed = await MediaSniffService.instance.sniff(
+          pageUrl,
+          headers: headers,
+          budget: sniffBudget,
+          onProgress: onProgress,
+        );
+        if (sniffed != null && sniffed.isNotEmpty) {
+          AppLog.instance.log('[Resolve] 嗅探优先命中: $sniffed');
+          _cache[pageUrl] = sniffed;
+          if (_cache.length > _cacheLimit) _cache.remove(_cache.keys.first);
+          return sniffed;
+        }
+        AppLog.instance.log('[Resolve] 嗅探优先没抓到，退回 HTTP 解析');
+      } catch (e) {
+        AppLog.instance.w('[Resolve] 嗅探优先异常: $e');
+      }
+      // 已经试过了，别再兜底一遍（否则等于白等两轮）
+      sniffAllowed = false;
+    }
+
     final route = PlayPipeline.routeFor(pageUrl);
 
     // ── 预算切分：HTTP 先跑，剩下的留给嗅探兜底 ──────────────────
-    final reserve = allowSniff ? _sniffReserve : Duration.zero;
+    final reserve = sniffAllowed ? _sniffReserve : Duration.zero;
     var httpBudget = budget - reserve;
     if (httpBudget < _minHttpBudget) httpBudget = _minHttpBudget;
     final deadline = startedAt.add(httpBudget);
 
     AppLog.instance.log(
       '[Resolve] 选路=${PlayPipeline.routeLabel(route)}，'
-      'HTTP 预算 ${httpBudget.inSeconds}s，嗅探兜底=${allowSniff ? "开" : "关"}',
+      'HTTP 预算 ${httpBudget.inSeconds}s，嗅探兜底=${sniffAllowed ? "开" : "关"}',
     );
 
     final dio = Dio(
@@ -183,7 +237,7 @@ class MediaResolver {
     }
 
     // ── ⑤ 嗅探兜底：HTTP 全空手时，让真浏览器把页面跑起来抓 ──────
-    if (found == null && allowSniff) {
+    if (found == null && sniffAllowed) {
       var left = budget - DateTime.now().difference(startedAt);
       if (left > _sniffReserve) left = _sniffReserve;
       if (left >= _minSniffBudget) {

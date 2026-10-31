@@ -1311,10 +1311,18 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   ///   · 详情页里点「播放」，解析出来的是一条**解析接口链接**
   ///     （`https://jiexi.xx/?url=<原始地址>`）。
   ///
-  /// ⚠️ 全程**后台**跑：不起 WebView、不弹页面、不打断播放器
-  /// （用户 2026-10-29 明确要求）。解析顺序：先直接抓页面找媒体地址，
-  /// 再按「解析线路」逐条试；一轮没结果会在总预算内重试，
-  /// 因为网页/接口经常要几秒才吐地址。
+  /// ⚠️ 不弹页面、不打断播放器（用户 2026-10-29 明确要求）。
+  /// 嗅探用的是**离屏** WebView：不占屏、不进导航栈，跑完即销毁。
+  ///
+  /// ── 解析顺序（2026-10-31 改）─────────────────────────────────
+  /// 传 `sniffFirst: true` ⇒ **嗅探优先**，和「嗅探测试」页的「点击播放」
+  /// 完全同一条路。原来这里是 HTTP 优先（HTTP 吃 10s、嗅探只吃剩 12s），
+  /// 而 `jx.muiu.site` 那条链要跟 4 层、实测 12~19s，第 4 层刚开始就被
+  /// 总预算砍断 —— 结果就是「测试页能播、正片播不了」。用户原话：
+  /// 「影视模块现在的解析线路和嗅探完全不是现在测试的这种，我不满意」。
+  ///
+  /// 嗅探没出地址时仍会退回 HTTP（抓页面 + 解析线路逐条试），
+  /// 所以这条路只会比原来多抓、不会比原来少抓。
   Future<String?> _sniffPageForMedia(
     String pageUrl,
     Map<String, String> headers,
@@ -1331,6 +1339,9 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       final found = await MediaResolver.instance.resolve(
         pageUrl,
         headers: headers,
+        // 和「嗅探测试」页「点击播放」同一条路：先让真浏览器把页面跑起来抓，
+        // 抓不到再退回 HTTP。不传这个 = 又回到「HTTP 先吃满预算」的老毛病。
+        sniffFirst: true,
         onProgress: (msg) {
           // 只更新一行状态文字，不弹窗、不遮画面
           _resolveHint.value = msg;

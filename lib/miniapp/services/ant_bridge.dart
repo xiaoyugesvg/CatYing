@@ -17,6 +17,7 @@ import 'package:tvbox/models/vod_info.dart';
 import 'package:tvbox/reading/source/global_proxy.dart';
 import 'package:tvbox/services/api_config.dart';
 import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/media_resolver.dart';
 import 'package:tvbox/services/play_pipeline.dart';
 import 'package:tvbox/services/source_service.dart';
 import 'package:tvbox/services/spider_service.dart';
@@ -1082,12 +1083,37 @@ class AntBridge {
 
     // 与影视端 / 海阔**共用同一条** [PlayPipeline]：
     //   ① 直链 → 原生播放器；
-    //   ② 其余网页地址 → 内嵌网页播放器。
+    //   ② 网页 → 先在页面里嗅探（离屏 WebView），抓出直链就进原生播放器；
+    //   ③ 嗅探也没出 → 内嵌网页播放器兜底。
+    //
+    // 2026-10-31 补 ②：小程序 `player.open` 拿到解析站/播放站页面时原来
+    // 直接甩进 WebView，等于把「找地址」的活丢回给用户；现在和影视端、
+    // 海阔走同一条嗅探路，`sniff: true` 也如实回报给小程序。
     final resolution = PlayPipeline.instance.resolve(
       url,
       headers: headers,
     );
     if (resolution.isPage) {
+      if (resolution.url.startsWith('http')) {
+        final sniffed = await MediaResolver.instance.resolve(
+          resolution.url,
+          headers: headers,
+          sniffFirst: true,
+        );
+        final direct = (sniffed ?? '').trim();
+        if (direct.isNotEmpty) {
+          AppLog.instance
+              .log('[AntBridge] player.open 网页嗅探命中，转原生播放器: $direct');
+          Get.to(() => MiniAppPlayerPage(
+              url: direct, title: title, headers: headers));
+          return {
+            'route': 'player',
+            'url': direct,
+            'sniff': true,
+            'headerKeys': headers.keys.toList(),
+          };
+        }
+      }
       AppLog.instance.log(
           '[AntBridge] player.open 网页地址转内嵌网页播放器: ${resolution.url}');
       Get.to(() => PlaybackSurface.webFallback(

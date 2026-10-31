@@ -11,6 +11,8 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/miniapp/pages/mini_app_player_page.dart';
 import 'package:tvbox/services/ad_block_service.dart';
+import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/media_resolver.dart';
 import 'package:tvbox/services/third_party_nav_guard.dart';
 import 'package:tvbox/widgets/ad_block_bubble.dart';
 import 'package:tvbox/widgets/playback_surface.dart';
@@ -127,35 +129,48 @@ class _RssArticlePageState extends State<RssArticlePage> {
     final playUrl = (direct?.trim() ?? '').isEmpty ? '' : direct!.trim();
     if (!mounted) return;
 
-    // 直链 → 原生播放器；网页地址（非直链）→ 内嵌 WebView 播放器兜底。
     // 之前这里把网页地址直接塞 MiniAppPlayerPage 会黑屏（2026-10-28 审计 P1-2）。
-    Future<void> goPlayer(String u, Map<String, String> h) =>
-        Navigator.of(context).push(
+    Future<void> goPlayer(String u) => Navigator.of(context).push(
           MaterialPageRoute<void>(
-            builder: (_) =>
-                MiniAppPlayerPage(url: u, title: title, headers: h),
+            builder: (_) => MiniAppPlayerPage(url: u, title: title, headers: headers),
           ),
         );
 
-    if (playUrl.isEmpty) {
-      // 拿不到直链 → 用内嵌网页播放器打开原网页
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) =>
-              PlaybackSurface.webFallback(url: ep.url, title: title),
-        ),
-      );
+    // ① 直链 → 原生播放器
+    if (playUrl.isNotEmpty && looksLikeDirectMedia(playUrl)) {
+      await goPlayer(playUrl);
       return;
     }
-    if (looksLikeDirectMedia(playUrl)) {
-      await goPlayer(playUrl, headers);
+
+    // ② 非直链 / 拿不到直链 → **先在页面里嗅探**，和影视端、海阔同一条路。
+    //    RSS 源给的「播放地址」十有八九是解析站/播放站页面，以前直接进
+    //    WebView 等于把「在广告里找播放按钮」丢回给用户（2026-10-31 补齐）。
+    final pageUrl = playUrl.isNotEmpty ? playUrl : ep.url;
+    var sniffed = '';
+    if (pageUrl.startsWith('http')) {
+      setState(() => _resolving = true);
+      try {
+        final found = await MediaResolver.instance.resolve(
+          pageUrl,
+          headers: headers,
+          sniffFirst: true,
+        );
+        sniffed = (found ?? '').trim();
+      } catch (_) {}
+      if (!mounted) return;
+      setState(() => _resolving = false);
+    }
+    if (sniffed.isNotEmpty) {
+      AppLog.instance.log('[RSS] 嗅探命中，进原生播放器: $sniffed');
+      await goPlayer(sniffed);
       return;
     }
-    // 非直链 → 内嵌网页播放器兜底
+
+    // ③ 嗅探也没出 → 内嵌网页播放器兜底
+    AppLog.instance.log('[RSS] 嗅探没出地址，进网页播放器兜底: $pageUrl');
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            PlaybackSurface.webFallback(url: playUrl, title: title),
+        builder: (_) => PlaybackSurface.webFallback(url: pageUrl, title: title),
       ),
     );
   }

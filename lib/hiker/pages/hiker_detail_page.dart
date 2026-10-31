@@ -9,6 +9,7 @@ import 'package:tvbox/miniapp/pages/mini_app_player_page.dart';
 import 'package:tvbox/pages/detail/simple_image_reader_page.dart';
 import 'package:tvbox/pages/detail/simple_text_reader_page.dart';
 import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/media_resolver.dart';
 import 'package:tvbox/services/play_pipeline.dart';
 import 'package:tvbox/services/play_route.dart';
 import 'package:tvbox/widgets/app_toast.dart';
@@ -818,9 +819,14 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
 
   /// 海阔媒体统一分发（2026-10-29 重构：与影视端共用 [PlayPipeline]）。
   ///
-  /// 链路只有一条：
+  /// 链路（2026-10-31 补齐嗅探）：
   ///   ① 直链 → 原生播放器；
-  ///   ② 仍是网页 → 内嵌网页播放器兜底。
+  ///   ② 网页 → **先在页面里嗅探**（离屏 WebView，和探针页「点击播放」同一条路），
+  ///      抓出 m3u8/mp4 就进原生播放器；
+  ///   ③ 嗅探也没出 → 内嵌网页播放器兜底（用户自己点）。
+  ///
+  /// 原来 ② 直接跳到 ③：海阔源给的多是解析站/播放站页面，进 WebView 后
+  /// 要么被广告挡、要么要手动点两次才出画面，体验和影视端差一截。
   Future<void> _resolveAndPlay(String url, Map<String, String> headers) async {
     final resolution = PlayPipeline.instance.resolve(
       url,
@@ -831,11 +837,42 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
       case PlayKind.media:
         return _pushPlayer(resolution.url, resolution.headers);
       case PlayKind.page:
+        // 嗅探优先：抓不到才进网页兜底
+        final sniffed = await _sniffThenPlay(resolution.url, resolution.headers);
+        if (sniffed) return;
         return _pushWeb(resolution.url, headers: resolution.headers);
       case PlayKind.novel:
       case PlayKind.pictures:
         // 这两类在 `hikerLinkKind` 分流时就已经进阅读器，这里只兜底不播。
         return;
+    }
+  }
+
+  /// 网页地址 → 嗅探出媒体直链就进原生播放器，返回 true。
+  ///
+  /// 和影视端 `detail/controller._sniffPageForMedia` 用**同一个**
+  /// [MediaResolver.resolve]（`sniffFirst: true`），保证三端行为一致：
+  /// 探针页测出来能播的地址，海阔里点播放也能播。
+  Future<bool> _sniffThenPlay(String pageUrl, Map<String, String> headers) async {
+    if (!pageUrl.startsWith('http')) return false;
+    try {
+      AppLog.instance.log('[Hiker] 网页地址先嗅探: $pageUrl');
+      final found = await MediaResolver.instance.resolve(
+        pageUrl,
+        headers: headers,
+        sniffFirst: true,
+      );
+      final trimmed = (found ?? '').trim();
+      if (trimmed.isEmpty) {
+        AppLog.instance.log('[Hiker] 嗅探没出地址，进网页播放器兜底');
+        return false;
+      }
+      AppLog.instance.log('[Hiker] 嗅探命中，进原生播放器: $trimmed');
+      await _pushPlayer(trimmed, headers);
+      return true;
+    } catch (e) {
+      AppLog.instance.w('[Hiker] 嗅探异常: $e');
+      return false;
     }
   }
 

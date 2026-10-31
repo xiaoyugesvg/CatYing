@@ -147,11 +147,6 @@ class MediaSniffService {
 
   /// 最多顺几层 iframe。
   ///
-  /// 实测那条链是：`jx.muiu.site` → `ckplayer.vip/jiexi` → `jx.php` →
-  /// `789jiexi.net/jiexi.php`（这一层才出地址）。3 层够覆盖常见壳站，
-  /// 再多基本是广告跳转了。
-  /// 最多顺几层 iframe。
-  ///
   /// 4 层是实测出来的：`jx.muiu.site` → `ckplayer.vip/jiexi/` →
   /// `ckplayer.vip/jx.php` → `api-api.789jiexi.net`（真正出地址的那层）。
   /// 原来 3 层够不到最后一跳，日志里表现为「跟过 2 个 iframe 就放弃」。
