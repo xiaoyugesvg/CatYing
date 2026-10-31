@@ -32,9 +32,36 @@ class SnifferCollector {
   final Map<String, SniffCandidate> _map = {};
   final List<String> _log = [];
 
+  /// 嗅到的 iframe 地址（按发现顺序、去重）。
+  ///
+  /// 解析站几乎都是「壳 + iframe 嵌播放器」，主 frame 读不到 iframe 内部的
+  /// 变量（跨域），但**读得到 iframe 的 src**。把这些地址回传上来，就能把
+  /// 那一层当**顶层页**重新加载一次 —— 于是不需要"注入所有 frame"
+  /// （那个能力 `webview_flutter` 没暴露，只能改原生）。
+  final List<String> _frames = [];
+
   int get count => _map.length;
 
+  List<String> get frames => List.unmodifiable(_frames);
+
   List<String> get logs => List.unmodifiable(_log);
+
+  /// 下一层该跟的 iframe。
+  ///
+  /// 优先挑带 `url=` 的：解析链每一层都会把**原始播放地址**当参数带着走
+  /// （`ckplayer.vip/jiexi/?url=...`），而广告落地页（`xxx.top/?shareName=`）
+  /// 不带 —— 这个优先级能避开广告页。
+  String? nextFrame(Set<String> visited) {
+    for (final f in _frames) {
+      if (visited.contains(f)) continue;
+      if (f.contains('url=')) return f;
+    }
+    for (final f in _frames) {
+      if (visited.contains(f)) continue;
+      return f;
+    }
+    return null;
+  }
 
   /// 按分数从高到低排序的候选
   List<SniffCandidate> get sorted {
@@ -55,6 +82,14 @@ class SnifferCollector {
   bool add(String url, {String kind = '', String via = ''}) {
     final u = url.trim();
     if (u.isEmpty) return false;
+    // iframe 地址单独存：它不是播放候选，是"下一层要跟的地址"
+    if (via == 'frame' || kind == 'frame') {
+      if (_frames.contains(u)) return false;
+      _frames.add(u);
+      _log.insert(0, '[frame]  $u');
+      if (_log.length > 150) _log.removeLast();
+      return true;
+    }
     if (_map.containsKey(u)) return false;
     final isMedia = MediaSniffer.isMediaUrl(u);
     final c = SniffCandidate(
@@ -72,6 +107,7 @@ class SnifferCollector {
 
   void clear() {
     _map.clear();
+    _frames.clear();
     _log.clear();
   }
 }

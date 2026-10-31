@@ -9,6 +9,21 @@
 //   · **本文件**：把探针页那套搬进正式链路，由 `MediaResolver` 兜底调用。
 //     页面真的加载、播放器真的跑起来，才抓得到地址。
 //
+// ── 四层采集（2026-10-31 按实测补齐）────────────────────────────
+//   ① 网络层：XHR / fetch / media.src / performance；
+//   ② 变量层：播放器对象里的 url（`config.url` / `art.option.url` …）；
+//   ③ console 层：脚本解密完自己打印的地址；
+//   ④ iframe 层：壳页嵌播放器时，读 iframe 的 src 当**下一层**去跟。
+//
+// 为什么必须有 ②③④：用户实测 `jx.muiu.site` 那条链，播放器把解密后的
+// 地址存进 JS 变量，交给 hls.js 之前就报 `Unsupported playback format:
+// m3u8` —— **一个网络请求都没发**。只钩网络一条都抓不到；真正暴露地址的
+// 是它自己那句 `console.log('解密原始链接：', url)`。
+// 而地址又在 **cross-origin iframe** 里，主 frame 读不到它的变量，
+// 只能读到 iframe 的 src —— 所以顺着 src 一层层当顶层页重新加载。
+// 这条路绕开了「注入所有 frame」（`webview_flutter` 没暴露这个能力，
+// 只能改原生）。
+//
 // ── 三条硬约束（沿用用户 2026-10-29 的原始要求）─────────────────
 //   1. **不打断播放器**：1×1 透明、IgnorePointer、挂在 root Overlay 上，
 //      不弹页面、不抢焦点；
@@ -31,13 +46,37 @@ import 'package:tvbox/services/sniffer_hook_js.dart';
 import 'package:tvbox/services/webview_sniffer.dart';
 import 'package:tvbox/widgets/video_player_pip.dart';
 
+/// 一次嗅探的完整结果（探针页要展示"抓到了什么"，所以不能只回首选）
+class SniffResult {
+  const SniffResult({
+    this.best,
+    this.candidates = const [],
+    this.frames = const [],
+    this.logs = const [],
+  });
+
+  /// 首选媒体地址（null = 没嗅到）
+  final String? best;
+
+  /// 所有候选（按分数降序）
+  final List<SniffCandidate> candidates;
+
+  /// 跟过的 iframe 地址（按发现顺序）
+  final List<String> frames;
+
+  /// 原始事件日志（新的在前）
+  final List<String> logs;
+
+  bool get ok => best != null && best!.isNotEmpty;
+}
+
 class MediaSniffService {
   MediaSniffService._();
   static final MediaSniffService instance = MediaSniffService._();
 
   /// 默认嗅探预算。比探针页（20s）短 —— 正式链路里用户已经等了一段
   /// HTTP 解析，再让他干等 20s 不合适。
-  static const Duration defaultBudget = Duration(seconds: 10);
+  static const Duration defaultBudget = Duration(seconds: 12);
 
   /// 预热：页面 onPageFinished 后再等这么久才开始采信结果。
   ///
@@ -45,29 +84,63 @@ class MediaSniffService {
   /// 太长又白等。1.5s 是「主播放器通常已经起来」的量级。
   static const Duration _warmup = Duration(milliseconds: 1500);
 
+  /// 最多顺几层 iframe。
+  ///
+  /// 实测那条链是：`jx.muiu.site` → `ckplayer.vip/jiexi` → `jx.php` →
+  /// `789jiexi.net/jiexi.php`（这一层才出地址）。3 层够覆盖常见壳站，
+  /// 再多基本是广告跳转了。
+  static const int _maxHops = 3;
+
+  /// 每一层最少给的时间（不然刚加载完就换层，等于白跳）
+  static const Duration _minHop = Duration(seconds: 3);
+
   WebViewController? _controller;
   OverlayEntry? _entry;
 
   /// 每次嗅探换一个新的收集器，避免上一集的地址污染这一集
   SnifferCollector? _collector;
 
+  /// 外部要求中止（探针页的「停止」）。
+  ///
+  /// 只置一个标志位，循环下一轮就跳出去 —— 不用 Future 取消那一套：
+  /// 真正要停的是 WebView 里的页面，靠收工时导航到 `about:blank`。
+  bool _cancelRequested = false;
+
   /// 串行闸门：共用一个隐形 WebView，并发导航会互相打断
   Future<void> _queue = Future<void>.value();
 
   bool get available => _controller != null;
 
-  /// 嗅探 [pageUrl]，返回**首选媒体地址**（没有则 null）。
-  ///
-  /// 只返回带已知媒体后缀的地址（`MediaSniffer.isMediaUrl`）—— 把网页
-  /// 丢给播放器只会白卡，不如老实返回 null 让上层换线路。
+  /// 要求中止当前（或排队中的）嗅探。已经抓到的结果仍会正常返回。
+  void cancel() => _cancelRequested = true;
+
+  /// 嗅探并返回**首选媒体地址**（没有则 null）。
   Future<String?> sniff(
+    String pageUrl, {
+    Map<String, String> headers = const {},
+    Duration budget = defaultBudget,
+    void Function(String message)? onProgress,
+  }) async {
+    final r = await sniffDetailed(
+      pageUrl,
+      headers: headers,
+      budget: budget,
+      onProgress: onProgress,
+    );
+    return r.best;
+  }
+
+  /// 嗅探并返回**完整结果**（探针页用：要展示候选列表和跟过的 iframe）
+  Future<SniffResult> sniffDetailed(
     String pageUrl, {
     Map<String, String> headers = const {},
     Duration budget = defaultBudget,
     void Function(String message)? onProgress,
   }) {
     final url = pageUrl.trim();
-    if (!url.startsWith('http')) return Future.value(null);
+    if (!url.startsWith('http')) return Future.value(const SniffResult());
+    // 每次新的一轮都把中止位清掉（上一轮点过「停止」不该影响这一轮）
+    _cancelRequested = false;
 
     final prev = _queue;
     final gate = Completer<void>();
@@ -87,14 +160,14 @@ class MediaSniffService {
         );
       } catch (e) {
         AppLog.instance.w('[Sniff] 嗅探异常 $url: $e');
-        return null;
+        return const SniffResult();
       } finally {
         if (!gate.isCompleted) gate.complete();
       }
     }();
   }
 
-  Future<String?> _run(
+  Future<SniffResult> _run(
     String url, {
     required Map<String, String> headers,
     required Duration budget,
@@ -102,61 +175,115 @@ class MediaSniffService {
   }) async {
     if (!await _ensureController()) {
       AppLog.instance.log('[Sniff] 隐形 WebView 不可用（App 未就绪），跳过嗅探');
-      return null;
+      return const SniffResult();
     }
     final c = _controller!;
     final collector = SnifferCollector();
     _collector = collector;
 
-    onProgress?.call('正在嗅探页面里的播放地址…');
+    final deadline = DateTime.now().add(budget);
+    final visited = <String>{};
+    var target = url;
+    String? best;
 
+    try {
+      for (var hop = 0; hop < _maxHops; hop++) {
+        if (target.isEmpty || DateTime.now().isAfter(deadline)) break;
+        if (_cancelRequested) break;
+        visited.add(target);
+        onProgress?.call(
+          hop == 0
+              ? '正在嗅探页面里的播放地址…'
+              : '顺着 iframe 再探一层（第 ${hop + 1} 层）…',
+        );
+        AppLog.instance.log('[Sniff] 第 ${hop + 1} 层: $target');
+
+        if (!await _load(c, target, headers)) break;
+
+        final hopDeadline = _hopDeadline(deadline, hop);
+        var warm = false;
+        final warmTimer = Timer(_warmup, () => warm = true);
+        try {
+          while (DateTime.now().isBefore(hopDeadline)) {
+            if (_cancelRequested) break;
+            await _inject(c);
+            final b = collector.best;
+            if (warm && b != null && b.isMedia) {
+              best = b.url;
+              break;
+            }
+            await Future<void>.delayed(const Duration(milliseconds: 300));
+          }
+        } finally {
+          warmTimer.cancel();
+        }
+        if (best != null) break;
+
+        // 这一层没有媒体地址 → 顺着 iframe 再下一层
+        final next = collector.nextFrame(visited);
+        if (next == null) break;
+        AppLog.instance.log('[Sniff] 跟到下一层: $next');
+        target = next;
+      }
+    } finally {
+      _collector = null;
+      // 收工必须把页面停掉：否则隐形 WebView 里的播放器还在拉流 / 占音频
+      unawaited(_quiet(c));
+    }
+
+    // 兜底：循环结束时可能刚好抓到一条（还没到 warm 也算）
+    if (best == null) {
+      final b = collector.best;
+      if (b != null && b.isMedia) best = b.url;
+    }
+
+    if (best != null) {
+      AppLog.instance.log('[Sniff] 命中: $best');
+    } else {
+      AppLog.instance.log(
+        '[Sniff] 未嗅到媒体地址（候选 ${collector.count} 条，'
+        '跟过 ${collector.frames.length} 个 iframe）: $url',
+      );
+    }
+    return SniffResult(
+      best: best,
+      candidates: collector.sorted,
+      frames: collector.frames,
+      logs: collector.logs,
+    );
+  }
+
+  /// 每一层的时间片：把剩余预算平摊给剩下的层数，且不低于 [_minHop]
+  DateTime _hopDeadline(DateTime deadline, int hop) {
+    final left = deadline.difference(DateTime.now()).inMilliseconds;
+    if (left <= 0) return DateTime.now();
+    final hopsLeft = _maxHops - hop;
+    var ms = left ~/ (hopsLeft < 1 ? 1 : hopsLeft);
+    if (ms < _minHop.inMilliseconds) ms = _minHop.inMilliseconds;
+    if (ms > left) ms = left;
+    return DateTime.now().add(Duration(milliseconds: ms));
+  }
+
+  Future<bool> _load(
+    WebViewController c,
+    String url,
+    Map<String, String> headers,
+  ) async {
     final h = <String, String>{
       for (final e in headers.entries)
         if (e.key.trim().isNotEmpty && e.value.trim().isNotEmpty)
           e.key: e.value,
     };
-
-    var warm = false;
-    final warmTimer = Timer(_warmup, () => warm = true);
-    final deadline = DateTime.now().add(budget);
-
     try {
-      try {
-        if (h.isEmpty) {
-          await c.loadRequest(Uri.parse(url));
-        } else {
-          await c.loadRequest(Uri.parse(url), headers: h);
-        }
-      } catch (e) {
-        AppLog.instance.log('[Sniff] 加载失败 $url: $e');
-        return null;
+      if (h.isEmpty) {
+        await c.loadRequest(Uri.parse(url));
+      } else {
+        await c.loadRequest(Uri.parse(url), headers: h);
       }
-
-      // 轮询：持续注入（早期请求也不放过），拿到首选就立刻收工
-      while (DateTime.now().isBefore(deadline)) {
-        await _inject(c);
-        final best = collector.best;
-        if (warm && best != null && best.isMedia) {
-          AppLog.instance.log('[Sniff] 命中（${best.kind} / ${best.via}）: ${best.url}');
-          return best.url;
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 300));
-      }
-
-      // 到点：有媒体候选就交出去，否则算失败
-      final best = collector.best;
-      if (best != null && best.isMedia) {
-        AppLog.instance.log('[Sniff] 到点取次优（${best.kind}）: ${best.url}');
-        return best.url;
-      }
-      AppLog.instance
-          .log('[Sniff] 未嗅到媒体地址（共 ${collector.count} 条候选）: $url');
-      return null;
-    } finally {
-      warmTimer.cancel();
-      _collector = null;
-      // 收工必须把页面停掉：否则隐形 WebView 里的播放器还在拉流 / 占音频
-      unawaited(_quiet(c));
+      return true;
+    } catch (e) {
+      AppLog.instance.log('[Sniff] 加载失败 $url: $e');
+      return false;
     }
   }
 
