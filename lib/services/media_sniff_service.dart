@@ -74,8 +74,8 @@ class MediaSniffService {
   MediaSniffService._();
   static final MediaSniffService instance = MediaSniffService._();
 
-  /// 默认嗅探预算。比探针页（20s）短 —— 正式链路里用户已经等了一段
-  /// HTTP 解析，再让他干等 20s 不合适。
+  /// 默认嗅探预算。比探针页（24s）短 —— 正式链路里用户已经等了一段
+  /// HTTP 解析，再让他干等太久不合适。
   static const Duration defaultBudget = Duration(seconds: 12);
 
   /// 预热：页面 onPageFinished 后再等这么久才开始采信结果。
@@ -93,6 +93,14 @@ class MediaSniffService {
 
   /// 每一层最少给的时间（不然刚加载完就换层，等于白跳）
   static const Duration _minHop = Duration(seconds: 3);
+
+  /// 每一层最多等这么久。
+  ///
+  /// **不再按剩余层数平摊** —— 早期版本是 `剩余 ÷ 剩余层数`（20s ÷ 3 ≈ 6.6s），
+  /// 实测把 `ckplayer.vip/jiexi` 砍在 6.7s，而它要 **8.5s** 才把地址打印出来，
+  /// 差 1.8 秒整条链就废了。层数是我们自己假想的上限，真实链子常常只有 2 层，
+  /// 平摊等于把预算浪费在根本不存在的层上。
+  static const Duration _hopCap = Duration(seconds: 10);
 
   WebViewController? _controller;
   OverlayEntry? _entry;
@@ -200,7 +208,8 @@ class MediaSniffService {
 
         if (!await _load(c, target, headers)) break;
 
-        final hopDeadline = _hopDeadline(deadline, hop);
+        final hopDeadline = _hopDeadline(deadline);
+        final hopStarted = DateTime.now();
         var warm = false;
         final warmTimer = Timer(_warmup, () => warm = true);
         try {
@@ -210,6 +219,15 @@ class MediaSniffService {
             final b = collector.best;
             if (warm && b != null && b.isMedia) {
               best = b.url;
+              break;
+            }
+            // 本层已经暴露出可跟的 iframe，自己却一条候选都没有
+            // → 别把 [_hopCap] 白等完，省下的时间留给下一层。
+            // 实测 `jx.muiu.site` 就是这种壳页：地址在 iframe 里，主 frame 永远等不到。
+            if (DateTime.now().difference(hopStarted) >= _minHop &&
+                collector.count == 0 &&
+                collector.nextFrame(visited) != null) {
+              AppLog.instance.log('[Sniff] 本层无候选但露出 iframe，提前跟下一层');
               break;
             }
             await Future<void>.delayed(const Duration(milliseconds: 300));
@@ -253,15 +271,11 @@ class MediaSniffService {
     );
   }
 
-  /// 每一层的时间片：把剩余预算平摊给剩下的层数，且不低于 [_minHop]
-  DateTime _hopDeadline(DateTime deadline, int hop) {
-    final left = deadline.difference(DateTime.now()).inMilliseconds;
-    if (left <= 0) return DateTime.now();
-    final hopsLeft = _maxHops - hop;
-    var ms = left ~/ (hopsLeft < 1 ? 1 : hopsLeft);
-    if (ms < _minHop.inMilliseconds) ms = _minHop.inMilliseconds;
-    if (ms > left) ms = left;
-    return DateTime.now().add(Duration(milliseconds: ms));
+  /// 每一层的时间片：最多 [_hopCap]，且不超过剩余预算
+  DateTime _hopDeadline(DateTime deadline) {
+    final left = deadline.difference(DateTime.now());
+    if (left <= Duration.zero) return DateTime.now();
+    return DateTime.now().add(_hopCap < left ? _hopCap : left);
   }
 
   Future<bool> _load(

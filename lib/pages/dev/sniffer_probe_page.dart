@@ -37,7 +37,7 @@ class _SnifferProbePageState extends State<SnifferProbePage> {
           'https://jx.muiu.site/?url=https://v.qq.com/x/cover/mzc00200803dr6b/g4102ay41nf.html');
 
   /// 测试页给的时间比正式链路（12s）宽一点：这里就是要看"到底抓得到什么"。
-  static const Duration _sniffBudget = Duration(seconds: 20);
+  static const Duration _sniffBudget = Duration(seconds: 24);
 
   // ── 解析测试 ──
   bool _parseRunning = false;
