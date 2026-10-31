@@ -8,6 +8,8 @@ import 'package:tvbox/music/services/player_manager.dart';
 import 'package:tvbox/music/services/settings_store.dart';
 import 'package:tvbox/music/theme/music_theme.dart';
 import 'package:tvbox/music/widgets/music_components.dart';
+import 'package:tvbox/music/widgets/mo_lv_blocks.dart';
+import 'package:tvbox/music/widgets/mo_lv_pages.dart';
 import 'package:tvbox/music/pages/playlist_page.dart';
 import 'package:tvbox/music/pages/local_music_page.dart';
 import 'package:tvbox/widgets/app_page_loading.dart';
@@ -145,6 +147,7 @@ class _LibraryPageState extends State<LibraryPage>
     if (_loading) {
       return AppPageLoading(color: MusicTheme.tint);
     }
+    final playlists = MusicLibraryStore.instance.playlists;
     // ⚠️ 必须包 SafeArea(top)：列表第一项"音乐库"标题原来紧贴状态栏，
     // 在刘海机上会被状态栏文字/时间压住（用户实测反馈）。
     // bottom: false —— 底部导航栏自己有 SafeArea，这里再来一层会多留白。
@@ -190,47 +193,48 @@ class _LibraryPageState extends State<LibraryPage>
           //    没有逻辑（"我的内容"被压到中间、榜单压到最后），
           //    而且 `榜单` 已拆成独立 tab（见 charts_page.dart），
           //    这里**不再重复**。
-          const SectionTitle(title: '我的内容'),
-          // 卡片式导航行（原来是裸 ListTile：系统列表长相，
-          // 跟下面的圆角卡片不是一个语言 —— 见 music_components 的说明）
-          MusicNavTile(
-            icon: Icons.queue_music_rounded,
+          // ══════════════════════════════════════════════════════════
+          // 按设计稿 `02_乐库.png` 重排（2026-10-31）
+          //
+          //   ① 我的歌单   —— **横滑方卡**（原来是一行导航条，看不出有几首）
+          //   ② 最近播放   —— **行列表**（原来是 2 列大网格，一屏只放 4 首）
+          //   ③ 正在播放   —— 行列表
+          //   ④ 我的收藏   —— 行列表
+          //   ⑤ 本地音乐   —— 导航条（它是"入口"，不是内容）
+          //
+          // 为什么网格换成行列表：设计稿 02 的「最近播放」是三行紧凑列表，
+          // 一行 = 封面 + 歌名 + 歌手 + 时长。网格适合"专辑/歌单"这种有封面
+          // 主体的东西，单曲用网格一屏只能放 4 首，找歌反而慢。
+          // ══════════════════════════════════════════════════════════
+          MoLvSectionTitle(
             title: '我的歌单',
-            subtitle: '本地歌单，不需要账号',
-            trailingText: '${MusicLibraryStore.instance.playlists.length}',
-            onTap: () => Navigator.of(context).push<void>(
-              MaterialPageRoute(
-                  settings: const RouteSettings(name: 'music:page'),
-                  builder: (_) => const PlaylistListPage()),
-            ),
+            trailing: playlists.isEmpty ? null : '${playlists.length} 个',
+            onMore: _openPlaylists,
           ),
+          if (playlists.isEmpty)
+            _emptyPlaylistHint()
+          else
+            MoLvShelf(
+              items: [
+                for (final p in playlists.take(10))
+                  MoLvShelfItem(title: p.name, subtitle: '${p.length} 首'),
+              ],
+              onTap: (i) => _openPlaylist(playlists[i]),
+            ),
+
+          _recentSection(),
+          _queueSection(),
+          _favoriteSection(),
+
+          const SizedBox(height: 12),
           MusicNavTile(
             icon: Icons.download_done_rounded,
             title: '本地音乐',
             subtitle: '已下载的歌，离线可听',
             trailingText:
                 '${MusicDownloadService.instance.localSongs.length}',
-            onTap: () => Navigator.of(context).push<void>(
-              MaterialPageRoute(
-                settings: const RouteSettings(name: 'music:page'),
-                // 🔴 音乐子页面是 push 到 root Navigator 的 → **不在**
-                // `MusicRootView` 的 `Theme(MusicTheme.themeData())` 作用域里 ✗
-                // → Scaffold/AppBar/Divider/Card 会回落到**影视侧** AppTheme 的配色 ✗
-                // 所以每个 push 点自己包一层音乐主题 ✓
-                builder: (_) => Theme(
-                  data: MusicTheme.themeData(),
-                  child: const LocalMusicPage(),
-                ),
-              ),
-            ),
+            onTap: _openLocalMusic,
           ),
-
-          // ② 正在播放（队列）
-          _queueSection(),
-
-          // ③④ 卡片式的两个"我的"列表
-          _recentCard(),
-          _favoriteCard(),
         ],
         ),
       ),
@@ -238,144 +242,90 @@ class _LibraryPageState extends State<LibraryPage>
   }
 
   // ============================================================
-  // 卡片式的「最近播放」/「我的收藏」
+  // 页面跳转 / 空状态
   // ============================================================
   //
-  // ── 为什么改成卡片（用户 2026 要求）──────────────────────────
-  // 原来是 `ListTile` 一行一首的密列表：
-  //   · 一行只看得到歌名 + 歌手，**封面很小（46）**，辨识度低
-  //   · 长列表看起来像"系统列表"，不像音乐 App
-  // 现在：
-  //   · **2 列网格卡片**，封面大（整格宽、1:1）
-  //   · 每格一张卡，视觉上就是"一张张能点的卡"
-  //
-  // ⚠️ 网格高度必须按**可用宽度**算，**不能用固定 childAspectRatio** ——
-  //    固定比例在窄屏 + 系统大字号时会**溢出**（本项目已踩过两次，
-  //    见 discover_page 里那两处注释）。
-  //    算法：格子宽 w → 封面高 w + 两行文字 + 间距。
+  // 🔴 音乐子页面是 push 到 root Navigator 的 → **不在**
+  //    `MusicRootView` 的 `Theme(MusicTheme.themeData())` 作用域里 ✗
+  //    → Scaffold/AppBar/Divider/Card 会回落到**影视侧** AppTheme 的配色 ✗
+  //    所以每个 push 点自己包一层音乐主题 ✓
 
-  /// 卡片网格（最近播放 / 收藏 共用）
-  Widget _cardGrid({
-    required List<Song> songs,
-    required int maxCount,
-    required bool showIndexBadge,
-  }) {
-    final shown = songs.take(maxCount).toList();
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: GridView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        padding: EdgeInsets.zero,
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          mainAxisExtent: () {
-            // 去掉左右 padding(16×2) 与列间距(12) 后每格宽度
-            final w = (MediaQuery.sizeOf(context).width - 16 * 2 - 12) / 2;
-            final ts = MediaQuery.textScalerOf(context);
-            // 封面(w) + 间距 6 + 歌名一行 + 歌手一行
-            return w + 6 + ts.scale(AppTheme.fontFootnote) * 1.35 * 2 + 6;
-          }(),
+  void _openPlaylists() => Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          settings: const RouteSettings(name: 'music:page'),
+          builder: (_) => Theme(
+            data: MusicTheme.themeData(),
+            child: const PlaylistListPage(),
+          ),
         ),
-        itemCount: shown.length,
-        itemBuilder: (c, i) => _songCard(
-          shown[i],
-          index: showIndexBadge ? i + 1 : null,
-          // 点卡片 → 从**整个列表**里对应的位置开始播（这样"下一首"才对）
-          onTap: () {
-            final at = songs.indexOf(shown[i]);
-            player.playQueue(songs, index: at < 0 ? 0 : at);
-          },
-        ),
-      ),
-    );
-  }
+      );
 
-  /// 单张歌曲卡
-  Widget _songCard(Song s, {int? index, required VoidCallback onTap}) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Stack(
+  void _openPlaylist(MusicPlaylist p) => Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          settings: const RouteSettings(name: 'music:page'),
+          builder: (_) => Theme(
+            data: MusicTheme.themeData(),
+            child: PlaylistDetailPage(playlistId: p.id),
+          ),
+        ),
+      );
+
+  void _openLocalMusic() => Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          settings: const RouteSettings(name: 'music:page'),
+          builder: (_) => Theme(
+            data: MusicTheme.themeData(),
+            child: const LocalMusicPage(),
+          ),
+        ),
+      );
+
+  Widget _emptyPlaylistHint() => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+        child: GlassCard(
+          child: Row(
             children: [
-              // 封面撑满格子宽（正方形）
-              AspectRatio(
-                aspectRatio: 1,
-                child: LayoutBuilder(
-                  builder: (c, box) => CoverImage(
-                    url: s.coverUrl,
-                    size: box.maxWidth,
-                    cornerRadius: 14,
+              Icon(Icons.queue_music_rounded,
+                  color: MusicTheme.secondary, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '还没有歌单。在歌曲右侧菜单里可以把歌加进新歌单（存在本机，不需要账号）。',
+                  style: TextStyle(
+                    color: MusicTheme.secondary,
+                    fontSize: AppTheme.fontFootnote,
+                    height: 1.5,
                   ),
                 ),
               ),
-              // 序号角标（最近播放用 —— 让用户看得出播放顺序）
-              if (index != null)
-                Positioned(
-                  left: 6,
-                  top: 6,
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.45),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text('$index',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: AppTheme.fontCaption,
-                            fontWeight: FontWeight.w600)),
-                  ),
-                ),
-              // VIP 角标
-              if (s.isVIP)
-                const Positioned(right: 6, top: 6, child: VipBadge()),
             ],
           ),
-          const SizedBox(height: 6),
-          Text(s.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  color: MusicTheme.label,
-                  fontSize: AppTheme.fontFootnote,
-                  fontWeight: FontWeight.w500)),
-          const SizedBox(height: 2),
-          Text(
-            s.artists.trim().isNotEmpty ? s.artists : s.album,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-                color: MusicTheme.secondary, fontSize: AppTheme.fontCaption),
-          ),
-        ],
-      ),
-    );
-  }
+        ),
+      );
 
-  /// ③ 最近播放（卡片式，最多 6 张）
-  Widget _recentCard() {
+  /// ② 最近播放（设计稿 02：行列表，最多 4 行）
+  Widget _recentSection() {
     if (_recent.isEmpty) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SectionTitle(title: '最近播放', action: '${_recent.length} 首'),
-        _cardGrid(songs: _recent, maxCount: 6, showIndexBadge: true),
+        MoLvSectionTitle(title: '最近播放', trailing: '${_recent.length} 首'),
+        MoLvTrackList(
+          songs: _recent,
+          maxCount: 4,
+          playingKey: player.currentSong?.identityKey,
+          // 从**整个列表**里对应的位置开始播（这样"下一首"才对）
+          onTap: (i) => player.playQueue(_recent, index: i),
+        ),
       ],
     );
   }
 
-  /// ④ 我的收藏（卡片式，最多 6 张）
-  Widget _favoriteCard() {
+  /// ④ 我的收藏（行列表）
+  Widget _favoriteSection() {
     if (_favorites.isEmpty) {
       return Padding(
-        padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
         child: GlassCard(
           child: Row(
             children: [
@@ -399,14 +349,19 @@ class _LibraryPageState extends State<LibraryPage>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SectionTitle(title: '我的收藏', action: '${_favorites.length} 首'),
-        _cardGrid(songs: _favorites, maxCount: 6, showIndexBadge: false),
+        MoLvSectionTitle(title: '我的收藏', trailing: '${_favorites.length} 首'),
+        MoLvTrackList(
+          songs: _favorites,
+          maxCount: 4,
+          playingKey: player.currentSong?.identityKey,
+          onTap: (i) => player.playQueue(_favorites, index: i),
+        ),
       ],
     );
   }
 
 
-  /// 正在播放队列（等于"当前歌单"，最实用的一个板块）
+  /// ③ 正在播放队列（等于"当前歌单"，最实用的一个板块）
   Widget _queueSection() {
     return AnimatedBuilder(
       animation: player,
@@ -416,22 +371,23 @@ class _LibraryPageState extends State<LibraryPage>
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SectionTitle(
+            MoLvSectionTitle(
               title: '正在播放',
-              action: '${q.length} 首',
+              trailing: '${q.length} 首',
             ),
-            ...q.take(6).toList().asMap().entries.map((e) => SongCell(
-                  song: e.value,
-                  index: e.key,
-                  showCover: true,
-                  playbackContext: q,
-                )),
-            if (q.length > 6)
+            MoLvTrackList(
+              songs: q,
+              maxCount: 4,
+              playingKey: player.currentSong?.identityKey,
+              onTap: (i) => player.playQueue(q, index: i),
+            ),
+            if (q.length > 4)
               Padding(
                 padding: const EdgeInsets.only(left: 16, top: 4),
-                child: Text('还有 ${q.length - 6} 首…',
+                child: Text('还有 ${q.length - 4} 首…',
                     style: TextStyle(
-                        color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
+                        color: MusicTheme.secondary,
+                        fontSize: AppTheme.fontFootnote)),
               ),
           ],
         );

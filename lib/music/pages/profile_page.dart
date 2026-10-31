@@ -9,6 +9,8 @@ import 'package:tvbox/music/services/settings_store.dart';
 import 'package:tvbox/music/theme/music_theme.dart';
 import 'package:tvbox/music/widgets/floating_play_button.dart';
 import 'package:tvbox/music/pages/music_log_page.dart';
+import 'package:tvbox/music/pages/local_music_page.dart';
+import 'package:tvbox/music/widgets/mo_lv_pages.dart';
 import 'package:tvbox/music/pages/music_source_settings_page.dart';
 import 'package:tvbox/music/pages/plugin_market_page.dart';
 import 'package:tvbox/music/pages/plugin_subscription_page.dart';
@@ -54,6 +56,23 @@ class ProfilePage extends StatelessWidget {
           // 所以整块**删掉**，直接从「个性化外观」开始。
           // 留一点顶部呼吸感（原来靠 header 的 padding 撑着）。
           const SizedBox(height: 12),
+
+          // ── 本地模式卡（设计稿 `08_我的.png` 顶部那张）──────────────
+          //
+          // 设计稿这里是一个账号头像 + 昵称，本项目没有账号，
+          // 所以换成本项目的真实形态：**本地模式**（收藏 / 歌单都在本机）。
+          // 点它去「本地音乐」—— 比弹一个假登录框诚实。
+          MoLvUserCard(
+            title: '本地模式',
+            subtitle: '不需要账号，收藏与歌单都存在本机',
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              settings: const RouteSettings(name: 'music:page'),
+              builder: (_) => Theme(
+                data: MusicTheme.themeData(),
+                child: const LocalMusicPage(),
+              ),
+            )),
+          ),
 
           // ── 外观 ────────────────────────────────────────────
           const _GroupTitle('个性化外观'),

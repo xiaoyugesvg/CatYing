@@ -4,9 +4,11 @@ import 'package:tvbox/common/theme.dart';
 import 'package:tvbox/music/models/models.dart';
 import 'package:tvbox/music/pages/playlist_detail_page.dart';
 import 'package:tvbox/music/services/music_api.dart';
+import 'package:tvbox/music/services/player_manager.dart';
 import 'package:tvbox/music/services/settings_store.dart';
 import 'package:tvbox/music/theme/music_theme.dart';
 import 'package:tvbox/music/widgets/music_components.dart';
+import 'package:tvbox/music/widgets/mo_lv_pages.dart';
 
 /// 「榜单」页 —— **左窄栏榜单列表 + 右内容区**。
 ///
@@ -111,6 +113,14 @@ class _ChartsPageState extends State<ChartsPage>
     _loadSongs();
   }
 
+  /// 顶部胶囊里显示的平台（设计稿 03 就是这四个）
+  static const List<SongSource> _chipSources = [
+    SongSource.netease,
+    SongSource.qq,
+    SongSource.kugou,
+    SongSource.ximalaya,
+  ];
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -118,10 +128,24 @@ class _ChartsPageState extends State<ChartsPage>
       bottom: false,
       child: Column(
         children: [
-          MusicPageHeader(
+          const MusicPageHeader(
             title: '榜单',
-            subtitle: '当前平台 · ${_source.displayName}',
+            subtitle: '每个平台一套榜，点上方切换',
           ),
+          // 平台胶囊行（设计稿 03）：切平台不再靠「设置 → 音源」绕一圈
+          MoLvChipRow(
+            labels: [for (final s in _chipSources) s.displayName],
+            selectedIndex: _chipSources.indexOf(_source),
+            onTap: (i) {
+              final s = _chipSources[i];
+              if (s == _source) return;
+              // setMusicSource 会先同步写 value 再落盘，所以紧接着 _load()
+              // 读到的就是新平台
+              SettingsStore.instance.setMusicSource(s);
+              _load();
+            },
+          ),
+          const SizedBox(height: 4),
           Expanded(child: _body()),
         ],
       ),
@@ -259,21 +283,31 @@ class _ChartsPageState extends State<ChartsPage>
                 tooltip: _grid ? '列表' : '网格',
                 onTap: () => setState(() => _grid = !_grid),
               ),
-              _iconButton(
-                icon: Icons.play_circle_fill_rounded,
-                tooltip: '播放全部',
-                color: MusicTheme.tint,
-                onTap: _songs.isEmpty
-                    ? null
-                    : () => openPlaylist(
-                          context,
-                          top.id,
-                          top.name,
-                          source: _source,
-                          isTopList: true,
-                          coverUrl: top.coverUrl,
-                        ),
-              ),
+              // 「播放全部 ▶」——设计稿 03 是**文字 + 箭头**，而且点了要
+              // 立刻开始播。原来这个位置是 openPlaylist（跳进详情页再看一遍），
+              // 名不副实。
+              if (_songs.isNotEmpty)
+                TextButton(
+                  onPressed: () =>
+                      MusicPlayerManager.instance.playQueue(_songs),
+                  style: TextButton.styleFrom(
+                    foregroundColor: MusicTheme.tint,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('播放全部',
+                          style: TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.w600)),
+                      SizedBox(width: 2),
+                      Icon(Icons.play_arrow_rounded, size: 16),
+                    ],
+                  ),
+                ),
             ],
           ),
         ),
@@ -322,13 +356,19 @@ class _ChartsPageState extends State<ChartsPage>
       );
     }
     if (!_grid) {
+      // 设计稿 03 的编号行：01/02/03 前三名用 accent 色。
+      // 注意没有「↑3 / ↓2」升降箭头 —— 本 App 不存排名快照，
+      // 编不出来就不编（假数据比没有更糟），右侧显示时长。
+      final playing = MusicPlayerManager.instance.currentSong?.identityKey;
       return ListView.builder(
         padding: const EdgeInsets.only(bottom: 160),
         itemCount: _songs.length,
-        itemBuilder: (c, i) => SongCell(
+        itemBuilder: (c, i) => MoLvRankRow(
           song: _songs[i],
           index: i,
-          playbackContext: _songs,
+          active: playing != null && _songs[i].identityKey == playing,
+          onTap: () =>
+              MusicPlayerManager.instance.playQueue(_songs, index: i),
         ),
       );
     }
