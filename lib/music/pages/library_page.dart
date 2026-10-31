@@ -69,7 +69,36 @@ class _LibraryPageState extends State<LibraryPage>
     //
     // 这里挂上就修好了：收藏/取消收藏/加最近播放/换歌单 → 自动重载。
     MusicLibraryStore.instance.revisionProxy.addListener(_onLibraryChanged);
+    // ── 🔴 下载完成 / 删除 / 清空时**必须重建**（修"下载了但乐库显示 0"）──
+    //
+    // 用户 2026-10-31 截图：本地音乐页明明写着「已下载 1 首 · 8.6 MB」，
+    // 乐库页的统计格却是「0 下载」、本地音乐那行也是「0」。
+    //
+    // 根因是两件事叠在一起：
+    //   ① 本页 `wantKeepAlive = true` ⇒ 切 tab **不重建**（见上面注释）；
+    //   ② `MusicDownloadService` 是个 `ChangeNotifier`，`notifyListeners()`
+    //      一直在发（下载进度每一帧都发），但**全项目没有一处监听它** ——
+    //      定义了却没人收 = 等于没写。
+    // 于是 `build()` 里读到的 `localSongs.length` 永远停在"第一次 build 时"的
+    // 值：启动时清单是空的（`main.dart` 的 `init()` 那时还没下过歌）⇒ 0 卡死。
+    //
+    // 本地音乐页之所以是对的：它每次进入都新建 State、在 `initState` 里现读。
+    MusicDownloadService.instance.addListener(_onDownloadsChanged);
     _load();
+  }
+
+  /// 下载清单变了（完成 / 删除 / 清空）→ 重建，让统计格和「本地音乐」计数跟上
+  ///
+  /// ⚠️ 不能无脑 `setState`：`onReceiveProgress` 每收一块数据就
+  /// `notifyListeners()` 一次，无脑重建等于给一个**在别的 tab 上、还
+  /// keepAlive 活着**的页面每帧刷新一遍。只在**条数变了**的时候重建。
+  int _downloadCount = -1;
+
+  void _onDownloadsChanged() {
+    if (!mounted) return;
+    final n = MusicDownloadService.instance.localSongs.length;
+    if (n == _downloadCount) return;
+    setState(() => _downloadCount = n);
   }
 
   /// 收藏 / 最近播放 / 歌单发生变化 → 重新读一份
@@ -91,6 +120,8 @@ class _LibraryPageState extends State<LibraryPage>
     // ⚠️ 成对移除：`ValueNotifier` 会**一直持有**监听闭包，
     // 不移除就是"页面已销毁但每次收藏仍会调它"的泄漏。
     MusicLibraryStore.instance.revisionProxy.removeListener(_onLibraryChanged);
+    // 同上，成对移除（`ChangeNotifier` 也会一直持有闭包）
+    MusicDownloadService.instance.removeListener(_onDownloadsChanged);
     super.dispose();
   }
 
