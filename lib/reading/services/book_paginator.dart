@@ -530,12 +530,36 @@ class BookPaginator {
     int from = 0,
     int? to,
   }) {
+    final all = pagesOfBlock(pages, blockIndex, from: from, to: to);
+    return all.isEmpty ? null : all.first;
+  }
+
+  /// 一个块覆盖的**全部**页（升序）。长段落被切成多个 `PageEntry` 时会跨页。
+  ///
+  /// ── 为什么需要它（用户 2026-10-31）────────────────────────────
+  /// 「听书为啥已经播放到下一页了，但是没有自动翻页过去」。
+  ///
+  /// 根因就是 [pageOfBlockInRange] 只返回**第一页**：一段跨 3~4 两页时，
+  /// 朗读推进到第 4 页，取到的目标页仍是 3 == 当前页 ⇒ 直接 return ⇒
+  /// 画面一动不动，直到整段念完才跳。段越长越明显（网文一段常常半屏）。
+  ///
+  /// 拿到全部页之后，调用方可以按**段内朗读进度**决定停在第几页。
+  static List<int> pagesOfBlock(
+    List<BookPage> pages,
+    int blockIndex, {
+    int from = 0,
+    int? to,
+  }) {
+    final out = <int>[];
     final end = (to ?? pages.length).clamp(0, pages.length);
     for (var i = from.clamp(0, pages.length); i < end; i++) {
       for (final e in pages[i].entries) {
-        if (e.blockIndex == blockIndex) return i;
+        if (e.blockIndex == blockIndex) {
+          out.add(i);
+          break; // 同一页里该块可能出现多个 entry，只记一次
+        }
       }
     }
-    return null;
+    return out;
   }
 }

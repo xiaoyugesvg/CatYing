@@ -74,6 +74,15 @@ mixin _ReaderPart01 on _BookSourceReaderPageState {
   /// 朗读进度监听（分页模式下据此翻页；`dispose` 必须撤掉）
   Worker? _ttsFollowWorker;
 
+  /// **段内**朗读进度监听（用户 2026-10-31：「已经播放到下一页了，但是没有
+  /// 自动翻页过去」）。
+  ///
+  /// `_ttsFollowWorker` 只盯「换段」，而网文一段常常半屏以上、**跨两页**：
+  /// 段内念到第 2 页时 `currentIndex` 没变 ⇒ 上面那个 worker 根本不会触发 ⇒
+  /// 画面卡在第 1 页直到整段念完。这里再盯一个 0~1 的段内进度（约 4 次/秒），
+  /// 段跨页时按进度把页翻过去。
+  Worker? _ttsProgressWorker;
+
 @override
   /// 番茄钟浮层 bottom 偏移：根据底部功能栏高度 + TTS 迷你条状态动态计算。
   /// 底部功能栏（悬浮卡片）高度 ≈ margin(10) + padding(16) + 进度行(48)
@@ -429,6 +438,10 @@ mixin _ReaderPart01 on _BookSourceReaderPageState {
     // 正在念的段落在别的页时它压根没被构建 ⇒ 必须在这里监听进度、主动翻页。
     // 滚动模式不用这个（`_wrapWithHighlight` 里 `ensureVisible` 更平滑）。
     _ttsFollowWorker = ever<int>(_tts.currentIndex, (_) => _followTtsSegment());
+    // 段内进度（0~1，约 4Hz）：段跨页时靠它把页翻过去。开销很小 ——
+    // `_followTtsSegment` 前几个判断都是常数级，只有"确实要换页"才会动 PageView。
+    _ttsProgressWorker =
+        ever<double>(_tts.segmentProgress, (_) => _followTtsSegment());
     // C7 护眼休息提醒：墙钟计时（后台恢复后自动补齐），30s 检查一次
     _eyeBreakStart = DateTime.now();
     _eyeTimer = Timer.periodic(const Duration(seconds: 30), (_) {
@@ -593,6 +606,8 @@ mixin _ReaderPart01 on _BookSourceReaderPageState {
     // 朗读跟随的监听必须一起撤掉（否则 service 是单例，会一直持有已销毁的 State）
     _ttsFollowWorker?.dispose();
     _ttsFollowWorker = null;
+    _ttsProgressWorker?.dispose();
+    _ttsProgressWorker = null;
     // 自动阅读定时器 / 滚动控制器（退出必须停，否则会继续翻页）
     _autoReadTimer?.cancel();
     _autoReadTimer = null;

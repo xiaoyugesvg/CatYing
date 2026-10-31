@@ -1715,7 +1715,12 @@ mixin _ReaderPart02 on _BookSourceReaderPageState {
     if (_ttsHighlight == 0 && !_ttsAutoLocate) return child;
     return Obx(() {
       // 不是"正在念的那一段"：原样返回，什么都不做
+      //
+      // ⚠️ 这里**故意不读** `segmentProgress` —— Obx 按"这一帧读了哪些 Rx"
+      //   决定订阅谁。读在下面（只有当前段才走到）⇒ 只有当前段那一个 Obx
+      //   会以 4Hz 重建，其余段落一点都不受影响。
       if (pi != _ttsParagraph) return child;
+      final segP = _tts.segmentProgress.value;
       final d = _ttsHighlightDecoration(pi);
       // 没开高亮：不套装饰也不套 padding，只借 Builder 拿一个段内 context
       final Widget out = d == null
@@ -1730,17 +1735,32 @@ mixin _ReaderPart02 on _BookSourceReaderPageState {
       //   · 这个 `Obx` 在"朗读进度变化"时重建，走到这里说明 pi 就是"正在念的那一段"
       //   · ⚠️ 用 `Builder` 取一个**段内**的 `BuildContext` —— `Obx` 的 builder 不带 context
       //   · ⚠️ 放进 `addPostFrameCallback`：重建当帧**尚未布局**，滚动目标要等一帧才准确
-      //   · ⚠️ `alignment: 0.35`：让当前段停在视口**偏上**处，下方还留得住下一段
-      //   · 分页模式**不靠这里**：本段在别的页时这个 widget 根本没被构建，
+      //   · ⚠️ 分页模式**不靠这里**：本段在别的页时这个 widget 根本没被构建，
       //     那种情况由 `_followTtsSegment` 直接把 PageView 翻到那一页。
+      //
+      // ⚠️ 2026-10-31：固定 `alignment: 0.35` 只对**一屏放得下**的段落有效。
+      //   网文一段常常比视口还高（用户截图那种），段首被钉在 35% 处之后
+      //   段内继续念，alignment 不变 ⇒ **画面一直不动**，直到念到下一段才跳。
+      //   现在：段落比视口高时，把落点按段内进度从段首推向段尾。
       return Builder(
         builder: (ctx) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!mounted || !ctx.mounted) return;
             if (_rs.pageMode.paginates) return;
+            var align = 0.35;
+            final ro = ctx.findRenderObject();
+            final vp = Scrollable.maybeOf(ctx)?.position.viewportDimension;
+            if (ro is RenderBox &&
+                ro.hasSize &&
+                vp != null &&
+                vp > 0 &&
+                ro.size.height > vp * 0.9) {
+              // 长段：0.05 → 0.9 平滑推进，读到最后一行时正好把段尾带进视野
+              align = (0.05 + segP * 0.85).clamp(0.05, 0.9);
+            }
             Scrollable.ensureVisible(
               ctx,
-              alignment: 0.35,
+              alignment: align,
               duration: const Duration(milliseconds: 260),
               curve: Curves.easeOut,
             );

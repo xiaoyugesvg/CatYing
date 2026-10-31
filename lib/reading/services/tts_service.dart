@@ -82,6 +82,39 @@ class TtsService extends GetxService {
   /// 当前念到第几段（高亮 + 自动滚动用）
   final currentIndex = 0.obs;
 
+  /// **当前这一段**念到哪了（0~1）。跟读翻页用。
+  ///
+  /// ── 为什么需要它（用户 2026-10-31）────────────────────────────
+  /// 「听书为啥已经播放到下一页了，但是没有自动翻页过去」。
+  ///
+  /// 原生只回 `onDone`（一段念完），没有段内进度 ⇒ 阅读器只能"一段一翻"。
+  /// 而网文一段常常半屏甚至更长，**段跨页**时：
+  ///   · 念到第 2 页了，但 `currentIndex` 还没变；
+  ///   · 阅读器算出的目标页还是这段的**首页** == 当前页；
+  ///   · ⇒ 画面纹丝不动，直到整段念完才跳一下。
+  ///
+  /// 这里补一个**估算**的段内进度：中文 TTS 正常语速约 4.5 字/秒，
+  /// 段总时长 ≈ `字数 / (4.5 × rate)`，再用单调时钟算比例。
+  /// 误差在 ±15% 量级，而翻页只需要判断"有没有跨过半页"，够用；
+  /// 网络源有真实播放器 position 时优先用真实值（见 [_netProgress]）。
+  final segmentProgress = 0.0.obs;
+
+  /// 段内进度计时器（只在朗读中跑）
+  Timer? _segTimer;
+  DateTime? _segStartedAt;
+  Duration _segPausedAcc = Duration.zero;
+  DateTime? _segPausedAt;
+  int _segChars = 0;
+
+  /// 中文 TTS 默认语速：每秒约几个字（@`rate = 0.5`，即系统默认语速）。
+  ///
+  /// 取 4.5 的依据：系统 AVSpeechSynthesizer 中文默认语速实测约 4.3~4.8 字/秒，
+  /// 各家网络源（Edge / Azure）落在同一区间。估算只需量级正确。
+  static const double _kCharsPerSecond = 4.5;
+
+  /// 系统 TTS 的"正常语速"基准值（AVSpeechUtteranceDefaultSpeechRate）。
+  static const double _kNormalRate = 0.5;
+
   /// 总段数
   final totalSegments = 0.obs;
 
@@ -344,6 +377,8 @@ class TtsService extends GetxService {
 
   Future<void> pause() async {
     if (!isSpeaking.value) return;
+    // 段内进度计时暂停（否则暂停期间也被算成"在念"，恢复后会一下跳好几页）
+    if (_segPausedAt == null) _segPausedAt = DateTime.now();
     if (_useNet && !_netSynthesizing) {
       try {
         await _netPlayer?.pause();
@@ -363,6 +398,12 @@ class TtsService extends GetxService {
 
   Future<void> resume() async {
     if (!isPaused.value) return;
+    // 把暂停期间从"已念时长"里扣掉
+    final pausedAt = _segPausedAt;
+    if (pausedAt != null) {
+      _segPausedAcc += DateTime.now().difference(pausedAt);
+      _segPausedAt = null;
+    }
     isSpeaking.value = true;
     isPaused.value = false;
     _updateNowPlaying(playing: true);
@@ -387,6 +428,7 @@ class TtsService extends GetxService {
 
   Future<void> stop() async {
     _stopRequested = true;
+    _stopSegClock();
     // ⚠️ 这里判 `_netPlayer`（而不是 `_useNet`）：降级后 `_useNet` 已经是 false，
     //   但播放器可能还留着上一段的声音、临时文件也还没删 —— 都得收干净。
     if (_netSource != null || _netPlayer != null) {
@@ -454,6 +496,56 @@ class TtsService extends GetxService {
   /// 逐段音色覆盖（A4 双音色，与 [_segments] 对齐；null = 用源默认音色）
   List<String?>? _segmentVoices;
 
+  // ── 段内进度计时（跟读翻页用）──────────────────────────────────
+
+  /// 一段开始念：重置并启动段内进度计时。
+  ///
+  /// 只统计**非空白字符**（标点算在内 —— 它们也要占朗读时间）。
+  void _startSegClock(String text) {
+    _segTimer?.cancel();
+    _segStartedAt = DateTime.now();
+    _segPausedAcc = Duration.zero;
+    _segPausedAt = null;
+    _segChars = text.replaceAll(RegExp(r'\s'), '').length;
+    segmentProgress.value = 0;
+    if (_segChars <= 0) return;
+    _segTimer = Timer.periodic(
+      const Duration(milliseconds: 250),
+      (_) => _tickSegClock(),
+    );
+  }
+
+  void _tickSegClock() {
+    if (!isSpeaking.value || isPaused.value) return;
+    final started = _segStartedAt;
+    if (started == null) return;
+    final total = _estimatedSegDuration();
+    if (total.inMilliseconds <= 0) return;
+    final elapsed = DateTime.now().difference(started) - _segPausedAcc;
+    final p = elapsed.inMilliseconds / total.inMilliseconds;
+    // 估算只用于"跨没跨过半页"，封顶 1.0 就够（真念完会走 _onSegmentDone）
+    segmentProgress.value = p.clamp(0.0, 1.0);
+  }
+
+  /// 段总时长估算。`rate` 的 0.5 = 正常语速，按比例缩放。
+  Duration _estimatedSegDuration() {
+    if (_segChars <= 0) return Duration.zero;
+    final r = rate.value <= 0 ? _kNormalRate : rate.value;
+    final cps = _kCharsPerSecond * (r / _kNormalRate);
+    if (cps <= 0) return Duration.zero;
+    return Duration(milliseconds: (_segChars / cps * 1000).round());
+  }
+
+  void _stopSegClock() {
+    _segTimer?.cancel();
+    _segTimer = null;
+    _segStartedAt = null;
+    _segPausedAcc = Duration.zero;
+    _segPausedAt = null;
+    _segChars = 0;
+    segmentProgress.value = 0;
+  }
+
   Future<void> _speakCurrent() async {
     if (_stopRequested) return;
     final i = currentIndex.value;
@@ -463,6 +555,8 @@ class TtsService extends GetxService {
       _onSegmentDone();
       return;
     }
+    // 新的一段开始 → 段内进度归零重算（跟读翻页依赖它判断跨页）
+    _startSegClock(seg);
     try {
       await _ch.invokeMethod('speak', {
         'text': seg,
@@ -533,6 +627,10 @@ class TtsService extends GetxService {
       if (bytes == null || bytes.isEmpty) throw '服务返回空音频';
       if (!isSpeaking.value) return; // 合成期间被暂停/停止
       // MiMo 固定返回 wav，其余按源的格式给扩展名（media_kit 靠它选解复用器）
+      //
+      // 段内进度计时**放在真正开播这一刻**：合成要花 0.3~3s，若在函数入口就
+      // 起表，这段"还没出声"的时间会被算成已念 ⇒ 跟读翻页会提前翻。
+      _startSegClock(seg);
       await _playNetBytes(bytes,
           ext: src.type == 'mimo' ? 'wav' : _extOf(src.audioFormat));
     } catch (e) {
@@ -1312,12 +1410,16 @@ class TtsService extends GetxService {
     final next = currentIndex.value + 1;
     if (next >= _segments.length) {
       isSpeaking.value = false;
+      _stopSegClock();
       _updateNowPlaying(playing: false);
       final cb = onFinished;
       if (cb != null) cb();
       return;
     }
     currentIndex.value = next;
+    // 上一段念完：段内进度清零，等 `_speakCurrent` / `_speakNetworkCurrent`
+    // 真正开口时再起表（网络源合成还要几百毫秒，不能提前算）。
+    segmentProgress.value = 0;
     _updateNowPlaying();
     // 🔴🔴 这里原来**无条件**调 `_speakCurrent()`（= 系统朗读）🔴🔴
     //

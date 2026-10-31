@@ -916,6 +916,8 @@ Timer? _ttsTimerHandle;
   /// 朗读推进时，把「正在念的那一段」翻进视野
   /// （分页模式翻页；滚动模式由 `_wrapWithHighlight` 自己滚 —— 见那里的注释）
   void _followTtsSegment();
+  /// 翻到指定页（双页模式内部换成 spread 号再翻）
+  void _jumpToReadingPage(int page);
   TextStyle _bodyStyle(Color fg, {bool bold = false, bool noUnderline = false});
   double  get _bubbleMaxWidth;
   double  get _bubbleTextWidth;

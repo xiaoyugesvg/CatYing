@@ -1497,18 +1497,54 @@ mixin _ReaderPart03 on _BookSourceReaderPageState {
     final want = _blockOffset + pi;
     // 无缝拼接后 `_pages` 里可能混着下一章的页 ⇒ 只在当前章的页范围里找
     final (start, end) = _chapterPageRange(_index);
-    final target = BookPaginator.pageOfBlockInRange(
+    // ⚠️ 用「该段覆盖的**全部**页」而不是「第一页」：
+    //   一段跨 3~4 两页时，`pageOfBlockInRange` 恒返回 3，念到第 4 页
+    //   目标页仍是 3 == 当前页 ⇒ 直接 return ⇒ 画面纹丝不动
+    //   （用户 2026-10-31：「已经播放到下一页了，但是没有自动翻页过去」）。
+    final spans = BookPaginator.pagesOfBlock(
       _pages,
       want,
       from: start,
       to: end,
     );
-    if (target == null || target == _pageIndex) return;
+    if (spans.isEmpty) return;
+    // 段内进度决定停在第几页：跨 N 页时按 0~1 的比例选
+    var target = spans.first;
+    if (spans.length > 1) {
+      final p = _tts.segmentProgress.value.clamp(0.0, 1.0);
+      final k = (p * spans.length).floor().clamp(0, spans.length - 1);
+      target = spans[k];
+    }
+    if (target == _pageIndex) return;
+    // **只往前跟**：用户一边听一边往后翻着看时，不能每 250ms 把他拽回朗读处
+    // （段内进度是 4Hz 的，往回翻会变成"页面自己在抖"）。
+    if (target < _pageIndex) return;
+    _jumpToReadingPage(target);
+  }
+
+@override
+  /// 翻到「正在朗读的那一页」—— 双页模式要把页号换成 spread 号。
+  ///
+  /// ⚠️ 双页模式的 `PageView` 里 item 是 **spread**（[0],(1,2),(3,4)…），
+  ///   直接把页号当 index 传给 `jumpToPage` 会翻到错误位置（而且
+  ///   `_pageIndex` 会被 `onPageChanged` 改回 spread 左页 ⇒ 每个 tick 都重翻）。
+  void _jumpToReadingPage(int page) {
+    if (_dualPageActive && _pages.length > 1) {
+      final targetSpread = page <= 0 ? 0 : (page + 1) ~/ 2;
+      final currentSpread = _pageIndex <= 0 ? 0 : (_pageIndex + 1) ~/ 2;
+      if (targetSpread == currentSpread) return;
+      if (_pageCtrl.hasClients) {
+        _pageCtrl.jumpToPage(targetSpread);
+      } else {
+        _setPageIndex(page);
+      }
+      return;
+    }
     if (_pageCtrl.hasClients) {
-      _pageCtrl.jumpToPage(target);
+      _pageCtrl.jumpToPage(page);
     } else {
       // 仿真 / 覆盖模式没有挂载 PageView
-      _setPageIndex(target);
+      _setPageIndex(page);
     }
   }
 
