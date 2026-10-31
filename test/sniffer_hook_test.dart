@@ -52,6 +52,15 @@ void main() {
       expect(kSnifferHookJs, contains("'xyplay'"));
     });
 
+    test('变量层要挖播放器实例的 .url（明文在这，stray.url 是密文）', () {
+      // api-api.789jiexi.net：密文放 stray.url（不是 http 开头，直接跳过），
+      // 明文只在 console.log 和 `stray.ad = new Artplayer({url: …})` 里。
+      // 前者要求 hook 早于那句 log；后者只要实例建出来就一直有效，
+      // 是「hook 晚到」时的唯一兜底。
+      expect(_hasLiveCode(kSnifferHookJs, 'if (o.ad) dig(o.ad'), isTrue);
+      expect(_hasLiveCode(kSnifferHookJs, 'if (o.player) dig(o.player'), isTrue);
+    });
+
     test('四类采集 + iframe 跟随都还在（且在定时器里被调用）', () {
       for (final fn in ['scanDom', 'scanPerf', 'scanVars', 'scanFrames']) {
         expect(

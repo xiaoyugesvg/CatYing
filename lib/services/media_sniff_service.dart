@@ -374,6 +374,8 @@ class MediaSniffService {
           elapsed: elapsed,
           note: note,
         );
+        // 没命中才自检：命中了说明一切正常，没必要再探
+        if (best == null) await _probeEnv(c, hop + 1);
 
         if (best != null) break;
         if (next == null) break;
@@ -479,6 +481,42 @@ class MediaSniffService {
     } catch (e) {
       AppLog.instance.log('[Sniff] 加载失败 $url: $e');
       return false;
+    }
+  }
+
+  /// 注入后自检：hook 装上了吗？页面 JS 环境正常吗？明文有没有挂在实例上？
+  ///
+  /// 为什么必须有：`api-api.789jiexi.net` 那层 0 候选，但 curl 直接打它的
+  /// `api.php` 是能出地址的（连 27 分钟前的旧 key 都能用）。说明问题不在
+  /// 网络，而在「页面 JS 在 WebView 里到底跑没跑」或「hook 注入时机」——
+  /// 这两件事以前日志里完全看不出来，只能靠猜。
+  ///
+  /// 输出示例：
+  /// `hook=true jq=function cj=object stray=object cfg=object adUrl=https://…m3u8`
+  Future<void> _probeEnv(WebViewController c, int hop) async {
+    try {
+      final raw = await c.runJavaScriptReturningResult(
+        'JSON.stringify({'
+        'hook:!!window.__catSniffInstalled,'
+        'jq:typeof window.\$,'
+        'cj:typeof window.CryptoJS,'
+        'stray:typeof window.stray,'
+        'cfg:typeof window.config,'
+        'adUrl:((window.stray&&window.stray.ad&&window.stray.ad.url)||"").slice(0,120),'
+        'frames:document.querySelectorAll("iframe").length'
+        '})',
+      );
+      var s = raw.toString();
+      // iOS 会把结果包成 JSON 字符串字面量（首尾引号 + 转义），先剥一层
+      if (s.length > 1 && s.startsWith('"') && s.endsWith('"')) {
+        try {
+          final d = jsonDecode(s);
+          if (d is String) s = d;
+        } catch (_) {}
+      }
+      AppLog.instance.log('[Sniff] 第 $hop 层环境: $s');
+    } catch (_) {
+      // 页面正在导航时求值会抛错，忽略
     }
   }
 

@@ -129,6 +129,16 @@ const String kSnifferHookJs = r'''
     // 常见嵌套：art.option.url / artplayer.option / player.config
     try { if (o.option) dig(o.option, d + 1); } catch (e) {}
     try { if (o.config) dig(o.config, d + 1); } catch (e) {}
+    // ── 2026-10-31 补：播放器**实例**上挂着明文地址 ──────────────
+    //
+    // 实测 `api-api.789jiexi.net`：页面把密文放 `stray.url`（不是 http 开头，
+    // 变量层直接跳过），解密后的明文只出现在两处 ——
+    //   · `console.log("解密原始链接：", decrypt(stray.url))`
+    //   · `stray.ad = new Artplayer({url: realPlayUrl})`
+    // 前者要求 hook 早于那句 log 装好；后者只要实例建出来就一直有效，
+    // 是「hook 晚到」时的兜底。不挖 ad / player 这两个键就永远抓不到。
+    try { if (o.ad) dig(o.ad, d + 1); } catch (e) {}
+    try { if (o.player) dig(o.player, d + 1); } catch (e) {}
   }
 
   function scanVars() {
