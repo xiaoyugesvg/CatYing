@@ -217,6 +217,74 @@ const String kSnifferHookJs = r'''
 })();
 ''';
 
+/// 替用户「点一下播放」。
+///
+/// ── 为什么必须有（2026-10-31 实测）──────────────────────────────
+/// 大量播放页把「取流」绑在**用户手势**上：页面渲染完了、JS 也跑完了，
+/// 但 `<video>` 的 `src` 要等用户点一下播放按钮才设 —— 有的是为了
+/// autoplay 策略，有的是故意的反爬。我们的隐形 WebView 里**没人点**，
+/// 于是网络层 0 请求、DOM 里没有 `<video>`，什么都抓不到。
+///
+/// 合成实验（本地路由页面，点击后才 fetch 地址）：
+///   只注入 hook 不点 → `<video>` 0 个，抓到 0 条
+///   注入 hook + 点一下 → 立刻抓到 `[dom/m3u8]`
+///
+/// ── 安全边界 ─────────────────────────────────────────────────
+///   · 只在「已经等了预热时间、还一条候选都没有」时才点，抓到就不打扰；
+///   · 每次页面加载最多点一次（`__catNudged`），避免反复点出广告；
+///   · **跳过 `<a>` 链接**（除非是 `javascript:` / `#` 这种假链接）——
+///     真的 `<a href="...">` 一点就跳走，会把当前页弄丢。
+///
+/// ⚠️ 对 `event.isTrusted` 做校验的站，合成点击骗不过去 —— 那种只能改原生。
+const String kAutoPlayNudgeJs = r'''
+(function () {
+  var SELECTORS = [
+    '.vjs-big-play-button', '.dplayer-play-icon', '.artplayer-plugin-play',
+    '.play-btn', '.playbtn', '.player-play', '.prism-play-btn',
+    '[class*="big-play"]', '[class*="play-btn"]', '[class*="playbtn"]',
+    '#play', '.play'
+  ];
+
+  function clickable(el) {
+    if (!el) return false;
+    var tag = String(el.tagName || '').toUpperCase();
+    if (tag !== 'A') return true;
+    var href = el.getAttribute('href') || '';
+    return href === '' || href === '#' || href.indexOf('javascript:') === 0;
+  }
+
+  try {
+    // ① 已经有 <video> 的：静音后强行 play()，让它去拉流
+    var vs = document.querySelectorAll('video');
+    for (var i = 0; i < vs.length; i++) {
+      try {
+        vs[i].muted = true;
+        var p = vs[i].play();
+        if (p && p.catch) p.catch(function () {});
+      } catch (e) {}
+    }
+
+    if (window.__catNudged) return;
+    window.__catNudged = true;
+
+    // ② 播放按钮 / 遮罩层：命中第一个能点的就点
+    for (var k = 0; k < SELECTORS.length; k++) {
+      var el = null;
+      try { el = document.querySelector(SELECTORS[k]); } catch (e) {}
+      if (el && clickable(el)) {
+        try { el.click(); } catch (e) {}
+        return;
+      }
+    }
+
+    // ③ 兜底：点 <video> 本身（很多播放器把点击绑在 video 上）
+    if (vs.length) {
+      try { vs[0].click(); } catch (e) {}
+    }
+  } catch (e) {}
+})();
+''';
+
 /// 让隐形嗅探 WebView **不出声**。
 ///
 /// ── 为什么必须有（2026-10-31）──────────────────────────────────

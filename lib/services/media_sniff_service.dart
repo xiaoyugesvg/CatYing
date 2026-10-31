@@ -211,6 +211,7 @@ class MediaSniffService {
         final hopDeadline = _hopDeadline(deadline);
         final hopStarted = DateTime.now();
         var warm = false;
+        var nudged = false;
         final warmTimer = Timer(_warmup, () => warm = true);
         try {
           while (DateTime.now().isBefore(hopDeadline)) {
@@ -220,6 +221,12 @@ class MediaSniffService {
             if (warm && b != null && b.isMedia) {
               best = b.url;
               break;
+            }
+            // 页面可能要「用户点一下播放」才去取流 —— 隐形 WebView 里没人点，
+            // 所以预热过后还一条候选都没有时，替它点一次。
+            if (warm && !nudged && collector.count == 0) {
+              nudged = true;
+              await _nudge(c);
             }
             // 本层已经暴露出可跟的 iframe，自己却一条候选都没有
             // → 别把 [_hopCap] 白等完，省下的时间留给下一层。
@@ -314,6 +321,16 @@ class MediaSniffService {
       await c.runJavaScript(kSilenceMediaJs);
     } catch (_) {
       // 页面还没就绪时求值会抛错，下一轮再试
+    }
+  }
+
+  /// 替用户点一下播放（只在还没抓到任何候选时调用）
+  Future<void> _nudge(WebViewController c) async {
+    try {
+      await c.runJavaScript(kAutoPlayNudgeJs);
+      AppLog.instance.log('[Sniff] 页面没出地址，替用户点了一次播放');
+    } catch (_) {
+      // 同上，下一层再说
     }
   }
 
