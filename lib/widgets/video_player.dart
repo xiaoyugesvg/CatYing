@@ -10,7 +10,7 @@ import 'package:tvbox/services/app_log.dart';
 import 'package:tvbox/services/subtitle_translator.dart';
 import 'package:tvbox/services/tmdb_service.dart';
 import 'package:tvbox/widgets/app_player.dart';
-import 'package:tvbox/widgets/ks_player.dart';
+import 'package:tvbox/widgets/aether_player.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart' show DragToMoveArea;
@@ -718,7 +718,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   /// 外挂译文（方案 A，见 `video_player_ext_subtitle.dart`）
   ///
   /// 不走内核的外挂字幕能力：自己按 `_positionVN` 把中文叠在画面上，
-  /// 这样 AVPlayer / MPV / KSPlayer 三种内核表现完全一致。
+  /// 这样 AVPlayer / MPV / AetherPlayer 三种内核表现完全一致。
   List<SubtitleCue> _extCues = const <SubtitleCue>[];
 
   /// 译文当前是否显示（可在字幕菜单里关）
@@ -917,8 +917,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             }
             // iOS：前台预热原生 AVPlayer（静音预缓冲常驻），退后台/点 PiP 时
             // 原生立即启动系统悬浮窗，避免"后台等缓冲"导致 PiP 时灵时不灵。
-            // （KSPlayer 自带小窗与前台共用同一实例，无需预热）
-            if (Platform.isIOS && _player is! KSPlayer) {
+            // （AetherPlayer 自带小窗与前台共用同一实例，无需预热）
+            if (Platform.isIOS && _player is! AetherPlayer) {
               final u = _player.state.playlist.medias.isNotEmpty
                   ? _player.state.playlist.medias.last.uri
                   : widget.url;
@@ -5217,8 +5217,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         AppLog.instance.log('[video_player] resume after pip failed: $e');
       }
     }
-    // 为下次进小窗保持 layer 就绪（KSPlayer 小窗共用同一实例，无需预热）
-    if (Platform.isIOS && _player is! KSPlayer && playUrl.isNotEmpty) {
+    // 为下次进小窗保持 layer 就绪（AetherPlayer 小窗共用同一实例，无需预热）
+    if (Platform.isIOS && _player is! AetherPlayer && playUrl.isNotEmpty) {
       VideoPlayerPip.instance.prepareIos(
         url: playUrl,
         headers: widget.headers,
@@ -5263,17 +5263,17 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         return;
       }
       final currentPos = _player.state.position;
-      // AVPlayer/KSPlayer 单实例：进小窗不暂停，画面交给系统 PiP，视频连续
+      // AVPlayer/AetherPlayer 单实例：进小窗不暂停，画面交给系统 PiP，视频连续
       // （MPV/Webview 没有系统小窗路径，提示切内核）
-      final isKsCore = _player is KSPlayer;
-      if (Platform.isIOS && !_player.isSharedIosAv && !isKsCore) {
+      final isAetherCore = _player is AetherPlayer;
+      if (Platform.isIOS && !_player.isSharedIosAv && !isAetherCore) {
         _showMessage('请把点播内核切换为「AVPlayer」后再使用小窗');
         return;
       }
-      // KSPlayer 走自带的 sample-buffer 小窗（与前台同一播放器实例），
+      // AetherPlayer 走自带的 sample-buffer 小窗（与前台同一播放器实例），
       // 其余走 AVPlayer 的系统小窗
-      final entered = isKsCore
-          ? await VideoPlayerPip.instance.enterIosKs(
+      final entered = isAetherCore
+          ? await VideoPlayerPip.instance.enterIosAether(
               url: playUrl,
               headers: widget.headers,
               position: currentPos,
@@ -5368,11 +5368,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       if (!supported) return;
 
       final currentPos = _player.state.position;
-      // 单实例（AVPlayer / KSPlayer）：进小窗不暂停，与手动 PiP 相同
-      final isKsCore = _player is KSPlayer;
-      if (!_player.isSharedIosAv && !isKsCore) return;
-      final entered = isKsCore
-          ? await VideoPlayerPip.instance.enterIosKs(
+      // 单实例（AVPlayer / AetherPlayer）：进小窗不暂停，与手动 PiP 相同
+      final isAetherCore = _player is AetherPlayer;
+      if (!_player.isSharedIosAv && !isAetherCore) return;
+      final entered = isAetherCore
+          ? await VideoPlayerPip.instance.enterIosAether(
               url: playUrl,
               headers: widget.headers,
               position: currentPos,
@@ -5674,7 +5674,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       final current = PlayerPrefs.instance.vodEngine.value;
       final shortLabel = switch (current) {
         PlayerEngine.avplayer => 'AV',
-        PlayerEngine.ksplayer => 'FF',
+        PlayerEngine.aether => 'FF',
         PlayerEngine.mpv => 'MPV',
       };
       return _iconButton(
@@ -5963,7 +5963,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     final supportHint = _player.supportsSubtitles
         ? '当前视频没有内嵌字幕轨（可换一个源试试）'
         : '当前内核（${_player.engineName}）不支持内嵌字幕轨，'
-            '切到「播放器核心 → MPV / KSPlayer」后再看';
+            '切到「播放器核心 → MPV / AetherPlayer」后再看';
     final picked = await showModalBottomSheet<int>(
       context: context,
       backgroundColor: const Color(0xFF1E1E1E),

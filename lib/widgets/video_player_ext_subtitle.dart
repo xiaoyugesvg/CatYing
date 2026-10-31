@@ -3,7 +3,7 @@ part of 'video_player.dart';
 /// 外挂字幕译文（方案 A）的 UI 与动作。
 ///
 /// 为什么自己画而不是交给内核：
-///   · MPV 能用 `sub-add`，但 AVPlayer / KSPlayer 加不了外部文件
+///   · MPV 能用 `sub-add`，但 AVPlayer / AetherPlayer 加不了外部文件
 ///   · 三种内核表现不一致 ⇒ 用户换个内核"字幕就没了"
 /// 自己按 `_positionVN` 叠中文，三条内核走同一份代码，样式也统一。
 extension _ExtSubtitleUi on _VideoPlayerWidgetState {

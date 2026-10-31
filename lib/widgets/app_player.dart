@@ -43,7 +43,7 @@ class AppConfig {
 
 /// 内嵌字幕轨（跨内核统一视图）。
 class SubtitleTrackInfo {
-  /// 内核内部的轨道 id（mpv 的 `1`/`2`、KSPlayer 的 trackID）。
+  /// 内核内部的轨道 id（mpv 的 `1`/`2`、AetherPlayer 的 trackID）。
   final String id;
 
   /// 展示名：优先轨道标题，其次语言名，最后「字幕 N」。
@@ -64,7 +64,7 @@ class SubtitleTrackInfo {
 
   /// 跨内核匹配键。
   ///
-  /// 切换播放核心（MPV ⇄ KSPlayer）后轨道 id 完全不同，靠这个键把用户选中的
+  /// 切换播放核心（MPV ⇄ AetherPlayer）后轨道 id 完全不同，靠这个键把用户选中的
   /// 同一条字幕找回来：优先用语言标记（同一片源的语言最稳），
   /// 无语言标记时退化为轨道名。
   String get matchKey {
@@ -206,7 +206,7 @@ class AppPlayer {
   // ── 字幕轨（内嵌）────────────────────────────────────────────
   //
   // 默认不支持：AVPlayer 后端（video_player）只能吃 MP4/MOV 的文本轨，
-  // 恒返回空列表 → 播放器自动隐藏字幕入口。MPV / KSPlayer 各自 override。
+  // 恒返回空列表 → 播放器自动隐藏字幕入口。MPV / AetherPlayer 各自 override。
 
   /// 是否支持内嵌字幕轨枚举 / 切换
   bool get supportsSubtitles => false;

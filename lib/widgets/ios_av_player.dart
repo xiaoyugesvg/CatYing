@@ -37,7 +37,7 @@ class IosAvPlayer extends AppPlayer {
 
   IosAvPlayer({super.config}) {
     _ensureHandlerInstalled();
-    // ⚠️ 同 KSPlayer：不在构造时抢占「活跃」身份，只有真正 `open()` 的实例
+    // ⚠️ 同 AetherPlayer：不在构造时抢占「活跃」身份，只有真正 `open()` 的实例
     //   才是共享 AvEngine 的当前主人（见 open()）。
     _startSizePolling();
     platformViewBuilder = ({BoxFit fit = BoxFit.contain, double? aspectRatio}) {

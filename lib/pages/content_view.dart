@@ -179,7 +179,7 @@ class _ContentViewState extends State<ContentView>
   /// 系统内存告警（iOS 的 `didReceiveMemoryWarning`）。
   ///
   /// ── 为什么补这个（2026-10-14）────────────────────────────────
-  /// 全项目原来**零处**实现它。本 App 同时挂着 Node + CPython + FFmpeg/KSPlayer，
+  /// 全项目原来**零处**实现它。本 App 同时挂着 Node + CPython + FFmpeg/AetherPlayer，
   /// 内存压力本来就大；系统发警告时我们不主动放掉任何东西 ⇒ 更容易被
   /// Jetsam 强杀（强杀时连生命周期回调都没有）。
   /// 这里只做**最可控**的一件事：清 Flutter 自己的图片解码缓存 ——

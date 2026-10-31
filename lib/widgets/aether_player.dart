@@ -6,23 +6,24 @@ import 'package:flutter/widgets.dart';
 
 import 'package:tvbox/widgets/app_player.dart';
 
-/// iOS 第四播放核心「FF」：KSPlayer（FFmpeg + Metal）。
+/// iOS 第四播放核心「FF」：AetherEngine（FFmpeg demux + VideoToolbox 解码）。
 ///
-/// - 原生侧 KSEngine.swift 持有全局唯一的 KSPlayerLayer（本身就是 UIView），
-///   应用内画面通过 UiKitView('ks_player_view') 上屏；
-/// - 控制走 'ks_player' MethodChannel（open/play/pause/seek/setRate/setVolume）；
-/// - 首选 KSMEPlayer（FFmpeg 全格式：MKV/ASS/多音轨…），失败自动回退 KSAVPlayer；
-/// - 小窗走 KSPlayer 自带 sample-buffer PiP（layer.isPipActive），不走 AVPlayer 的
-///   'pip_manager' startPip 路径（见 VideoPlayerPip.enterIosKs）。
+/// - 原生侧 AetherEngineBridge.swift 持有全局唯一的 AetherEngine，
+///   画面由 AetherPlayerView 自己托管（引擎按会话换内部 CALayer），
+///   通过 UiKitView('aether_player_view') 上屏；
+/// - 控制走 'aether_player' MethodChannel（open/play/pause/seek/setRate/setVolume）；
+/// - 全格式（MKV/ASS/多音轨/Dolby Vision/Dolby Atmos）由 FFmpeg demux + 原生解码承担；
+/// - 小窗走引擎自己的 pictureInPictureActive，事件仍走 'pip_manager' 通道的
+///   onPipStarted / onPipStopped（见 VideoPlayerPip）。
 ///
 /// 结构镜像 IosAvPlayer：原生引擎是单例，Dart 侧「最近 open 的实例」是当前主人，
 /// 原生事件只投递给它。
-class KSPlayer extends AppPlayer {
-  static const _channel = MethodChannel('ks_player');
+class AetherPlayer extends AppPlayer {
+  static const _channel = MethodChannel('aether_player');
 
   /// MethodChannel 处理器全进程只能有一个（原因同 IosAvPlayer）：
   /// 直播页与详情页各自创建实例，后创建者会覆盖处理器。
-  static KSPlayer? _activeInstance;
+  static AetherPlayer? _activeInstance;
   static bool _handlerInstalled = false;
 
   static void _ensureHandlerInstalled() {
@@ -33,14 +34,14 @@ class KSPlayer extends AppPlayer {
     });
   }
 
-  KSPlayer({super.config}) {
+  AetherPlayer({super.config}) {
     _ensureHandlerInstalled();
-    // ⚠️ 不在构造时抢占「活跃」身份：只有真正 `open()` 的实例才是共享 KSEngine
+    // ⚠️ 不在构造时抢占「活跃」身份：只有真正 `open()` 的实例才是共享 AetherEngine
     //   的当前主人（见 open()）。否则"构造了但没 open / open 失败"的实例会
     //   把正在播放的实例的事件路由夺走 → 进度条停住、转圈不消失。
     _startSizePolling();
     platformViewBuilder = ({BoxFit fit = BoxFit.contain, double? aspectRatio}) {
-      return KSPlayerView(fit: fit, aspectRatio: aspectRatio);
+      return AetherPlayerView(fit: fit, aspectRatio: aspectRatio);
     };
   }
 
@@ -102,7 +103,7 @@ class KSPlayer extends AppPlayer {
       case 'onReady':
         _buffering = false;
         stream.addBuffering(false);
-        // 内核就绪（含 ME↔AV 回退换实例）→ 枚举内嵌字幕轨
+        // 会话就绪 → 枚举内嵌字幕轨
         unawaited(refreshSubtitleTracks());
         break;
       case 'onBuffering':
@@ -120,19 +121,19 @@ class KSPlayer extends AppPlayer {
   }
 
   @override
-  AppPlayerStateView get state => _KsState(this);
+  AppPlayerStateView get state => _AetherState(this);
 
   @override
   bool get supportsSubtitles => true;
 
   @override
-  String get engineName => 'KSPlayer';
+  String get engineName => 'Aether';
 
-  /// 枚举原生侧（KSPlayerLayer.player）的内嵌字幕轨。
+  /// 枚举原生侧（AetherPlayerView.player）的内嵌字幕轨。
   /// 位图字幕（PGS/VobSub）也一并列出 —— FF 内核可直接渲染。
   @override
   Future<void> refreshSubtitleTracks() async {
-    // 只有共享 KSEngine 的当前主人才有权查询
+    // 只有共享 AetherEngine 的当前主人才有权查询
     if (!identical(_activeInstance, this)) return;
     try {
       final raw =
@@ -175,7 +176,7 @@ class KSPlayer extends AppPlayer {
 
   @override
   Future<void> open(AppMedia media, {bool play = true, bool live = false}) async {
-    // 谁最后 open，谁就是共享 KSEngine 的当前主人 → 事件归它
+    // 谁最后 open，谁就是共享 AetherEngine 的当前主人 → 事件归它
     _activeInstance = this;
     _url = media.url;
     _buffering = true;
@@ -183,7 +184,7 @@ class KSPlayer extends AppPlayer {
     // 换源：清空旧字幕轨列表，等 onReady 后重新枚举，避免残留上一个源
     publishSubtitleTracks(const <SubtitleTrackInfo>[]);
     setSelectedSubtitleIndex(-1);
-    // 换台/换集复用同一实例（直播页 _ksPlayer ??= 复用）：旧流的时长/进度
+    // 换台/换集复用同一实例（直播页 _aetherPlayer ??= 复用）：旧流的时长/进度
     // 立即清零并广播，避免新流 ready 前 UI 短暂显示上一台的残留时长
     _position = Duration.zero;
     _duration = Duration.zero;
@@ -197,8 +198,7 @@ class KSPlayer extends AppPlayer {
           'url': media.url,
           'headers': media.httpHeaders ?? const <String, String>{},
           'positionMs': (media.start?.inMilliseconds ?? 0),
-          // 直播流原生侧 AVPlayer 优先（FFmpeg 拆 DVB 数据轨会野指针闪退，
-          // 见 KSEngine.open 的 live 分支注释）
+          // 直播标记：引擎据此选择低延迟/时移策略
           'live': live,
         })
         .timeout(const Duration(seconds: 30));
@@ -241,7 +241,7 @@ class KSPlayer extends AppPlayer {
   @override
   Future<void> setVolume(double v) async {
     _volume = v.clamp(0.0, 100.0);
-    // 音量为 0 视为静音：原生侧显式置 isMuted，保证 FF 内核真正无声；
+    // 音量为 0 视为静音：原生侧同时置 muted，保证真正无声；
     // 取消静音（>0）时同时解除 muted 并恢复该音量。
     _muted = _volume <= 0;
     try {
@@ -256,12 +256,12 @@ class KSPlayer extends AppPlayer {
   Future<void> dispose() async {
     _sizePoller?.cancel();
     _sizePoller = null;
-    // ⚠️ 原生 KSEngine 是**全局唯一**播放层：只有当前活跃实例才有权 close。
+    // ⚠️ 原生 AetherEngine 是**全局唯一**播放层：只有当前活跃实例才有权 close。
     //   非活跃实例（例如直播页正在播、详情页另建实例后又销毁）若也发 close，
     //   会把别人正在用的原生层一并销毁 → 其它页面黑屏 / 点了没反应。
     if (identical(_activeInstance, this)) {
       try {
-        // close：销毁原生 KSPlayerLayer（含 PiP 清理）；仅 pause 会常驻占内存
+        // close：销毁原生 AetherPlayerView（含 PiP 清理）；仅 pause 会常驻占内存
         await _channel.invokeMethod('close');
       } catch (_) {}
       _activeInstance = null;
@@ -271,9 +271,9 @@ class KSPlayer extends AppPlayer {
 }
 
 /// 只读状态视图（对齐 media_kit Player.state 的读取面）
-class _KsState extends AppPlayerStateView {
-  final KSPlayer _p;
-  _KsState(this._p);
+class _AetherState extends AppPlayerStateView {
+  final AetherPlayer _p;
+  _AetherState(this._p);
   @override
   bool get playing => _p._playing;
   @override
@@ -296,11 +296,11 @@ class _KsState extends AppPlayerStateView {
       );
 }
 
-/// 应用内画面：UiKitView 嵌 KSEngine 的 KSPlayerLayer
-class KSPlayerView extends StatelessWidget {
+/// 应用内画面：UiKitView 嵌 AetherEngine 的 AetherPlayerView
+class AetherPlayerView extends StatelessWidget {
   final BoxFit fit;
   final double? aspectRatio;
-  const KSPlayerView({
+  const AetherPlayerView({
     super.key,
     this.fit = BoxFit.contain,
     this.aspectRatio,
@@ -309,7 +309,7 @@ class KSPlayerView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final view = UiKitView(
-      viewType: 'ks_player_view',
+      viewType: 'aether_player_view',
       hitTestBehavior: PlatformViewHitTestBehavior.transparent,
       creationParams: const <String, dynamic>{},
       creationParamsCodec: const StandardMessageCodec(),
