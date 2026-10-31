@@ -91,16 +91,20 @@ class SnifferCollector {
       return true;
     }
     if (_map.containsKey(u)) return false;
-    final isMedia = MediaSniffer.isMediaUrl(u);
+    // 播放器页 URL 里塞着真地址（`artplayer.html?url=<编码后的 m3u8>`）时，
+    // 存真地址而不是那个 HTML 页 —— 否则首选会是个页面，播放必挂。
+    final real = MediaSniffer.unwrapEmbeddedUrl(u);
+    if (_map.containsKey(real)) return false;
+    final isMedia = MediaSniffer.isMediaUrl(real);
     final c = SniffCandidate(
-      url: u,
+      url: real,
       kind: kind,
       via: via,
       isMedia: isMedia,
-      score: isMedia ? MediaSniffer.score(u) : 0,
+      score: isMedia ? MediaSniffer.score(real) : 0,
     );
-    _map[u] = c;
-    _log.insert(0, '[${via.isEmpty ? "?" : via}] ${kind.isEmpty ? "?" : kind}  $u');
+    _map[real] = c;
+    _log.insert(0, '[${via.isEmpty ? "?" : via}] ${kind.isEmpty ? "?" : kind}  $real');
     if (_log.length > 150) _log.removeLast();
     return true;
   }

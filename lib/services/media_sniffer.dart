@@ -29,7 +29,57 @@ class MediaSniffer {
     caseSensitive: false,
   );
 
-  static bool isMediaUrl(String url) => mediaUrlPattern.hasMatch(url);
+  /// 页面型路径（`.html` / `.htm` / `.shtml`）—— 这些**永远不是**媒体文件。
+  ///
+  /// 为什么必须单独判：大量 CMS 的播放器 iframe 长这样
+  ///   `https://x.com/static/player/artplayer.html?url=https%3A%2F%2Fcdn%2Fa%2Findex.m3u8`
+  /// 整个 URL 结尾正好是 `.m3u8`，[mediaUrlPattern] 会当成媒体直链 —— 但它
+  /// 是个 HTML 页，交给播放器必挂。实测 `szctv.com` 就是这样被误判的。
+  ///
+  /// 只列 html/htm/shtml，**不含 `.php`**：`get.php?f=a.m3u8` 这类
+  /// 「脚本出口 + 参数指文件」是真实存在的媒体地址，不能一刀切。
+  static final RegExp _pagePathPattern =
+      RegExp(r'\.(?:html?|shtml)$', caseSensitive: false);
+
+  static bool looksLikePlayerPage(String url) {
+    final path = url.toLowerCase().split('?').first.split('#').first;
+    return _pagePathPattern.hasMatch(path);
+  }
+
+  /// 把「播放器页 URL 里塞着真地址」拆出来。
+  ///
+  /// `artplayer.html?url=<百分号编码的真地址>` 这种写法在 CMS 站里极常见，
+  /// 真地址就在 `url` / `v` / `src` 这类参数里。拆出来用真地址，
+  /// 而不是把整个页面 URL 当直链。
+  ///
+  /// 拆不出来就原样返回（不猜）。
+  static const List<String> _embedKeys = [
+    'url',
+    'v',
+    'src',
+    'video',
+    'm3u8',
+    'playurl',
+    'videourl',
+  ];
+
+  static String unwrapEmbeddedUrl(String url) {
+    if (!url.contains('=')) return url;
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.queryParameters.isEmpty) return url;
+    for (final e in uri.queryParameters.entries) {
+      if (!_embedKeys.contains(e.key.toLowerCase())) continue;
+      final v = e.value.trim();
+      if (v.isEmpty || !v.startsWith('http')) continue;
+      if (!mediaUrlPattern.hasMatch(v)) continue;
+      if (looksLikePlayerPage(v)) continue;
+      return v;
+    }
+    return url;
+  }
+
+  static bool isMediaUrl(String url) =>
+      !looksLikePlayerPage(url) && mediaUrlPattern.hasMatch(url);
 
   /// 从一段文本（页面源码 / JSON 响应 / JS 片段）里抽媒体地址
   static List<String> extractFromText(String text) {
