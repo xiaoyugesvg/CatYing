@@ -116,3 +116,68 @@ const String kSnifferHookJs = r'''
   setTimeout(function () { scanDom(); scanPerf(); }, 1500);
 })();
 ''';
+
+/// 让隐形嗅探 WebView **不出声**。
+///
+/// ── 为什么必须有（2026-10-31）──────────────────────────────────
+/// 嗅探要在页面里把播放器真的跑起来才抓得到地址，而播放器一跑就会出声。
+/// 探针页是用户主动点的，出声还能接受；但 Phase 2 把它接进正式播放链路后，
+/// 用户点「播放」会先听到一段陌生页面的声音 —— 比抓不到地址更糟。
+///
+/// 做法（三层，任意一层生效就够）：
+///   1. 钩 `HTMLMediaElement.prototype.play`，播放前先置 `muted = true`；
+///   2. 用 `MutationObserver` + 定时器，把**已经存在**的媒体元素逐个静音；
+///   3. `volume = 0` 兜底（某些播放器会自己改回 muted）。
+///
+/// ⚠️ 只静音，不暂停 —— 暂停了就没有网络请求，也就抓不到地址了。
+const String kSilenceMediaJs = r'''
+(function () {
+  if (window.__catSilentInstalled) return;
+  window.__catSilentInstalled = true;
+
+  function hush(el) {
+    try {
+      if (!el || !el.tagName) return;
+      var t = String(el.tagName).toUpperCase();
+      if (t !== 'VIDEO' && t !== 'AUDIO') return;
+      if (!el.muted) el.muted = true;
+      if (el.volume !== 0) el.volume = 0;
+    } catch (e) {}
+  }
+
+  function hushAll() {
+    try {
+      var els = document.querySelectorAll('video,audio');
+      for (var i = 0; i < els.length; i++) hush(els[i]);
+    } catch (e) {}
+  }
+
+  try {
+    var P = HTMLMediaElement.prototype;
+    var OP = P.play;
+    if (OP) {
+      P.play = function () {
+        hush(this);
+        return OP.apply(this, arguments);
+      };
+    }
+    var OV = Object.getOwnPropertyDescriptor(P, 'volume');
+    if (OV && OV.set) {
+      Object.defineProperty(P, 'volume', {
+        configurable: true,
+        get: OV.get,
+        set: function (v) { try { OV.set.call(this, 0); } catch (e) {} }
+      });
+    }
+  } catch (e) {}
+
+  try {
+    new MutationObserver(hushAll).observe(document.documentElement, {
+      childList: true, subtree: true
+    });
+  } catch (e) {}
+
+  hushAll();
+  setInterval(hushAll, 500);
+})();
+''';

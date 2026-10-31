@@ -5,8 +5,10 @@ import 'package:dio/dio.dart';
 
 import 'package:tvbox/reading/source/global_proxy.dart';
 import 'package:tvbox/services/app_log.dart';
+import 'package:tvbox/services/media_sniff_service.dart';
 import 'package:tvbox/services/media_sniffer.dart';
 import 'package:tvbox/services/parse_lines.dart';
+import 'package:tvbox/services/play_pipeline.dart';
 
 /// 后台把「网页播放地址 / 解析接口链接」解析成**媒体直链**。
 ///
@@ -21,7 +23,15 @@ import 'package:tvbox/services/parse_lines.dart';
 ///   ① 直接抓页面 HTML，正则找 m3u8/mp4（最快，不依赖解析线路）；
 ///   ② 页面里嵌的 iframe / `?url=` 再跟一跳（很多"播放页"其实是个壳）；
 ///   ③ 解析线路（订阅 `parses` 或自定义）逐条试 —— 选中那条排最前；
-///   ④ 以上都没拿到 ⇒ 在总预算内再重来一轮（最多 3 轮）。
+///   ④ 以上都没拿到 ⇒ 在总预算内再重来一轮（最多 3 轮）；
+///   ⑤ **仍未拿到 ⇒ 隐形 WebView 嗅探兜底**（2026-10-31 Phase 2）。
+///
+/// ── 选路（2026-10-31）─────────────────────────────────────────
+/// ①②③ 不是对每种地址都该按这个顺序跑。`PlayPipeline.routeFor` 会先判：
+///   · `platform`（爱奇艺/优酷/腾讯/芒果/B站/PPTV）：页面是 SPA，抓 HTML
+///     一定空手 —— **跳过 ①②**，直接上解析线路，省下 8s×3 轮；
+///   · `parseUrl`（`jx.xx/?url=...`）：它本身就是一条线路，先请求它；
+///   · `plainPage`：按原顺序。
 ///
 /// 结果按页面地址缓存（同一集重进不再解析）。
 class MediaResolver {
@@ -33,6 +43,15 @@ class MediaResolver {
 
   /// 单次 HTTP 超时上限
   static const Duration _requestTimeout = Duration(seconds: 8);
+
+  /// 给「嗅探兜底」预留的预算上限（HTTP 阶段最多用到 `budget - 这个值`）
+  static const Duration _sniffReserve = Duration(seconds: 12);
+
+  /// HTTP 阶段至少给这么多，否则一条线路都试不完就去嗅探，得不偿失
+  static const Duration _minHttpBudget = Duration(seconds: 8);
+
+  /// 剩余预算低于这个值就不做嗅探了（起 WebView 本身也要时间）
+  static const Duration _minSniffBudget = Duration(seconds: 4);
 
   /// 页面 → 媒体地址 缓存（按集缓存，重进不再解析）
   final Map<String, String> _cache = {};
@@ -49,10 +68,14 @@ class MediaResolver {
   ///
   /// [onProgress] 可选：把"正在试第几条线路"回给调用方，用于界面上的
   /// 一行小字提示（不弹窗、不遮画面）。
+  ///
+  /// [allowSniff] 是否允许**最后**用隐形 WebView 嗅探兜底。
+  /// 「解析测试」页传 false，让"解析"和"嗅探"两种测试保持独立可比。
   Future<String?> resolve(
     String pageUrl, {
     Map<String, String> headers = const {},
     Duration budget = defaultBudget,
+    bool allowSniff = true,
     void Function(String message)? onProgress,
   }) {
     final url = pageUrl.trim();
@@ -73,6 +96,7 @@ class MediaResolver {
       url,
       headers: headers,
       budget: budget,
+      allowSniff: allowSniff,
       onProgress: onProgress,
     );
     _inflight[url] = task;
@@ -83,9 +107,23 @@ class MediaResolver {
     String pageUrl, {
     required Map<String, String> headers,
     required Duration budget,
+    required bool allowSniff,
     void Function(String message)? onProgress,
   }) async {
-    final deadline = DateTime.now().add(budget);
+    final startedAt = DateTime.now();
+    final route = PlayPipeline.routeFor(pageUrl);
+
+    // ── 预算切分：HTTP 先跑，剩下的留给嗅探兜底 ──────────────────
+    final reserve = allowSniff ? _sniffReserve : Duration.zero;
+    var httpBudget = budget - reserve;
+    if (httpBudget < _minHttpBudget) httpBudget = _minHttpBudget;
+    final deadline = startedAt.add(httpBudget);
+
+    AppLog.instance.log(
+      '[Resolve] 选路=${PlayPipeline.routeLabel(route)}，'
+      'HTTP 预算 ${httpBudget.inSeconds}s，嗅探兜底=${allowSniff ? "开" : "关"}',
+    );
+
     final dio = Dio(
       BaseOptions(
         connectTimeout: _requestTimeout,
@@ -99,6 +137,12 @@ class MediaResolver {
 
     String? found;
     try {
+      // 平台页（SPA）抓 HTML 一定空手 → 跳过「抓页面」，直接上线路
+      final pageFirst = route != PlayRoute.platform;
+      if (!pageFirst) {
+        onProgress?.call('平台页面，直接用解析线路…');
+      }
+
       // ── 最多 3 轮：第一轮常常空手，重试往往就有了 ──────────────
       for (var round = 1; round <= 3 && found == null; round++) {
         if (DateTime.now().isAfter(deadline)) break;
@@ -112,8 +156,10 @@ class MediaResolver {
         );
 
         // ① 直接抓页面
-        found = await _fromPage(dio, pageUrl, headers, deadline);
-        if (found != null) break;
+        if (pageFirst) {
+          found = await _fromPage(dio, pageUrl, headers, deadline);
+          if (found != null) break;
+        }
 
         // ② 解析线路
         final lines = ParseLineStore.instance.attemptOrder.take(6).toList();
@@ -134,6 +180,30 @@ class MediaResolver {
       AppLog.instance.w('[Resolve] 解析异常: $e');
     } finally {
       dio.close(force: true);
+    }
+
+    // ── ⑤ 嗅探兜底：HTTP 全空手时，让真浏览器把页面跑起来抓 ──────
+    if (found == null && allowSniff) {
+      var left = budget - DateTime.now().difference(startedAt);
+      if (left > _sniffReserve) left = _sniffReserve;
+      if (left >= _minSniffBudget) {
+        onProgress?.call('改用浏览器嗅探…');
+        try {
+          found = await MediaSniffService.instance.sniff(
+            pageUrl,
+            headers: headers,
+            budget: left,
+            onProgress: onProgress,
+          );
+          if (found != null) {
+            AppLog.instance.log('[Resolve] 嗅探兜底成功: $found');
+          }
+        } catch (e) {
+          AppLog.instance.w('[Resolve] 嗅探兜底异常: $e');
+        }
+      } else {
+        AppLog.instance.log('[Resolve] 剩余预算不足，跳过嗅探兜底');
+      }
     }
 
     if (found != null) {

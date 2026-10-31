@@ -101,6 +101,10 @@ class _SnifferProbePageState extends State<SnifferProbePage> {
     try {
       final r = await MediaResolver.instance.resolve(
         url,
+        // 这里是「解析测试」：**只测 HTTP 解析**（抓页面 + 线路）。
+        // 关掉嗅探兜底，才能和下面的「嗅探测试」分开比 —— 否则一个失败会
+        // 悄悄被另一个救回来，看不出到底是哪条路通了。
+        allowSniff: false,
         onProgress: (m) {
           if (mounted) setState(() => _parseStatus = m);
         },
