@@ -104,7 +104,11 @@ class _DramaManagePageState extends State<DramaManagePage> {
     final api = ApiConfig.instance;
     final all = <SourceBean>[
       ...api.sourceBeanList,
-      if (api.localSourcesEnabled.value) ...api.localVideoSources,
+      // 三族各看各的开关（2026-10-31 恢复本地 JS 开关后修正）：
+      // 原来只判 `localSourcesEnabled`（那是本地 PY 的），于是把 PY 打开、
+      // 把 JS / XBPQ 关掉时，这两族仍然会出现在短剧的源选择里 —— 用户说的
+      // 「开关是串的」就是这种：关掉的那一族还在。
+      ...api.localVideoSources.where(api.isLocalSourceEnabled),
     ];
     if (all.isEmpty) {
       AppToast.show('还没有可用的影视源', '');

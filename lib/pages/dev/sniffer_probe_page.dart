@@ -78,8 +78,19 @@ class _SnifferProbePageState extends State<SnifferProbePage> {
     try {
       // ① 先嗅探。探针页的存在意义就是验证嗅探，所以先让它单独跑，
       //    抓到什么能完整打出来（下面照样会展示候选 / iframe / 事件）。
+      //
+      // ⚠️ 平台链接（爱奇艺 / 腾讯 / 优酷 / 芒果 / B站 / PPTV）要先套线路：
+      //    直接嗅探平台页是 0 候选（SPA + 会员校验 + DRM），
+      //    能出地址的形态是 `jx.xx/?url=v.qq.com/...`。用户 2026-10-31：
+      //    「这些域名的播放链接要加解析线路才能嗅探呢」。
+      final target = await MediaResolver.instance.sniffTargetFor(url);
+      if (!mounted) return;
+      if (target.viaParseLine) {
+        setState(() => _sniffStatus = '平台链接，先套${target.label}再嗅探…');
+      }
       final r = await MediaSniffService.instance.sniffDetailed(
-        url,
+        target.url,
+        headers: target.headers,
         budget: _sniffBudget,
         onProgress: (m) {
           if (mounted) setState(() => _sniffStatus = m);
@@ -179,23 +190,30 @@ class _SnifferProbePageState extends State<SnifferProbePage> {
       _sniffStatus = '准备嗅探…';
     });
     try {
+      // 平台链接同样先套线路：直接嗅探平台页是**确定性的 0 候选**，
+      // 那种「跑一遍什么都没抓到」对排查没有任何信息量。
+      final target = await MediaResolver.instance.sniffTargetFor(url);
+      if (!mounted) return;
+      final prefix = target.viaParseLine ? '（已套${target.label}）' : '';
       final r = await MediaSniffService.instance.sniffDetailed(
-        url,
+        target.url,
+        headers: target.headers,
         budget: _sniffBudget,
         onProgress: (m) {
-          if (mounted) setState(() => _sniffStatus = m);
+          if (mounted) setState(() => _sniffStatus = '$prefix$m');
         },
       );
       if (!mounted) return;
       setState(() {
         _sniff = r;
         if (r.ok) {
-          _sniffStatus = '嗅探成功';
+          _sniffStatus = '$prefix嗅探成功';
         } else if (r.candidates.isEmpty) {
-          _sniffStatus = '没抓到任何地址（候选 0 条，跟过 ${r.frames.length} 个 iframe）';
+          _sniffStatus =
+              '$prefix没抓到任何地址（候选 0 条，跟过 ${r.frames.length} 个 iframe）';
         } else {
           _sniffStatus =
-              '抓到 ${r.candidates.length} 条，但没有媒体直链（可能都在 iframe 里没跟到）';
+              '$prefix抓到 ${r.candidates.length} 条，但没有媒体直链（可能都在 iframe 里没跟到）';
         }
       });
     } catch (e) {
@@ -258,7 +276,8 @@ class _SnifferProbePageState extends State<SnifferProbePage> {
     final routeMode = url.isEmpty
         ? null
         : (isVideoPlatformUrl(url)
-            ? '平台链接：建议先用「解析测试」走线路，直连嗅探多半被 DRM / 防盗链挡住'
+            ? '平台链接：点「点击播放」会自动先套一条解析线路再嗅探'
+                '（直接嗅探平台页一定空手：SPA + 会员校验 + DRM）'
             : '普通页面：直接嗅探抓取');
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),

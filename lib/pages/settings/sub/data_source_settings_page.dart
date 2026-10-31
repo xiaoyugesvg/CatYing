@@ -332,15 +332,21 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
         // 本地 JS 源（用户 2026-10-29）：与本地爬虫**同构**的第三族 ——
         // 订阅 JS / 猫源 / TVBox 的 .js 脚本，交给内置 Node 执行。
         //
-        // 2026-10-31：**去掉开关**（用户：「不留了，本地源加个视觉标记」）。
-        // 本地 JS 已并进源切换面板的订阅分类（排在订阅线路前面），
-        // 再留一个开关只会让用户看到「最前面那几条凭空消失」。导入即启用。
+        // 2026-10-31：**恢复开关**。早上按「不留了」删成了常量 true，
+        // 用户当天就要求「本地JS 也缺少一个开关吧」——
+        // 三族必须对称，否则这一族关不掉、还在偷偷参与搜索和主页源恢复。
         Obx(
           () => _card(
             SettingsRow(
               icon: Icons.code_rounded,
               title: '本地JS',
               value: '${ApiConfig.instance.localJsSourceCount} 个',
+              trailingSwitch: true,
+              switchValue: ApiConfig.instance.localJsEnabled.value,
+              onSwitchChanged: (v) async {
+                await ApiConfig.instance.setLocalJsEnabled(v);
+                if (mounted) setState(() {});
+              },
               onTap: () async {
                 await Get.to(() => const LocalJsSourcesPage());
                 if (mounted) setState(() {});

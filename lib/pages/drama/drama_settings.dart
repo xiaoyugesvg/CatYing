@@ -314,7 +314,8 @@ class DramaSettings {
     final api = ApiConfig.instance;
     final all = <SourceBean>[
       ...api.sourceBeanList,
-      if (api.localSourcesEnabled.value) ...api.localVideoSources,
+      // 同上：三族各看各的开关，别用一个开关代表三族（2026-10-31）
+      ...api.localVideoSources.where(api.isLocalSourceEnabled),
     ];
     return resolveTargets(
       all: all,

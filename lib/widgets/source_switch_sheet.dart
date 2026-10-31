@@ -822,11 +822,15 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
     // 2026-10-29：三族各有独立开关，不能一律去开「本地爬虫」。
     if (source.isLocalPySource && !ApiConfig.instance.localSourcesEnabled.value) {
       await ApiConfig.instance.setLocalSourcesEnabled(true);
+    } else if (source.isLocalJsSource &&
+        !ApiConfig.instance.localJsEnabled.value) {
+      // 2026-10-31 恢复本地 JS 开关：选它就得把这一族打开，
+      // 否则刚切过去主页源又会被订阅线路覆盖（和 PY / XBPQ 同一语义）。
+      await ApiConfig.instance.setLocalJsEnabled(true);
     } else if (source.isXbpqSource &&
         !ApiConfig.instance.localXbpqEnabled.value) {
       await ApiConfig.instance.setLocalXbpqEnabled(true);
     }
-    // 本地 JS 没有开关（2026-10-31，导入即启用），这里不需要再"顺手打开"。
     await ApiConfig.instance.setHomeSource(source);
     if (!mounted) return;
     Navigator.of(context).pop(true);

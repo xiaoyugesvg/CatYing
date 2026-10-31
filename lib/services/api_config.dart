@@ -85,17 +85,20 @@ class ApiConfig extends GetxController {
   /// 保存开关的 prefs 键
   static const String _kLocalSourcesEnabled = 'local_sources_enabled_v1';
 
-  /// 「本地 JS 源」—— **没有开关**（2026-10-31 用户决定）。
+  /// 「本地 JS 源」总开关（2026-10-31 **恢复**）。
   ///
-  /// 原来它和三族里其它两族一样有独立开关（`local_js_enabled_v1`），
-  /// 用户后来的要求是「不留了，本地源加个视觉标记」：本地 JS 已经并进
-  /// 源切换面板的**订阅分类**里（排在订阅线路前面），再留一个开关只会让
-  /// 用户看到「最前面那几条凭空消失」。导入即启用。
+  /// ── 为什么恢复了 ──────────────────────────────────────────────
+  /// 今天早些时候按「不留了，本地源加个视觉标记」把它删成了常量 true，
+  /// 用户随后要求：「本地JS 也缺少一个开关吧」。
   ///
-  /// 因此这里只保留一个**常量 true**，让 [isLocalSourceEnabled] 的调用方
-  /// 与另外两族保持同一套写法；老用户 prefs 里的 `local_js_enabled_v1`
-  /// 不再读取（无害残留，不需要迁移）。
-  static const bool localJsAlwaysEnabled = true;
+  /// 三族（本地PY / 本地JS / XBPQ）必须**对称**：只要有一族没有开关，
+  /// 用户就会看到「这一族关不掉」，而且源切换面板里那几条会一直参与
+  /// 主页源恢复 / 搜索，找不到原因。对称比"少一个开关"重要。
+  ///
+  /// 默认 **true**：删开关那版是"导入即启用"，默认 true 才不会让已有用户
+  /// 升级后突然少掉一批源（本地 PY / XBPQ 默认 false 是它们本来的语义）。
+  final localJsEnabled = true.obs;
+  static const String _kLocalJsEnabled = 'local_js_enabled_v1';
 
   /// 「XBPQ 规则源」总开关。
   ///
@@ -120,8 +123,8 @@ class ApiConfig extends GetxController {
       return localSourcesEnabled.value;
     }
     if (s.key.startsWith(SourceBean.localJsKeyPrefix)) {
-      // 本地 JS 没有开关（见 [localJsAlwaysEnabled]）：导入即参与
-      return localJsAlwaysEnabled;
+      // 本地 JS 与另外两族同一套语义（2026-10-31 恢复开关）
+      return localJsEnabled.value;
     }
     if (s.key.startsWith(SourceBean.xbpqKeyPrefix)) {
       return localXbpqEnabled.value;
@@ -388,10 +391,13 @@ class ApiConfig extends GetxController {
       AppLog.instance.w('[ApiConfig] 读取本地源开关失败: $e');
     }
 
-    // ── ① 开关口径：每次都同步一次（默认关），保证冷启动 / 切订阅时一致 ──
+    // ── ① 开关口径：每次都同步一次，保证冷启动 / 切订阅时一致 ──────
+    // 本地 PY / XBPQ 默认关；本地 JS 默认开（它原本是"导入即启用"，
+    // 默认关会让已有用户升级后突然少一批源）。
     if (prefs != null) {
       localSourcesEnabled.value = prefs.getBool(_kLocalSourcesEnabled) ?? false;
       localXbpqEnabled.value = prefs.getBool(_kLocalXbpqEnabled) ?? false;
+      localJsEnabled.value = prefs.getBool(_kLocalJsEnabled) ?? true;
     }
 
     // ── ② 三套本地源各自独立加载：任何一套抛错不能把其它两套一起带走 ──
@@ -501,6 +507,19 @@ class ApiConfig extends GetxController {
     localXbpqEnabled.value = value;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kLocalXbpqEnabled, value);
+    PrefsMirror.snapshotSoon();
+    await reloadLocalVideoSources();
+  }
+
+  /// 「本地 JS 源」总开关（2026-10-31 恢复）。
+  ///
+  /// 关掉后本地 JS 不再参与主页源恢复 / 搜索 / 源面板；
+  /// 清单本身仍可读（「订阅管理 → 本地JS」里照样能管理已导入的脚本）。
+  Future<void> setLocalJsEnabled(bool value) async {
+    if (localJsEnabled.value == value) return;
+    localJsEnabled.value = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kLocalJsEnabled, value);
     PrefsMirror.snapshotSoon();
     await reloadLocalVideoSources();
   }

@@ -265,6 +265,49 @@ const String kSnifferHookJs = r'''
     } catch (e) {}
   }
 
+  // ── ⑥ <video>.src 赋值（2026-10-31 新增）───────────────────────
+  //
+  // 播放器解密完地址，**最后一个动作一定是给某个 media 元素设 src**
+  // （`v.src = url` 或 `v.setAttribute('src', url)`）。
+  // 钩原型比 `scanDom` 轮询更准：
+  //   · 轮询 700ms 一次，短命的 `<video>`（切源时建了又删）可能整个错过；
+  //   · `currentSrc` 要等浏览器真的开始加载才有值，而 `src` 是立刻有的；
+  //   · hls.js 会把 src 设成 `blob:`，此时只有这条钩子能拿到它之前的原始 url
+  //     —— 不过 blob 本身不是媒体地址，靠它之前的 XHR 兜。
+  // 不依赖播放器叫什么名字，这是唯一一条「名字无关」的采集面。
+  (function hookMediaSrc() {
+    if (window.__catMediaHooked) return;
+    window.__catMediaHooked = true;
+    try {
+      var P = window.HTMLMediaElement && HTMLMediaElement.prototype;
+      var d = P && Object.getOwnPropertyDescriptor(P, 'src');
+      if (d && d.set) {
+        Object.defineProperty(P, 'src', {
+          configurable: true,
+          enumerable: !!d.enumerable,
+          get: d.get,
+          set: function (v) {
+            try { maybe(v, '', 'media-src'); } catch (e) {}
+            return d.set.call(this, v);
+          }
+        });
+      }
+    } catch (e) {}
+    try {
+      var SA = Element.prototype.setAttribute;
+      Element.prototype.setAttribute = function (k, v) {
+        try {
+          var tag = (this && this.tagName) || '';
+          if (String(k).toLowerCase() === 'src' &&
+              (tag === 'VIDEO' || tag === 'SOURCE' || tag === 'AUDIO')) {
+            maybe(v, '', 'media-attr');
+          }
+        } catch (e) {}
+        return SA.apply(this, arguments);
+      };
+    } catch (e) {}
+  })();
+
   function scanPerf() {
     try {
       if (!window.performance || !performance.getEntriesByType) return;

@@ -33,6 +33,13 @@ import 'package:tvbox/services/play_pipeline.dart';
 ///   · `parseUrl`（`jx.xx/?url=...`）：它本身就是一条线路，先请求它；
 ///   · `plainPage`：按原顺序。
 ///
+/// ── 平台页要先套线路再嗅探（2026-10-31）──────────────────────
+/// 用户：「这些域名的播放链接要加解析线路才能嗅探呢」。对 ——
+/// `v.qq.com/x/cover/xxx.html` 这类页面**直接嗅探一定 0 候选**（SPA +
+/// 会员校验 + DRM），能出地址的形态是 `jx.xx/?url=https://v.qq.com/...`。
+/// 所以平台页的嗅探对象是「套过线路的地址」，不是平台页本身，
+/// 见 [sniffTargetFor]。
+///
 /// 结果按页面地址缓存（同一集重进不再解析）。
 class MediaResolver {
   MediaResolver._();
@@ -40,29 +47,67 @@ class MediaResolver {
 
   /// 默认总预算：HTTP 阶段跑完 + 嗅探兜底还能顺 4 层 iframe。
   ///
-  /// 为什么从 22s 提到 30s：嗅探兜底最多能跟 4 层（`MediaSniffService._maxHops`），
-  /// 实测 `jx.muiu.site` 那条链每层要 3.1s（提前跟）到 10s（等满时间片），
-  /// 四层合计 12.3~19.3s。原来只留 12s，第 4 层刚开始就被总预算砍断
-  /// —— 日志里表现为「第 4 层 0.5s 就结束、0 候选」。
+  /// 为什么从 22s 提到 30s、又提到 **35s**（2026-10-31 日志实测）：
   ///
-  /// 30s 只是**上限**：命中就立刻返回（szctv 那种 3.2s 就出地址），
+  /// 22s 那次（`app_2026-10-31(8).log`）的现场是：
+  /// ```
+  /// 22:02:59.049  第 4 层: api-api.789jiexi.net/jiexi.php
+  /// 22:03:00.535  第 4 层环境: {"hook":true,"jq":"function","cj":"object",
+  ///                            "stray":"object","cfg":"object","frames":0}
+  /// 22:03:00.535  未嗅到媒体地址（候选 0 条，跟过 3 个 iframe，4 层）
+  /// ```
+  /// 第 4 层**只活了 1.48 秒**就被总预算砍断 —— 而这一层恰恰是唯一出地址的
+  /// 那一层：它要 `$.post("api.php")` 拿密文、再 `decrypt()` 解密、再建
+  /// Artplayer 实例。环境自检里 `stray` / `cfg` / `jq` 全在，说明 hook 正常、
+  /// 页面也在跑，**只是没给够时间**。
+  ///
+  /// 前 3 层实测共约 12s（每层 2.5~3.3s，露出 iframe 就提前跟），
+  /// 第 4 层还要 3~5s 解密建播放器 ⇒ 12+5 = 17s，20s 只剩 3s 余量太薄，
+  /// 给到 25s 才有抗抖动空间。
+  ///
+  /// 35s 只是**上限**：命中就立刻返回（szctv 那种 3.2s 就出地址），
   /// 只有全链路都空手时才等满，期间有 [_resolveHint] 一路显示进度。
-  static const Duration defaultBudget = Duration(seconds: 30);
+  static const Duration defaultBudget = Duration(seconds: 35);
 
   /// 单次 HTTP 超时上限
   static const Duration _requestTimeout = Duration(seconds: 8);
 
   /// 给「嗅探兜底」预留的预算上限（HTTP 阶段最多用到 `budget - 这个值`）
   ///
-  /// 20s = 4 层 × 每层 5s 的保守估计。原来 12s 只够走 2~3 层，
-  /// 而真正出地址的层往往在第 4 层（`api-api.789jiexi.net` 那种）。
-  static const Duration _sniffReserve = Duration(seconds: 20);
+  /// 25s = 前 3 层实测 12s + 第 4 层解密建播放器 5s + 抗抖动余量。
+  /// 12s（最早）只够走 2~3 层，20s 在 4 层链上只剩 3s 余量 ——
+  /// 日志里两次都是「第 4 层刚加载就被砍」。
+  static const Duration _sniffReserve = Duration(seconds: 25);
 
   /// HTTP 阶段至少给这么多，否则一条线路都试不完就去嗅探，得不偿失
   static const Duration _minHttpBudget = Duration(seconds: 8);
 
   /// 剩余预算低于这个值就不做嗅探了（起 WebView 本身也要时间）
   static const Duration _minSniffBudget = Duration(seconds: 4);
+
+  /// **平台页**的总预算上限（比 [defaultBudget] 宽）。
+  ///
+  /// 平台页天生比普通播放页慢一整步：要先套解析线路、再嗅探线路页，
+  /// 而线路页本身还可能是 2~4 层 iframe。30s 会卡在「线路刚套好、
+  /// 嗅探刚到第 3 层」的位置 —— 和之前 12s 砍断第 4 层是同一个毛病。
+  ///
+  /// 50s 只是上限：命中的情况一般 5~15s 就出（线路页通常 1~2 层），
+  /// 只有「三条线路全都不认」时才等满，期间界面一路显示在试哪条。
+  /// 50 = 第一条 25s + 后两条各 8s + HTTP 兜底 9s。
+  static const Duration _platformBudget = Duration(seconds: 50);
+
+  /// 平台页最多用「嗅探」试几条解析线路。
+  ///
+  /// 一条不够：不同线路认的平台不一样（有的只做腾讯、有的只做B站），
+  /// 只试第一条等于碰运气。也不能全试：订阅里 50+ 条线路 × 每条几秒 =
+  /// 几分钟，用户早返回了。3 条是「覆盖率」和「等待时间」的折中。
+  static const int _platformSniffLines = 3;
+
+  /// 平台页第 2 条及之后每条线路的嗅探预算。
+  ///
+  /// 第一条吃满 [_sniffReserve]（25s，4 层链要这么久），后面的给 8s ——
+  /// 线路页通常只有 1~2 层，8s 够；再多就把总预算吃光了。
+  static const Duration _platformHopBudget = Duration(seconds: 8);
 
   /// 页面 → 媒体地址 缓存（按集缓存，重进不再解析）
   final Map<String, String> _cache = {};
@@ -75,6 +120,84 @@ class MediaResolver {
 
   void clearCache() => _cache.clear();
 
+  /// 决定「这条地址该嗅探什么」——**平台页要先套一条解析线路**。
+  ///
+  /// ── 为什么要这样（用户 2026-10-31）──────────────────────────
+  /// 用户原话：「爱奇艺、腾讯、优酷、芒果、哔哩哔哩、PPTV 这些域名链接的
+  /// 解析弄了么？这些域名的播放链接要加解析线路才能嗅探呢」。
+  ///
+  /// 完全正确。直接嗅探 `v.qq.com/x/cover/xxx.html` **一定 0 候选**：
+  ///   · 页面是 SPA，播放器要等登录 / 会员校验之后才由 JS 创建；
+  ///   · 正片流走 DRM（Widevine / FairPlay），抓到也解不了；
+  ///   · 平台还会按 Referer + Cookie 校验播放来源。
+  ///
+  /// 能出地址的形态是 `jx.xx/?url=https://v.qq.com/...` —— 探针页一直在测的
+  /// 就是这种地址。所以平台页的顺序必须是 **套线路 → 嗅探线路页**，
+  /// 而不是「嗅探平台页 → 再套线路」。
+  ///
+  /// 非平台页（普通播放页 / 已套过接口的 `jx.xx/?url=`）原样返回。
+  Future<SniffTarget> sniffTargetFor(
+    String pageUrl, {
+    Map<String, String> headers = const {},
+  }) async {
+    final all = await sniffTargetsFor(pageUrl, headers: headers);
+    return all.first;
+  }
+
+  /// 同上，但平台页会给出**多条**候选（每条线路一个）。
+  ///
+  /// 为什么不能只给一条：不同线路认的平台不一样（有的只做腾讯、有的只做B站、
+  /// 有的只做爱奇艺），只看第一条就是碰运气。也不能全给：56 条线路 × 每条
+  /// 几秒 = 几分钟，用户早就返回了。取前 [_platformSniffLines] 条。
+  Future<List<SniffTarget>> sniffTargetsFor(
+    String pageUrl, {
+    Map<String, String> headers = const {},
+  }) async {
+    if (PlayPipeline.routeFor(pageUrl) != PlayRoute.platform) {
+      return [SniffTarget(url: pageUrl, label: '原页面', headers: headers)];
+    }
+    final lines = await availableParseLines();
+    if (lines.isEmpty) {
+      // 一条线路都没有：只能硬着头皮嗅探平台页（基本空手，但至少不是静默失败）
+      AppLog.instance.w('[Resolve] 平台页但没有任何解析线路可用: $pageUrl');
+      return [
+        SniffTarget(
+          url: pageUrl,
+          label: '原页面（无线路可用）',
+          headers: headers,
+        ),
+      ];
+    }
+    final picked = lines.take(_platformSniffLines).toList();
+    AppLog.instance.log(
+      '[Resolve] 平台页先套 ${picked.length} 条线路再嗅探：'
+      '${picked.map((e) => e.name).join(' / ')}',
+    );
+    return [
+      for (final line in picked)
+        SniffTarget(
+          url: line.apply(pageUrl),
+          label: '线路「${line.name}」',
+          headers: {...headers, ...line.headers},
+          viaParseLine: true,
+        ),
+    ];
+  }
+
+  /// 可用解析线路：用户选中的排最前（[ParseLineStore.attemptOrder]）。
+  ///
+  /// 读不到线路就返回空列表 —— 调用方按「没有线路可用」处理，不抛异常。
+  Future<List<ParseLine>> availableParseLines() async {
+    final store = ParseLineStore.instance;
+    try {
+      if (!store.loaded) await store.load();
+      if (store.isEmpty) await store.ensureSyncedFromConfig();
+    } catch (e) {
+      AppLog.instance.w('[Resolve] 读解析线路失败: $e');
+    }
+    return store.attemptOrder;
+  }
+
   /// 解析入口。返回 null = 没解析出来（调用方按"这条线路播不了"处理）。
   ///
   /// [onProgress] 可选：把"正在试第几条线路"回给调用方，用于界面上的
@@ -85,6 +208,9 @@ class MediaResolver {
   ///
   /// [sniffFirst] **嗅探优先**：先用真浏览器把页面跑起来抓，抓不到再退回
   /// HTTP 抓页面 + 解析线路。影视模块 / 海阔 / RSS 都该传 true。
+  ///
+  /// 平台页（爱奇艺 / 腾讯 / 优酷 / 芒果 / B站 / PPTV）会自动先套一条解析
+  /// 线路再嗅探 —— 直接嗅探平台页是 0 候选，见 [sniffTargetFor]。
   ///
   /// 为什么顺序很关键（用户 2026-10-31：「影视模块现在的解析线路和嗅探
   /// 完全不是现在测试的这种」）：原来是「HTTP 先吃 10s，嗅探只吃剩下的
@@ -137,39 +263,70 @@ class MediaResolver {
     // 嗅探优先跑过之后，后面的 HTTP 流程不该再重复嗅探一次
     var sniffAllowed = allowSniff;
 
+    // 选路要**提前**算：嗅探对象取决于它（平台页得先套线路）
+    final route = PlayPipeline.routeFor(pageUrl);
+
+    // 平台页给更宽的预算（先套线路再嗅探，天生多一步）
+    var totalBudget = budget;
+    if (route == PlayRoute.platform && totalBudget < _platformBudget) {
+      totalBudget = _platformBudget;
+      AppLog.instance.log(
+        '[Resolve] 平台页，预算提到 ${totalBudget.inSeconds}s（要先套线路再嗅探）',
+      );
+    }
+
     // ── 嗅探优先：和探针页「点击播放」完全同一条路径 ──────────────
     if (sniffFirst && allowSniff) {
-      final sniffBudget = budget < _sniffReserve ? budget : _sniffReserve;
-      onProgress?.call('正在页面里嗅探播放地址…');
-      AppLog.instance.log(
-        '[Resolve] 嗅探优先，预算 ${sniffBudget.inSeconds}s（和探针页同一条路）',
-      );
-      try {
-        final sniffed = await MediaSniffService.instance.sniff(
-          pageUrl,
-          headers: headers,
-          budget: sniffBudget,
-          onProgress: onProgress,
-        );
-        if (sniffed != null && sniffed.isNotEmpty) {
-          AppLog.instance.log('[Resolve] 嗅探优先命中: $sniffed');
-          _cache[pageUrl] = sniffed;
-          if (_cache.length > _cacheLimit) _cache.remove(_cache.keys.first);
-          return sniffed;
+      final sniffBudget =
+          totalBudget < _sniffReserve ? totalBudget : _sniffReserve;
+      // ⚠️ 关键：平台页不能直接嗅探平台页本身（SPA + 会员校验 + DRM，
+      // 一定 0 候选），要先把地址套上解析线路，嗅探「线路页」。
+      final targets = await sniffTargetsFor(pageUrl, headers: headers);
+      var first = true;
+      for (final target in targets) {
+        // 第一条吃满预算，后面的用短预算（平台页可能给到 3 条线路）
+        var budgetForTarget = first ? sniffBudget : _platformHopBudget;
+        first = false;
+        final left = totalBudget - DateTime.now().difference(startedAt);
+        if (left < _minSniffBudget) {
+          AppLog.instance.log('[Resolve] 预算不足，剩下的线路不再嗅探');
+          break;
         }
-        AppLog.instance.log('[Resolve] 嗅探优先没抓到，退回 HTTP 解析');
-      } catch (e) {
-        AppLog.instance.w('[Resolve] 嗅探优先异常: $e');
+        if (budgetForTarget > left) budgetForTarget = left;
+
+        onProgress?.call(
+          target.viaParseLine ? '正在用${target.label}解析…' : '正在页面里嗅探播放地址…',
+        );
+        AppLog.instance.log(
+          '[Resolve] 嗅探优先 · ${target.label} · 预算 ${budgetForTarget.inSeconds}s'
+          '（和探针页同一条路）→ ${target.url}',
+        );
+        try {
+          final sniffed = await MediaSniffService.instance.sniff(
+            target.url,
+            headers: target.headers,
+            budget: budgetForTarget,
+            onProgress: onProgress,
+          );
+          if (sniffed != null && sniffed.isNotEmpty) {
+            AppLog.instance.log('[Resolve] 嗅探优先命中（${target.label}）: $sniffed');
+            _cache[pageUrl] = sniffed;
+            if (_cache.length > _cacheLimit) _cache.remove(_cache.keys.first);
+            return sniffed;
+          }
+          AppLog.instance.log('[Resolve] ${target.label} 没抓到，换下一条');
+        } catch (e) {
+          AppLog.instance.w('[Resolve] 嗅探优先异常（${target.label}）: $e');
+        }
       }
+      AppLog.instance.log('[Resolve] 嗅探优先全部空手，退回 HTTP 解析');
       // 已经试过了，别再兜底一遍（否则等于白等两轮）
       sniffAllowed = false;
     }
 
-    final route = PlayPipeline.routeFor(pageUrl);
-
     // ── 预算切分：HTTP 先跑，剩下的留给嗅探兜底 ──────────────────
     final reserve = sniffAllowed ? _sniffReserve : Duration.zero;
-    var httpBudget = budget - reserve;
+    var httpBudget = totalBudget - reserve;
     if (httpBudget < _minHttpBudget) httpBudget = _minHttpBudget;
     final deadline = startedAt.add(httpBudget);
 
@@ -238,14 +395,18 @@ class MediaResolver {
 
     // ── ⑤ 嗅探兜底：HTTP 全空手时，让真浏览器把页面跑起来抓 ──────
     if (found == null && sniffAllowed) {
-      var left = budget - DateTime.now().difference(startedAt);
+      var left = totalBudget - DateTime.now().difference(startedAt);
       if (left > _sniffReserve) left = _sniffReserve;
       if (left >= _minSniffBudget) {
-        onProgress?.call('改用浏览器嗅探…');
+        // 平台页在这里同样要先套线路：直接嗅探平台页是 0 候选
+        final target = await sniffTargetFor(pageUrl, headers: headers);
+        onProgress?.call(
+          target.viaParseLine ? '改用${target.label}嗅探…' : '改用浏览器嗅探…',
+        );
         try {
           found = await MediaSniffService.instance.sniff(
-            pageUrl,
-            headers: headers,
+            target.url,
+            headers: target.headers,
             budget: left,
             onProgress: onProgress,
           );
@@ -266,7 +427,8 @@ class MediaResolver {
         _cache.remove(_cache.keys.first);
       }
     } else {
-      AppLog.instance.w('[Resolve] 解析失败（已用 ${budget.inSeconds}s 预算）: $pageUrl');
+      AppLog.instance
+          .w('[Resolve] 解析失败（已用 ${totalBudget.inSeconds}s 预算）: $pageUrl');
     }
     return found;
   }
@@ -483,4 +645,34 @@ class MediaResolver {
       return null;
     }
   }
+}
+
+/// 「这次该嗅探哪个地址」的决策结果。
+///
+/// 普通播放页就是它自己；**平台页（爱奇艺 / 腾讯 / 优酷 / 芒果 / B站 /
+/// PPTV）要先套一条解析线路**，嗅探的是线路页而不是平台页本身。
+/// 详见 [MediaResolver.sniffTargetFor]。
+class SniffTarget {
+  const SniffTarget({
+    required this.url,
+    required this.label,
+    this.headers = const {},
+    this.viaParseLine = false,
+  });
+
+  /// 真正交给 WebView 的地址
+  final String url;
+
+  /// 给日志 / 界面看的一句话（`原页面` / `线路「xxx」`）
+  final String label;
+
+  /// 请求头。线路自带的 header 会覆盖调用方的 —— 不少接口按 UA
+  /// 决定给不给地址，用默认 UA 请求只会拿回一个空白页。
+  final Map<String, String> headers;
+
+  /// 是否「套过解析线路」
+  final bool viaParseLine;
+
+  @override
+  String toString() => 'SniffTarget($label → $url)';
 }

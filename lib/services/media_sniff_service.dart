@@ -583,19 +583,36 @@ class MediaSniffService {
         },
       ));
 
-    // 1×1 透明但**真的渲染**（Offstage / 0 尺寸都不挂平台视图，JS 不跑）
+    // ── 视口尺寸：**必须像真手机**（2026-10-31 改）──────────────────
+    //
+    // 原来是 1×1「透明但真的渲染」。问题不在渲染，在**布局尺寸**：
+    //   · Artplayer / DPlayer / video.js / ckplayer 初始化时都会读
+    //     `clientWidth` / `clientHeight`，容器太小时它们直接不建 `<video>`，
+    //     或者建了也不 preload（iOS 对零面积元素的 video 尤其如此）；
+    //   · 页面里 `if (w > 0)` 这类守卫很常见，1×1 会让整条初始化链走空。
+    // 结果就是：页面自己的 `$.post` / 解密逻辑照跑（环境自检里
+    // `stray`/`cfg` 都在），但地址始终不进播放器 ⇒ 候选恒为 0。
+    //
+    // 现在给 390×844 的正常手机视口，再用 1% 不透明度藏起来
+    // （肉眼不可见，但保证视图真的被绘制 —— Offstage / 0 尺寸会让
+    // 平台视图不挂载，JS 也就不跑了）。
     final entry = OverlayEntry(
       builder: (_) => Positioned(
         left: 0,
         top: 0,
-        width: 1,
-        height: 1,
-        child: IgnorePointer(child: WebViewWidget(controller: c)),
+        width: 390,
+        height: 844,
+        child: IgnorePointer(
+          child: Opacity(
+            opacity: 0.01,
+            child: WebViewWidget(controller: c),
+          ),
+        ),
       ),
     );
     _entry = entry;
     overlay.insert(entry);
-    AppLog.instance.log('[Sniff] 隐形 WebView 已挂载（1×1 Overlay）');
+    AppLog.instance.log('[Sniff] 隐形 WebView 已挂载（390×844 · 1% 不透明度）');
     return true;
   }
 
